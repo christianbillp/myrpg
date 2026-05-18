@@ -10,7 +10,7 @@ export class Player {
   tileY: number;
   private moving = false;
 
-  constructor(scene: Phaser.Scene, tileX: number, tileY: number) {
+  constructor(scene: Phaser.Scene, tileX: number, tileY: number, color = 0x4fc3f7) {
     this.scene = scene;
     this.tileX = tileX;
     this.tileY = tileY;
@@ -19,7 +19,7 @@ export class Player {
       tileY * TILE_SIZE + TILE_SIZE / 2,
       TILE_SIZE - 6,
       TILE_SIZE - 6,
-      0x4fc3f7
+      color
     );
     this.sprite.setDepth(1);
   }

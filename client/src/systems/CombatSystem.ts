@@ -28,58 +28,129 @@ export function rollInitiative(
 export function playerMeleeAttack(
   player: PlayerDef,
   enemy: EnemyDef,
-): { damage: number; logs: string[] } {
-  const strMod = mod(player.str);
-  const attackBonus = strMod + player.proficiencyBonus;
-  const naturalRoll = d20();
+  isHidden: boolean,
+): { damage: number; logs: string[]; vexApplied: boolean } {
+  const attack = player.mainAttack;
+  const statMod = attack.statKey === 'str' ? mod(player.str) : mod(player.dex);
+  const attackBonus = statMod + player.proficiencyBonus;
+  const logs: string[] = [];
+
+  let naturalRoll: number;
+  let rollDesc: string;
+
+  if (isHidden) {
+    const r1 = d20();
+    const r2 = d20();
+    naturalRoll = Math.max(r1, r2);
+    rollDesc = `advantage (${r1}, ${r2}) → ${naturalRoll}`;
+    logs.push(`${player.name} attacks from the shadows!`);
+  } else {
+    naturalRoll = d20();
+    rollDesc = `${naturalRoll}`;
+  }
+
   const total = naturalRoll + attackBonus;
   const isCrit = naturalRoll === 20;
   const isHit = isCrit || total >= enemy.ac;
-  const logs: string[] = [];
 
-  logs.push(`${player.name} swings the Greatsword!`);
-  logs.push(`Attack: d20(${naturalRoll})+${attackBonus} = ${total} vs AC ${enemy.ac}`);
+  logs.push(`Attack: d20(${rollDesc})+${attackBonus} = ${total} vs AC ${enemy.ac}`);
 
   let damage = 0;
+  let vexApplied = false;
 
   if (isCrit) {
-    const dice = d(6) + d(6) + d(6) + d(6);
-    damage = dice + strMod;
-    logs.push(`⚡ CRITICAL HIT! 4d6+${strMod} = ${dice}+${strMod} = ${damage} slashing`);
+    let dice = 0;
+    for (let i = 0; i < attack.damageDice * 2; i++) dice += d(attack.damageSides);
+    let sneakDice = 0;
+    if (isHidden && player.sneakAttackDice > 0) {
+      for (let i = 0; i < player.sneakAttackDice * 2; i++) sneakDice += d(6);
+    }
+    damage = dice + statMod + sneakDice;
+    const sneakPart = sneakDice > 0 ? ` + ${sneakDice} Sneak Attack` : '';
+    logs.push(`⚡ CRITICAL HIT! ${dice}+${statMod}${sneakPart} = ${damage}`);
+    vexApplied = attack.vex;
   } else if (isHit) {
-    const roll1 = d(6) + d(6);
-    const roll2 = d(6) + d(6);
-    const best = Math.max(roll1, roll2);
-    damage = best + strMod;
-    logs.push(`HIT! Savage Attacker: [${roll1}] vs [${roll2}] → ${best}+${strMod} = ${damage} slashing`);
+    let dice = 0;
+    if (attack.savageAttacker) {
+      let roll1 = 0;
+      let roll2 = 0;
+      for (let i = 0; i < attack.damageDice; i++) { roll1 += d(attack.damageSides); roll2 += d(attack.damageSides); }
+      dice = Math.max(roll1, roll2);
+      logs.push(`HIT! Savage Attacker: [${roll1}] vs [${roll2}] → ${dice}+${statMod}`);
+    } else {
+      for (let i = 0; i < attack.damageDice; i++) dice += d(attack.damageSides);
+      logs.push(`HIT! ${dice}+${statMod}`);
+    }
+    let sneakDice = 0;
+    if (isHidden && player.sneakAttackDice > 0) {
+      for (let i = 0; i < player.sneakAttackDice; i++) sneakDice += d(6);
+      logs.push(`Sneak Attack: +${sneakDice}`);
+    }
+    damage = dice + statMod + sneakDice;
+    logs.push(`Total: ${damage} damage`);
+    vexApplied = attack.vex;
   } else {
-    damage = Math.max(0, strMod);
-    if (damage > 0) {
-      logs.push(`Miss! (${total} vs AC ${enemy.ac}) — Graze: ${damage} slashing`);
+    if (attack.graze) {
+      damage = Math.max(0, statMod);
+      if (damage > 0) {
+        logs.push(`Miss! Graze: ${damage} damage`);
+      } else {
+        logs.push(`Miss! (${total} vs AC ${enemy.ac})`);
+      }
     } else {
       logs.push(`Miss! (${total} vs AC ${enemy.ac})`);
     }
   }
 
-  return { damage, logs };
+  return { damage, logs, vexApplied };
+}
+
+export function playerHide(
+  player: PlayerDef,
+  enemyPassivePerception: number,
+): { hidden: boolean; logs: string[] } {
+  const stealthRoll = d20() + player.stealthBonus;
+  if (stealthRoll > enemyPassivePerception) {
+    return {
+      hidden: true,
+      logs: [
+        `${player.name} hides!`,
+        `Stealth: d20+${player.stealthBonus} = ${stealthRoll} vs Perception ${enemyPassivePerception} ✓`,
+      ],
+    };
+  }
+  return {
+    hidden: false,
+    logs: [`${player.name} tries to hide... ${stealthRoll} vs ${enemyPassivePerception} — spotted!`],
+  };
 }
 
 export function enemyDaggerAttack(
   enemy: EnemyDef,
   playerAc: number,
   withAdvantage: boolean,
+  withDisadvantage = false,
 ): { damage: number; isHit: boolean; isCrit: boolean; logs: string[] } {
   const attack = enemy.attacks[0];
   const logs: string[] = [];
 
+  // Advantage and disadvantage cancel each other out
+  const effectiveAdvantage = withAdvantage && !withDisadvantage;
+  const effectiveDisadvantage = withDisadvantage && !withAdvantage;
+
   let naturalRoll: number;
   let rollDesc: string;
 
-  if (withAdvantage) {
+  if (effectiveAdvantage) {
     const r1 = d20();
     const r2 = d20();
     naturalRoll = Math.max(r1, r2);
     rollDesc = `advantage (${r1}, ${r2}) → ${naturalRoll}`;
+  } else if (effectiveDisadvantage) {
+    const r1 = d20();
+    const r2 = d20();
+    naturalRoll = Math.min(r1, r2);
+    rollDesc = `disadvantage (${r1}, ${r2}) → ${naturalRoll}`;
   } else {
     naturalRoll = d20();
     rollDesc = `${naturalRoll}`;

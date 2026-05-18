@@ -2,11 +2,12 @@ import Phaser from 'phaser';
 import { Player } from '../entities/Player';
 import { Enemy } from '../entities/Enemy';
 import { TILE_SIZE, GRID_COLS, GRID_ROWS, HUD_HEIGHT } from '../constants';
-import { ALDRIC } from '../data/player';
+import { ALDRIC, PlayerDef } from '../data/player';
 import { GOBLIN_MINION } from '../data/enemies';
 import {
   rollInitiative,
   playerMeleeAttack,
+  playerHide,
   enemyDaggerAttack,
   tryNimbleEscape,
   playerSecondWind,
@@ -15,7 +16,6 @@ import {
 
 const GRID_H = GRID_ROWS * TILE_SIZE;
 const W = GRID_COLS * TILE_SIZE;
-const PLAYER_SPEED = 6;
 const ENEMY_SPEED = 6;
 const DPR = window.devicePixelRatio;
 
@@ -34,15 +34,19 @@ export class GameScene extends Phaser.Scene {
     right: Phaser.Input.Keyboard.Key;
   };
 
+  // Per-run state — initialised in init()
+  private playerDef: PlayerDef = ALDRIC;
+  private playerHp = ALDRIC.maxHp;
+  private secondWindUses = ALDRIC.secondWindMaxUses;
+  private playerXp = ALDRIC.xp;
+  private playerSpeed = ALDRIC.speed;
+  private playerHidden = false;
+  private enemyVexed = false;
   private mode: GameMode = 'exploring';
   private movesLeft = 0;
   private enemyHidden = false;
   private deathSaveSuccesses = 0;
   private deathSaveFailures = 0;
-  private playerHp = ALDRIC.maxHp;
-  private secondWindUses = ALDRIC.secondWindMaxUses;
-  private playerXp = ALDRIC.xp;
-
   private combatLog: string[] = [];
 
   private playerHpBar!: Phaser.GameObjects.Graphics;
@@ -52,6 +56,7 @@ export class GameScene extends Phaser.Scene {
   private logText!: Phaser.GameObjects.Text;
   private attackBtn!: Phaser.GameObjects.Container;
   private secondWindBtn!: Phaser.GameObjects.Container;
+  private hideBtn!: Phaser.GameObjects.Container;
   private endTurnBtn!: Phaser.GameObjects.Container;
   private deathSaveBtn!: Phaser.GameObjects.Container;
 
@@ -61,11 +66,35 @@ export class GameScene extends Phaser.Scene {
     super({ key: 'GameScene' });
   }
 
+  init(data: { playerDef?: PlayerDef }): void {
+    const def = data?.playerDef ?? ALDRIC;
+    this.playerDef = def;
+    this.playerHp = def.maxHp;
+    this.secondWindUses = def.secondWindMaxUses;
+    this.playerXp = def.xp;
+    this.playerSpeed = def.speed;
+    this.playerHidden = false;
+    this.enemyVexed = false;
+    this.mode = 'exploring';
+    this.movesLeft = 0;
+    this.enemyHidden = false;
+    this.deathSaveSuccesses = 0;
+    this.deathSaveFailures = 0;
+    this.combatLog = [];
+    this.activeEnemy = null;
+  }
+
   create(): void {
+    this.enemies = [];
     this.drawGrid();
     this.highlightLayer = this.add.graphics().setDepth(0.5);
     this.spawnEnemies();
-    this.player = new Player(this, Math.floor(GRID_COLS / 2), Math.floor(GRID_ROWS / 2));
+    this.player = new Player(
+      this,
+      Math.floor(GRID_COLS / 2),
+      Math.floor(GRID_ROWS / 2),
+      this.playerDef.color,
+    );
 
     this.cursors = this.input.keyboard!.createCursorKeys();
     this.wasd = {
@@ -122,10 +151,12 @@ export class GameScene extends Phaser.Scene {
   private startCombat(enemy: Enemy): void {
     this.activeEnemy = enemy;
     this.enemyHidden = false;
+    this.enemyVexed = false;
+    this.playerHidden = false;
     this.deathSaveSuccesses = 0;
     this.deathSaveFailures = 0;
 
-    const { playerFirst, logs } = rollInitiative(ALDRIC, enemy.def);
+    const { playerFirst, logs } = rollInitiative(this.playerDef, enemy.def);
     this.addLogs(logs);
 
     if (playerFirst) {
@@ -139,7 +170,7 @@ export class GameScene extends Phaser.Scene {
 
   private enterPlayerTurn(): void {
     this.mode = 'player_turn';
-    this.movesLeft = PLAYER_SPEED;
+    this.movesLeft = this.playerSpeed;
     this.updateHUD();
     this.drawHighlights();
   }
@@ -148,10 +179,21 @@ export class GameScene extends Phaser.Scene {
     if (!this.activeEnemy || this.mode !== 'player_turn') return;
     if (chebyshev(this.player.tileX, this.player.tileY, this.activeEnemy.tileX, this.activeEnemy.tileY) > 1) return;
 
-    const { damage, logs } = playerMeleeAttack(ALDRIC, this.activeEnemy.def);
+    const { damage, logs, vexApplied } = playerMeleeAttack(
+      this.playerDef,
+      this.activeEnemy.def,
+      this.playerHidden,
+    );
+    this.playerHidden = false;
     this.addLogs(logs);
+
     this.activeEnemy.takeDamage(damage);
     this.addLogs([`${this.activeEnemy.def.name} HP: ${this.activeEnemy.hp}/${this.activeEnemy.maxHp}`]);
+
+    if (vexApplied) {
+      this.enemyVexed = true;
+      this.addLogs([`Vex! ${this.activeEnemy.def.name} has Disadvantage on its next attack.`]);
+    }
 
     if (this.activeEnemy.isDead()) {
       this.playerXp += this.activeEnemy.def.xp;
@@ -162,6 +204,7 @@ export class GameScene extends Phaser.Scene {
       this.activeEnemy.destroy();
       this.enemies = this.enemies.filter(e => e !== this.activeEnemy);
       this.activeEnemy = null;
+      this.enemyVexed = false;
       this.mode = 'exploring';
       this.highlightLayer.clear();
       this.updateHUD();
@@ -174,14 +217,26 @@ export class GameScene extends Phaser.Scene {
     this.time.delayedCall(900, () => this.runEnemyTurn());
   }
 
-  private onSecondWind(): void {
-    if (this.mode !== 'player_turn' || this.secondWindUses <= 0 || this.playerHp >= ALDRIC.maxHp) return;
+  private onHide(): void {
+    if (this.mode !== 'player_turn' || !this.activeEnemy) return;
 
-    const { healed, logs } = playerSecondWind(ALDRIC.level);
+    const { hidden, logs } = playerHide(this.playerDef, this.activeEnemy.def.passivePerception);
+    this.playerHidden = hidden;
+    this.addLogs(logs);
+    this.mode = 'enemy_turn';
+    this.highlightLayer.clear();
+    this.updateHUD();
+    this.time.delayedCall(600, () => this.runEnemyTurn());
+  }
+
+  private onSecondWind(): void {
+    if (this.mode !== 'player_turn' || this.secondWindUses <= 0 || this.playerHp >= this.playerDef.maxHp) return;
+
+    const { healed, logs } = playerSecondWind(this.playerDef.level);
     const before = this.playerHp;
-    this.playerHp = Math.min(ALDRIC.maxHp, this.playerHp + healed);
+    this.playerHp = Math.min(this.playerDef.maxHp, this.playerHp + healed);
     this.secondWindUses--;
-    this.addLogs([...logs, `HP: ${before} → ${this.playerHp}/${ALDRIC.maxHp} (${this.secondWindUses} uses left)`]);
+    this.addLogs([...logs, `HP: ${before} → ${this.playerHp}/${this.playerDef.maxHp} (${this.secondWindUses} uses left)`]);
     this.updateHUD();
   }
 
@@ -197,7 +252,7 @@ export class GameScene extends Phaser.Scene {
     if (this.mode !== 'death_saves') return;
 
     const { roll, outcome } = rollDeathSave();
-    const logs: string[] = [`${ALDRIC.name} death save: d20 = ${roll}`];
+    const logs: string[] = [`${this.playerDef.name} death save: d20 = ${roll}`];
     let nextMode: GameMode = 'death_saves';
 
     switch (outcome) {
@@ -205,7 +260,7 @@ export class GameScene extends Phaser.Scene {
         this.playerHp = 1;
         this.deathSaveSuccesses = 0;
         this.deathSaveFailures = 0;
-        logs.push(`Natural 20! ${ALDRIC.name} regains 1 HP!`);
+        logs.push(`Natural 20! ${this.playerDef.name} regains 1 HP!`);
         nextMode = 'player_turn';
         break;
 
@@ -213,14 +268,14 @@ export class GameScene extends Phaser.Scene {
         this.deathSaveFailures = Math.min(3, this.deathSaveFailures + 2);
         logs.push(`Natural 1! Two failures. (${this.deathSaveFailures}/3)`);
         nextMode = this.deathSaveFailures >= 3 ? 'defeat' : 'enemy_turn';
-        if (nextMode === 'defeat') logs.push(`${ALDRIC.name} has died.`);
+        if (nextMode === 'defeat') logs.push(`${this.playerDef.name} has died.`);
         break;
 
       case 'success':
         this.deathSaveSuccesses++;
         logs.push(`Success! (${this.deathSaveSuccesses}/3)`);
         if (this.deathSaveSuccesses >= 3) {
-          logs.push(`${ALDRIC.name} stabilizes.`);
+          logs.push(`${this.playerDef.name} stabilizes.`);
           nextMode = 'defeat';
         } else {
           nextMode = 'enemy_turn';
@@ -231,7 +286,7 @@ export class GameScene extends Phaser.Scene {
         this.deathSaveFailures++;
         logs.push(`Failure! (${this.deathSaveFailures}/3)`);
         nextMode = this.deathSaveFailures >= 3 ? 'defeat' : 'enemy_turn';
-        if (nextMode === 'defeat') logs.push(`${ALDRIC.name} has died.`);
+        if (nextMode === 'defeat') logs.push(`${this.playerDef.name} has died.`);
         break;
     }
 
@@ -240,7 +295,7 @@ export class GameScene extends Phaser.Scene {
     this.updateHUD();
 
     if (nextMode === 'player_turn') {
-      this.movesLeft = PLAYER_SPEED;
+      this.movesLeft = this.playerSpeed;
       this.drawHighlights();
     } else if (nextMode === 'enemy_turn') {
       this.time.delayedCall(900, () => this.runEnemyTurn());
@@ -258,7 +313,7 @@ export class GameScene extends Phaser.Scene {
 
     const belowHalf = enemy.hp <= enemy.maxHp / 2;
     if (!this.enemyHidden && (belowHalf || Math.random() < 0.3)) {
-      const passivePerc = 10 + ALDRIC.perceptionBonus;
+      const passivePerc = 10 + this.playerDef.perceptionBonus;
       const { hidden, logs } = tryNimbleEscape(enemy.def, passivePerc);
       this.addLogs(logs);
       this.enemyHidden = hidden;
@@ -281,14 +336,8 @@ export class GameScene extends Phaser.Scene {
     const tx = enemy.tileX + stepX;
     const ty = enemy.tileY + stepY;
 
-    if (tx < 0 || ty < 0 || tx >= GRID_COLS || ty >= GRID_ROWS) {
-      onDone();
-      return;
-    }
-    if (tx === this.player.tileX && ty === this.player.tileY) {
-      onDone();
-      return;
-    }
+    if (tx < 0 || ty < 0 || tx >= GRID_COLS || ty >= GRID_ROWS) { onDone(); return; }
+    if (tx === this.player.tileX && ty === this.player.tileY) { onDone(); return; }
 
     enemy.moveTo(tx, ty, () => {
       this.enemyMoveStep(enemy, stepsLeft - 1, onDone);
@@ -305,10 +354,19 @@ export class GameScene extends Phaser.Scene {
       return;
     }
 
+    // Goblin: advantage when hidden, disadvantage when player is hidden (unseen target)
+    // or when the player's Vex condition is active. Advantage + Disadvantage cancel.
     const withAdvantage = this.enemyHidden;
+    const withDisadvantage = this.playerHidden || this.enemyVexed;
     this.enemyHidden = false;
+    this.enemyVexed = false;
 
-    const { damage, isHit, isCrit, logs } = enemyDaggerAttack(enemy.def, ALDRIC.ac, withAdvantage);
+    const { damage, isHit, isCrit, logs } = enemyDaggerAttack(
+      enemy.def,
+      this.playerDef.ac,
+      withAdvantage,
+      withDisadvantage,
+    );
     this.addLogs(logs);
 
     if (isHit) {
@@ -316,11 +374,11 @@ export class GameScene extends Phaser.Scene {
         const failures = isCrit ? 2 : 1;
         this.deathSaveFailures = Math.min(3, this.deathSaveFailures + failures);
         this.addLogs([
-          `Strikes unconscious ${ALDRIC.name}!${isCrit ? ' CRITICAL — 2 failures!' : ' 1 failure.'}`,
+          `Strikes unconscious ${this.playerDef.name}!${isCrit ? ' CRITICAL — 2 failures!' : ' 1 failure.'}`,
           `Death saves: ${this.deathSaveSuccesses} ✓  ${this.deathSaveFailures} ✗`,
         ]);
         if (this.deathSaveFailures >= 3) {
-          this.addLogs([`${ALDRIC.name} has died.`]);
+          this.addLogs([`${this.playerDef.name} has died.`]);
           this.mode = 'defeat';
           this.updateHUD();
           return;
@@ -331,10 +389,10 @@ export class GameScene extends Phaser.Scene {
       }
 
       this.playerHp = Math.max(0, this.playerHp - damage);
-      this.addLogs([`${ALDRIC.name} HP: ${this.playerHp}/${ALDRIC.maxHp}`]);
+      this.addLogs([`${this.playerDef.name} HP: ${this.playerHp}/${this.playerDef.maxHp}`]);
 
       if (this.playerHp <= 0) {
-        this.addLogs([`${ALDRIC.name} falls unconscious!`]);
+        this.addLogs([`${this.playerDef.name} falls unconscious!`]);
         this.mode = 'death_saves';
         this.updateHUD();
         return;
@@ -346,6 +404,7 @@ export class GameScene extends Phaser.Scene {
 
   private endEnemyTurn(): void {
     if (this.mode === 'defeat') return;
+    this.playerHidden = false;
     if (this.playerHp <= 0) {
       this.mode = 'death_saves';
       this.updateHUD();
@@ -354,14 +413,17 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
+  // --- HUD ---
+
   private buildHUD(): void {
     const y = GRID_H;
 
     this.add.rectangle(W / 2, y + HUD_HEIGHT / 2, W, HUD_HEIGHT, 0x0d0d1e).setDepth(10);
     this.add.rectangle(W / 2, y + 1, W, 2, 0x445566).setDepth(10);
 
-    this.add.text(12, y + 10, ALDRIC.name, {
-      fontSize: '13px', color: '#4fc3f7', fontFamily: 'monospace', resolution: DPR,
+    this.add.text(12, y + 10, this.playerDef.name, {
+      fontSize: '13px', color: '#' + this.playerDef.color.toString(16).padStart(6, '0'),
+      fontFamily: 'monospace', resolution: DPR,
     }).setDepth(11);
 
     this.enemyInfoText = this.add.text(W - 12, y + 10, '', {
@@ -389,6 +451,7 @@ export class GameScene extends Phaser.Scene {
     const btnY = y + 148;
     this.attackBtn = this.makeButton(130, btnY, 'ATTACK', 0x1a4a1e, () => this.onAttack());
     this.secondWindBtn = this.makeButton(W / 2, btnY, 'SECOND WIND', 0x1a3a5a, () => this.onSecondWind());
+    this.hideBtn = this.makeButton(W / 2, btnY, 'HIDE', 0x1a3a1a, () => this.onHide());
     this.endTurnBtn = this.makeButton(W - 130, btnY, 'END TURN', 0x3a3020, () => this.onEndTurn());
     this.deathSaveBtn = this.makeButton(W / 2, btnY, 'ROLL DEATH SAVE', 0x5a1a1a, () => this.onDeathSave());
   }
@@ -411,14 +474,20 @@ export class GameScene extends Phaser.Scene {
   private updateHUD(): void {
     const y = GRID_H;
 
-    this.drawHpBar(this.playerHpBar, 12, y + 26, 240, this.playerHp, ALDRIC.maxHp);
+    this.drawHpBar(this.playerHpBar, 12, y + 26, 240, this.playerHp, this.playerDef.maxHp);
+
+    const swPart = this.playerDef.secondWindMaxUses > 0
+      ? `    SW: ${this.secondWindUses}/${this.playerDef.secondWindMaxUses}`
+      : '';
     this.playerHpText.setText(
-      `${this.playerHp}/${ALDRIC.maxHp} HP    SW: ${this.secondWindUses}/${ALDRIC.secondWindMaxUses}    XP: ${this.playerXp}`,
+      `${this.playerHp}/${this.playerDef.maxHp} HP${swPart}    XP: ${this.playerXp}`,
     );
 
     if (this.activeEnemy) {
+      const vexedPart = this.enemyVexed ? '  [VEXED]' : '';
+      const hiddenPart = this.enemyHidden ? '  [HIDDEN]' : '';
       this.enemyInfoText.setText(
-        `${this.activeEnemy.def.name}  ${this.activeEnemy.hp}/${this.activeEnemy.maxHp} HP${this.enemyHidden ? '  [HIDDEN]' : ''}`,
+        `${this.activeEnemy.def.name}  ${this.activeEnemy.hp}/${this.activeEnemy.maxHp} HP${hiddenPart}${vexedPart}`,
       );
     } else {
       this.enemyInfoText.setText('');
@@ -428,6 +497,7 @@ export class GameScene extends Phaser.Scene {
 
     this.attackBtn.setVisible(false);
     this.secondWindBtn.setVisible(false);
+    this.hideBtn.setVisible(false);
     this.endTurnBtn.setVisible(false);
     this.deathSaveBtn.setVisible(false);
     this.phaseText.setColor('#e2b96f');
@@ -438,13 +508,19 @@ export class GameScene extends Phaser.Scene {
         break;
 
       case 'player_turn': {
+        const hiddenLabel = this.playerHidden ? '  [HIDDEN]' : '';
+        this.phaseText.setText(`Your turn — ${this.movesLeft}/${this.playerSpeed} moves${hiddenLabel}`);
+        this.endTurnBtn.setVisible(true);
+
         const adjEnemy = this.activeEnemy !== null &&
           chebyshev(this.player.tileX, this.player.tileY, this.activeEnemy.tileX, this.activeEnemy.tileY) <= 1;
-        this.phaseText.setText(`Your turn — ${this.movesLeft}/${PLAYER_SPEED} moves remaining`);
-        this.endTurnBtn.setVisible(true);
         if (adjEnemy) this.attackBtn.setVisible(true);
-        if (this.secondWindUses > 0 && this.playerHp < ALDRIC.maxHp) {
+
+        if (this.playerDef.secondWindMaxUses > 0 && this.secondWindUses > 0 && this.playerHp < this.playerDef.maxHp) {
           this.secondWindBtn.setVisible(true);
+        }
+        if (this.playerDef.sneakAttackDice > 0 && !this.playerHidden && this.activeEnemy) {
+          this.hideBtn.setVisible(true);
         }
         break;
       }
@@ -456,7 +532,7 @@ export class GameScene extends Phaser.Scene {
       case 'death_saves':
         this.phaseText.setColor('#ff7777');
         this.phaseText.setText(
-          `${ALDRIC.name} is unconscious!  ✓ ${this.deathSaveSuccesses}/3  ✗ ${this.deathSaveFailures}/3`,
+          `${this.playerDef.name} is unconscious!  ✓ ${this.deathSaveSuccesses}/3  ✗ ${this.deathSaveFailures}/3`,
         );
         this.deathSaveBtn.setVisible(true);
         break;
