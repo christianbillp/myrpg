@@ -21,14 +21,14 @@ A browser-based 2D single-player RPG built with modern web technologies.
 
 ### Done
 
-- **US-001** As a player, I want to move my character around the world using keyboard input (WASD and arrow keys) so that I can explore the game world. The world to be represented as a grid so that movement feels structured and tile-aligned.
+- **US-001** As a player, I want to move my character around the world using keyboard input (WASD and arrow keys) so that I can explore the game world. The world is represented as a grid where each tile equals 5 feet, making movement structured and tile-aligned.
+- **US-005** As a player, I want to engage in turn-based combat with enemies so that exploration feels challenging and rewarding. Combat is fully integrated into the grid: movement (30 ft = 6 tiles per turn) and actions happen on the same map, following SRD 5.2.1 rules (initiative, attack rolls, Greatsword with Savage Attacker and Graze mastery, Second Wind, Nimble Escape, death saving throws).
 
 ### Now
 
 ### Next
 
 - **US-004** As a player, I want to talk to NPCs and read their dialogue so that I can learn about the world and advance the story.
-- **US-005** As a player, I want to engage in combat with enemies so that exploration feels challenging and rewarding. _(style TBD: turn-based or action)_
 - **US-006** As a player, I want to pick up, manage, and use items in an inventory so that I can equip myself for challenges.
 - **US-007** As a player, I want to receive and track quests so that I have clear goals and a sense of progression.
 - **US-008** As a player, I want my game state saved and loaded automatically so that I can continue where I left off.

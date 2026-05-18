@@ -53,10 +53,23 @@ npm run build
 - Database migrations are plain SQL files in `server/src/db/migrations/`.
 - Environment variables are read from `.env` (never committed); see `.env.example` for required keys.
 
+## Game Rules
+
+All gameplay mechanics must follow the **D&D 5e SRD 5.2.1** rules, available as markdown in `/workspace/dnd.srd.5.2.1/`. Before implementing any gameplay system (combat, leveling, skills, spells, items, etc.), read the relevant SRD section first. Key sections:
+
+- `01_Playing_The_Game/` — D20 tests, ability checks, combat, damage, healing
+- `02_Creating_A_Character/` — ability scores, XP/level table, HP by class
+- `03_Character_Classes/` — class features per level
+- `04_Character_Origins/` — species traits, backgrounds
+- `06_Equipment/` — weapons, armour, gear stats
+- `07_Spells/` — spell rules and descriptions
+- `08_Rules_Glossary/` — conditions, resting, special senses
+- `11_Monsters/` — monster stat blocks and CR
+
 ## Working with Claude
 
 - Keep changes focused — one feature or fix per session where possible.
-- Update `requirements.md` checkboxes as features are completed.
+- Update `requirements.md` as features are completed.
 - When adding a new system (combat, inventory, etc.), discuss the design in a few sentences before implementing.
 - Prefer editing existing files over creating new ones.
 - Do not add error handling for scenarios that cannot happen.
