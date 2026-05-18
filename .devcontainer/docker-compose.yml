@@ -1,0 +1,59 @@
+version: "3.9"
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    volumes:
+      - ..:/workspace:cached
+    command: sleep infinity
+    environment:
+      - NODE_ENV=development
+      - DATABASE_URL=postgresql://rpg:rpg@db:5432/myrpg
+      - REDIS_URL=redis://cache:6379
+    depends_on:
+      db:
+        condition: service_healthy
+      cache:
+        condition: service_healthy
+    networks:
+      - rpg-net
+
+  db:
+    image: postgres:18-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: rpg
+      POSTGRES_PASSWORD: rpg
+      POSTGRES_DB: myrpg
+    volumes:
+      - postgres-data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U rpg -d myrpg"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - rpg-net
+
+  cache:
+    image: redis:7-alpine
+    restart: unless-stopped
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - rpg-net
+
+volumes:
+  postgres-data:
+  redis-data:
+
+networks:
+  rpg-net:
+    driver: bridge
