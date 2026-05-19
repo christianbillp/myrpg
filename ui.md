@@ -8,7 +8,7 @@ Canonical names for all UI regions and components. Use these consistently in cod
 +----------------+--------------------------------------------------+
 |                |                                                  |
 |                |                                                  |
-|  Player Panel  |                  Game Grid                       |
+|  Player Panel  |                  Game Map                       |
 |                |                                                  |
 |                |                                                  |
 +----------------+--------------------------------------------------+
@@ -17,7 +17,7 @@ Canonical names for all UI regions and components. Use these consistently in cod
 ```
 
 - **Player Panel** — 160 px wide left sidebar, full canvas height
-- **Game Grid** — tile-based play area to the right of the Player Panel
+- **Game Map** — tile-based play area to the right of the Player Panel
 - **HUD** — 200 px tall bar at the bottom, spanning full canvas width
 
 ---
@@ -37,7 +37,7 @@ Defined in `client/src/ui/PlayerPanel.ts`. Always visible. Displays the active p
 
 ---
 
-## Game Grid
+## Game Map
 
 Rendered in `client/src/scenes/GameScene.ts`. Each tile = 5 ft. Occupies the area to the right of the Player Panel.
 
@@ -51,9 +51,9 @@ Rendered in `client/src/scenes/GameScene.ts`. Each tile = 5 ft. Occupies the are
 
 ## Target Panel
 
-Defined in `client/src/ui/TargetPanel.ts`. Visible only when a creature is selected. Positioned on the right side of the Game Grid, mirroring the Player Panel's width and layout.
+Defined in `client/src/ui/TargetPanel.ts`. Visible only when a creature is selected. Positioned on the right side of the Game Map, mirroring the Player Panel's width and layout.
 
-Selection: clicking a creature in the Game Grid selects it. The creature is highlighted with a coloured outline (its token colour). Clicking an empty tile or defeating the creature clears the selection and hides the panel.
+Selection: clicking a creature in the Game Map selects it. The creature is highlighted with a coloured outline (its token colour). Clicking an empty tile or defeating the creature clears the selection and hides the panel.
 
 | Component | Description |
 |-----------|-------------|
@@ -67,7 +67,7 @@ Selection: clicking a creature in the Game Grid selects it. The creature is high
 
 ## HUD (Heads-Up Display)
 
-Rendered in `client/src/scenes/GameScene.ts`. Spans the full canvas width below the Game Grid.
+Rendered in `client/src/scenes/GameScene.ts`. Spans the full canvas width below the Game Map.
 
 | Component | Description |
 |-----------|-------------|

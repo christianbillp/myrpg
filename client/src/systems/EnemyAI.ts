@@ -1,4 +1,3 @@
-import { GRID_COLS, GRID_ROWS } from '../constants';
 import { Enemy } from '../entities/Enemy';
 import { tryNimbleEscape, enemyAttack } from './CombatSystem';
 import { EnemyTurnResult } from './CombatManager';
@@ -13,6 +12,9 @@ export interface EnemyTurnConfig {
   enemyVexed: boolean;
   enemyCurrentlyHidden: boolean;
   passivePerception: number;
+  passable: boolean[][];
+  mapCols: number;
+  mapRows: number;
 }
 
 export class EnemyAI {
@@ -31,7 +33,7 @@ export class EnemyAI {
       enemyHidden = hidden;
     }
 
-    EnemyAI.moveStep(enemy, enemy.def.speed, config, () => {
+    EnemyAI.moveSteps(enemy, enemy.def.speed, config, () => {
       const dist = chebyshev(enemy.tileX, enemy.tileY, config.playerTileX, config.playerTileY);
 
       if (dist > 1) {
@@ -64,7 +66,7 @@ export class EnemyAI {
     return attacks.find(a => a.attackType === 'melee' || a.attackType === 'both');
   }
 
-  private static moveStep(
+  private static moveSteps(
     enemy: Enemy,
     stepsLeft: number,
     config: EnemyTurnConfig,
@@ -75,19 +77,58 @@ export class EnemyAI {
       return;
     }
 
-    const absDx = Math.abs(config.playerTileX - enemy.tileX);
-    const absDy = Math.abs(config.playerTileY - enemy.tileY);
-    const stepX = absDx >= absDy ? Math.sign(config.playerTileX - enemy.tileX) : 0;
-    const stepY = absDx < absDy ? Math.sign(config.playerTileY - enemy.tileY) : 0;
-    const tx = enemy.tileX + stepX;
-    const ty = enemy.tileY + stepY;
+    const next = EnemyAI.nextStepToward(
+      enemy.tileX, enemy.tileY,
+      config.playerTileX, config.playerTileY,
+      config.passable, config.mapRows, config.mapCols,
+    );
 
-    if (tx < 0 || ty < 0 || tx >= GRID_COLS || ty >= GRID_ROWS) { onDone(); return; }
-    if (tx === config.playerTileX && ty === config.playerTileY) { onDone(); return; }
+    if (!next || (next[0] === config.playerTileX && next[1] === config.playerTileY)) {
+      onDone();
+      return;
+    }
 
-    enemy.moveTo(tx, ty, () => {
-      EnemyAI.moveStep(enemy, stepsLeft - 1, config, onDone);
+    enemy.moveTo(next[0], next[1], () => {
+      EnemyAI.moveSteps(enemy, stepsLeft - 1, config, onDone);
     });
+  }
+
+  private static nextStepToward(
+    fromX: number,
+    fromY: number,
+    targetX: number,
+    targetY: number,
+    passable: boolean[][],
+    rows: number,
+    cols: number,
+  ): [number, number] | null {
+    if (chebyshev(fromX, fromY, targetX, targetY) <= 1) return null;
+
+    const visited: boolean[][] = Array.from({ length: rows }, () =>
+      new Array<boolean>(cols).fill(false),
+    );
+    const firstStep: ([number, number] | null)[][] = Array.from({ length: rows }, () =>
+      new Array<[number, number] | null>(cols).fill(null),
+    );
+
+    visited[fromY][fromX] = true;
+    const queue: [number, number][] = [[fromY, fromX]];
+    const dirs: [number, number][] = [[0, 1], [0, -1], [1, 0], [-1, 0]];
+
+    while (queue.length > 0) {
+      const [cy, cx] = queue.shift()!;
+      for (const [dr, dc] of dirs) {
+        const ny = cy + dr, nx = cx + dc;
+        if (ny < 0 || ny >= rows || nx < 0 || nx >= cols) continue;
+        if (!passable[ny][nx]) continue;
+        if (visited[ny][nx]) continue;
+        visited[ny][nx] = true;
+        firstStep[ny][nx] = firstStep[cy][cx] !== null ? firstStep[cy][cx] : [nx, ny];
+        if (chebyshev(nx, ny, targetX, targetY) <= 1) return firstStep[ny][nx]!;
+        queue.push([ny, nx]);
+      }
+    }
+    return null;
   }
 }
 

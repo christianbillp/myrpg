@@ -12,9 +12,10 @@ import {
   TARGET_PANEL_WIDTH,
 } from "../constants";
 import { ALDRIC, PlayerDef } from "../data/player";
-import { GOBLIN_MINION } from "../data/enemies";
+import { GOBLIN_MINION, BANDIT } from "../data/enemies";
 import { CombatManager } from "../systems/CombatManager";
 import { EnemyAI, chebyshev } from "../systems/EnemyAI";
+import { generateMap, GameMap } from "../systems/MapGenerator";
 
 const GRID_H = GRID_ROWS * TILE_SIZE;
 const GRID_W = GRID_COLS * TILE_SIZE;
@@ -45,7 +46,8 @@ export class GameScene extends Phaser.Scene {
   private deathSaveBtn!: Phaser.GameObjects.Container;
 
   private highlightLayer!: Phaser.GameObjects.Graphics;
-  private gridContainer!: Phaser.GameObjects.Container;
+  private mapContainer!: Phaser.GameObjects.Container;
+  private gameMap!: GameMap;
   private gridZoom = 1;
   private isPanning = false;
   private panLastX = 0;
@@ -79,20 +81,18 @@ export class GameScene extends Phaser.Scene {
     this.gridZoom = 1;
     this.isPanning = false;
 
-    this.gridContainer = this.add.container(PLAYER_PANEL_WIDTH, 0);
-    this.gridContainer.add(this.drawGrid());
+    this.gameMap = generateMap();
+
+    this.mapContainer = this.add.container(PLAYER_PANEL_WIDTH, 0);
+    this.mapContainer.add(this.drawMapTiles());
     this.highlightLayer = this.add.graphics();
-    this.gridContainer.add(this.highlightLayer);
+    this.mapContainer.add(this.highlightLayer);
+
+    const [startX, startY] = this.findPlayerSpawn();
+    this.player = new Player(this, startX, startY, this.combat.playerDef.color);
+    this.mapContainer.add(this.player.gameObject);
 
     this.spawnEnemies();
-
-    this.player = new Player(
-      this,
-      Math.floor(GRID_COLS / 2),
-      Math.floor(GRID_ROWS / 2),
-      this.combat.playerDef.color,
-    );
-    this.gridContainer.add(this.player.gameObject);
 
     this.cursors = this.input.keyboard!.createCursorKeys();
     this.wasd = {
@@ -121,12 +121,12 @@ export class GameScene extends Phaser.Scene {
           0.5,
           3,
         );
-        const pivotX = pointer.x - this.gridContainer.x;
-        const pivotY = pointer.y - this.gridContainer.y;
-        this.gridContainer.x = pointer.x - pivotX * (newZoom / this.gridZoom);
-        this.gridContainer.y = pointer.y - pivotY * (newZoom / this.gridZoom);
+        const pivotX = pointer.x - this.mapContainer.x;
+        const pivotY = pointer.y - this.mapContainer.y;
+        this.mapContainer.x = pointer.x - pivotX * (newZoom / this.gridZoom);
+        this.mapContainer.y = pointer.y - pivotY * (newZoom / this.gridZoom);
         this.gridZoom = newZoom;
-        this.gridContainer.setScale(newZoom);
+        this.mapContainer.setScale(newZoom);
         this.clampGridPan();
       },
     );
@@ -151,8 +151,8 @@ export class GameScene extends Phaser.Scene {
       if (!this.isPanning && (Math.abs(dx) > 3 || Math.abs(dy) > 3))
         this.isPanning = true;
       if (this.isPanning) {
-        this.gridContainer.x += dx;
-        this.gridContainer.y += dy;
+        this.mapContainer.x += dx;
+        this.mapContainer.y += dy;
         this.clampGridPan();
       }
       this.panLastX = pointer.x;
@@ -167,15 +167,15 @@ export class GameScene extends Phaser.Scene {
         pointer.y >= 0 &&
         pointer.y < GRID_H
       ) {
-        const localX = (pointer.x - this.gridContainer.x) / this.gridZoom;
-        const localY = (pointer.y - this.gridContainer.y) / this.gridZoom;
+        const localX = (pointer.x - this.mapContainer.x) / this.gridZoom;
+        const localY = (pointer.y - this.mapContainer.y) / this.gridZoom;
         const tileX = Math.floor(localX / TILE_SIZE);
         const tileY = Math.floor(localY / TILE_SIZE);
         if (
           tileX >= 0 &&
-          tileX < GRID_COLS &&
+          tileX < this.gameMap.cols &&
           tileY >= 0 &&
-          tileY < GRID_ROWS
+          tileY < this.gameMap.rows
         ) {
           this.selectEnemy(
             this.enemies.find((e) => e.tileX === tileX && e.tileY === tileY) ??
@@ -196,41 +196,35 @@ export class GameScene extends Phaser.Scene {
     if (this.combat.mode !== "exploring" && this.combat.mode !== "player_turn")
       return;
 
+    const leftJust = Phaser.Input.Keyboard.JustDown(this.cursors.left) || Phaser.Input.Keyboard.JustDown(this.wasd.left);
+    const rightJust = Phaser.Input.Keyboard.JustDown(this.cursors.right) || Phaser.Input.Keyboard.JustDown(this.wasd.right);
+    const upJust = Phaser.Input.Keyboard.JustDown(this.cursors.up) || Phaser.Input.Keyboard.JustDown(this.wasd.up);
+    const downJust = Phaser.Input.Keyboard.JustDown(this.cursors.down) || Phaser.Input.Keyboard.JustDown(this.wasd.down);
+
     let dx = 0;
     let dy = 0;
-
-    if (
-      Phaser.Input.Keyboard.JustDown(this.cursors.left) ||
-      Phaser.Input.Keyboard.JustDown(this.wasd.left)
-    )
-      dx = -1;
-    else if (
-      Phaser.Input.Keyboard.JustDown(this.cursors.right) ||
-      Phaser.Input.Keyboard.JustDown(this.wasd.right)
-    )
-      dx = 1;
-    else if (
-      Phaser.Input.Keyboard.JustDown(this.cursors.up) ||
-      Phaser.Input.Keyboard.JustDown(this.wasd.up)
-    )
-      dy = -1;
-    else if (
-      Phaser.Input.Keyboard.JustDown(this.cursors.down) ||
-      Phaser.Input.Keyboard.JustDown(this.wasd.down)
-    )
-      dy = 1;
+    if (leftJust && !rightJust) dx = -1;
+    else if (rightJust && !leftJust) dx = 1;
+    if (upJust && !downJust) dy = -1;
+    else if (downJust && !upJust) dy = 1;
 
     if (dx === 0 && dy === 0) return;
 
     const nx = this.player.tileX + dx;
     const ny = this.player.tileY + dy;
 
-    if (nx < 0 || ny < 0 || nx >= GRID_COLS || ny >= GRID_ROWS) return;
+    if (nx < 0 || ny < 0 || nx >= this.gameMap.cols || ny >= this.gameMap.rows) return;
+    if (!this.gameMap.passable[ny][nx]) return;
+    if (dx !== 0 && dy !== 0) {
+      const adjX = this.gameMap.passable[this.player.tileY][nx];
+      const adjY = this.gameMap.passable[ny][this.player.tileX];
+      if (!adjX && !adjY) return;
+    }
     if (this.enemies.some((e) => e.tileX === nx && e.tileY === ny)) return;
     if (this.combat.mode === "player_turn" && this.combat.movesLeft <= 0)
       return;
 
-    this.player.move(dx, dy, GRID_COLS, GRID_ROWS);
+    this.player.move(dx, dy, this.gameMap.cols, this.gameMap.rows);
 
     if (this.combat.mode === "player_turn") {
       this.combat.movesLeft--;
@@ -274,6 +268,9 @@ export class GameScene extends Phaser.Scene {
         enemyVexed: this.combat.enemyVexed,
         enemyCurrentlyHidden: this.combat.enemyHidden,
         passivePerception: 10 + this.combat.playerDef.perceptionBonus,
+        passable: this.gameMap.passable,
+        mapCols: this.gameMap.cols,
+        mapRows: this.gameMap.rows,
       },
       (result) => this.combat.applyEnemyTurnResult(result),
     );
@@ -574,14 +571,33 @@ export class GameScene extends Phaser.Scene {
     if (this.combat.mode !== "player_turn" || this.combat.movesLeft <= 0)
       return;
 
-    this.highlightLayer.fillStyle(0x4fc3f7, 0.15);
+    const { cols, rows, passable } = this.gameMap;
     const px = this.player.tileX;
     const py = this.player.tileY;
 
-    for (let col = 0; col < GRID_COLS; col++) {
-      for (let row = 0; row < GRID_ROWS; row++) {
-        const dist = Math.abs(col - px) + Math.abs(row - py);
-        if (dist > 0 && dist <= this.combat.movesLeft) {
+    const dist: number[][] = Array.from({ length: rows }, () => new Array<number>(cols).fill(-1));
+    dist[py][px] = 0;
+    const queue: [number, number][] = [[py, px]];
+    const dirs: [number, number][] = [[0, 1], [0, -1], [1, 0], [-1, 0]];
+
+    while (queue.length > 0) {
+      const [cy, cx] = queue.shift()!;
+      if (dist[cy][cx] >= this.combat.movesLeft) continue;
+      for (const [dr, dc] of dirs) {
+        const nr = cy + dr, nc = cx + dc;
+        if (nr < 0 || nr >= rows || nc < 0 || nc >= cols) continue;
+        if (!passable[nr][nc]) continue;
+        if (this.enemies.some((e) => e.tileX === nc && e.tileY === nr)) continue;
+        if (dist[nr][nc] !== -1) continue;
+        dist[nr][nc] = dist[cy][cx] + 1;
+        queue.push([nr, nc]);
+      }
+    }
+
+    this.highlightLayer.fillStyle(0x4fc3f7, 0.15);
+    for (let row = 0; row < rows; row++) {
+      for (let col = 0; col < cols; col++) {
+        if (dist[row][col] > 0) {
           this.highlightLayer.fillRect(
             col * TILE_SIZE + 1,
             row * TILE_SIZE + 1,
@@ -595,40 +611,75 @@ export class GameScene extends Phaser.Scene {
 
   private clampGridPan(): void {
     const margin = TILE_SIZE;
-    this.gridContainer.x = Phaser.Math.Clamp(
-      this.gridContainer.x,
-      PLAYER_PANEL_WIDTH + margin - GRID_W * this.gridZoom,
-      PLAYER_PANEL_WIDTH + GRID_W - margin,
+    const contentW = this.gameMap.cols * TILE_SIZE;
+    const contentH = this.gameMap.rows * TILE_SIZE;
+    this.mapContainer.x = Phaser.Math.Clamp(
+      this.mapContainer.x,
+      PLAYER_PANEL_WIDTH + margin - contentW * this.gridZoom,
+      PLAYER_PANEL_WIDTH + contentW - margin,
     );
-    this.gridContainer.y = Phaser.Math.Clamp(
-      this.gridContainer.y,
-      margin - GRID_H * this.gridZoom,
-      GRID_H - margin,
+    this.mapContainer.y = Phaser.Math.Clamp(
+      this.mapContainer.y,
+      margin - contentH * this.gridZoom,
+      contentH - margin,
     );
   }
 
   private resetGridView(): void {
     this.gridZoom = 1;
-    this.gridContainer.setScale(1);
-    this.gridContainer.setPosition(PLAYER_PANEL_WIDTH, 0);
+    this.mapContainer.setScale(1);
+    this.mapContainer.setPosition(PLAYER_PANEL_WIDTH, 0);
+  }
+
+  private findPlayerSpawn(): [number, number] {
+    const { cols, rows, passable } = this.gameMap;
+    const candidates: [number, number][] = [];
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < Math.floor(cols / 3); c++) {
+        if (passable[r][c]) candidates.push([c, r]);
+      }
+    }
+    if (candidates.length > 0) {
+      return candidates[Math.floor(Math.random() * candidates.length)];
+    }
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < cols; c++) {
+        if (passable[r][c]) return [c, r];
+      }
+    }
+    return [0, 0];
   }
 
   private spawnEnemies(): void {
-    for (const pos of [
-      { x: 10, y: 3 },
-      { x: 4, y: 8 },
-    ]) {
-      const enemy = new Enemy(this, GOBLIN_MINION, pos.x, pos.y);
+    const { cols, rows, passable } = this.gameMap;
+    const candidates: [number, number][] = [];
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < cols; c++) {
+        if (passable[r][c] && chebyshev(c, r, this.player.tileX, this.player.tileY) >= 5) {
+          candidates.push([r, c]);
+        }
+      }
+    }
+    for (let i = candidates.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [candidates[i], candidates[j]] = [candidates[j], candidates[i]];
+    }
+    const defs = [GOBLIN_MINION, BANDIT];
+    const count = Math.min(2, candidates.length);
+    for (let i = 0; i < count; i++) {
+      const [r, c] = candidates[i];
+      const enemy = new Enemy(this, defs[i % defs.length], c, r);
       this.enemies.push(enemy);
-      this.gridContainer.add(enemy.gameObject);
+      this.mapContainer.add(enemy.gameObject);
     }
   }
 
-  private drawGrid(): Phaser.GameObjects.Graphics {
+  private drawMapTiles(): Phaser.GameObjects.Graphics {
     const g = this.add.graphics();
-    for (let row = 0; row < GRID_ROWS; row++) {
-      for (let col = 0; col < GRID_COLS; col++) {
-        g.fillStyle(0x16213e);
+    const { cols, rows, passable } = this.gameMap;
+    for (let row = 0; row < rows; row++) {
+      for (let col = 0; col < cols; col++) {
+        g.fillStyle(passable[row][col] ? 0x16213e : 0x05080f);
         g.fillRect(
           col * TILE_SIZE + 1,
           row * TILE_SIZE + 1,
