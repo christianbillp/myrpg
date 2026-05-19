@@ -13,6 +13,8 @@ import {
 } from "../constants";
 import { ALDRIC, PlayerDef } from "../data/player";
 import { GOBLIN_MINION, BANDIT } from "../data/enemies";
+import { HEALTH_POTION } from "../data/items";
+import { MapItem } from "../entities/MapItem";
 import { CombatManager } from "../systems/CombatManager";
 import { EnemyAI, chebyshev } from "../systems/EnemyAI";
 import { generateMap, GameMap } from "../systems/MapGenerator";
@@ -25,6 +27,7 @@ const DPR = window.devicePixelRatio;
 export class GameScene extends Phaser.Scene {
   private player!: Player;
   private enemies: Enemy[] = [];
+  private mapItems: MapItem[] = [];
   private combat!: CombatManager;
 
   private cursors!: Phaser.Types.Input.Keyboard.CursorKeys;
@@ -78,6 +81,7 @@ export class GameScene extends Phaser.Scene {
 
   create(): void {
     this.enemies = [];
+    this.mapItems = [];
     this.selectedEnemy = null;
     this.gridZoom = 1;
     this.isPanning = false;
@@ -95,6 +99,7 @@ export class GameScene extends Phaser.Scene {
     this.mapContainer.add(this.player.gameObject);
 
     this.spawnEnemies();
+    this.spawnItems();
 
     this.cursors = this.input.keyboard!.createCursorKeys();
     this.wasd = {
@@ -224,6 +229,7 @@ export class GameScene extends Phaser.Scene {
       return;
 
     this.player.move(dx, dy, this.gameMap.cols, this.gameMap.rows);
+    this.checkItemPickup();
 
     if (this.combat.mode === "player_turn") {
       this.combat.movesLeft--;
@@ -325,7 +331,7 @@ export class GameScene extends Phaser.Scene {
     const cx = PLAYER_PANEL_WIDTH + GRID_W / 2;
     const lx = PLAYER_PANEL_WIDTH + 12;
 
-    this.playerPanel = new PlayerPanel(this, this.combat.playerDef);
+    this.playerPanel = new PlayerPanel(this, this.combat.playerDef, () => this.combat.usePotion());
     this.targetPanel = new TargetPanel(this);
 
     this.add
@@ -453,6 +459,8 @@ export class GameScene extends Phaser.Scene {
       this.combat.playerHp,
       this.combat.playerDef.maxHp,
       this.combat.playerXp,
+      this.combat.playerGold,
+      this.combat.inventory,
     );
   }
 
@@ -637,6 +645,44 @@ export class GameScene extends Phaser.Scene {
     this.gridZoom = 1;
     this.mapContainer.setScale(1);
     this.mapContainer.setPosition(PLAYER_PANEL_WIDTH, 0);
+  }
+
+  private spawnItems(): void {
+    const { cols, rows, passable } = this.gameMap;
+    const candidates: [number, number][] = [];
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < cols; c++) {
+        if (
+          passable[r][c] &&
+          chebyshev(c, r, this.player.tileX, this.player.tileY) >= 3 &&
+          !this.enemies.some((e) => e.tileX === c && e.tileY === r)
+        ) {
+          candidates.push([r, c]);
+        }
+      }
+    }
+    for (let i = candidates.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [candidates[i], candidates[j]] = [candidates[j], candidates[i]];
+    }
+    const count = Math.min(3, candidates.length);
+    for (let i = 0; i < count; i++) {
+      const [r, c] = candidates[i];
+      const item = new MapItem(this, HEALTH_POTION, c, r);
+      this.mapItems.push(item);
+      this.mapContainer.add(item.gameObject);
+    }
+  }
+
+  private checkItemPickup(): void {
+    const idx = this.mapItems.findIndex(
+      (i) => i.tileX === this.player.tileX && i.tileY === this.player.tileY,
+    );
+    if (idx === -1) return;
+    const item = this.mapItems[idx];
+    this.combat.addItem(item.def);
+    item.destroy();
+    this.mapItems.splice(idx, 1);
   }
 
   private findPlayerSpawn(): [number, number] {

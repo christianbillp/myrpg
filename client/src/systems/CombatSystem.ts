@@ -1,6 +1,7 @@
 import { d, d20, mod, rollAdvantage, rollDisadvantage } from './Dice';
 import { PlayerDef } from '../data/player';
 import { EnemyAttack, EnemyDef } from '../data/enemies';
+import { ConsumableDef } from '../data/items';
 
 export function rollInitiative(
   player: PlayerDef,
@@ -204,6 +205,16 @@ export function playerSecondWind(level: number): { healed: number; logs: string[
   return {
     healed,
     logs: [`Second Wind! 1d10+${level}: ${healRoll}+${level} = ${healed} HP restored`],
+  };
+}
+
+export function drinkPotion(item: ConsumableDef): { healed: number; logs: string[] } {
+  const rolls: number[] = [];
+  for (let i = 0; i < item.healDice; i++) rolls.push(d(item.healSides));
+  const healed = rolls.reduce((a, b) => a + b, 0) + item.healBonus;
+  return {
+    healed,
+    logs: [`Drinks ${item.name}! ${item.healDice}d${item.healSides}+${item.healBonus}: [${rolls.join(', ')}]+${item.healBonus} = ${healed} HP`],
   };
 }
 

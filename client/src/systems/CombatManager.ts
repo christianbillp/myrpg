@@ -1,12 +1,15 @@
 import { PlayerDef } from '../data/player';
 import { Enemy } from '../entities/Enemy';
+import { crGoldReward } from '../data/enemies';
 import {
   rollInitiative,
   playerMeleeAttack,
   playerHide,
   playerSecondWind,
+  drinkPotion,
   rollDeathSave,
 } from './CombatSystem';
+import { ItemDef } from '../data/items';
 
 export type CombatMode = 'exploring' | 'player_turn' | 'enemy_turn' | 'death_saves' | 'defeat';
 
@@ -31,6 +34,8 @@ export class CombatManager {
   playerHp: number;
   playerXp: number;
   secondWindUses: number;
+  inventory: ItemDef[] = [];
+  playerGold = 0;
   playerHidden = false;
   enemyVexed = false;
   enemyHidden = false;
@@ -59,6 +64,23 @@ export class CombatManager {
     this.onChange = onChange;
     this.onEnemyTurn = onEnemyTurn;
     this.onEnemyKilled = onEnemyKilled;
+  }
+
+  addItem(item: ItemDef): void {
+    this.inventory.push(item);
+    this.addLogs([`Picked up ${item.name}!`]);
+    this.onChange();
+  }
+
+  usePotion(): void {
+    const idx = this.inventory.findIndex(i => i.type === 'consumable');
+    if (idx === -1 || (this.mode !== 'player_turn' && this.mode !== 'exploring')) return;
+    const item = this.inventory.splice(idx, 1)[0];
+    const { healed, logs } = drinkPotion(item);
+    const before = this.playerHp;
+    this.playerHp = Math.min(this.playerDef.maxHp, this.playerHp + healed);
+    this.addLogs([...logs, `HP: ${before} → ${this.playerHp}/${this.playerDef.maxHp}`]);
+    this.onChange();
   }
 
   startCombat(enemy: Enemy): void {
@@ -106,10 +128,12 @@ export class CombatManager {
     }
 
     if (this.activeEnemy.isDead()) {
+      const gold = crGoldReward(this.activeEnemy.def.cr);
       this.playerXp += this.activeEnemy.def.xp;
+      this.playerGold += gold;
       this.addLogs([
-        `☠ ${this.activeEnemy.def.name} is slain! +${this.activeEnemy.def.xp} XP`,
-        `Total XP: ${this.playerXp}`,
+        `☠ ${this.activeEnemy.def.name} is slain! +${this.activeEnemy.def.xp} XP  +${gold} GP`,
+        `Total XP: ${this.playerXp}  |  GP: ${this.playerGold}`,
       ]);
       const killed = this.activeEnemy;
       this.activeEnemy = null;

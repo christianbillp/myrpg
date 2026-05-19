@@ -1,3 +1,11 @@
+export function crGoldReward(cr: string): number {
+  if (cr.includes('/')) {
+    const [num, den] = cr.split('/').map(Number);
+    return Math.floor(10 * num / den);
+  }
+  return 10 * Number(cr);
+}
+
 export interface EnemyAttack {
   name: string;
   attackType: 'melee' | 'ranged' | 'both';

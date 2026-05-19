@@ -29,13 +29,13 @@ A browser-based 2D single-player RPG built with modern web technologies.
 - **US-017** As a developer, I want every monster's stat block to be sourced directly from the D&D 5e SRD 5.2.1 so that combat mechanics are correct and new monsters can be added without guesswork. Each `EnemyDef` records creature type, HP dice formula, and full attack entries with attack type (melee / ranged / both), reach, and range. The combat system selects the correct attack based on type. Initial roster: Goblin Minion and Bandit.
 - **US-018** As a player, I want to zoom in and out on the game map using the mouse wheel so that I can get a better view of the battlefield. I also want to pan around the map by left-click dragging, and reset both zoom and pan to the default view with a dedicated button.
 - **US-019** As a player, I want to move around on a randomly generated map so that I can experience a variety of challenges. Each encounter generates a new square map with a random side length between 10 and 30 tiles, where 20–40% of tiles are impassable walls. All passable tiles are guaranteed to be reachable from each other (flood-fill validated). Player and enemies spawn on passable tiles separated by at least 5 tiles. Wall tiles are visually distinct. Movement respects walls including the SRD diagonal corner rule (diagonal movement is blocked when both orthogonal neighbours are walls). The enemy AI uses BFS pathfinding to navigate around walls.
+- **US-006** As a player, I want to pick up, manage, and use items in an inventory so that I can equip myself for challenges. Up to 3 Health Potions (2d4+2 healing per SRD) spawn as green diamond tokens on the map each encounter; walking onto a token picks it up automatically. The Player Panel shows a live item count and a USE POTION button (dimmed when empty). Gold pieces (GP) are awarded on kill at 10 × CR (rounded down); the current gold total is shown in the Player Panel below XP. Both XP and GP rewards are recorded in the combat log.
 
 ### Now
 
 ### Next
 
 - **US-004** As a player, I want to talk to NPCs and read their dialogue so that I can learn about the world and advance the story.
-- **US-006** As a player, I want to pick up, manage, and use items in an inventory so that I can equip myself for challenges.
 - **US-007** As a player, I want to receive and track quests so that I have clear goals and a sense of progression.
 - **US-008** As a player, I want my game state saved and loaded automatically so that I can continue where I left off.
 
