@@ -50,6 +50,7 @@ export class GameScene extends Phaser.Scene {
   private gameMap!: GameMap;
   private gridZoom = 1;
   private isPanning = false;
+  private panStartedInGameMap = false;
   private panLastX = 0;
   private panLastY = 0;
   private playerPanel!: PlayerPanel;
@@ -80,6 +81,7 @@ export class GameScene extends Phaser.Scene {
     this.selectedEnemy = null;
     this.gridZoom = 1;
     this.isPanning = false;
+    this.panStartedInGameMap = false;
 
     this.gameMap = generateMap();
 
@@ -132,19 +134,17 @@ export class GameScene extends Phaser.Scene {
     );
 
     this.input.on("pointerdown", (pointer: Phaser.Input.Pointer) => {
+      this.panStartedInGameMap = false;
       if (!pointer.leftButtonDown()) return;
-      if (
-        pointer.x < PLAYER_PANEL_WIDTH ||
-        pointer.x >= PLAYER_PANEL_WIDTH + GRID_W
-      )
-        return;
-      if (pointer.y < 0 || pointer.y >= GRID_H) return;
+      if (!this.isPointerInGameMap(pointer)) return;
+      this.panStartedInGameMap = true;
       this.isPanning = false;
       this.panLastX = pointer.x;
       this.panLastY = pointer.y;
     });
 
     this.input.on("pointermove", (pointer: Phaser.Input.Pointer) => {
+      if (!this.panStartedInGameMap) return;
       if (!pointer.leftButtonDown()) return;
       const dx = pointer.x - this.panLastX;
       const dy = pointer.y - this.panLastY;
@@ -161,11 +161,9 @@ export class GameScene extends Phaser.Scene {
 
     this.input.on("pointerup", (pointer: Phaser.Input.Pointer) => {
       if (
+        this.panStartedInGameMap &&
         !this.isPanning &&
-        pointer.x >= PLAYER_PANEL_WIDTH &&
-        pointer.x < PLAYER_PANEL_WIDTH + GRID_W &&
-        pointer.y >= 0 &&
-        pointer.y < GRID_H
+        this.isPointerInGameMap(pointer)
       ) {
         const localX = (pointer.x - this.mapContainer.x) / this.gridZoom;
         const localY = (pointer.y - this.mapContainer.y) / this.gridZoom;
@@ -186,6 +184,7 @@ export class GameScene extends Phaser.Scene {
         }
       }
       this.isPanning = false;
+      this.panStartedInGameMap = false;
     });
 
     this.buildHUD();
@@ -622,6 +621,15 @@ export class GameScene extends Phaser.Scene {
       this.mapContainer.y,
       margin - contentH * this.gridZoom,
       contentH - margin,
+    );
+  }
+
+  private isPointerInGameMap(pointer: Phaser.Input.Pointer): boolean {
+    return (
+      pointer.x >= PLAYER_PANEL_WIDTH &&
+      pointer.x < PLAYER_PANEL_WIDTH + GRID_W &&
+      pointer.y >= 0 &&
+      pointer.y < GRID_H
     );
   }
 
