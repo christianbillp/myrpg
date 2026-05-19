@@ -1,7 +1,8 @@
 import { GRID_COLS, GRID_ROWS } from '../constants';
 import { Enemy } from '../entities/Enemy';
-import { tryNimbleEscape, enemyDaggerAttack } from './CombatSystem';
+import { tryNimbleEscape, enemyAttack } from './CombatSystem';
 import { EnemyTurnResult } from './CombatManager';
+import { EnemyAttack } from '../data/enemies';
 
 export interface EnemyTurnConfig {
   playerTileX: number;
@@ -39,10 +40,17 @@ export class EnemyAI {
         return;
       }
 
+      const meleeAttack = EnemyAI.primaryMeleeAttack(enemy.def.attacks);
+      if (!meleeAttack) {
+        logs.push(`${enemy.def.name} has no melee attack.`);
+        onDone({ damage: 0, isHit: false, isCrit: false, attacked: false, logs });
+        return;
+      }
       const withAdvantage = enemyHidden;
       const withDisadvantage = config.playerHidden || config.enemyVexed;
-      const { damage, isHit, isCrit, logs: attackLogs } = enemyDaggerAttack(
+      const { damage, isHit, isCrit, logs: attackLogs } = enemyAttack(
         enemy.def,
+        meleeAttack,
         config.playerAc,
         withAdvantage,
         withDisadvantage,
@@ -50,6 +58,10 @@ export class EnemyAI {
       logs.push(...attackLogs);
       onDone({ damage, isHit, isCrit, attacked: true, logs });
     });
+  }
+
+  private static primaryMeleeAttack(attacks: EnemyAttack[]): EnemyAttack | undefined {
+    return attacks.find(a => a.attackType === 'melee' || a.attackType === 'both');
   }
 
   private static moveStep(

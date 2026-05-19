@@ -2,7 +2,8 @@ import Phaser from 'phaser';
 import { Player } from '../entities/Player';
 import { Enemy } from '../entities/Enemy';
 import { PlayerPanel } from '../ui/PlayerPanel';
-import { TILE_SIZE, GRID_COLS, GRID_ROWS, HUD_HEIGHT, PANEL_WIDTH } from '../constants';
+import { TargetPanel } from '../ui/TargetPanel';
+import { TILE_SIZE, GRID_COLS, GRID_ROWS, HUD_HEIGHT, PANEL_WIDTH, TARGET_PANEL_WIDTH } from '../constants';
 import { ALDRIC, PlayerDef } from '../data/player';
 import { GOBLIN_MINION } from '../data/enemies';
 import { CombatManager } from '../systems/CombatManager';
@@ -10,7 +11,7 @@ import { EnemyAI, chebyshev } from '../systems/EnemyAI';
 
 const GRID_H = GRID_ROWS * TILE_SIZE;
 const GRID_W = GRID_COLS * TILE_SIZE;
-const W = PANEL_WIDTH + GRID_W;
+const W = PANEL_WIDTH + GRID_W + TARGET_PANEL_WIDTH;
 const DPR = window.devicePixelRatio;
 
 export class GameScene extends Phaser.Scene {
@@ -38,6 +39,8 @@ export class GameScene extends Phaser.Scene {
 
   private highlightLayer!: Phaser.GameObjects.Graphics;
   private playerPanel!: PlayerPanel;
+  private targetPanel!: TargetPanel;
+  private selectedEnemy: Enemy | null = null;
 
   constructor() {
     super({ key: 'GameScene' });
@@ -50,6 +53,7 @@ export class GameScene extends Phaser.Scene {
       () => this.updateHUD(),
       (delay) => this.time.delayedCall(delay, () => this.runEnemyTurn()),
       (enemy) => {
+        if (this.selectedEnemy === enemy) this.selectEnemy(null);
         enemy.destroy();
         this.enemies = this.enemies.filter(e => e !== enemy);
         this.highlightLayer.clear();
@@ -59,6 +63,7 @@ export class GameScene extends Phaser.Scene {
 
   create(): void {
     this.enemies = [];
+    this.selectedEnemy = null;
     this.drawGrid();
     this.highlightLayer = this.add.graphics().setDepth(0.5);
     this.spawnEnemies();
@@ -76,6 +81,15 @@ export class GameScene extends Phaser.Scene {
       left: this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.A),
       right: this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.D),
     };
+
+    this.input.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
+      if (pointer.x < PANEL_WIDTH || pointer.x >= PANEL_WIDTH + GRID_W) return;
+      if (pointer.y < 0 || pointer.y >= GRID_H) return;
+      const tileX = Math.floor((pointer.x - PANEL_WIDTH) / TILE_SIZE);
+      const tileY = Math.floor(pointer.y / TILE_SIZE);
+      const hit = this.enemies.find(e => e.tileX === tileX && e.tileY === tileY) ?? null;
+      this.selectEnemy(hit);
+    });
 
     this.buildHUD();
     this.updateHUD();
@@ -115,6 +129,7 @@ export class GameScene extends Phaser.Scene {
     for (const enemy of this.enemies) {
       if (chebyshev(this.player.tileX, this.player.tileY, enemy.tileX, enemy.tileY) <= 2) {
         this.combat.startCombat(enemy);
+        this.selectEnemy(enemy);
         return;
       }
     }
@@ -166,6 +181,17 @@ export class GameScene extends Phaser.Scene {
     this.combat.onDeathSave();
   }
 
+  private selectEnemy(enemy: Enemy | null): void {
+    if (this.selectedEnemy) this.selectedEnemy.setSelected(false);
+    this.selectedEnemy = enemy;
+    if (enemy) {
+      enemy.setSelected(true);
+      this.targetPanel.show(enemy.def, enemy.hp);
+    } else {
+      this.targetPanel.hide();
+    }
+  }
+
   // --- HUD ---
 
   private buildHUD(): void {
@@ -174,6 +200,7 @@ export class GameScene extends Phaser.Scene {
     const lx = PANEL_WIDTH + 12;
 
     this.playerPanel = new PlayerPanel(this, this.combat.playerDef);
+    this.targetPanel = new TargetPanel(this);
 
     this.add.rectangle(W / 2, y + HUD_HEIGHT / 2, W, HUD_HEIGHT, 0x0d0d1e).setDepth(10);
     this.add.rectangle(W / 2, y + 1, W, 2, 0x445566).setDepth(10);
@@ -233,6 +260,7 @@ export class GameScene extends Phaser.Scene {
 
   private updateHUD(): void {
     this.updatePanel();
+    if (this.selectedEnemy) this.targetPanel.refresh(this.selectedEnemy.hp, this.selectedEnemy.maxHp);
 
     if (this.combat.activeEnemy) {
       const vexedPart  = this.combat.enemyVexed  ? '  [VEXED]'  : '';

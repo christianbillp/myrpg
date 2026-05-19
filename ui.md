@@ -49,6 +49,22 @@ Rendered in `client/src/scenes/GameScene.ts`. Each tile = 5 ft. Occupies the are
 
 ---
 
+## Target Panel
+
+Defined in `client/src/ui/TargetPanel.ts`. Visible only when a creature is selected. Positioned on the right side of the Game Grid, mirroring the Player Panel's width and layout.
+
+Selection: clicking a creature in the Game Grid selects it. The creature is highlighted with a coloured outline (its token colour). Clicking an empty tile or defeating the creature clears the selection and hides the panel.
+
+| Component | Description |
+|-----------|-------------|
+| **Name Header** | Creature name (in token colour) and type/CR line |
+| **HP Bar** | Colour-coded health bar: green > 50 %, orange > 25 %, red ≤ 25 % |
+| **HP Text** | Numeric HP — "current / max" |
+| **Combat Stats** | AC, Speed |
+| **Ability Scores** | All six scores (STR DEX CON INT WIS CHA) with modifiers |
+
+---
+
 ## HUD (Heads-Up Display)
 
 Rendered in `client/src/scenes/GameScene.ts`. Spans the full canvas width below the Game Grid.

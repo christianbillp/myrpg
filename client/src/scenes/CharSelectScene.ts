@@ -1,8 +1,8 @@
 import Phaser from 'phaser';
 import { ALDRIC, MIRIEL, PlayerDef } from '../data/player';
-import { TILE_SIZE, GRID_COLS, GRID_ROWS, HUD_HEIGHT, PANEL_WIDTH } from '../constants';
+import { TILE_SIZE, GRID_COLS, GRID_ROWS, HUD_HEIGHT, PANEL_WIDTH, TARGET_PANEL_WIDTH } from '../constants';
 
-const W = PANEL_WIDTH + GRID_COLS * TILE_SIZE;
+const W = PANEL_WIDTH + GRID_COLS * TILE_SIZE + TARGET_PANEL_WIDTH;
 const H = GRID_ROWS * TILE_SIZE + HUD_HEIGHT;
 const DPR = window.devicePixelRatio;
 

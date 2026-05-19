@@ -12,6 +12,7 @@ export class Enemy {
   readonly def: EnemyDef;
   private container: Phaser.GameObjects.Container;
   private hpBar: Phaser.GameObjects.Graphics;
+  private selectionRing: Phaser.GameObjects.Graphics;
   private scene: Phaser.Scene;
   private moving = false;
 
@@ -25,8 +26,10 @@ export class Enemy {
 
     const body = scene.add.rectangle(0, 0, TILE_SIZE - 8, TILE_SIZE - 8, def.color);
     this.hpBar = scene.add.graphics();
+    this.selectionRing = scene.add.graphics();
     this.container = scene.add
       .container(PANEL_WIDTH + tileX * TILE_SIZE + TILE_SIZE / 2, tileY * TILE_SIZE + TILE_SIZE / 2, [
+        this.selectionRing,
         body,
         this.hpBar,
       ])
@@ -60,6 +63,15 @@ export class Enemy {
   takeDamage(amount: number): void {
     this.hp = Math.max(0, this.hp - amount);
     this.refreshHpBar();
+  }
+
+  setSelected(selected: boolean): void {
+    this.selectionRing.clear();
+    if (selected) {
+      const half = (TILE_SIZE - 8) / 2 + 3;
+      this.selectionRing.lineStyle(2, this.def.color, 1);
+      this.selectionRing.strokeRect(-half, -half, half * 2, half * 2);
+    }
   }
 
   isDead(): boolean {

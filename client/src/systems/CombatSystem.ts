@@ -1,6 +1,6 @@
 import { d, d20, mod, rollAdvantage, rollDisadvantage } from './Dice';
 import { PlayerDef } from '../data/player';
-import { EnemyDef } from '../data/enemies';
+import { EnemyAttack, EnemyDef } from '../data/enemies';
 
 export function rollInitiative(
   player: PlayerDef,
@@ -124,13 +124,13 @@ export function playerHide(
   };
 }
 
-export function enemyDaggerAttack(
+export function enemyAttack(
   enemy: EnemyDef,
+  attack: EnemyAttack,
   playerAc: number,
   withAdvantage: boolean,
   withDisadvantage = false,
 ): { damage: number; isHit: boolean; isCrit: boolean; logs: string[] } {
-  const attack = enemy.attacks[0];
   const logs: string[] = [];
 
   // Advantage and disadvantage cancel each other out
