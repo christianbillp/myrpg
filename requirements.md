@@ -23,7 +23,7 @@ A browser-based 2D single-player RPG built with modern web technologies.
 
 - **US-002** As a player, I want to choose between Aldric Vane (Human Fighter) and Miriel Duskwhisper (Wood Elf Rogue) before the encounter begins so that I can experience different combat styles. Each character has distinct mechanics: Aldric uses Greatsword with Savage Attacker and Graze mastery plus Second Wind; Miriel uses Shortsword with Sneak Attack (from hiding), Vex mastery, and a Hide action.
 - **US-001** As a player, I want to move my character around the world using keyboard input (WASD and arrow keys) so that I can explore the game world. The world is represented as a grid where each tile equals 5 feet, making movement structured and tile-aligned.
-- **US-005** As a player, I want to engage in turn-based combat with enemies so that exploration feels challenging and rewarding. Combat is fully integrated into the grid: movement (30 ft = 6 tiles per turn) and actions happen on the same map, following SRD 5.2.1 rules (initiative, attack rolls, Greatsword with Savage Attacker and Graze mastery, Second Wind, Nimble Escape, death saving throws).
+- **US-005** As a player, I want to engage in turn-based combat with enemies so that exploration feels challenging and rewarding. Combat is fully integrated into the grid: movement (30 ft = 6 tiles per turn) and actions happen on the same map, following SRD 5.2.1 rules (initiative, attack rolls, Greatsword with Savage Attacker and Graze mastery, Second Wind, Nimble Escape, death saving throws). It is possible to scroll through the entire combat log.
 
 ### Now
 

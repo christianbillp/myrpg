@@ -48,12 +48,14 @@ export class GameScene extends Phaser.Scene {
   private deathSaveSuccesses = 0;
   private deathSaveFailures = 0;
   private combatLog: string[] = [];
+  private logScrollOffset = 0;
 
   private playerHpBar!: Phaser.GameObjects.Graphics;
   private playerHpText!: Phaser.GameObjects.Text;
   private enemyInfoText!: Phaser.GameObjects.Text;
   private phaseText!: Phaser.GameObjects.Text;
   private logText!: Phaser.GameObjects.Text;
+  private logScrollHint!: Phaser.GameObjects.Text;
   private attackBtn!: Phaser.GameObjects.Container;
   private secondWindBtn!: Phaser.GameObjects.Container;
   private hideBtn!: Phaser.GameObjects.Container;
@@ -81,6 +83,7 @@ export class GameScene extends Phaser.Scene {
     this.deathSaveSuccesses = 0;
     this.deathSaveFailures = 0;
     this.combatLog = [];
+    this.logScrollOffset = 0;
     this.activeEnemy = null;
   }
 
@@ -446,6 +449,15 @@ export class GameScene extends Phaser.Scene {
       lineSpacing: 4,
     }).setDepth(11);
 
+    this.logScrollHint = this.add.text(W - 12, y + 118, '', {
+      fontSize: '10px', color: '#445566', fontFamily: 'monospace', resolution: DPR,
+    }).setOrigin(1, 0).setDepth(12);
+
+    const logZone = this.add.zone(W / 2, y + 99, W, 52).setInteractive().setDepth(13);
+    logZone.on('wheel', (_p: unknown, _dx: number, dy: number) => {
+      this.scrollLog(dy > 0 ? -1 : 1);
+    });
+
     this.add.rectangle(W / 2, y + 126, W, 1, 0x334455).setDepth(11);
 
     const btnY = y + 148;
@@ -493,7 +505,7 @@ export class GameScene extends Phaser.Scene {
       this.enemyInfoText.setText('');
     }
 
-    this.logText.setText(this.combatLog.slice(-3).join('\n'));
+    this.updateLogDisplay();
 
     this.attackBtn.setVisible(false);
     this.secondWindBtn.setVisible(false);
@@ -578,8 +590,32 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
+  private scrollLog(delta: number): void {
+    const maxOffset = Math.max(0, this.combatLog.length - 3);
+    this.logScrollOffset = Math.max(0, Math.min(maxOffset, this.logScrollOffset + delta));
+    this.updateLogDisplay();
+  }
+
+  private updateLogDisplay(): void {
+    const total = this.combatLog.length;
+    const offset = Math.min(this.logScrollOffset, Math.max(0, total - 3));
+    this.logScrollOffset = offset;
+    const end = total - offset;
+    const start = Math.max(0, end - 3);
+    this.logText.setText(this.combatLog.slice(start, end).join('\n'));
+
+    if (offset > 0) {
+      this.logScrollHint.setText(`▼ ${offset} newer`);
+    } else if (total > 3) {
+      this.logScrollHint.setText('↑ scroll for history');
+    } else {
+      this.logScrollHint.setText('');
+    }
+  }
+
   private addLogs(lines: string[]): void {
     this.combatLog.push(...lines);
+    this.logScrollOffset = 0;
   }
 
   private spawnEnemies(): void {
