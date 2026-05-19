@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import { TILE_SIZE, PANEL_WIDTH } from '../constants';
+import { TILE_SIZE } from '../constants';
 import { EnemyDef } from '../data/enemies';
 
 const MOVE_DURATION = 130;
@@ -28,7 +28,7 @@ export class Enemy {
     this.hpBar = scene.add.graphics();
     this.selectionRing = scene.add.graphics();
     this.container = scene.add
-      .container(PANEL_WIDTH + tileX * TILE_SIZE + TILE_SIZE / 2, tileY * TILE_SIZE + TILE_SIZE / 2, [
+      .container(tileX * TILE_SIZE + TILE_SIZE / 2, tileY * TILE_SIZE + TILE_SIZE / 2, [
         this.selectionRing,
         body,
         this.hpBar,
@@ -49,7 +49,7 @@ export class Enemy {
 
     this.scene.tweens.add({
       targets: this.container,
-      x: PANEL_WIDTH + tx * TILE_SIZE + TILE_SIZE / 2,
+      x: tx * TILE_SIZE + TILE_SIZE / 2,
       y: ty * TILE_SIZE + TILE_SIZE / 2,
       duration: MOVE_DURATION,
       ease: 'Sine.easeInOut',
@@ -73,6 +73,8 @@ export class Enemy {
       this.selectionRing.strokeRect(-half, -half, half * 2, half * 2);
     }
   }
+
+  get gameObject(): Phaser.GameObjects.Container { return this.container; }
 
   isDead(): boolean {
     return this.hp <= 0;

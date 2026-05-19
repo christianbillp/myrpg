@@ -6,14 +6,14 @@ A browser-based 2D single-player RPG built with modern web technologies.
 
 ## Tech Stack
 
-| Layer            | Technology        | Version                  |
-| ---------------- | ----------------- | ------------------------ |
-| Game engine      | Phaser.js         | 3.x (latest stable)      |
-| Language         | TypeScript        | 5.x (latest stable)      |
-| Build tool       | Vite              | 6.x (latest stable)      |
-| Backend          | Node.js + Fastify | Node 22 LTS, Fastify 5.x |
-| Database         | PostgreSQL        | 17                       |
-| Cache / sessions | Redis             | 7                        |
+| Layer            | Technology        | Version              | Status  |
+| ---------------- | ----------------- | -------------------- | ------- |
+| Game engine      | Phaser.js         | 3.88.x               | In use  |
+| Language         | TypeScript        | 5.7.x                | In use  |
+| Build tool       | Vite              | 6.3.x                | In use  |
+| Backend          | Node.js + Fastify | Node 22 LTS, Fastify 5.x | Planned |
+| Database         | PostgreSQL        | 17                   | Planned |
+| Cache / sessions | Redis             | 7                    | Planned |
 
 ## Functional Requirements and Roadmap
 
@@ -27,6 +27,7 @@ A browser-based 2D single-player RPG built with modern web technologies.
 - **US-005** As a player, I want to engage in turn-based combat with enemies so that exploration feels challenging and rewarding. Combat is fully integrated into the grid: movement (30 ft = 6 tiles per turn) and actions happen on the same map, following SRD 5.2.1 rules (initiative, attack rolls, Greatsword with Savage Attacker and Graze mastery, Second Wind, Nimble Escape, death saving throws). It is possible to scroll through the entire combat log.
 - **US-016** As a player, I want to click a creature in the game grid to select it so that I can inspect its stats. The selected creature is highlighted with a coloured outline in the grid. A Target Panel appears on the right side of the game grid showing the creature's name, HP bar, AC, speed, and ability scores — mirroring the layout of the Player Panel. Clicking elsewhere or defeating the creature deselects it and hides the panel. When combat starts, the nearest active enemy is automatically selected.
 - **US-017** As a developer, I want every monster's stat block to be sourced directly from the D&D 5e SRD 5.2.1 so that combat mechanics are correct and new monsters can be added without guesswork. Each `EnemyDef` records creature type, HP dice formula, and full attack entries with attack type (melee / ranged / both), reach, and range. The combat system selects the correct attack based on type. Initial roster: Goblin Minion and Bandit.
+- **US-018** As a player, I want to zoom in and out on the game grid using the mouse wheel so that I can get a better view of the battlefield. I also want to pan around the grid by left-click dragging, and reset both zoom and pan to the default view with a dedicated button.
 
 ### Now
 
