@@ -41,6 +41,16 @@ const SIMPLE_COMBAT: EncounterTypeDef = {
   ],
 };
 
+const SOCIAL_INTERACTION: EncounterTypeDef = {
+  id: "social_interaction",
+  title: "Social Interaction",
+  lines: [
+    "Speak with a villager,",
+    "solve their riddle,",
+    "and earn your reward.",
+  ],
+};
+
 const OPEN_MAP: MapTypeDef = {
   id: "open",
   title: "Open Map",
@@ -56,7 +66,7 @@ const ROOMS_MAP: MapTypeDef = {
 };
 
 export class EncounterSetupScene extends Phaser.Scene {
-  private selectedEncounterType: EncounterTypeDef | null = null;
+  private selectedEncounterTypeIds: Set<string> = new Set();
   private selectedMapType: MapTypeDef | null = null;
   private selectedPlayer: PlayerDef | null = null;
 
@@ -71,7 +81,7 @@ export class EncounterSetupScene extends Phaser.Scene {
   }
 
   create(): void {
-    this.selectedEncounterType = null;
+    this.selectedEncounterTypeIds.clear();
     this.selectedMapType = null;
     this.selectedPlayer = null;
     this.encounterCardBgs.clear();
@@ -125,7 +135,12 @@ export class EncounterSetupScene extends Phaser.Scene {
       })
       .setOrigin(0.5, 0);
 
-    this.buildEncounterCard(SIMPLE_COMBAT, encounterCx, CONTENT_CY);
+    const encounterCardH = 200;
+    const encounterCardGap = 20;
+    const encTopCY = CONTENT_CY - (encounterCardH + encounterCardGap) / 2;
+    const encBotCY = CONTENT_CY + (encounterCardH + encounterCardGap) / 2;
+    this.buildEncounterCard(SIMPLE_COMBAT, encounterCx, encTopCY, encounterCardH);
+    this.buildEncounterCard(SOCIAL_INTERACTION, encounterCx, encBotCY, encounterCardH);
 
     const mapCardH = 200;
     const mapCardGap = 20;
@@ -143,9 +158,8 @@ export class EncounterSetupScene extends Phaser.Scene {
     this.refreshBeginButton();
   }
 
-  private buildEncounterCard(def: EncounterTypeDef, cx: number, cy: number): void {
+  private buildEncounterCard(def: EncounterTypeDef, cx: number, cy: number, cardH: number): void {
     const cardW = 240;
-    const cardH = 380;
 
     const bg = this.add
       .rectangle(cx, cy, cardW, cardH, 0x111122)
@@ -155,46 +169,41 @@ export class EncounterSetupScene extends Phaser.Scene {
     this.encounterCardBgs.set(def.id, bg);
 
     bg.on("pointerover", () => {
-      if (this.selectedEncounterType?.id !== def.id)
+      if (!this.selectedEncounterTypeIds.has(def.id))
         bg.setStrokeStyle(2, 0x667788);
     });
     bg.on("pointerout", () => {
-      if (this.selectedEncounterType?.id !== def.id)
+      if (!this.selectedEncounterTypeIds.has(def.id))
         bg.setStrokeStyle(2, 0x334455);
     });
     bg.on("pointerdown", () => {
-      for (const [id, b] of this.encounterCardBgs)
-        b.setStrokeStyle(2, id === def.id ? 0xe2b96f : 0x334455);
-      this.selectedEncounterType = def;
+      if (this.selectedEncounterTypeIds.has(def.id)) {
+        this.selectedEncounterTypeIds.delete(def.id);
+        bg.setStrokeStyle(2, 0x334455);
+      } else {
+        this.selectedEncounterTypeIds.add(def.id);
+        bg.setStrokeStyle(2, 0xe2b96f);
+      }
       this.refreshBeginButton();
     });
 
     const top = cy - cardH / 2;
 
-    this.add.rectangle(cx, top + 48, 44, 44, 0xe2b96f).setAlpha(0.15);
+    this.add.rectangle(cx, top + 30, 36, 36, 0xe2b96f).setAlpha(0.15);
     this.add
-      .text(cx, top + 48, "⚔", {
-        fontSize: "22px",
-        color: "#e2b96f",
-        fontFamily: "monospace",
-        resolution: DPR,
-      })
-      .setOrigin(0.5);
-
-    this.add
-      .text(cx, top + 86, def.title, {
-        fontSize: "14px",
+      .text(cx, top + 54, def.title, {
+        fontSize: "13px",
         color: "#ffffff",
         fontFamily: "monospace",
         resolution: DPR,
       })
       .setOrigin(0.5, 0);
 
-    this.add.rectangle(cx, top + 108, cardW - 24, 1, 0x334455);
+    this.add.rectangle(cx, top + 74, cardW - 24, 1, 0x334455);
 
     this.add
-      .text(cx, top + 120, def.lines.join("\n"), {
-        fontSize: "12px",
+      .text(cx, top + 86, def.lines.join("\n"), {
+        fontSize: "11px",
         color: "#99aabb",
         fontFamily: "monospace",
         resolution: DPR,
@@ -204,8 +213,8 @@ export class EncounterSetupScene extends Phaser.Scene {
       .setOrigin(0.5, 0);
 
     this.add
-      .text(cx, top + cardH - 20, "SELECT", {
-        fontSize: "12px",
+      .text(cx, top + cardH - 18, "SELECT", {
+        fontSize: "11px",
         color: "#e2b96f",
         fontFamily: "monospace",
         resolution: DPR,
@@ -417,13 +426,14 @@ export class EncounterSetupScene extends Phaser.Scene {
       this.scene.start("GameScene", {
         playerDef: this.selectedPlayer,
         mapType: this.selectedMapType!.id,
+        encounterTypes: Array.from(this.selectedEncounterTypeIds),
       });
     });
   }
 
   private isReady(): boolean {
     return (
-      this.selectedEncounterType !== null &&
+      this.selectedEncounterTypeIds.size > 0 &&
       this.selectedMapType !== null &&
       this.selectedPlayer !== null
     );

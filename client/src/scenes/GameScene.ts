@@ -19,6 +19,9 @@ import { CombatManager } from "../systems/CombatManager";
 import { EnemyAI, chebyshev } from "../systems/EnemyAI";
 import { generateMap, GameMap } from "../systems/MapGenerator";
 import { generateRoomsMap } from "../systems/RoomsMapGenerator";
+import { NPC } from "../entities/NPC";
+import { COMMONER } from "../data/npcs";
+import { pickRiddle, Riddle } from "../data/riddles";
 
 const GRID_H = GRID_ROWS * TILE_SIZE;
 const GRID_W = GRID_COLS * TILE_SIZE;
@@ -48,6 +51,7 @@ export class GameScene extends Phaser.Scene {
   private hideBtn!: Phaser.GameObjects.Container;
   private endTurnBtn!: Phaser.GameObjects.Container;
   private deathSaveBtn!: Phaser.GameObjects.Container;
+  private riddleOverlay: Phaser.GameObjects.Container | null = null;
 
   private highlightLayer!: Phaser.GameObjects.Graphics;
   private mapContainer!: Phaser.GameObjects.Container;
@@ -60,15 +64,20 @@ export class GameScene extends Phaser.Scene {
   private playerPanel!: PlayerPanel;
   private targetPanel!: TargetPanel;
   private selectedEnemy: Enemy | null = null;
+  private selectedNPC: NPC | null = null;
+  private npc: NPC | null = null;
+  private npcTalkedTo = false;
 
   constructor() {
     super({ key: "GameScene" });
   }
 
   private mapType: "open" | "rooms" = "open";
+  private encounterTypes: ("simple_combat" | "social_interaction")[] = ["simple_combat"];
 
-  init(data: { playerDef?: PlayerDef; mapType?: "open" | "rooms" }): void {
+  init(data: { playerDef?: PlayerDef; mapType?: "open" | "rooms"; encounterTypes?: ("simple_combat" | "social_interaction")[] }): void {
     this.mapType = data?.mapType ?? "open";
+    this.encounterTypes = data?.encounterTypes ?? ["simple_combat"];
     const def = data?.playerDef ?? ALDRIC;
     this.combat = new CombatManager(
       def,
@@ -87,6 +96,10 @@ export class GameScene extends Phaser.Scene {
     this.enemies = [];
     this.mapItems = [];
     this.selectedEnemy = null;
+    this.selectedNPC = null;
+    this.npc = null;
+    this.npcTalkedTo = false;
+    this.riddleOverlay = null;
     this.gridZoom = 1;
     this.isPanning = false;
     this.panStartedInGameMap = false;
@@ -102,8 +115,13 @@ export class GameScene extends Phaser.Scene {
     this.player = new Player(this, startX, startY, this.combat.playerDef.color);
     this.mapContainer.add(this.player.gameObject);
 
-    this.spawnEnemies();
-    this.spawnItems();
+    if (this.encounterTypes.includes("simple_combat")) {
+      this.spawnEnemies();
+      this.spawnItems();
+    }
+    if (this.encounterTypes.includes("social_interaction")) {
+      this.spawnNPC();
+    }
 
     this.cursors = this.input.keyboard!.createCursorKeys();
     this.wasd = {
@@ -184,10 +202,14 @@ export class GameScene extends Phaser.Scene {
           tileY >= 0 &&
           tileY < this.gameMap.rows
         ) {
-          this.selectEnemy(
-            this.enemies.find((e) => e.tileX === tileX && e.tileY === tileY) ??
-              null,
-          );
+          const enemy = this.enemies.find((e) => e.tileX === tileX && e.tileY === tileY) ?? null;
+          if (enemy) {
+            this.selectEnemy(enemy);
+          } else if (this.npc?.tileX === tileX && this.npc?.tileY === tileY) {
+            this.selectNPC(this.npc);
+          } else {
+            this.selectEnemy(null);
+          }
         } else {
           this.selectEnemy(null);
         }
@@ -237,10 +259,10 @@ export class GameScene extends Phaser.Scene {
 
     if (this.combat.mode === "player_turn") {
       this.combat.movesLeft--;
-      this.updateHUD();
     } else {
       this.checkCombatTrigger();
     }
+    this.updateHUD();
   }
 
   private checkCombatTrigger(): void {
@@ -318,11 +340,27 @@ export class GameScene extends Phaser.Scene {
   }
 
   private selectEnemy(enemy: Enemy | null): void {
+    if (this.selectedNPC) { this.selectedNPC.setSelected(false); this.selectedNPC = null; }
     if (this.selectedEnemy) this.selectedEnemy.setSelected(false);
     this.selectedEnemy = enemy;
     if (enemy) {
       enemy.setSelected(true);
       this.targetPanel.show(enemy.def, enemy.hp);
+    } else {
+      this.targetPanel.hide();
+    }
+  }
+
+  private selectNPC(npc: NPC | null): void {
+    if (this.selectedEnemy) { this.selectedEnemy.setSelected(false); this.selectedEnemy = null; }
+    if (this.selectedNPC) this.selectedNPC.setSelected(false);
+    this.selectedNPC = npc;
+    if (npc) {
+      npc.setSelected(true);
+      const canTalk = !this.npcTalkedTo && chebyshev(
+        this.player.tileX, this.player.tileY, npc.tileX, npc.tileY,
+      ) <= 1;
+      this.targetPanel.showNPC(npc.def, canTalk, () => this.onTalk());
     } else {
       this.targetPanel.hide();
     }
@@ -472,6 +510,13 @@ export class GameScene extends Phaser.Scene {
     this.updatePanel();
     if (this.selectedEnemy)
       this.targetPanel.refresh(this.selectedEnemy.hp, this.selectedEnemy.maxHp);
+    if (this.selectedNPC) {
+      const canTalk = !this.npcTalkedTo && chebyshev(
+        this.player.tileX, this.player.tileY,
+        this.selectedNPC.tileX, this.selectedNPC.tileY,
+      ) <= 1;
+      this.targetPanel.refreshNPC(canTalk);
+    }
 
     if (this.combat.activeEnemy) {
       const vexedPart = this.combat.enemyVexed ? "  [VEXED]" : "";
@@ -730,6 +775,115 @@ export class GameScene extends Phaser.Scene {
       this.enemies.push(enemy);
       this.mapContainer.add(enemy.gameObject);
     }
+  }
+
+  private spawnNPC(): void {
+    const { cols, rows, passable } = this.gameMap;
+    const candidates: [number, number][] = [];
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < cols; c++) {
+        if (
+          passable[r][c] &&
+          chebyshev(c, r, this.player.tileX, this.player.tileY) >= 5 &&
+          !this.enemies.some((e) => e.tileX === c && e.tileY === r)
+        ) {
+          candidates.push([c, r]);
+        }
+      }
+    }
+    if (candidates.length === 0) return;
+    const [nx, ny] = candidates[Math.floor(Math.random() * candidates.length)];
+    this.npc = new NPC(this, COMMONER, nx, ny);
+    this.mapContainer.add(this.npc.gameObject);
+  }
+
+  private onTalk(): void {
+    if (!this.npc || this.npcTalkedTo || this.riddleOverlay) return;
+    this.showRiddleOverlay(pickRiddle());
+  }
+
+  private showRiddleOverlay(riddle: Riddle): void {
+    const panelW = 580;
+    const panelH = 400;
+    const panelX = W / 2;
+    const panelY = GRID_H / 2;
+
+    const backdrop = this.add.rectangle(W / 2, (GRID_H + HUD_HEIGHT) / 2, W, GRID_H + HUD_HEIGHT, 0x000000, 0.7);
+    const panel = this.add.rectangle(0, 0, panelW, panelH, 0x0d0d1e).setStrokeStyle(2, 0xe2b96f);
+
+    const top = -panelH / 2;
+
+    const title = this.add.text(0, top + 24, "RIDDLE", {
+      fontSize: "16px", color: "#e2b96f", fontFamily: "monospace", resolution: DPR,
+    }).setOrigin(0.5, 0);
+
+    const sep1 = this.add.rectangle(0, top + 50, panelW - 40, 1, 0x334455);
+
+    const prompt = this.add.text(0, top + 62, `${this.npc!.def.name} says:`, {
+      fontSize: "11px", color: "#667788", fontFamily: "monospace", resolution: DPR,
+    }).setOrigin(0.5, 0);
+
+    const question = this.add.text(0, top + 82, riddle.question, {
+      fontSize: "14px", color: "#ccddef", fontFamily: "monospace", resolution: DPR,
+      align: "center", lineSpacing: 6,
+    }).setOrigin(0.5, 0);
+
+    const btnW = panelW - 60;
+    const btnH = 40;
+    const btnStartY = top + 220;
+    const btnGap = 52;
+
+    const answerObjects: Phaser.GameObjects.GameObject[] = [title, sep1, prompt, question];
+    const resultText = this.add.text(0, top + 220, "", {
+      fontSize: "14px", color: "#e2b96f", fontFamily: "monospace", resolution: DPR,
+      align: "center", lineSpacing: 6,
+    }).setOrigin(0.5, 0).setVisible(false);
+
+    const closeBtn = this.add.container(0, top + panelH - 36, [
+      this.add.rectangle(0, 0, 120, 32, 0x1a2a3a).setStrokeStyle(1, 0x556677),
+      this.add.text(0, 0, "CLOSE", { fontSize: "12px", color: "#ffffff", fontFamily: "monospace", resolution: DPR }).setOrigin(0.5),
+    ]).setVisible(false);
+    (closeBtn.getAt(0) as Phaser.GameObjects.Rectangle).setInteractive({ useHandCursor: true })
+      .on("pointerdown", () => {
+        this.riddleOverlay?.destroy();
+        this.riddleOverlay = null;
+        this.updateHUD();
+      });
+
+    const onAnswer = (chosenIndex: number): void => {
+      answerBtns.forEach((b) => b.destroy());
+      const correct = chosenIndex === riddle.correctIndex;
+      if (correct) {
+        this.combat.playerGold += 10;
+        this.combat.combatLog.push("Correct! The villager rewards you with +10 GP.");
+        resultText.setText("Correct!\nThe villager rewards you with +10 GP.").setColor("#7ec87e");
+      } else {
+        this.combat.combatLog.push("Wrong answer — the villager shakes their head.");
+        resultText.setText("Wrong answer.\nThe villager shakes their head.").setColor("#cc7777");
+      }
+      resultText.setVisible(true);
+      closeBtn.setVisible(true);
+      this.npcTalkedTo = true;
+      this.npc?.setInteractionHint(false);
+      this.updateHUD();
+    };
+
+    const answerBtns = riddle.options.map((label, i) => {
+      const btnY = btnStartY + i * btnGap;
+      const bg = this.add.rectangle(0, 0, btnW, btnH, 0x1a2030).setStrokeStyle(1, 0x445566);
+      const txt = this.add.text(0, 0, label, {
+        fontSize: "13px", color: "#ffffff", fontFamily: "monospace", resolution: DPR,
+      }).setOrigin(0.5);
+      bg.setInteractive({ useHandCursor: true })
+        .on("pointerover", () => bg.setFillStyle(0x2a3050))
+        .on("pointerout", () => bg.setFillStyle(0x1a2030))
+        .on("pointerdown", () => onAnswer(i));
+      return this.add.container(0, btnY, [bg, txt]);
+    });
+
+    this.riddleOverlay = this.add.container(panelX, panelY, [
+      backdrop, panel, ...answerObjects, resultText, closeBtn, ...answerBtns,
+    ]).setDepth(100);
   }
 
   private drawMapTiles(): Phaser.GameObjects.Graphics {
