@@ -1,8 +1,8 @@
 import Phaser from 'phaser';
 import { ALDRIC, MIRIEL, PlayerDef } from '../data/player';
-import { TILE_SIZE, GRID_COLS, GRID_ROWS, HUD_HEIGHT } from '../constants';
+import { TILE_SIZE, GRID_COLS, GRID_ROWS, HUD_HEIGHT, PANEL_WIDTH } from '../constants';
 
-const W = GRID_COLS * TILE_SIZE;
+const W = PANEL_WIDTH + GRID_COLS * TILE_SIZE;
 const H = GRID_ROWS * TILE_SIZE + HUD_HEIGHT;
 const DPR = window.devicePixelRatio;
 
@@ -58,7 +58,7 @@ export class CharSelectScene extends Phaser.Scene {
     }).setOrigin(0.5, 0);
 
     // Class line
-    const className = def.sneakAttackDice > 0 ? 'Wood Elf  Rogue 1' : 'Human  Fighter 1';
+    const className = `${def.speciesName}  ${def.className} ${def.level}`;
     this.add.text(cx, top + 130, className, {
       fontSize: '12px', color: '#8899aa', fontFamily: 'monospace', resolution: DPR,
     }).setOrigin(0.5, 0);
@@ -69,7 +69,7 @@ export class CharSelectScene extends Phaser.Scene {
     const statMod = def.mainAttack.statKey === 'str' ? Math.floor((def.str - 10) / 2) : Math.floor((def.dex - 10) / 2);
     const atkBonus = statMod + def.proficiencyBonus;
     const statsLines = [
-      `HP ${def.maxHp}   AC ${def.ac}   Speed ${def.speed * 5} ft`,
+      `HP ${def.maxHp}   AC ${def.ac}   Speed ${def.speedFt} ft`,
       `Attack +${atkBonus}   Initiative +${Math.floor((def.dex - 10) / 2)}`,
     ];
     statsLines.forEach((line, i) => {

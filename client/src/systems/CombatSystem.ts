@@ -1,4 +1,4 @@
-import { d, d20, mod } from './Dice';
+import { d, d20, mod, rollAdvantage, rollDisadvantage } from './Dice';
 import { PlayerDef } from '../data/player';
 import { EnemyDef } from '../data/enemies';
 
@@ -39,10 +39,9 @@ export function playerMeleeAttack(
   let rollDesc: string;
 
   if (isHidden) {
-    const r1 = d20();
-    const r2 = d20();
-    naturalRoll = Math.max(r1, r2);
-    rollDesc = `advantage (${r1}, ${r2}) → ${naturalRoll}`;
+    const { result, rolls } = rollAdvantage();
+    naturalRoll = result;
+    rollDesc = `advantage (${rolls[0]}, ${rolls[1]}) → ${naturalRoll}`;
     logs.push(`${player.name} attacks from the shadows!`);
   } else {
     naturalRoll = d20();
@@ -142,15 +141,13 @@ export function enemyDaggerAttack(
   let rollDesc: string;
 
   if (effectiveAdvantage) {
-    const r1 = d20();
-    const r2 = d20();
-    naturalRoll = Math.max(r1, r2);
-    rollDesc = `advantage (${r1}, ${r2}) → ${naturalRoll}`;
+    const { result, rolls } = rollAdvantage();
+    naturalRoll = result;
+    rollDesc = `advantage (${rolls[0]}, ${rolls[1]}) → ${naturalRoll}`;
   } else if (effectiveDisadvantage) {
-    const r1 = d20();
-    const r2 = d20();
-    naturalRoll = Math.min(r1, r2);
-    rollDesc = `disadvantage (${r1}, ${r2}) → ${naturalRoll}`;
+    const { result, rolls } = rollDisadvantage();
+    naturalRoll = result;
+    rollDesc = `disadvantage (${rolls[0]}, ${rolls[1]}) → ${naturalRoll}`;
   } else {
     naturalRoll = d20();
     rollDesc = `${naturalRoll}`;
@@ -165,12 +162,14 @@ export function enemyDaggerAttack(
 
   let damage = 0;
   if (isHit) {
+    let dice = 0;
+    const diceCount = isCrit ? attack.damageDice * 2 : attack.damageDice;
+    for (let i = 0; i < diceCount; i++) dice += d(attack.damageSides);
+    damage = dice + attack.damageBonus;
     if (isCrit) {
-      damage = d(attack.damageSides) + d(attack.damageSides) + attack.damageBonus;
-      logs.push(`⚡ CRITICAL HIT! ${damage} ${attack.damageType}`);
+      logs.push(`⚡ CRITICAL HIT! ${dice}+${attack.damageBonus} = ${damage} ${attack.damageType}`);
     } else {
-      damage = d(attack.damageSides) + attack.damageBonus;
-      logs.push(`Hit! ${damage} ${attack.damageType}`);
+      logs.push(`Hit! ${dice}+${attack.damageBonus} = ${damage} ${attack.damageType}`);
     }
   } else {
     logs.push(`Miss! (${attackTotal} vs AC ${playerAc})`);

@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import { TILE_SIZE } from '../constants';
+import { TILE_SIZE, PANEL_WIDTH } from '../constants';
 import { EnemyDef } from '../data/enemies';
 
 const MOVE_DURATION = 130;
@@ -26,7 +26,7 @@ export class Enemy {
     const body = scene.add.rectangle(0, 0, TILE_SIZE - 8, TILE_SIZE - 8, def.color);
     this.hpBar = scene.add.graphics();
     this.container = scene.add
-      .container(tileX * TILE_SIZE + TILE_SIZE / 2, tileY * TILE_SIZE + TILE_SIZE / 2, [
+      .container(PANEL_WIDTH + tileX * TILE_SIZE + TILE_SIZE / 2, tileY * TILE_SIZE + TILE_SIZE / 2, [
         body,
         this.hpBar,
       ])
@@ -46,7 +46,7 @@ export class Enemy {
 
     this.scene.tweens.add({
       targets: this.container,
-      x: tx * TILE_SIZE + TILE_SIZE / 2,
+      x: PANEL_WIDTH + tx * TILE_SIZE + TILE_SIZE / 2,
       y: ty * TILE_SIZE + TILE_SIZE / 2,
       duration: MOVE_DURATION,
       ease: 'Sine.easeInOut',

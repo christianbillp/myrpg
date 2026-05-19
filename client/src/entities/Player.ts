@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import { TILE_SIZE } from '../constants';
+import { TILE_SIZE, PANEL_WIDTH } from '../constants';
 
 const MOVE_DURATION = 150;
 
@@ -15,7 +15,7 @@ export class Player {
     this.tileX = tileX;
     this.tileY = tileY;
     this.sprite = scene.add.rectangle(
-      tileX * TILE_SIZE + TILE_SIZE / 2,
+      PANEL_WIDTH + tileX * TILE_SIZE + TILE_SIZE / 2,
       tileY * TILE_SIZE + TILE_SIZE / 2,
       TILE_SIZE - 6,
       TILE_SIZE - 6,
@@ -38,7 +38,7 @@ export class Player {
 
     this.scene.tweens.add({
       targets: this.sprite,
-      x: nx * TILE_SIZE + TILE_SIZE / 2,
+      x: PANEL_WIDTH + nx * TILE_SIZE + TILE_SIZE / 2,
       y: ny * TILE_SIZE + TILE_SIZE / 2,
       duration: MOVE_DURATION,
       ease: 'Sine.easeInOut',

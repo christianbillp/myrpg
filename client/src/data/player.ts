@@ -10,6 +10,8 @@ export interface PlayerAttack {
 
 export interface PlayerDef {
   name: string;
+  speciesName: string;
+  className: string;
   level: number;
   maxHp: number;
   ac: number;
@@ -25,6 +27,7 @@ export interface PlayerDef {
   sneakAttackDice: number;
   stealthBonus: number;
   speed: number;
+  speedFt: number;
   color: number;
   xp: number;
   mainAttack: PlayerAttack;
@@ -32,6 +35,8 @@ export interface PlayerDef {
 
 export const ALDRIC: PlayerDef = {
   name: 'Aldric Vane',
+  speciesName: 'Human',
+  className: 'Fighter',
   level: 1,
   maxHp: 12,
   ac: 17,
@@ -47,6 +52,7 @@ export const ALDRIC: PlayerDef = {
   sneakAttackDice: 0,
   stealthBonus: 2,
   speed: 6,
+  speedFt: 30,
   color: 0x4fc3f7,
   xp: 0,
   mainAttack: {
@@ -62,6 +68,8 @@ export const ALDRIC: PlayerDef = {
 
 export const MIRIEL: PlayerDef = {
   name: 'Miriel Duskwhisper',
+  speciesName: 'Wood Elf',
+  className: 'Rogue',
   level: 1,
   maxHp: 9,
   ac: 14,
@@ -77,6 +85,7 @@ export const MIRIEL: PlayerDef = {
   sneakAttackDice: 1,
   stealthBonus: 7,
   speed: 7,
+  speedFt: 35,
   color: 0x9b59b6,
   xp: 0,
   mainAttack: {

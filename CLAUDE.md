@@ -45,6 +45,10 @@ npm run typecheck
 npm run build
 ```
 
+## UI Naming Conventions
+
+All UI regions and components have canonical names defined in `ui.md`. Read that file before implementing or discussing any UI feature. Use the names there consistently in code (variable names, class names) and in prompts — e.g. "Player Panel", "Combat Log", "Action Buttons", "Phase Text".
+
 ## Conventions
 
 - **TypeScript strict mode** is enabled — no implicit `any`.
@@ -65,6 +69,26 @@ All gameplay mechanics must follow the **D&D 5e SRD 5.2.1** rules, available as 
 - `07_Spells/` — spell rules and descriptions
 - `08_Rules_Glossary/` — conditions, resting, special senses
 - `11_Monsters/` — monster stat blocks and CR
+
+## Code Quality
+
+Refactoring should optimise for **scalability, agility, and maintainability** — the codebase must be easy to extend and easy to shrink. Specifically:
+
+- **Modularity** — encapsulate each concern in its own class or file so features can be added or removed without rippling changes across the codebase.
+- **Naming consistency** — variable names, class names, and method names must match the terminology in `ui.md`, `requirements.md`, and other reference documents. A reader should be able to find the code for a named concept by searching for its documented name.
+- **Readability for humans and AI agents** — code should be self-explanatory from names and structure alone. Avoid clever abbreviations; prefer the full canonical term.
+- **Low coupling** — components communicate through clear interfaces. Avoid reaching into the internals of another class or scene.
+
+## Reviewing
+
+A review checks whether the codebase needs refactoring. It considers three things together: the code as written, the reference documentation (`ui.md`, `requirements.md`, and any other docs), and the outstanding requirements. Specifically look for:
+
+- Naming inconsistencies between code and documentation.
+- Components or methods that have grown too large or taken on multiple responsibilities.
+- Coupling that would make adding or removing a feature unnecessarily hard.
+- Anything in the requirements that is partially implemented or implemented in a way that will not scale.
+
+**Do not make any changes during a review.** At the end, present findings as a short list and prompt the user with concrete candidate actions and decisions to choose from.
 
 ## Working with Claude
 

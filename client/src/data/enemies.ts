@@ -21,6 +21,8 @@ export interface EnemyDef {
   proficiencyBonus: number;
   stealthBonus: number;
   passivePerception: number;
+  speed: number;
+  speedFt: number;
   attacks: EnemyAttack[];
   xp: number;
   cr: string;
@@ -41,6 +43,8 @@ export const GOBLIN_MINION: EnemyDef = {
   proficiencyBonus: 2,
   stealthBonus: 6,
   passivePerception: 9,
+  speed: 6,
+  speedFt: 30,
   attacks: [
     {
       name: 'Dagger',
