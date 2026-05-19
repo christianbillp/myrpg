@@ -1,0 +1,117 @@
+import { GameMap } from "./MapGenerator";
+
+interface Room { x: number; y: number; w: number; h: number; }
+
+export function generateRoomsMap(): GameMap {
+  for (let attempt = 0; attempt < 100; attempt++) {
+    const result = tryGenerate();
+    if (result) return result;
+  }
+  return fallback();
+}
+
+function tryGenerate(): GameMap | null {
+  const cols = 22 + Math.floor(Math.random() * 8); // 22–29
+  const rows = 22 + Math.floor(Math.random() * 8);
+  const passable: boolean[][] = Array.from({ length: rows }, () =>
+    new Array<boolean>(cols).fill(false),
+  );
+
+  const rooms: Room[] = [];
+  const target = 4 + Math.floor(Math.random() * 4); // 4–7 rooms
+
+  for (let i = 0; i < target * 20 && rooms.length < target; i++) {
+    const w = 3 + Math.floor(Math.random() * 6); // 3–8
+    const h = 3 + Math.floor(Math.random() * 4); // 3–6
+    const x = 1 + Math.floor(Math.random() * (cols - w - 2));
+    const y = 1 + Math.floor(Math.random() * (rows - h - 2));
+
+    const overlaps = rooms.some(
+      (r) => x <= r.x + r.w && x + w >= r.x && y <= r.y + r.h && y + h >= r.y,
+    );
+    if (overlaps) continue;
+
+    rooms.push({ x, y, w, h });
+    for (let ry = y; ry < y + h; ry++)
+      for (let rx = x; rx < x + w; rx++)
+        passable[ry][rx] = true;
+  }
+
+  if (rooms.length < 2) return null;
+
+  rooms.sort((a, b) => a.x + a.w / 2 - (b.x + b.w / 2));
+  for (let i = 0; i < rooms.length - 1; i++)
+    carveCorridor(passable, rooms[i], rooms[i + 1]);
+
+  let startR = -1, startC = -1;
+  outer: for (let r = 0; r < rows; r++)
+    for (let c = 0; c < cols; c++)
+      if (passable[r][c]) { startR = r; startC = c; break outer; }
+
+  if (startR === -1) return null;
+
+  let total = 0;
+  for (let r = 0; r < rows; r++)
+    for (let c = 0; c < cols; c++)
+      if (passable[r][c]) total++;
+
+  if (floodFillCount(passable, rows, cols, startR, startC) !== total) return null;
+
+  return { cols, rows, passable };
+}
+
+function carveCorridor(passable: boolean[][], a: Room, b: Room): void {
+  const ax = Math.floor(a.x + a.w / 2);
+  const ay = Math.floor(a.y + a.h / 2);
+  const bx = Math.floor(b.x + b.w / 2);
+  const by = Math.floor(b.y + b.h / 2);
+
+  const minX = Math.min(ax, bx), maxX = Math.max(ax, bx);
+  for (let cx = minX; cx <= maxX; cx++) passable[ay][cx] = true;
+
+  const minY = Math.min(ay, by), maxY = Math.max(ay, by);
+  for (let cy = minY; cy <= maxY; cy++) passable[cy][bx] = true;
+}
+
+function floodFillCount(
+  passable: boolean[][],
+  rows: number,
+  cols: number,
+  startR: number,
+  startC: number,
+): number {
+  const visited: boolean[][] = Array.from({ length: rows }, () =>
+    new Array<boolean>(cols).fill(false),
+  );
+  const queue: [number, number][] = [[startR, startC]];
+  visited[startR][startC] = true;
+  let count = 0;
+  const dirs: [number, number][] = [[0, 1], [0, -1], [1, 0], [-1, 0]];
+  while (queue.length > 0) {
+    const [cy, cx] = queue.shift()!;
+    count++;
+    for (const [dr, dc] of dirs) {
+      const nr = cy + dr, nc = cx + dc;
+      if (nr >= 0 && nr < rows && nc >= 0 && nc < cols && passable[nr][nc] && !visited[nr][nc]) {
+        visited[nr][nc] = true;
+        queue.push([nr, nc]);
+      }
+    }
+  }
+  return count;
+}
+
+function fallback(): GameMap {
+  const cols = 22, rows = 22;
+  const passable: boolean[][] = Array.from({ length: rows }, () =>
+    new Array<boolean>(cols).fill(false),
+  );
+  for (let r = 2; r < 7; r++) for (let c = 2; c < 8; c++) passable[r][c] = true;
+  for (let r = 2; r < 7; r++) for (let c = 14; c < 20; c++) passable[r][c] = true;
+  for (let r = 14; r < 20; r++) for (let c = 2; c < 8; c++) passable[r][c] = true;
+  for (let r = 14; r < 20; r++) for (let c = 14; c < 20; c++) passable[r][c] = true;
+  for (let cx = 2; cx <= 17; cx++) passable[4][cx] = true;
+  for (let cy = 4; cy <= 17; cy++) passable[cy][17] = true;
+  for (let cx = 5; cx <= 17; cx++) passable[17][cx] = true;
+  return { cols, rows, passable };
+}

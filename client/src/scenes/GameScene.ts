@@ -18,6 +18,7 @@ import { MapItem } from "../entities/MapItem";
 import { CombatManager } from "../systems/CombatManager";
 import { EnemyAI, chebyshev } from "../systems/EnemyAI";
 import { generateMap, GameMap } from "../systems/MapGenerator";
+import { generateRoomsMap } from "../systems/RoomsMapGenerator";
 
 const GRID_H = GRID_ROWS * TILE_SIZE;
 const GRID_W = GRID_COLS * TILE_SIZE;
@@ -64,7 +65,10 @@ export class GameScene extends Phaser.Scene {
     super({ key: "GameScene" });
   }
 
-  init(data: { playerDef?: PlayerDef }): void {
+  private mapType: "open" | "rooms" = "open";
+
+  init(data: { playerDef?: PlayerDef; mapType?: "open" | "rooms" }): void {
+    this.mapType = data?.mapType ?? "open";
     const def = data?.playerDef ?? ALDRIC;
     this.combat = new CombatManager(
       def,
@@ -87,7 +91,7 @@ export class GameScene extends Phaser.Scene {
     this.isPanning = false;
     this.panStartedInGameMap = false;
 
-    this.gameMap = generateMap();
+    this.gameMap = this.mapType === "rooms" ? generateRoomsMap() : generateMap();
 
     this.mapContainer = this.add.container(PLAYER_PANEL_WIDTH, 0);
     this.mapContainer.add(this.drawMapTiles());

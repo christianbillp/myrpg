@@ -98,3 +98,4 @@ A review checks whether the codebase needs refactoring. It considers three thing
 - Prefer editing existing files over creating new ones.
 - Do not add error handling for scenarios that cannot happen.
 - Do not push to remote or commit unless explicitly asked.
+- Commit messages follow Conventional Commits: one line, e.g. `feat: add rooms map generator.` — brief, lowercase after the colon, ending with a full stop.
