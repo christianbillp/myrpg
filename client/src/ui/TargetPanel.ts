@@ -21,8 +21,6 @@ export class TargetPanel {
   private typeText: Phaser.GameObjects.Text;
   private statsText: Phaser.GameObjects.Text;
   private abilitiesText: Phaser.GameObjects.Text;
-  private talkBtnContainer: Phaser.GameObjects.Container;
-  private onTalkCallback: (() => void) | null = null;
 
   constructor(scene: Phaser.Scene) {
     const track = <T extends Visible>(obj: T): T => {
@@ -147,30 +145,6 @@ export class TargetPanel {
         .setDepth(11),
     );
 
-    const talkX = PX + TARGET_PANEL_WIDTH / 2;
-    const talkSep = scene.add.rectangle(0, 0, TARGET_PANEL_WIDTH - 16, 1, 0x334455).setDepth(11);
-    const talkBg = scene.add
-      .rectangle(0, 20, TARGET_PANEL_WIDTH - 24, 30, 0x1a3a20)
-      .setStrokeStyle(1, 0x556677)
-      .setDepth(11)
-      .setInteractive({ useHandCursor: true });
-    const talkLabel = scene.add
-      .text(0, 20, "TALK", {
-        fontSize: "12px",
-        color: "#ffffff",
-        fontFamily: "monospace",
-        resolution: DPR,
-      })
-      .setOrigin(0.5)
-      .setDepth(12);
-    talkBg.on("pointerover", () => talkBg.setAlpha(0.75));
-    talkBg.on("pointerout", () => talkBg.setAlpha(1));
-    talkBg.on("pointerdown", () => this.onTalkCallback?.());
-    this.talkBtnContainer = scene.add
-      .container(talkX, 310, [talkSep, talkBg, talkLabel])
-      .setDepth(11)
-      .setVisible(false);
-
     this.hide();
   }
 
@@ -205,11 +179,10 @@ export class TargetPanel {
     this.items.forEach((item) => item.setVisible(true));
   }
 
-  showNPC(def: NPCDef, canTalk: boolean, onTalk: () => void): void {
-    this.onTalkCallback = onTalk;
+  showNPC(def: NPCDef): void {
     const colorHex = "#" + def.color.toString(16).padStart(6, "0");
     this.nameText.setText(def.name).setColor(colorHex);
-    this.typeText.setText(`Medium Humanoid  CR ${def.cr}`);
+    this.typeText.setText(`${def.type}  CR ${def.cr}`);
     this.statsText.setText(
       [`AC     ${def.ac}`, `Speed  ${def.speedFt} ft`].join("\n"),
     );
@@ -228,16 +201,10 @@ export class TargetPanel {
     );
     this.refresh(def.maxHp, def.maxHp);
     this.items.forEach((item) => item.setVisible(true));
-    this.talkBtnContainer.setVisible(canTalk);
-  }
-
-  refreshNPC(canTalk: boolean): void {
-    this.talkBtnContainer.setVisible(canTalk);
   }
 
   hide(): void {
     this.items.forEach((item) => item.setVisible(false));
-    this.talkBtnContainer.setVisible(false);
   }
 
   refresh(hp: number, maxHp: number): void {

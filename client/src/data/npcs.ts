@@ -1,6 +1,7 @@
 export interface NPCDef {
   id: string;
   name: string;
+  type: string;
   color: number;
   ac: number;
   maxHp: number;
@@ -17,6 +18,7 @@ export interface NPCDef {
 export const COMMONER: NPCDef = {
   id: "commoner",
   name: "Commoner",
+  type: "Medium Humanoid",
   color: 0xd4a57a,
   ac: 10,
   maxHp: 4,

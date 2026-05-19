@@ -277,6 +277,11 @@ export class CombatManager {
     this.endEnemyTurn();
   }
 
+  awardGold(amount: number): void {
+    this.playerGold += amount;
+    this.onChange();
+  }
+
   addLogs(lines: string[]): void {
     this.combatLog.push(...lines);
     this.logScrollOffset = 0;

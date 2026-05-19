@@ -227,7 +227,7 @@ export class PlayerPanel {
     this.xpText.setText(`XP  ${xp}`);
     this.gpText.setText(`GP  ${gold}`);
 
-    const potions = inventory.filter(i => i.id === "health_potion").length;
+    const potions = inventory.filter(i => i.type === "consumable").length;
     this.inventoryText.setText(potions > 0 ? `Health Potion  ×${potions}` : "Empty");
     this.usePotionBg.setAlpha(potions > 0 ? 1 : 0.4);
   }

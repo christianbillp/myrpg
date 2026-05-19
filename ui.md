@@ -26,16 +26,16 @@ Canonical names for all UI regions and components. Use these consistently in cod
 
 Defined in `client/src/ui/PlayerPanel.ts`. Always visible. Displays the active player's stats.
 
-| Component          | Description                                                      |
-| ------------------ | ---------------------------------------------------------------- |
-| **Name Header**    | Player name (in class colour) and species/class/level line       |
-| **HP Bar**         | Colour-coded health bar: green > 50 %, orange > 25 %, red ≤ 25 % |
-| **HP Text**        | Numeric HP — "current / max"                                     |
-| **Combat Stats**   | AC, Speed, Proficiency bonus, Initiative bonus                   |
-| **Ability Scores** | All six scores (STR DEX CON INT WIS CHA) with modifiers          |
-| **XP Display**     | Current experience points                                        |
-| **GP Display**     | Current gold pieces (awarded from kills at 10 × CR)              |
-| **Inventory**      | Item count per type (e.g. "Health Potion ×2") or "Empty"         |
+| Component          | Description                                                                                              |
+| ------------------ | -------------------------------------------------------------------------------------------------------- |
+| **Name Header**    | Player name (in class colour) and species/class/level line                                               |
+| **HP Bar**         | Colour-coded health bar: green > 50 %, orange > 25 %, red ≤ 25 %                                         |
+| **HP Text**        | Numeric HP — "current / max"                                                                             |
+| **Combat Stats**   | AC, Speed, Proficiency bonus, Initiative bonus                                                           |
+| **Ability Scores** | All six scores (STR DEX CON INT WIS CHA) with modifiers                                                  |
+| **XP Display**     | Current experience points                                                                                |
+| **GP Display**     | Current gold pieces (awarded from kills at 10 × CR)                                                      |
+| **Inventory**      | Item count per type (e.g. "Health Potion ×2") or "Empty"                                                 |
 | **Use Potion**     | Button below the inventory list; dimmed when no potions held; clicking drinks one potion (2d4+2 HP, SRD) |
 
 ---
@@ -83,10 +83,12 @@ Rendered in `client/src/scenes/GameScene.ts`. Spans the full canvas width below 
 
 ### Action Buttons
 
-| Button              | Condition                                                   | Description                                |
-| ------------------- | ----------------------------------------------------------- | ------------------------------------------ |
-| **Attack**          | Player's turn, adjacent to enemy                            | Make a melee attack                        |
-| **Second Wind**     | Player's turn, Fighter only, uses remaining, not at full HP | Spend a use to heal 1d10 + level HP        |
-| **Hide**            | Player's turn, Rogue only, not already hidden               | Attempt to hide for Sneak Attack advantage |
-| **End Turn**        | Player's turn                                               | Pass initiative to the enemy               |
-| **Roll Death Save** | Player unconscious                                          | Roll a d20 death saving throw              |
+| Button              | Condition                                                   | Description                                                             |
+| ------------------- | ----------------------------------------------------------- | ----------------------------------------------------------------------- |
+| **Attack**          | Player's turn, adjacent to enemy                            | Make a melee attack                                                     |
+| **Second Wind**     | Player's turn, Fighter only, uses remaining, not at full HP | Spend a use to heal 1d10 + level HP                                     |
+| **Hide**            | Player's turn, Rogue only, not already hidden               | Attempt to hide for Sneak Attack advantage                              |
+| **End Turn**        | Player's turn                                               | Pass initiative to the enemy                                            |
+| **Roll Death Save** | Player unconscious                                          | Roll a d20 death saving throw                                           |
+| **Communicate**     | Exploring, Social Interaction encounter active              | Initiate dialogue with selected NPC; logs "No target selected." if none |
+| **Search**          | Exploring, Exploration encounter active                     | Roll Wisdom (Perception) to detect a secret on an adjacent tile         |

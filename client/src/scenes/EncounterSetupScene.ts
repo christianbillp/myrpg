@@ -1,5 +1,6 @@
 import Phaser from "phaser";
 import { ALDRIC, MIRIEL, PlayerDef } from "../data/player";
+import { EncounterType } from "../data/encounterTypes";
 import {
   TILE_SIZE,
   GRID_COLS,
@@ -466,7 +467,7 @@ export class EncounterSetupScene extends Phaser.Scene {
       this.scene.start("GameScene", {
         playerDef: this.selectedPlayer,
         mapType: this.selectedMapType!.id,
-        encounterTypes: Array.from(this.selectedEncounterTypeIds),
+        encounterTypes: Array.from(this.selectedEncounterTypeIds) as EncounterType[],
       });
     });
   }

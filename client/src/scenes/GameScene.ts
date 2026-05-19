@@ -21,9 +21,11 @@ import { generateMap, GameMap } from "../systems/MapGenerator";
 import { generateRoomsMap } from "../systems/RoomsMapGenerator";
 import { NPC } from "../entities/NPC";
 import { COMMONER } from "../data/npcs";
-import { pickRiddle, Riddle } from "../data/riddles";
+import { pickRiddle } from "../data/riddles";
 import { SecretDef, pickSecrets } from "../data/secrets";
 import { d20 } from "../systems/Dice";
+import { EncounterType } from "../data/encounterTypes";
+import { RiddleOverlay } from "../ui/RiddleOverlay";
 
 const GRID_H = GRID_ROWS * TILE_SIZE;
 const GRID_W = GRID_COLS * TILE_SIZE;
@@ -54,7 +56,8 @@ export class GameScene extends Phaser.Scene {
   private endTurnBtn!: Phaser.GameObjects.Container;
   private deathSaveBtn!: Phaser.GameObjects.Container;
   private searchBtn!: Phaser.GameObjects.Container;
-  private riddleOverlay: Phaser.GameObjects.Container | null = null;
+  private communicateBtn!: Phaser.GameObjects.Container;
+  private riddleOverlay: RiddleOverlay | null = null;
 
   private mapSecrets: { tileX: number; tileY: number; def: SecretDef }[] = [];
 
@@ -78,9 +81,9 @@ export class GameScene extends Phaser.Scene {
   }
 
   private mapType: "open" | "rooms" = "open";
-  private encounterTypes: ("simple_combat" | "social_interaction" | "exploration")[] = ["simple_combat"];
+  private encounterTypes: EncounterType[] = ["simple_combat"];
 
-  init(data: { playerDef?: PlayerDef; mapType?: "open" | "rooms"; encounterTypes?: ("simple_combat" | "social_interaction" | "exploration")[] }): void {
+  init(data: { playerDef?: PlayerDef; mapType?: "open" | "rooms"; encounterTypes?: EncounterType[] }): void {
     this.mapType = data?.mapType ?? "open";
     this.encounterTypes = data?.encounterTypes ?? ["simple_combat"];
     const def = data?.playerDef ?? ALDRIC;
@@ -366,10 +369,7 @@ export class GameScene extends Phaser.Scene {
     this.selectedNPC = npc;
     if (npc) {
       npc.setSelected(true);
-      const canTalk = !this.npcTalkedTo && chebyshev(
-        this.player.tileX, this.player.tileY, npc.tileX, npc.tileY,
-      ) <= 1;
-      this.targetPanel.showNPC(npc.def, canTalk, () => this.onTalk());
+      this.targetPanel.showNPC(npc.def);
     } else {
       this.targetPanel.hide();
     }
@@ -484,6 +484,13 @@ export class GameScene extends Phaser.Scene {
       0x1a2a3a,
       () => this.onSearch(),
     );
+    this.communicateBtn = this.makeButton(
+      cx,
+      btnY,
+      "COMMUNICATE",
+      0x2a1a3a,
+      () => this.onCommunicate(),
+    );
   }
 
   private makeButton(
@@ -526,14 +533,6 @@ export class GameScene extends Phaser.Scene {
     this.updatePanel();
     if (this.selectedEnemy)
       this.targetPanel.refresh(this.selectedEnemy.hp, this.selectedEnemy.maxHp);
-    if (this.selectedNPC) {
-      const canTalk = !this.npcTalkedTo && chebyshev(
-        this.player.tileX, this.player.tileY,
-        this.selectedNPC.tileX, this.selectedNPC.tileY,
-      ) <= 1;
-      this.targetPanel.refreshNPC(canTalk);
-    }
-
     if (this.combat.activeEnemy) {
       const vexedPart = this.combat.enemyVexed ? "  [VEXED]" : "";
       const hiddenPart = this.combat.enemyHidden ? "  [HIDDEN]" : "";
@@ -553,6 +552,7 @@ export class GameScene extends Phaser.Scene {
     this.endTurnBtn.setVisible(false);
     this.deathSaveBtn.setVisible(false);
     this.searchBtn.setVisible(false);
+    this.communicateBtn.setVisible(false);
     this.phaseText.setColor("#e2b96f");
 
     switch (this.combat.mode) {
@@ -560,6 +560,8 @@ export class GameScene extends Phaser.Scene {
         this.phaseText.setText("Exploring — WASD / arrow keys to move");
         if (this.encounterTypes.includes("exploration"))
           this.searchBtn.setVisible(true);
+        if (this.encounterTypes.includes("social_interaction"))
+          this.communicateBtn.setVisible(true);
         break;
 
       case "player_turn": {
@@ -816,93 +818,39 @@ export class GameScene extends Phaser.Scene {
     this.mapContainer.add(this.npc.gameObject);
   }
 
-  private onTalk(): void {
-    if (!this.npc || this.npcTalkedTo || this.riddleOverlay) return;
-    this.showRiddleOverlay(pickRiddle());
-  }
-
-  private showRiddleOverlay(riddle: Riddle): void {
-    const panelW = 580;
-    const panelH = 400;
-    const panelX = W / 2;
-    const panelY = GRID_H / 2;
-
-    const backdrop = this.add.rectangle(W / 2, (GRID_H + HUD_HEIGHT) / 2, W, GRID_H + HUD_HEIGHT, 0x000000, 0.7);
-    const panel = this.add.rectangle(0, 0, panelW, panelH, 0x0d0d1e).setStrokeStyle(2, 0xe2b96f);
-
-    const top = -panelH / 2;
-
-    const title = this.add.text(0, top + 24, "RIDDLE", {
-      fontSize: "16px", color: "#e2b96f", fontFamily: "monospace", resolution: DPR,
-    }).setOrigin(0.5, 0);
-
-    const sep1 = this.add.rectangle(0, top + 50, panelW - 40, 1, 0x334455);
-
-    const prompt = this.add.text(0, top + 62, `${this.npc!.def.name} says:`, {
-      fontSize: "11px", color: "#667788", fontFamily: "monospace", resolution: DPR,
-    }).setOrigin(0.5, 0);
-
-    const question = this.add.text(0, top + 82, riddle.question, {
-      fontSize: "14px", color: "#ccddef", fontFamily: "monospace", resolution: DPR,
-      align: "center", lineSpacing: 6,
-    }).setOrigin(0.5, 0);
-
-    const btnW = panelW - 60;
-    const btnH = 40;
-    const btnStartY = top + 220;
-    const btnGap = 52;
-
-    const answerObjects: Phaser.GameObjects.GameObject[] = [title, sep1, prompt, question];
-    const resultText = this.add.text(0, top + 220, "", {
-      fontSize: "14px", color: "#e2b96f", fontFamily: "monospace", resolution: DPR,
-      align: "center", lineSpacing: 6,
-    }).setOrigin(0.5, 0).setVisible(false);
-
-    const closeBtn = this.add.container(0, top + panelH - 36, [
-      this.add.rectangle(0, 0, 120, 32, 0x1a2a3a).setStrokeStyle(1, 0x556677),
-      this.add.text(0, 0, "CLOSE", { fontSize: "12px", color: "#ffffff", fontFamily: "monospace", resolution: DPR }).setOrigin(0.5),
-    ]).setVisible(false);
-    (closeBtn.getAt(0) as Phaser.GameObjects.Rectangle).setInteractive({ useHandCursor: true })
-      .on("pointerdown", () => {
-        this.riddleOverlay?.destroy();
+  private onCommunicate(): void {
+    if (this.riddleOverlay) return;
+    if (!this.selectedNPC) {
+      this.combat.addLogs(["No target selected."]);
+      this.updateHUD();
+      return;
+    }
+    if (this.npcTalkedTo) return;
+    if (chebyshev(this.player.tileX, this.player.tileY, this.selectedNPC.tileX, this.selectedNPC.tileY) > 1) {
+      this.combat.addLogs(["Target is too far away."]);
+      this.updateHUD();
+      return;
+    }
+    this.riddleOverlay = new RiddleOverlay(
+      this,
+      this.npc!.def.name,
+      pickRiddle(),
+      (correct) => {
+        if (correct) {
+          this.combat.awardGold(10);
+          this.combat.addLogs(["Correct! The villager rewards you with +10 GP."]);
+        } else {
+          this.combat.addLogs(["Wrong answer — the villager shakes their head."]);
+        }
+        this.npcTalkedTo = true;
+        this.npc?.setInteractionHint(false);
+        this.updateHUD();
+      },
+      () => {
         this.riddleOverlay = null;
         this.updateHUD();
-      });
-
-    const onAnswer = (chosenIndex: number): void => {
-      answerBtns.forEach((b) => b.destroy());
-      const correct = chosenIndex === riddle.correctIndex;
-      if (correct) {
-        this.combat.playerGold += 10;
-        this.combat.combatLog.push("Correct! The villager rewards you with +10 GP.");
-        resultText.setText("Correct!\nThe villager rewards you with +10 GP.").setColor("#7ec87e");
-      } else {
-        this.combat.combatLog.push("Wrong answer — the villager shakes their head.");
-        resultText.setText("Wrong answer.\nThe villager shakes their head.").setColor("#cc7777");
-      }
-      resultText.setVisible(true);
-      closeBtn.setVisible(true);
-      this.npcTalkedTo = true;
-      this.npc?.setInteractionHint(false);
-      this.updateHUD();
-    };
-
-    const answerBtns = riddle.options.map((label, i) => {
-      const btnY = btnStartY + i * btnGap;
-      const bg = this.add.rectangle(0, 0, btnW, btnH, 0x1a2030).setStrokeStyle(1, 0x445566);
-      const txt = this.add.text(0, 0, label, {
-        fontSize: "13px", color: "#ffffff", fontFamily: "monospace", resolution: DPR,
-      }).setOrigin(0.5);
-      bg.setInteractive({ useHandCursor: true })
-        .on("pointerover", () => bg.setFillStyle(0x2a3050))
-        .on("pointerout", () => bg.setFillStyle(0x1a2030))
-        .on("pointerdown", () => onAnswer(i));
-      return this.add.container(0, btnY, [bg, txt]);
-    });
-
-    this.riddleOverlay = this.add.container(panelX, panelY, [
-      backdrop, panel, ...answerObjects, resultText, closeBtn, ...answerBtns,
-    ]).setDepth(100);
+      },
+    );
   }
 
   private spawnSecrets(): void {
@@ -934,15 +882,15 @@ export class GameScene extends Phaser.Scene {
 
   private onSearch(): void {
     if (this.combat.mode !== "exploring") return;
-    if (this.mapSecrets.length === 0) return;
 
     const roll = d20() + this.combat.playerDef.perceptionBonus;
+
     const adj = this.mapSecrets.filter(
       (s) => chebyshev(this.player.tileX, this.player.tileY, s.tileX, s.tileY) <= 1,
     );
 
     if (adj.length === 0) {
-      this.combat.combatLog.push(`Search (${roll}) — nothing of interest nearby.`);
+      this.combat.addLogs([`Search (${roll}) — Nothing found.`]);
       this.updateHUD();
       return;
     }
@@ -952,19 +900,19 @@ export class GameScene extends Phaser.Scene {
     this.mapSecrets = this.mapSecrets.filter((s) => s !== secret);
 
     if (success) {
-      this.combat.combatLog.push(`Search (${roll} vs DC ${secret.def.dc}) — ${secret.def.successText}`);
+      this.combat.addLogs([`Search (${roll} vs DC ${secret.def.dc}) — ${secret.def.successText}`]);
       const r = secret.def.reward;
       if (r.type === "gold") {
-        this.combat.playerGold += r.amount;
-        this.combat.combatLog.push(`+${r.amount} GP`);
+        this.combat.awardGold(r.amount);
+        this.combat.addLogs([`+${r.amount} GP`]);
       } else if (r.type === "item") {
         this.combat.addItem(r.item);
-        this.combat.combatLog.push(`Found: ${r.item.name}`);
+        this.combat.addLogs([`Found: ${r.item.name}`]);
       } else {
-        this.combat.combatLog.push(`Lore: "${r.text}"`);
+        this.combat.addLogs([`Lore: "${r.text}"`]);
       }
     } else {
-      this.combat.combatLog.push(`Search (${roll} vs DC ${secret.def.dc}) — ${secret.def.failureText}`);
+      this.combat.addLogs([`Search (${roll} vs DC ${secret.def.dc}) — ${secret.def.failureText}`]);
     }
 
     this.updateHUD();
