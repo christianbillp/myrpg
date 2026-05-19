@@ -22,6 +22,8 @@ import { generateRoomsMap } from "../systems/RoomsMapGenerator";
 import { NPC } from "../entities/NPC";
 import { COMMONER } from "../data/npcs";
 import { pickRiddle, Riddle } from "../data/riddles";
+import { SecretDef, pickSecrets } from "../data/secrets";
+import { d20 } from "../systems/Dice";
 
 const GRID_H = GRID_ROWS * TILE_SIZE;
 const GRID_W = GRID_COLS * TILE_SIZE;
@@ -51,7 +53,10 @@ export class GameScene extends Phaser.Scene {
   private hideBtn!: Phaser.GameObjects.Container;
   private endTurnBtn!: Phaser.GameObjects.Container;
   private deathSaveBtn!: Phaser.GameObjects.Container;
+  private searchBtn!: Phaser.GameObjects.Container;
   private riddleOverlay: Phaser.GameObjects.Container | null = null;
+
+  private mapSecrets: { tileX: number; tileY: number; def: SecretDef }[] = [];
 
   private highlightLayer!: Phaser.GameObjects.Graphics;
   private mapContainer!: Phaser.GameObjects.Container;
@@ -73,9 +78,9 @@ export class GameScene extends Phaser.Scene {
   }
 
   private mapType: "open" | "rooms" = "open";
-  private encounterTypes: ("simple_combat" | "social_interaction")[] = ["simple_combat"];
+  private encounterTypes: ("simple_combat" | "social_interaction" | "exploration")[] = ["simple_combat"];
 
-  init(data: { playerDef?: PlayerDef; mapType?: "open" | "rooms"; encounterTypes?: ("simple_combat" | "social_interaction")[] }): void {
+  init(data: { playerDef?: PlayerDef; mapType?: "open" | "rooms"; encounterTypes?: ("simple_combat" | "social_interaction" | "exploration")[] }): void {
     this.mapType = data?.mapType ?? "open";
     this.encounterTypes = data?.encounterTypes ?? ["simple_combat"];
     const def = data?.playerDef ?? ALDRIC;
@@ -95,6 +100,7 @@ export class GameScene extends Phaser.Scene {
   create(): void {
     this.enemies = [];
     this.mapItems = [];
+    this.mapSecrets = [];
     this.selectedEnemy = null;
     this.selectedNPC = null;
     this.npc = null;
@@ -121,6 +127,9 @@ export class GameScene extends Phaser.Scene {
     }
     if (this.encounterTypes.includes("social_interaction")) {
       this.spawnNPC();
+    }
+    if (this.encounterTypes.includes("exploration")) {
+      this.spawnSecrets();
     }
 
     this.cursors = this.input.keyboard!.createCursorKeys();
@@ -468,6 +477,13 @@ export class GameScene extends Phaser.Scene {
       0x5a1a1a,
       () => this.onDeathSave(),
     );
+    this.searchBtn = this.makeButton(
+      W - 130,
+      btnY,
+      "SEARCH",
+      0x1a2a3a,
+      () => this.onSearch(),
+    );
   }
 
   private makeButton(
@@ -536,11 +552,14 @@ export class GameScene extends Phaser.Scene {
     this.hideBtn.setVisible(false);
     this.endTurnBtn.setVisible(false);
     this.deathSaveBtn.setVisible(false);
+    this.searchBtn.setVisible(false);
     this.phaseText.setColor("#e2b96f");
 
     switch (this.combat.mode) {
       case "exploring":
         this.phaseText.setText("Exploring — WASD / arrow keys to move");
+        if (this.encounterTypes.includes("exploration"))
+          this.searchBtn.setVisible(true);
         break;
 
       case "player_turn": {
@@ -884,6 +903,71 @@ export class GameScene extends Phaser.Scene {
     this.riddleOverlay = this.add.container(panelX, panelY, [
       backdrop, panel, ...answerObjects, resultText, closeBtn, ...answerBtns,
     ]).setDepth(100);
+  }
+
+  private spawnSecrets(): void {
+    const { cols, rows, passable } = this.gameMap;
+    const candidates: [number, number][] = [];
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < cols; c++) {
+        if (
+          passable[r][c] &&
+          chebyshev(c, r, this.player.tileX, this.player.tileY) >= 3 &&
+          !this.enemies.some((e) => e.tileX === c && e.tileY === r) &&
+          !(this.npc?.tileX === c && this.npc?.tileY === r)
+        ) {
+          candidates.push([r, c]);
+        }
+      }
+    }
+    for (let i = candidates.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [candidates[i], candidates[j]] = [candidates[j], candidates[i]];
+    }
+    const secrets = pickSecrets(4);
+    const count = Math.min(secrets.length, candidates.length);
+    for (let i = 0; i < count; i++) {
+      const [r, c] = candidates[i];
+      this.mapSecrets.push({ tileX: c, tileY: r, def: secrets[i] });
+    }
+  }
+
+  private onSearch(): void {
+    if (this.combat.mode !== "exploring") return;
+    if (this.mapSecrets.length === 0) return;
+
+    const roll = d20() + this.combat.playerDef.perceptionBonus;
+    const adj = this.mapSecrets.filter(
+      (s) => chebyshev(this.player.tileX, this.player.tileY, s.tileX, s.tileY) <= 1,
+    );
+
+    if (adj.length === 0) {
+      this.combat.combatLog.push(`Search (${roll}) — nothing of interest nearby.`);
+      this.updateHUD();
+      return;
+    }
+
+    const secret = adj[0];
+    const success = roll >= secret.def.dc;
+    this.mapSecrets = this.mapSecrets.filter((s) => s !== secret);
+
+    if (success) {
+      this.combat.combatLog.push(`Search (${roll} vs DC ${secret.def.dc}) — ${secret.def.successText}`);
+      const r = secret.def.reward;
+      if (r.type === "gold") {
+        this.combat.playerGold += r.amount;
+        this.combat.combatLog.push(`+${r.amount} GP`);
+      } else if (r.type === "item") {
+        this.combat.addItem(r.item);
+        this.combat.combatLog.push(`Found: ${r.item.name}`);
+      } else {
+        this.combat.combatLog.push(`Lore: "${r.text}"`);
+      }
+    } else {
+      this.combat.combatLog.push(`Search (${roll} vs DC ${secret.def.dc}) — ${secret.def.failureText}`);
+    }
+
+    this.updateHUD();
   }
 
   private drawMapTiles(): Phaser.GameObjects.Graphics {

@@ -33,12 +33,7 @@ interface MapTypeDef {
 const SIMPLE_COMBAT: EncounterTypeDef = {
   id: "simple_combat",
   title: "Simple Combat",
-  lines: [
-    "Defeat all enemies in",
-    "turn-based combat.",
-    "",
-    "Full SRD 5.2.1 rules.",
-  ],
+  lines: ["Defeat all enemies in", "turn-based combat."],
 };
 
 const SOCIAL_INTERACTION: EncounterTypeDef = {
@@ -48,6 +43,16 @@ const SOCIAL_INTERACTION: EncounterTypeDef = {
     "Speak with a villager,",
     "solve their riddle,",
     "and earn your reward.",
+  ],
+};
+
+const EXPLORATION: EncounterTypeDef = {
+  id: "exploration",
+  title: "Exploration",
+  lines: [
+    "Secrets are hidden across",
+    "the map. Use the Search",
+    "action to find them.",
   ],
 };
 
@@ -70,7 +75,8 @@ export class EncounterSetupScene extends Phaser.Scene {
   private selectedMapType: MapTypeDef | null = null;
   private selectedPlayer: PlayerDef | null = null;
 
-  private encounterCardBgs: Map<string, Phaser.GameObjects.Rectangle> = new Map();
+  private encounterCardBgs: Map<string, Phaser.GameObjects.Rectangle> =
+    new Map();
   private mapTypeCardBgs: Map<string, Phaser.GameObjects.Rectangle> = new Map();
   private charCardBgs: Map<string, Phaser.GameObjects.Rectangle> = new Map();
   private beginBg!: Phaser.GameObjects.Rectangle;
@@ -101,11 +107,16 @@ export class EncounterSetupScene extends Phaser.Scene {
 
     this.add.rectangle(W / 2, 66, W - 64, 1, 0x334455);
 
-    this.add.rectangle(ENCOUNTER_DIVIDER_X, H / 2, 1, H - 140, 0x334455).setOrigin(0.5, 0.5);
-    this.add.rectangle(MAP_DIVIDER_X, H / 2, 1, H - 140, 0x334455).setOrigin(0.5, 0.5);
+    this.add
+      .rectangle(ENCOUNTER_DIVIDER_X, H / 2, 1, H - 140, 0x334455)
+      .setOrigin(0.5, 0.5);
+    this.add
+      .rectangle(MAP_DIVIDER_X, H / 2, 1, H - 140, 0x334455)
+      .setOrigin(0.5, 0.5);
 
     const encounterCx = ENCOUNTER_DIVIDER_X / 2;
-    const mapCx = ENCOUNTER_DIVIDER_X + (MAP_DIVIDER_X - ENCOUNTER_DIVIDER_X) / 2;
+    const mapCx =
+      ENCOUNTER_DIVIDER_X + (MAP_DIVIDER_X - ENCOUNTER_DIVIDER_X) / 2;
     const charCx = MAP_DIVIDER_X + (W - MAP_DIVIDER_X) / 2;
 
     this.add
@@ -135,12 +146,27 @@ export class EncounterSetupScene extends Phaser.Scene {
       })
       .setOrigin(0.5, 0);
 
-    const encounterCardH = 200;
-    const encounterCardGap = 20;
-    const encTopCY = CONTENT_CY - (encounterCardH + encounterCardGap) / 2;
-    const encBotCY = CONTENT_CY + (encounterCardH + encounterCardGap) / 2;
-    this.buildEncounterCard(SIMPLE_COMBAT, encounterCx, encTopCY, encounterCardH);
-    this.buildEncounterCard(SOCIAL_INTERACTION, encounterCx, encBotCY, encounterCardH);
+    const encounterCardH = 155;
+    const encounterCardGap = 15;
+    const encStep = encounterCardH + encounterCardGap;
+    this.buildEncounterCard(
+      SIMPLE_COMBAT,
+      encounterCx,
+      CONTENT_CY - encStep,
+      encounterCardH,
+    );
+    this.buildEncounterCard(
+      SOCIAL_INTERACTION,
+      encounterCx,
+      CONTENT_CY,
+      encounterCardH,
+    );
+    this.buildEncounterCard(
+      EXPLORATION,
+      encounterCx,
+      CONTENT_CY + encStep,
+      encounterCardH,
+    );
 
     const mapCardH = 200;
     const mapCardGap = 20;
@@ -158,7 +184,12 @@ export class EncounterSetupScene extends Phaser.Scene {
     this.refreshBeginButton();
   }
 
-  private buildEncounterCard(def: EncounterTypeDef, cx: number, cy: number, cardH: number): void {
+  private buildEncounterCard(
+    def: EncounterTypeDef,
+    cx: number,
+    cy: number,
+    cardH: number,
+  ): void {
     const cardW = 240;
 
     const bg = this.add
@@ -222,7 +253,12 @@ export class EncounterSetupScene extends Phaser.Scene {
       .setOrigin(0.5, 0);
   }
 
-  private buildMapTypeCard(def: MapTypeDef, cx: number, cy: number, cardH: number): void {
+  private buildMapTypeCard(
+    def: MapTypeDef,
+    cx: number,
+    cy: number,
+    cardH: number,
+  ): void {
     const cardW = 240;
     const accentHex = "#" + def.accent.toString(16).padStart(6, "0");
 
@@ -238,8 +274,7 @@ export class EncounterSetupScene extends Phaser.Scene {
         bg.setStrokeStyle(2, def.accent & 0x7f7f7f);
     });
     bg.on("pointerout", () => {
-      if (this.selectedMapType?.id !== def.id)
-        bg.setStrokeStyle(2, 0x334455);
+      if (this.selectedMapType?.id !== def.id) bg.setStrokeStyle(2, 0x334455);
     });
     bg.on("pointerdown", () => {
       for (const [id, b] of this.mapTypeCardBgs)
@@ -326,12 +361,17 @@ export class EncounterSetupScene extends Phaser.Scene {
       .setOrigin(0.5, 0);
 
     this.add
-      .text(cx, top + 114, `${def.speciesName}  ${def.className} ${def.level}`, {
-        fontSize: "11px",
-        color: "#8899aa",
-        fontFamily: "monospace",
-        resolution: DPR,
-      })
+      .text(
+        cx,
+        top + 114,
+        `${def.speciesName}  ${def.className} ${def.level}`,
+        {
+          fontSize: "11px",
+          color: "#8899aa",
+          fontFamily: "monospace",
+          resolution: DPR,
+        },
+      )
       .setOrigin(0.5, 0);
 
     this.add.rectangle(cx, top + 140, cardW - 32, 1, 0x334455);
