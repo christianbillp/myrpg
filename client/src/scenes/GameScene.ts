@@ -11,11 +11,12 @@ import {
   PLAYER_PANEL_WIDTH,
   TARGET_PANEL_WIDTH,
 } from "../constants";
-import { ALDRIC, PlayerDef } from "../data/player";
+import { PlayerDef } from "../data/player";
 import { GOBLIN_MINION, BANDIT } from "../data/enemies";
 import { HEALTH_POTION } from "../data/items";
 import { MapItem } from "../entities/MapItem";
-import { EncounterManager } from "../systems/EncounterManager";
+import { EncounterManager, ResumeState } from "../systems/EncounterManager";
+import { SaveSystem, SaveData } from "../systems/SaveSystem";
 import { EnemyAI, chebyshev } from "../systems/EnemyAI";
 import { generateMap, GameMap } from "../systems/MapGenerator";
 import { generateRoomsMap } from "../systems/RoomsMapGenerator";
@@ -77,11 +78,12 @@ export class GameScene extends Phaser.Scene {
   private savedMap: GameMap | null = null;
   private encounterTypes: EncounterType[] = ["simple_combat"];
 
-  init(data: { playerDef?: PlayerDef; mapType?: "open" | "rooms" | "saved"; encounterTypes?: EncounterType[]; savedMap?: GameMap }): void {
+  init(data: { playerDef?: PlayerDef; mapType?: "open" | "rooms" | "saved"; encounterTypes?: EncounterType[]; savedMap?: GameMap; resumeState?: ResumeState }): void {
     this.mapType = data?.mapType ?? "open";
     this.savedMap = data?.savedMap ?? null;
     this.encounterTypes = data?.encounterTypes ?? ["simple_combat"];
-    const def = data?.playerDef ?? ALDRIC;
+    const characters = this.registry.get("characters") as PlayerDef[];
+    const def = data?.playerDef ?? characters[0];
     this.combat = new EncounterManager(
       def,
       () => this.updateHUD(),
@@ -96,7 +98,23 @@ export class GameScene extends Phaser.Scene {
         this.highlightLayer.clear();
         this.quests.onKill();
       },
+      data?.resumeState,
     );
+  }
+
+  shutdown(): void {
+    SaveSystem.save(this.buildSaveData());
+  }
+
+  private buildSaveData(): SaveData {
+    return {
+      playerDefId: this.combat.playerDef.id as 'aldric' | 'miriel',
+      hp: this.combat.playerHp,
+      xp: this.combat.playerXp,
+      gold: this.combat.playerGold,
+      inventoryIds: this.combat.inventory.map((i) => i.id),
+      secondWindUses: this.combat.secondWindUses,
+    };
   }
 
   create(): void {
@@ -414,8 +432,13 @@ export class GameScene extends Phaser.Scene {
       onDeathSave:   () => this.onDeathSave(),
       onSearch:      () => this.onSearch(),
       onCommunicate: () => this.onCommunicate(),
-      onResetView:   () => this.resetGridView(),
-      onScrollLog:   (dy) => {
+      onResetView:      () => this.resetGridView(),
+      onNewEncounter:   () => {
+        const saveData = this.buildSaveData();
+        SaveSystem.save(saveData);
+        this.scene.start("EncounterSetupScene", { saveData });
+      },
+      onScrollLog:      (dy) => {
         this.combat.scrollLog(dy > 0 ? -1 : 1);
         this.updateHUD();
       },

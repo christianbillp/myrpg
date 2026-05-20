@@ -53,6 +53,7 @@ export interface HUDCallbacks {
   onSearch: () => void;
   onCommunicate: () => void;
   onResetView: () => void;
+  onNewEncounter: () => void;
   onScrollLog: (dy: number) => void;
 }
 
@@ -102,7 +103,8 @@ export class HUD {
 
     scene.add.rectangle(W / 2, y + 122, W, 1, 0x334455).setDepth(11);
 
-    HUD.makeButton(scene, PLAYER_PANEL_WIDTH + 80, y + 10, "RESET VIEW", 0x1a2a3a, callbacks.onResetView);
+    HUD.makeButton(scene, PLAYER_PANEL_WIDTH + 80,  y + 10, "RESET VIEW",    0x1a2a3a, callbacks.onResetView);
+    HUD.makeButton(scene, PLAYER_PANEL_WIDTH + 250, y + 10, "NEW ENCOUNTER", 0x2a1a1a, callbacks.onNewEncounter);
 
     this.attackBtn    = HUD.makeButton(scene, PLAYER_PANEL_WIDTH + 130, btnY, "ATTACK",          0x1a4a1e, callbacks.onAttack);
     this.secondWindBtn = HUD.makeButton(scene, cx,                       btnY, "SECOND WIND",     0x1a3a5a, callbacks.onSecondWind);

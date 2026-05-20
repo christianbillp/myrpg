@@ -1,8 +1,10 @@
 import Phaser from "phaser";
-import { ALDRIC, MIRIEL, PlayerDef } from "../data/player";
+import { PlayerDef } from "../data/player";
 import { EncounterType } from "../data/encounterTypes";
 import { SavedMapDef, toGameMap } from "../data/maps";
 import { SavedMapPickerOverlay } from "../ui/SavedMapPickerOverlay";
+import { SaveSystem, SaveData, resumeFromSave } from "../systems/SaveSystem";
+import { ResumeState } from "../systems/EncounterManager";
 import {
   TILE_SIZE,
   GRID_COLS,
@@ -93,16 +95,28 @@ export class EncounterSetupScene extends Phaser.Scene {
   private savedMapNameLabel!: Phaser.GameObjects.Text;
   private beginBg!: Phaser.GameObjects.Rectangle;
   private beginLabel!: Phaser.GameObjects.Text;
+  private characters: PlayerDef[] = [];
+  private resumeState: ResumeState | null = null;
+  private savedCharDefId: string | null = null;
+  private incomingSaveData: SaveData | null = null;
+  private saveBannerText!: Phaser.GameObjects.Text;
 
   constructor() {
     super({ key: "EncounterSetupScene" });
   }
 
+  init(data: { saveData?: SaveData }): void {
+    this.incomingSaveData = data?.saveData ?? null;
+  }
+
   create(): void {
+    this.characters = this.registry.get("characters") as PlayerDef[];
     this.selectedEncounterTypeIds.clear();
     this.selectedMapType = null;
     this.selectedSavedMap = null;
     this.selectedPlayer = null;
+    this.resumeState = null;
+    this.savedCharDefId = null;
     this.encounterCardBgs.clear();
     this.mapTypeCardBgs.clear();
     this.charCardBgs.clear();
@@ -189,12 +203,38 @@ export class EncounterSetupScene extends Phaser.Scene {
     this.buildSavedMapCard(mapCx, CONTENT_CY + mapStep, mapCardH);
 
     const spread = 170;
-    this.buildCharCard(ALDRIC, charCx - spread, CONTENT_CY);
-    this.buildCharCard(MIRIEL, charCx + spread, CONTENT_CY);
+    const offsets = [-spread, spread];
+    this.characters.forEach((char, i) => this.buildCharCard(char, charCx + (offsets[i] ?? i * 2 * spread), CONTENT_CY));
+
+    this.saveBannerText = this.add
+      .text(W / 2, H - 76, "", { fontSize: "11px", color: "#667788", fontFamily: "monospace", resolution: DPR })
+      .setOrigin(0.5, 0)
+      .setDepth(1);
 
     this.add.rectangle(W / 2, H - 58, W - 64, 1, 0x334455);
     this.buildBeginButton(W / 2, H - 36);
     this.refreshBeginButton();
+
+    if (this.incomingSaveData) {
+      this.applySave(this.incomingSaveData);
+    } else if (SaveSystem.hasExistingSave()) {
+      this.applySave(SaveSystem.load()!);
+    } else {
+      SaveSystem.loadFromServer().then((save) => {
+        if (save) this.applySave(save);
+      });
+    }
+  }
+
+  private applySave(save: SaveData): void {
+    const savedDef = this.characters.find((c) => c.id === save.playerDefId) ?? this.characters[0];
+    if (!savedDef) return;
+    this.resumeState = resumeFromSave(save);
+    this.savedCharDefId = savedDef.id;
+    this.selectChar(savedDef);
+    this.saveBannerText.setText(
+      `Saved: ${savedDef.name}  ·  HP ${save.hp}/${savedDef.maxHp}  ·  ${save.xp} XP  ·  ${save.gold} GP`,
+    );
   }
 
   private buildEncounterCard(
@@ -363,12 +403,7 @@ export class EncounterSetupScene extends Phaser.Scene {
       if (this.selectedPlayer?.name !== def.name)
         bg.setStrokeStyle(2, 0x334455);
     });
-    bg.on("pointerdown", () => {
-      for (const [id, b] of this.charCardBgs)
-        b.setStrokeStyle(2, id === def.name ? def.color : 0x334455);
-      this.selectedPlayer = def;
-      this.refreshBeginButton();
-    });
+    bg.on("pointerdown", () => this.selectChar(def));
 
     const top = cy - cardH / 2;
 
@@ -445,8 +480,15 @@ export class EncounterSetupScene extends Phaser.Scene {
       .setOrigin(0.5, 0);
   }
 
+  private selectChar(def: PlayerDef): void {
+    for (const [id, b] of this.charCardBgs)
+      b.setStrokeStyle(2, id === def.name ? def.color : 0x334455);
+    this.selectedPlayer = def;
+    this.refreshBeginButton();
+  }
+
   private charFeatures(def: PlayerDef): string[] {
-    if (def.name === ALDRIC.name) {
+    if (def.id === "aldric") {
       return [
         "Greatsword  2d6+3 slashing",
         "Savage Attacker (roll dmg twice)",
@@ -486,6 +528,10 @@ export class EncounterSetupScene extends Phaser.Scene {
     });
     this.beginBg.on("pointerdown", () => {
       if (!this.isReady()) return;
+      const selectedId = this.selectedPlayer?.id ?? 'aldric';
+      const resume = this.resumeState && this.savedCharDefId === selectedId
+        ? this.resumeState
+        : undefined;
       this.scene.start("GameScene", {
         playerDef: this.selectedPlayer,
         mapType: this.selectedMapType!.id,
@@ -494,6 +540,7 @@ export class EncounterSetupScene extends Phaser.Scene {
           this.selectedMapType!.id === "saved" && this.selectedSavedMap
             ? toGameMap(this.selectedSavedMap)
             : undefined,
+        resumeState: resume,
       });
     });
   }

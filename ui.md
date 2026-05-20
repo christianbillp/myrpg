@@ -73,7 +73,7 @@ Selection: clicking a creature in the Game Map selects it. The creature is highl
 
 ## HUD (Heads-Up Display)
 
-Rendered in `client/src/scenes/GameScene.ts`. Spans the full canvas width below the Game Map.
+Defined in `client/src/ui/HUD.ts`. Spans the full canvas width below the Game Map.
 
 | Component           | Description                                                                                                   |
 | ------------------- | ------------------------------------------------------------------------------------------------------------- |
@@ -94,3 +94,4 @@ Rendered in `client/src/scenes/GameScene.ts`. Spans the full canvas width below 
 | **Roll Death Save** | —            | Player unconscious                                                           | Roll a d20 death saving throw                                           |
 | **Communicate**     | —            | Exploring, Social Interaction encounter active                               | Initiate dialogue with selected NPC; logs "No target selected." if none |
 | **Search**          | —            | Exploring, Exploration encounter active                                      | Roll Wisdom (Perception) to detect a secret on an adjacent tile         |
+| **New Encounter**   | —            | Always visible                                                               | Trigger auto-save and return to the Encounter Setup screen              |

@@ -1,6 +1,7 @@
 import { PlayerDef } from '../data/player';
 import { Enemy } from '../entities/Enemy';
 import { crGoldReward } from '../data/enemies';
+import { ItemDef } from '../data/items';
 import {
   rollInitiative,
   playerMeleeAttack,
@@ -9,9 +10,16 @@ import {
   drinkPotion,
   rollDeathSave,
 } from './CombatSystem';
-import { ItemDef } from '../data/items';
 
 export type CombatMode = 'exploring' | 'player_turn' | 'enemy_turn' | 'death_saves' | 'defeat';
+
+export interface ResumeState {
+  hp: number;
+  xp: number;
+  gold: number;
+  inventory: ItemDef[];
+  secondWindUses: number;
+}
 
 export interface EnemyTurnResult {
   damage: number;
@@ -60,11 +68,14 @@ export class EncounterManager {
     onChange: () => void,
     onEnemyTurn: (delay: number) => void,
     onEnemyKilled: (enemy: Enemy) => void,
+    resume?: ResumeState,
   ) {
     this.playerDef = playerDef;
-    this.playerHp = playerDef.maxHp;
-    this.playerXp = playerDef.xp;
-    this.secondWindUses = playerDef.secondWindMaxUses;
+    this.playerHp = resume?.hp ?? playerDef.maxHp;
+    this.playerXp = resume?.xp ?? playerDef.xp;
+    this.playerGold = resume?.gold ?? 0;
+    this.inventory = resume?.inventory ?? [];
+    this.secondWindUses = resume?.secondWindUses ?? playerDef.secondWindMaxUses;
     this.onChange = onChange;
     this.onEnemyTurn = onEnemyTurn;
     this.onEnemyKilled = onEnemyKilled;

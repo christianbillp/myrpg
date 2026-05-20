@@ -1,4 +1,5 @@
 import Phaser from "phaser";
+import { BootScene } from "./scenes/BootScene";
 import { EncounterSetupScene } from "./scenes/EncounterSetupScene";
 import { GameScene } from "./scenes/GameScene";
 import {
@@ -15,7 +16,7 @@ const config: Phaser.Types.Core.GameConfig = {
   width: PLAYER_PANEL_WIDTH + GRID_COLS * TILE_SIZE + TARGET_PANEL_WIDTH,
   height: GRID_ROWS * TILE_SIZE + HUD_HEIGHT,
   backgroundColor: "#000000",
-  scene: [EncounterSetupScene, GameScene],
+  scene: [BootScene, EncounterSetupScene, GameScene],
 };
 
 new Phaser.Game(config);
