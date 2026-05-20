@@ -15,6 +15,7 @@ export interface EnemyTurnConfig {
   passable: boolean[][];
   mapCols: number;
   mapRows: number;
+  occupiedTiles: [number, number][];
 }
 
 export class EnemyAI {
@@ -81,6 +82,7 @@ export class EnemyAI {
       enemy.tileX, enemy.tileY,
       config.playerTileX, config.playerTileY,
       config.passable, config.mapRows, config.mapCols,
+      config.occupiedTiles,
     );
 
     if (!next || (next[0] === config.playerTileX && next[1] === config.playerTileY)) {
@@ -101,6 +103,7 @@ export class EnemyAI {
     passable: boolean[][],
     rows: number,
     cols: number,
+    occupiedTiles: [number, number][],
   ): [number, number] | null {
     if (chebyshev(fromX, fromY, targetX, targetY) <= 1) return null;
 
@@ -122,6 +125,7 @@ export class EnemyAI {
         if (ny < 0 || ny >= rows || nx < 0 || nx >= cols) continue;
         if (!passable[ny][nx]) continue;
         if (visited[ny][nx]) continue;
+        if (occupiedTiles.some(([ox, oy]) => ox === nx && oy === ny)) continue;
         visited[ny][nx] = true;
         firstStep[ny][nx] = firstStep[cy][cx] !== null ? firstStep[cy][cx] : [nx, ny];
         if (chebyshev(nx, ny, targetX, targetY) <= 1) return firstStep[ny][nx]!;

@@ -42,14 +42,18 @@ export class CombatManager {
   deathSaveSuccesses = 0;
   deathSaveFailures = 0;
   activeEnemy: Enemy | null = null;
+  combatEnemies: Enemy[] = [];
   combatLog: string[] = [];
   logScrollOffset = 0;
   movesLeft = 0;
+  actionUsed = false;
+  bonusActionUsed = false;
 
   readonly playerDef: PlayerDef;
   private readonly onChange: () => void;
   private readonly onEnemyTurn: (delay: number) => void;
   private readonly onEnemyKilled: (enemy: Enemy) => void;
+  private activeEnemyIndex = 0;
 
   constructor(
     playerDef: PlayerDef,
@@ -74,43 +78,48 @@ export class CombatManager {
 
   usePotion(): void {
     const idx = this.inventory.findIndex(i => i.type === 'consumable');
-    if (idx === -1 || (this.mode !== 'player_turn' && this.mode !== 'exploring')) return;
+    if (idx === -1) return;
+    if (this.mode === 'player_turn' && this.bonusActionUsed) return;
+    if (this.mode !== 'player_turn' && this.mode !== 'exploring') return;
     const item = this.inventory.splice(idx, 1)[0];
     const { healed, logs } = drinkPotion(item);
     const before = this.playerHp;
     this.playerHp = Math.min(this.playerDef.maxHp, this.playerHp + healed);
     this.addLogs([...logs, `HP: ${before} → ${this.playerHp}/${this.playerDef.maxHp}`]);
+    if (this.mode === 'player_turn') this.bonusActionUsed = true;
     this.onChange();
   }
 
-  startCombat(enemy: Enemy): void {
-    this.activeEnemy = enemy;
+  startCombat(enemies: Enemy[]): void {
+    this.combatEnemies = [...enemies];
+    this.activeEnemy = enemies[0] ?? null;
     this.enemyHidden = false;
     this.enemyVexed = false;
     this.playerHidden = false;
     this.deathSaveSuccesses = 0;
     this.deathSaveFailures = 0;
 
-    const { playerFirst, logs } = rollInitiative(this.playerDef, enemy.def);
+    const { playerFirst, logs } = rollInitiative(this.playerDef, enemies[0].def);
     this.addLogs(logs);
 
     if (playerFirst) {
       this.enterPlayerTurn();
     } else {
-      this.mode = 'enemy_turn';
-      this.onChange();
-      this.onEnemyTurn(ENEMY_TURN_DELAY.init);
+      this.enterEnemyPhase(ENEMY_TURN_DELAY.init);
     }
   }
 
   enterPlayerTurn(): void {
     this.mode = 'player_turn';
+    this.activeEnemy = null;
     this.movesLeft = this.playerDef.speed;
+    this.actionUsed = false;
+    this.bonusActionUsed = false;
     this.onChange();
   }
 
   onAttack(): void {
-    if (!this.activeEnemy || this.mode !== 'player_turn') return;
+    if (!this.activeEnemy || this.mode !== 'player_turn' || this.actionUsed) return;
 
     const { damage, logs, vexApplied } = playerMeleeAttack(
       this.playerDef,
@@ -136,46 +145,48 @@ export class CombatManager {
         `Total XP: ${this.playerXp}  |  GP: ${this.playerGold}`,
       ]);
       const killed = this.activeEnemy;
+      this.combatEnemies = this.combatEnemies.filter(e => e !== killed);
       this.activeEnemy = null;
       this.enemyVexed = false;
-      this.mode = 'exploring';
       this.onEnemyKilled(killed);
-      this.onChange();
-      return;
+
+      if (this.combatEnemies.every(e => e.isDead())) {
+        this.mode = 'exploring';
+        this.onChange();
+        return;
+      }
     }
 
-    this.mode = 'enemy_turn';
+    this.actionUsed = true;
     this.onChange();
-    this.onEnemyTurn(ENEMY_TURN_DELAY.attack);
   }
 
   onHide(): void {
-    if (this.mode !== 'player_turn' || !this.activeEnemy) return;
-
-    const { hidden, logs } = playerHide(this.playerDef, this.activeEnemy.def.passivePerception);
+    if (this.mode !== 'player_turn' || this.bonusActionUsed) return;
+    const target = this.combatEnemies.find(e => !e.isDead()) ?? null;
+    if (!target) return;
+    const { hidden, logs } = playerHide(this.playerDef, target.def.passivePerception);
     this.playerHidden = hidden;
     this.addLogs(logs);
-    this.mode = 'enemy_turn';
+    this.bonusActionUsed = true;
     this.onChange();
-    this.onEnemyTurn(ENEMY_TURN_DELAY.hide);
   }
 
   onSecondWind(): void {
-    if (this.mode !== 'player_turn' || this.secondWindUses <= 0 || this.playerHp >= this.playerDef.maxHp) return;
+    if (this.mode !== 'player_turn' || this.bonusActionUsed || this.secondWindUses <= 0 || this.playerHp >= this.playerDef.maxHp) return;
 
     const { healed, logs } = playerSecondWind(this.playerDef.level);
     const before = this.playerHp;
     this.playerHp = Math.min(this.playerDef.maxHp, this.playerHp + healed);
     this.secondWindUses--;
     this.addLogs([...logs, `HP: ${before} → ${this.playerHp}/${this.playerDef.maxHp} (${this.secondWindUses} uses left)`]);
+    this.bonusActionUsed = true;
     this.onChange();
   }
 
   onEndTurn(): void {
     if (this.mode !== 'player_turn') return;
-    this.mode = 'enemy_turn';
-    this.onChange();
-    this.onEnemyTurn(ENEMY_TURN_DELAY.endTurn);
+    this.enterEnemyPhase(ENEMY_TURN_DELAY.endTurn);
   }
 
   onDeathSave(): void {
@@ -188,8 +199,6 @@ export class CombatManager {
     switch (outcome) {
       case 'nat20':
         this.playerHp = 1;
-        this.deathSaveSuccesses = 0;
-        this.deathSaveFailures = 0;
         logs.push(`Natural 20! ${this.playerDef.name} regains 1 HP!`);
         nextMode = 'player_turn';
         break;
@@ -221,16 +230,16 @@ export class CombatManager {
     }
 
     this.addLogs(logs);
-    this.mode = nextMode;
 
     if (nextMode === 'player_turn') {
       this.movesLeft = this.playerDef.speed;
-    }
-
-    this.onChange();
-
-    if (nextMode === 'enemy_turn') {
-      this.onEnemyTurn(ENEMY_TURN_DELAY.deathSave);
+      this.mode = 'player_turn';
+      this.onChange();
+    } else if (nextMode === 'enemy_turn') {
+      this.enterEnemyPhase(ENEMY_TURN_DELAY.deathSave);
+    } else {
+      this.mode = nextMode;
+      this.onChange();
     }
   }
 
@@ -292,14 +301,38 @@ export class CombatManager {
     this.logScrollOffset = Math.max(0, Math.min(maxOffset, this.logScrollOffset + delta));
   }
 
+  private enterEnemyPhase(delay: number): void {
+    this.mode = 'enemy_turn';
+    this.activeEnemyIndex = 0;
+    this.onChange();
+    this.scheduleNextEnemy(delay);
+  }
+
+  private scheduleNextEnemy(delay: number): void {
+    while (this.activeEnemyIndex < this.combatEnemies.length) {
+      const enemy = this.combatEnemies[this.activeEnemyIndex];
+      if (!enemy.isDead()) {
+        this.activeEnemy = enemy;
+        this.onChange();
+        this.onEnemyTurn(delay);
+        return;
+      }
+      this.activeEnemyIndex++;
+    }
+    this.activeEnemy = null;
+    this.activeEnemyIndex = 0;
+    this.enterPlayerTurn();
+  }
+
   private endEnemyTurn(): void {
     if (this.mode === 'defeat') return;
     this.playerHidden = false;
     if (this.playerHp <= 0) {
       this.mode = 'death_saves';
       this.onChange();
-    } else {
-      this.enterPlayerTurn();
+      return;
     }
+    this.activeEnemyIndex++;
+    this.scheduleNextEnemy(ENEMY_TURN_DELAY.attack);
   }
 }

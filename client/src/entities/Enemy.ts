@@ -3,16 +3,19 @@ import { TILE_SIZE } from '../constants';
 import { EnemyDef } from '../data/enemies';
 
 const MOVE_DURATION = 130;
+const DPR = window.devicePixelRatio;
 
 export class Enemy {
   tileX: number;
   tileY: number;
   hp: number;
+  label = "";
   readonly maxHp: number;
   readonly def: EnemyDef;
   private container: Phaser.GameObjects.Container;
   private hpBar: Phaser.GameObjects.Graphics;
   private selectionRing: Phaser.GameObjects.Graphics;
+  private labelText: Phaser.GameObjects.Text;
   private scene: Phaser.Scene;
   private moving = false;
 
@@ -27,11 +30,20 @@ export class Enemy {
     const body = scene.add.rectangle(0, 0, TILE_SIZE - 8, TILE_SIZE - 8, def.color);
     this.hpBar = scene.add.graphics();
     this.selectionRing = scene.add.graphics();
+    this.labelText = scene.add
+      .text(0, -4, "", {
+        fontSize: "13px",
+        color: "#ffffff",
+        fontFamily: "monospace",
+        resolution: DPR,
+      })
+      .setOrigin(0.5);
     this.container = scene.add
       .container(tileX * TILE_SIZE + TILE_SIZE / 2, tileY * TILE_SIZE + TILE_SIZE / 2, [
         this.selectionRing,
         body,
         this.hpBar,
+        this.labelText,
       ])
       .setDepth(1);
 
@@ -63,6 +75,11 @@ export class Enemy {
   takeDamage(amount: number): void {
     this.hp = Math.max(0, this.hp - amount);
     this.refreshHpBar();
+  }
+
+  setLabel(label: string): void {
+    this.label = label;
+    this.labelText.setText(label);
   }
 
   setSelected(selected: boolean): void {

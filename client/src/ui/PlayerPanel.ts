@@ -214,7 +214,7 @@ export class PlayerPanel {
     this.usePotionBg.on("pointerdown", onUsePotion);
   }
 
-  refresh(hp: number, maxHp: number, xp: number, gold: number, inventory: ItemDef[]): void {
+  refresh(hp: number, maxHp: number, xp: number, gold: number, inventory: ItemDef[], bonusActionUsed = false): void {
     const pct = maxHp > 0 ? hp / maxHp : 0;
     const width = PLAYER_PANEL_WIDTH - 24;
     this.hpBar.clear();
@@ -229,6 +229,6 @@ export class PlayerPanel {
 
     const potions = inventory.filter(i => i.type === "consumable").length;
     this.inventoryText.setText(potions > 0 ? `Health Potion  ×${potions}` : "Empty");
-    this.usePotionBg.setAlpha(potions > 0 ? 1 : 0.4);
+    this.usePotionBg.setAlpha(potions > 0 && !bonusActionUsed ? 1 : 0.4);
   }
 }

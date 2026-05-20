@@ -26,6 +26,7 @@ import { SecretDef, pickSecrets } from "../data/secrets";
 import { d20 } from "../systems/Dice";
 import { EncounterType } from "../data/encounterTypes";
 import { RiddleOverlay } from "../ui/RiddleOverlay";
+import { TurnOrderBar, TurnChip } from "../ui/TurnOrderBar";
 
 const GRID_H = GRID_ROWS * TILE_SIZE;
 const GRID_W = GRID_COLS * TILE_SIZE;
@@ -58,6 +59,7 @@ export class GameScene extends Phaser.Scene {
   private searchBtn!: Phaser.GameObjects.Container;
   private communicateBtn!: Phaser.GameObjects.Container;
   private riddleOverlay: RiddleOverlay | null = null;
+  private turnOrderBar!: TurnOrderBar;
 
   private mapSecrets: { tileX: number; tileY: number; def: SecretDef }[] = [];
 
@@ -94,7 +96,10 @@ export class GameScene extends Phaser.Scene {
       () => this.updateHUD(),
       (delay) => this.time.delayedCall(delay, () => this.runEnemyTurn()),
       (enemy) => {
-        if (this.selectedEnemy === enemy) this.selectEnemy(null);
+        if (this.selectedEnemy === enemy) {
+          const next = this.enemies.find((e) => e !== enemy && !e.isDead()) ?? null;
+          this.selectEnemy(next);
+        }
         enemy.destroy();
         this.enemies = this.enemies.filter((e) => e !== enemy);
         this.highlightLayer.clear();
@@ -267,6 +272,7 @@ export class GameScene extends Phaser.Scene {
       if (!adjX && !adjY) return;
     }
     if (this.enemies.some((e) => e.tileX === nx && e.tileY === ny)) return;
+    if (this.npc && this.npc.tileX === nx && this.npc.tileY === ny) return;
     if (this.combat.mode === "player_turn" && this.combat.movesLeft <= 0)
       return;
 
@@ -291,7 +297,12 @@ export class GameScene extends Phaser.Scene {
           enemy.tileY,
         ) <= 2
       ) {
-        this.combat.startCombat(enemy);
+        if (this.enemies.length > 1) {
+          this.enemies.forEach((e, i) =>
+            e.setLabel(String.fromCharCode(65 + i)),
+          );
+        }
+        this.combat.startCombat(this.enemies);
         this.selectEnemy(enemy);
         return;
       }
@@ -303,9 +314,9 @@ export class GameScene extends Phaser.Scene {
       this.combat.enterPlayerTurn();
       return;
     }
-
+    const acting = this.combat.activeEnemy;
     EnemyAI.runTurn(
-      this.combat.activeEnemy,
+      acting,
       {
         playerTileX: this.player.tileX,
         playerTileY: this.player.tileY,
@@ -318,6 +329,9 @@ export class GameScene extends Phaser.Scene {
         passable: this.gameMap.passable,
         mapCols: this.gameMap.cols,
         mapRows: this.gameMap.rows,
+        occupiedTiles: this.enemies
+          .filter((e) => e !== acting && !e.isDead())
+          .map((e) => [e.tileX, e.tileY] as [number, number]),
       },
       (result) => this.combat.applyEnemyTurnResult(result),
     );
@@ -326,16 +340,16 @@ export class GameScene extends Phaser.Scene {
   // --- Action Button Handlers ---
 
   private onAttack(): void {
-    if (!this.combat.activeEnemy || this.combat.mode !== "player_turn") return;
-    if (
-      chebyshev(
-        this.player.tileX,
-        this.player.tileY,
-        this.combat.activeEnemy.tileX,
-        this.combat.activeEnemy.tileY,
-      ) > 1
-    )
-      return;
+    if (this.combat.mode !== "player_turn") return;
+    const isAdjacent = (e: Enemy) =>
+      !e.isDead() &&
+      chebyshev(this.player.tileX, this.player.tileY, e.tileX, e.tileY) <= 1;
+    const target =
+      (this.selectedEnemy && isAdjacent(this.selectedEnemy)
+        ? this.selectedEnemy
+        : this.combat.combatEnemies.find(isAdjacent)) ?? null;
+    if (!target) return;
+    this.combat.activeEnemy = target;
     this.combat.onAttack();
   }
 
@@ -388,6 +402,7 @@ export class GameScene extends Phaser.Scene {
 
     this.playerPanel = new PlayerPanel(this, this.combat.playerDef, () => this.combat.usePotion());
     this.targetPanel = new TargetPanel(this);
+    this.turnOrderBar = new TurnOrderBar(this);
 
     this.add
       .rectangle(W / 2, y + HUD_HEIGHT / 2, W, HUD_HEIGHT, 0x0d0d1e)
@@ -530,6 +545,7 @@ export class GameScene extends Phaser.Scene {
       this.combat.playerXp,
       this.combat.playerGold,
       this.combat.inventory,
+      this.combat.mode === "player_turn" && this.combat.bonusActionUsed,
     );
   }
 
@@ -537,14 +553,44 @@ export class GameScene extends Phaser.Scene {
     this.updatePanel();
     if (this.selectedEnemy)
       this.targetPanel.refresh(this.selectedEnemy.hp, this.selectedEnemy.maxHp);
-    if (this.combat.activeEnemy) {
-      const vexedPart = this.combat.enemyVexed ? "  [VEXED]" : "";
-      const hiddenPart = this.combat.enemyHidden ? "  [HIDDEN]" : "";
+
+    const displayEnemy =
+      this.selectedEnemy && !this.selectedEnemy.isDead()
+        ? this.selectedEnemy
+        : this.combat.activeEnemy;
+    if (displayEnemy) {
+      const isActive = displayEnemy === this.combat.activeEnemy;
+      const vexedPart = isActive && this.combat.enemyVexed ? "  [VEXED]" : "";
+      const hiddenPart = isActive && this.combat.enemyHidden ? "  [HIDDEN]" : "";
       this.enemyInfoText.setText(
-        `${this.combat.activeEnemy.def.name}  ${this.combat.activeEnemy.hp}/${this.combat.activeEnemy.maxHp} HP${hiddenPart}${vexedPart}`,
+        `${displayEnemy.def.name}  ${displayEnemy.hp}/${displayEnemy.maxHp} HP${hiddenPart}${vexedPart}`,
       );
     } else {
       this.enemyInfoText.setText("");
+    }
+
+    const inCombat = this.combat.mode !== "exploring" && this.combat.combatEnemies.length > 0;
+    this.turnOrderBar.setVisible(inCombat);
+    if (inCombat) {
+      const chips: TurnChip[] = [
+        {
+          label: "",
+          name: this.combat.playerDef.name,
+          color: this.combat.playerDef.color,
+          isActive:
+            this.combat.mode === "player_turn" ||
+            this.combat.mode === "death_saves",
+          isDead: this.combat.playerHp <= 0,
+        },
+        ...this.combat.combatEnemies.map((e) => ({
+          label: e.label,
+          name: e.def.name,
+          color: e.def.color,
+          isActive: this.combat.activeEnemy === e,
+          isDead: e.isDead(),
+        })),
+      ];
+      this.turnOrderBar.refresh(chips);
     }
 
     this.updateLogDisplay();
@@ -570,22 +616,24 @@ export class GameScene extends Phaser.Scene {
 
       case "player_turn": {
         const hiddenLabel = this.combat.playerHidden ? "  [HIDDEN]" : "";
+        const actedLabel = this.combat.actionUsed ? "  · action used" : "";
+        const bonusLabel = this.combat.bonusActionUsed ? "  · bonus used" : "";
         this.phaseText.setText(
-          `Your turn — ${this.combat.movesLeft}/${this.combat.playerDef.speed} moves${hiddenLabel}`,
+          `Your turn — ${this.combat.movesLeft}/${this.combat.playerDef.speed} moves${hiddenLabel}${actedLabel}${bonusLabel}`,
         );
         this.endTurnBtn.setVisible(true);
 
-        const adjEnemy =
-          this.combat.activeEnemy !== null &&
-          chebyshev(
-            this.player.tileX,
-            this.player.tileY,
-            this.combat.activeEnemy.tileX,
-            this.combat.activeEnemy.tileY,
-          ) <= 1;
-        if (adjEnemy) this.attackBtn.setVisible(true);
+        if (!this.combat.actionUsed) {
+          const hasAdjacentTarget = this.combat.combatEnemies.some(
+            (e) =>
+              !e.isDead() &&
+              chebyshev(this.player.tileX, this.player.tileY, e.tileX, e.tileY) <= 1,
+          );
+          if (hasAdjacentTarget) this.attackBtn.setVisible(true);
+        }
 
         if (
+          !this.combat.bonusActionUsed &&
           this.combat.playerDef.secondWindMaxUses > 0 &&
           this.combat.secondWindUses > 0 &&
           this.combat.playerHp < this.combat.playerDef.maxHp
@@ -593,20 +641,22 @@ export class GameScene extends Phaser.Scene {
           this.secondWindBtn.setVisible(true);
         }
         if (
+          !this.combat.bonusActionUsed &&
           this.combat.playerDef.sneakAttackDice > 0 &&
           !this.combat.playerHidden &&
-          this.combat.activeEnemy
+          this.combat.combatEnemies.some((e) => !e.isDead())
         ) {
           this.hideBtn.setVisible(true);
         }
         break;
       }
 
-      case "enemy_turn":
-        this.phaseText.setText(
-          `${this.combat.activeEnemy?.def.name ?? "Enemy"}'s turn...`,
-        );
+      case "enemy_turn": {
+        const ae = this.combat.activeEnemy;
+        const labelPart = ae?.label ? `${ae.label} · ` : "";
+        this.phaseText.setText(`${labelPart}${ae?.def.name ?? "Enemy"}'s turn...`);
         break;
+      }
 
       case "death_saves":
         this.phaseText.setColor("#ff7777");
@@ -669,6 +719,7 @@ export class GameScene extends Phaser.Scene {
         if (nr < 0 || nr >= rows || nc < 0 || nc >= cols) continue;
         if (!passable[nr][nc]) continue;
         if (this.enemies.some((e) => e.tileX === nc && e.tileY === nr)) continue;
+        if (this.npc && this.npc.tileX === nc && this.npc.tileY === nr) continue;
         if (dist[nr][nc] !== -1) continue;
         dist[nr][nc] = dist[cy][cx] + 1;
         queue.push([nr, nc]);
@@ -793,10 +844,11 @@ export class GameScene extends Phaser.Scene {
       [candidates[i], candidates[j]] = [candidates[j], candidates[i]];
     }
     const defs = [GOBLIN_MINION, BANDIT];
-    const count = Math.min(2, candidates.length);
+    const target = 2 + Math.floor(Math.random() * 3); // 2, 3, or 4
+    const count = Math.min(target, candidates.length);
     for (let i = 0; i < count; i++) {
       const [r, c] = candidates[i];
-      const enemy = new Enemy(this, defs[i % defs.length], c, r);
+      const enemy = new Enemy(this, defs[Math.floor(Math.random() * defs.length)], c, r);
       this.enemies.push(enemy);
       this.mapContainer.add(enemy.gameObject);
     }
