@@ -1,7 +1,7 @@
 import { Enemy } from '../entities/Enemy';
 import { tryNimbleEscape, enemyAttack } from './CombatSystem';
 import { EnemyTurnResult } from './EncounterManager';
-import { EnemyAttack } from '../data/enemies';
+import { MonsterAttack } from '../data/monsters';
 
 export interface EnemyTurnConfig {
   playerTileX: number;
@@ -63,7 +63,7 @@ export class EnemyAI {
     });
   }
 
-  private static primaryMeleeAttack(attacks: EnemyAttack[]): EnemyAttack | undefined {
+  private static primaryMeleeAttack(attacks: MonsterAttack[]): MonsterAttack | undefined {
     return attacks.find(a => a.attackType === 'melee' || a.attackType === 'both');
   }
 

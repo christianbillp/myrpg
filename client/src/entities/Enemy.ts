@@ -1,6 +1,6 @@
 import Phaser from 'phaser';
 import { TILE_SIZE } from '../constants';
-import { EnemyDef } from '../data/enemies';
+import { MonsterDef } from '../data/monsters';
 
 const MOVE_DURATION = 130;
 const DPR = window.devicePixelRatio;
@@ -11,7 +11,7 @@ export class Enemy {
   hp: number;
   label = "";
   readonly maxHp: number;
-  readonly def: EnemyDef;
+  readonly def: MonsterDef;
   private container: Phaser.GameObjects.Container;
   private hpBar: Phaser.GameObjects.Graphics;
   private selectionRing: Phaser.GameObjects.Graphics;
@@ -19,7 +19,7 @@ export class Enemy {
   private scene: Phaser.Scene;
   private moving = false;
 
-  constructor(scene: Phaser.Scene, def: EnemyDef, tileX: number, tileY: number) {
+  constructor(scene: Phaser.Scene, def: MonsterDef, tileX: number, tileY: number) {
     this.scene = scene;
     this.def = def;
     this.tileX = tileX;

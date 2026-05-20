@@ -1,11 +1,11 @@
 import { d, d20, mod, rollAdvantage, rollDisadvantage } from './Dice';
 import { PlayerDef } from '../data/player';
-import { EnemyAttack, EnemyDef } from '../data/enemies';
+import { MonsterAttack, MonsterDef } from '../data/monsters';
 import { ConsumableDef } from '../data/items';
 
 export function rollInitiative(
   player: PlayerDef,
-  enemy: EnemyDef,
+  enemy: MonsterDef,
 ): { playerFirst: boolean; logs: string[] } {
   const pRoll = d20();
   const eRoll = d20();
@@ -28,7 +28,7 @@ export function rollInitiative(
 
 export function playerMeleeAttack(
   player: PlayerDef,
-  enemy: EnemyDef,
+  enemy: MonsterDef,
   isHidden: boolean,
 ): { damage: number; logs: string[]; vexApplied: boolean } {
   const attack = player.mainAttack;
@@ -126,8 +126,8 @@ export function playerHide(
 }
 
 export function enemyAttack(
-  enemy: EnemyDef,
-  attack: EnemyAttack,
+  enemy: MonsterDef,
+  attack: MonsterAttack,
   playerAc: number,
   withAdvantage: boolean,
   withDisadvantage = false,
@@ -180,7 +180,7 @@ export function enemyAttack(
 }
 
 export function tryNimbleEscape(
-  enemy: EnemyDef,
+  enemy: MonsterDef,
   passivePerception: number,
 ): { hidden: boolean; logs: string[] } {
   const stealthRoll = d20() + enemy.stealthBonus;

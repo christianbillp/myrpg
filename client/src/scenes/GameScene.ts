@@ -12,8 +12,8 @@ import {
   TARGET_PANEL_WIDTH,
 } from "../constants";
 import { PlayerDef } from "../data/player";
-import { GOBLIN_MINION, BANDIT } from "../data/enemies";
-import { HEALTH_POTION } from "../data/items";
+import { MonsterDef } from "../data/monsters";
+import { ItemDef } from "../data/items";
 import { MapItem } from "../entities/MapItem";
 import { EncounterManager, ResumeState } from "../systems/EncounterManager";
 import { SaveSystem, SaveData } from "../systems/SaveSystem";
@@ -22,7 +22,6 @@ import { generateMap, GameMap } from "../systems/MapGenerator";
 import { generateRoomsMap } from "../systems/RoomsMapGenerator";
 import { shuffle } from "../systems/MapUtils";
 import { NPC } from "../entities/NPC";
-import { COMMONER } from "../data/npcs";
 import { pickRiddle } from "../data/riddles";
 import { SecretDef, pickSecrets } from "../data/secrets";
 import { d20 } from "../systems/Dice";
@@ -108,7 +107,7 @@ export class GameScene extends Phaser.Scene {
 
   private buildSaveData(): SaveData {
     return {
-      playerDefId: this.combat.playerDef.id as 'aldric' | 'miriel',
+      playerDefId: this.combat.playerDef.id,
       hp: this.combat.playerHp,
       xp: this.combat.playerXp,
       gold: this.combat.playerGold,
@@ -413,7 +412,7 @@ export class GameScene extends Phaser.Scene {
     this.selectedNPC = npc;
     if (npc) {
       npc.setSelected(true);
-      this.targetPanel.showNPC(npc.def);
+      this.targetPanel.show(npc.def, npc.def.maxHp);
     } else {
       this.targetPanel.hide();
     }
@@ -574,6 +573,8 @@ export class GameScene extends Phaser.Scene {
   }
 
   private spawnItems(): void {
+    const items = this.registry.get("items") as ItemDef[];
+    const healthPotion = items.find((i) => i.id === "health_potion") ?? items[0];
     const { cols, rows, passable } = this.gameMap;
     const candidates: [number, number][] = [];
     for (let r = 0; r < rows; r++) {
@@ -591,7 +592,7 @@ export class GameScene extends Phaser.Scene {
     const count = Math.min(3, candidates.length);
     for (let i = 0; i < count; i++) {
       const [r, c] = candidates[i];
-      const item = new MapItem(this, HEALTH_POTION, c, r);
+      const item = new MapItem(this, healthPotion, c, r);
       this.mapItems.push(item);
       this.mapContainer.add(item.gameObject);
     }
@@ -629,6 +630,8 @@ export class GameScene extends Phaser.Scene {
   }
 
   private spawnEnemies(): void {
+    const monsters = this.registry.get("monsters") as MonsterDef[];
+    const defs = monsters.filter((m) => m.cr !== "0");
     const { cols, rows, passable } = this.gameMap;
     const candidates: [number, number][] = [];
     for (let r = 0; r < rows; r++) {
@@ -639,8 +642,7 @@ export class GameScene extends Phaser.Scene {
       }
     }
     shuffle(candidates);
-    const defs = [GOBLIN_MINION, BANDIT];
-    const target = 2 + Math.floor(Math.random() * 3); // 2, 3, or 4
+    const target = 2 + Math.floor(Math.random() * 3);
     const count = Math.min(target, candidates.length);
     for (let i = 0; i < count; i++) {
       const [r, c] = candidates[i];
@@ -651,6 +653,8 @@ export class GameScene extends Phaser.Scene {
   }
 
   private spawnNPC(): void {
+    const monsters = this.registry.get("monsters") as MonsterDef[];
+    const commoner = monsters.find((m) => m.id === "commoner") ?? monsters[0];
     const { cols, rows, passable } = this.gameMap;
     const candidates: [number, number][] = [];
     for (let r = 0; r < rows; r++) {
@@ -666,7 +670,7 @@ export class GameScene extends Phaser.Scene {
     }
     if (candidates.length === 0) return;
     const [nx, ny] = candidates[Math.floor(Math.random() * candidates.length)];
-    this.npc = new NPC(this, COMMONER, nx, ny);
+    this.npc = new NPC(this, commoner, nx, ny);
     this.mapContainer.add(this.npc.gameObject);
   }
 
@@ -757,8 +761,12 @@ export class GameScene extends Phaser.Scene {
         this.combat.awardGold(r.amount);
         this.combat.addLogs([`+${r.amount} GP`]);
       } else if (r.type === "item") {
-        this.combat.addItem(r.item);
-        this.combat.addLogs([`Found: ${r.item.name}`]);
+        const items = this.registry.get("items") as ItemDef[];
+        const item = items.find((i) => i.id === r.itemId);
+        if (item) {
+          this.combat.addItem(item);
+          this.combat.addLogs([`Found: ${item.name}`]);
+        }
       } else {
         this.combat.addLogs([`Lore: "${r.text}"`]);
       }

@@ -1,0 +1,8 @@
+{
+  "id": "health_potion",
+  "name": "Health Potion",
+  "type": "consumable",
+  "healDice": 2,
+  "healSides": 4,
+  "healBonus": 2
+}

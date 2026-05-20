@@ -9,10 +9,16 @@ export class BootScene extends Phaser.Scene {
 
   preload(): void {
     this.load.json("characters", `${API_URL}/characters`);
+    this.load.json("monsters",   `${API_URL}/monsters`);
+    this.load.json("items",      `${API_URL}/items`);
+    this.load.json("maps",       `${API_URL}/maps`);
   }
 
   create(): void {
     this.registry.set("characters", this.cache.json.get("characters"));
+    this.registry.set("monsters",   this.cache.json.get("monsters"));
+    this.registry.set("items",      this.cache.json.get("items"));
+    this.registry.set("maps",       this.cache.json.get("maps"));
     this.scene.start("EncounterSetupScene");
   }
 }

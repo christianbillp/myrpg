@@ -5,8 +5,7 @@ import {
   GRID_COLS,
   TARGET_PANEL_WIDTH,
 } from "../constants";
-import { EnemyDef } from "../data/enemies";
-import { NPCDef } from "../data/npcs";
+import { MonsterDef } from "../data/monsters";
 
 const DPR = window.devicePixelRatio;
 const PX = PLAYER_PANEL_WIDTH + GRID_COLS * TILE_SIZE;
@@ -148,38 +147,7 @@ export class TargetPanel {
     this.hide();
   }
 
-  show(def: EnemyDef, hp: number): void {
-    const colorHex = "#" + def.color.toString(16).padStart(6, "0");
-    this.nameText.setText(def.name).setColor(colorHex);
-    this.typeText.setText(`CR ${def.cr}`);
-
-    this.statsText.setText(
-      [`AC     ${def.ac}`, `Speed  ${def.speedFt} ft`].join("\n"),
-    );
-
-    const statMod = (v: number) => Math.floor((v - 10) / 2);
-    const abilities: [string, number][] = [
-      ["STR", def.str],
-      ["DEX", def.dex],
-      ["CON", def.con],
-      ["INT", def.int],
-      ["WIS", def.wis],
-      ["CHA", def.cha],
-    ];
-    this.abilitiesText.setText(
-      abilities
-        .map(([name, val]) => {
-          const m = statMod(val);
-          return `${name}  ${String(val).padStart(2)}  (${m >= 0 ? "+" : ""}${m})`;
-        })
-        .join("\n"),
-    );
-
-    this.refresh(hp, def.maxHp);
-    this.items.forEach((item) => item.setVisible(true));
-  }
-
-  showNPC(def: NPCDef): void {
+  show(def: MonsterDef, hp: number): void {
     const colorHex = "#" + def.color.toString(16).padStart(6, "0");
     this.nameText.setText(def.name).setColor(colorHex);
     this.typeText.setText(`${def.type}  CR ${def.cr}`);
@@ -199,7 +167,7 @@ export class TargetPanel {
         })
         .join("\n"),
     );
-    this.refresh(def.maxHp, def.maxHp);
+    this.refresh(hp, def.maxHp);
     this.items.forEach((item) => item.setVisible(true));
   }
 

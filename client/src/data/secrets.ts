@@ -1,8 +1,6 @@
-import { ConsumableDef, HEALTH_POTION } from "./items";
-
 export type SecretReward =
   | { type: "gold"; amount: number }
-  | { type: "item"; item: ConsumableDef }
+  | { type: "item"; itemId: string }
   | { type: "lore"; text: string };
 
 export interface SecretDef {
@@ -24,7 +22,7 @@ const SECRET_POOL: SecretDef[] = [
   {
     id: "hidden_vial",
     dc: 12,
-    reward: { type: "item", item: HEALTH_POTION },
+    reward: { type: "item", itemId: "health_potion" },
     successText: "Tucked in a crevice, you find a small healing vial.",
     failureText: "The crevice holds only dust and cobwebs.",
   },
@@ -65,7 +63,7 @@ const SECRET_POOL: SecretDef[] = [
   {
     id: "healing_cache",
     dc: 15,
-    reward: { type: "item", item: HEALTH_POTION },
+    reward: { type: "item", itemId: "health_potion" },
     successText: "A hidden niche in the wall holds a carefully wrapped vial.",
     failureText: "The walls show signs of age but nothing stands out.",
   },

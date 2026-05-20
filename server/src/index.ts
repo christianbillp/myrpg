@@ -6,20 +6,19 @@ import { fileURLToPath } from 'url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const DATA_DIR = join(__dirname, '../data');
-const CHARACTERS_DIR = join(DATA_DIR, 'characters');
 const SAVE_FILE = join(DATA_DIR, 'character.json');
 
-async function readCharacters(): Promise<unknown[]> {
-  const files = await readdir(CHARACTERS_DIR);
+async function readDir(dir: string): Promise<unknown[]> {
+  const files = await readdir(dir);
   return Promise.all(
     files
       .filter((f) => f.endsWith('.json'))
-      .map(async (f) => JSON.parse(await readFile(join(CHARACTERS_DIR, f), 'utf-8'))),
+      .map(async (f) => JSON.parse(await readFile(join(dir, f), 'utf-8'))),
   );
 }
 
 async function defaultSave(): Promise<unknown> {
-  const chars = await readCharacters();
+  const chars = await readDir(join(DATA_DIR, 'characters'));
   const first = chars[0] as Record<string, unknown>;
   return {
     playerDefId: first['id'],
@@ -48,7 +47,10 @@ const server = Fastify({ logger: false });
 
 await server.register(cors, { origin: 'http://localhost:5173' });
 
-server.get('/characters', async () => readCharacters());
+server.get('/characters', async () => readDir(join(DATA_DIR, 'characters')));
+server.get('/monsters',   async () => readDir(join(DATA_DIR, 'monsters')));
+server.get('/items',      async () => readDir(join(DATA_DIR, 'items')));
+server.get('/maps',       async () => readDir(join(DATA_DIR, 'maps')));
 
 server.get('/save', async () => readSave());
 

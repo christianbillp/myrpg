@@ -1,4 +1,4 @@
-import { HEALTH_POTION, ItemDef } from '../data/items';
+import { ItemDef } from '../data/items';
 import { ResumeState } from './EncounterManager';
 
 const SAVE_KEY = 'myrpg_save';
@@ -13,16 +13,13 @@ export interface SaveData {
   secondWindUses: number;
 }
 
-const ITEMS_BY_ID: Record<string, ItemDef> = {
-  health_potion: HEALTH_POTION,
-};
-
-export function resumeFromSave(save: SaveData): ResumeState {
+export function resumeFromSave(save: SaveData, items: ItemDef[]): ResumeState {
+  const itemsById = Object.fromEntries(items.map((i) => [i.id, i]));
   return {
     hp: save.hp,
     xp: save.xp,
     gold: save.gold,
-    inventory: save.inventoryIds.map((id) => ITEMS_BY_ID[id]).filter(Boolean) as ItemDef[],
+    inventory: save.inventoryIds.map((id) => itemsById[id]).filter(Boolean) as ItemDef[],
     secondWindUses: save.secondWindUses,
   };
 }

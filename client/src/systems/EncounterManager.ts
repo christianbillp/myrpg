@@ -1,6 +1,6 @@
 import { PlayerDef } from '../data/player';
 import { Enemy } from '../entities/Enemy';
-import { crGoldReward } from '../data/enemies';
+import { crGoldReward } from '../data/monsters';
 import { ItemDef } from '../data/items';
 import {
   rollInitiative,

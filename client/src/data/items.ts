@@ -9,11 +9,3 @@ export interface ConsumableDef {
 
 export type ItemDef = ConsumableDef;
 
-export const HEALTH_POTION: ConsumableDef = {
-  id: 'health_potion',
-  name: 'Health Potion',
-  type: 'consumable',
-  healDice: 2,
-  healSides: 4,
-  healBonus: 2,
-};

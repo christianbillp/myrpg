@@ -1,5 +1,6 @@
 import Phaser from "phaser";
 import { PlayerDef } from "../data/player";
+import { ItemDef } from "../data/items";
 import { EncounterType } from "../data/encounterTypes";
 import { SavedMapDef, toGameMap } from "../data/maps";
 import { SavedMapPickerOverlay } from "../ui/SavedMapPickerOverlay";
@@ -229,7 +230,8 @@ export class EncounterSetupScene extends Phaser.Scene {
   private applySave(save: SaveData): void {
     const savedDef = this.characters.find((c) => c.id === save.playerDefId) ?? this.characters[0];
     if (!savedDef) return;
-    this.resumeState = resumeFromSave(save);
+    const items = this.registry.get("items") as ItemDef[];
+    this.resumeState = resumeFromSave(save, items);
     this.savedCharDefId = savedDef.id;
     this.selectChar(savedDef);
     this.saveBannerText.setText(

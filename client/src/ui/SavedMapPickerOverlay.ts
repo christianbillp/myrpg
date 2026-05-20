@@ -1,5 +1,5 @@
 import Phaser from "phaser";
-import { SavedMapDef, SAVED_MAPS } from "../data/maps";
+import { SavedMapDef } from "../data/maps";
 import {
   GRID_ROWS,
   TILE_SIZE,
@@ -67,8 +67,9 @@ export class SavedMapPickerOverlay {
     ];
 
     const cardObjects: Phaser.GameObjects.GameObject[] = [];
+    const savedMaps = scene.registry.get("maps") as SavedMapDef[];
 
-    SAVED_MAPS.forEach((def, i) => {
+    savedMaps.forEach((def, i) => {
       const [cx, cy] = positions[i];
       const cardTop = cy - cardH / 2;
 

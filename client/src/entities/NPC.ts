@@ -1,18 +1,18 @@
 import Phaser from "phaser";
-import { NPCDef } from "../data/npcs";
+import { MonsterDef } from "../data/monsters";
 import { TILE_SIZE } from "../constants";
 
 const DPR = window.devicePixelRatio;
 
 export class NPC {
-  readonly def: NPCDef;
+  readonly def: MonsterDef;
   private _tileX: number;
   private _tileY: number;
   private container: Phaser.GameObjects.Container;
   private body: Phaser.GameObjects.Rectangle;
   private hint: Phaser.GameObjects.Text;
 
-  constructor(scene: Phaser.Scene, def: NPCDef, tileX: number, tileY: number) {
+  constructor(scene: Phaser.Scene, def: MonsterDef, tileX: number, tileY: number) {
     this.def = def;
     this._tileX = tileX;
     this._tileY = tileY;
