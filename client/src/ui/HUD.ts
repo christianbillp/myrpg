@@ -174,6 +174,8 @@ export class HUD {
           this.searchBtn.setVisible(true);
         if (state.encounterTypes.includes("social_interaction") && !state.npcTalkedTo)
           this.communicateBtn.setVisible(true);
+        if (state.encounterTypes.includes("ai_dialogue"))
+          this.communicateBtn.setVisible(true);
         break;
 
       case "player_turn": {

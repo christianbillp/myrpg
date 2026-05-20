@@ -13,6 +13,7 @@ import {
 } from "../constants";
 import { PlayerDef } from "../data/player";
 import { MonsterDef } from "../data/monsters";
+import { NPCDef } from "../data/npcs";
 import { ItemDef } from "../data/items";
 import { MapItem } from "../entities/MapItem";
 import { EncounterManager, ResumeState } from "../systems/EncounterManager";
@@ -27,6 +28,7 @@ import { SecretDef, pickSecrets } from "../data/secrets";
 import { d20 } from "../systems/Dice";
 import { EncounterType } from "../data/encounterTypes";
 import { RiddleOverlay } from "../ui/RiddleOverlay";
+import { AIChatOverlay, ChatPlayerState, ChatMessage } from "../ui/AIChatOverlay";
 import { HUD, HUDState } from "../ui/HUD";
 import { QuestDisplay, combatQuests, explorationQuests, socialQuests } from "../data/quests";
 import { QuestManager } from "../systems/QuestManager";
@@ -49,6 +51,8 @@ export class GameScene extends Phaser.Scene {
   };
 
   private riddleOverlay: RiddleOverlay | null = null;
+  private aiChatOverlay: AIChatOverlay | null = null;
+  private npcChatHistory: ChatMessage[] = [];
   private hud!: HUD;
   private quests!: QuestManager;
 
@@ -125,6 +129,8 @@ export class GameScene extends Phaser.Scene {
     this.npc = null;
     this.npcTalkedTo = false;
     this.riddleOverlay = null;
+    this.aiChatOverlay = null;
+    this.npcChatHistory = [];
     this.gridZoom = 1;
     this.isPanning = false;
     this.panStartedInGameMap = false;
@@ -146,7 +152,7 @@ export class GameScene extends Phaser.Scene {
       this.spawnEnemies();
       this.spawnItems();
     }
-    if (this.encounterTypes.includes("social_interaction")) {
+    if (this.encounterTypes.includes("social_interaction") || this.encounterTypes.includes("ai_dialogue")) {
       this.spawnNPC();
     }
     if (this.encounterTypes.includes("exploration")) {
@@ -169,6 +175,7 @@ export class GameScene extends Phaser.Scene {
         _dx: number,
         dy: number,
       ) => {
+        if (this.aiChatOverlay || this.riddleOverlay) return;
         if (
           pointer.x < PLAYER_PANEL_WIDTH ||
           pointer.x >= PLAYER_PANEL_WIDTH + GRID_W
@@ -251,7 +258,7 @@ export class GameScene extends Phaser.Scene {
     const questDefs = [
       ...(this.encounterTypes.includes("simple_combat") ? combatQuests(this.enemies.length) : []),
       ...(this.encounterTypes.includes("exploration") ? explorationQuests() : []),
-      ...(this.encounterTypes.includes("social_interaction") ? socialQuests() : []),
+      ...(this.encounterTypes.includes("social_interaction") || this.encounterTypes.includes("ai_dialogue") ? socialQuests() : []),
     ];
     this.quests = new QuestManager(
       questDefs,
@@ -264,11 +271,13 @@ export class GameScene extends Phaser.Scene {
       () => this.updateHUD(),
     );
 
+    this.centerViewOnPlayer();
     this.buildHUD();
     this.updateHUD();
   }
 
   update(): void {
+    if (this.aiChatOverlay || this.riddleOverlay) return;
     if (this.combat.mode !== "exploring" && this.combat.mode !== "player_turn")
       return;
 
@@ -566,10 +575,18 @@ export class GameScene extends Phaser.Scene {
     );
   }
 
+  private centerViewOnPlayer(): void {
+    const px = this.player.tileX * TILE_SIZE + TILE_SIZE / 2;
+    const py = this.player.tileY * TILE_SIZE + TILE_SIZE / 2;
+    this.mapContainer.x = PLAYER_PANEL_WIDTH + GRID_W / 2 - px * this.gridZoom;
+    this.mapContainer.y = GRID_H / 2 - py * this.gridZoom;
+    this.clampGridPan();
+  }
+
   private resetGridView(): void {
     this.gridZoom = 1;
     this.mapContainer.setScale(1);
-    this.mapContainer.setPosition(PLAYER_PANEL_WIDTH, 0);
+    this.centerViewOnPlayer();
   }
 
   private spawnItems(): void {
@@ -654,7 +671,19 @@ export class GameScene extends Phaser.Scene {
 
   private spawnNPC(): void {
     const monsters = this.registry.get("monsters") as MonsterDef[];
-    const commoner = monsters.find((m) => m.id === "commoner") ?? monsters[0];
+    let commoner: MonsterDef;
+    if (this.encounterTypes.includes("ai_dialogue")) {
+      const npcs = (this.registry.get("npcs") as NPCDef[] | null) ?? [];
+      const npcDef = npcs.find((n) => n.persona) ?? npcs[0];
+      if (npcDef) {
+        const base = monsters.find((m) => m.id === npcDef.monsterClass) ?? monsters[0];
+        commoner = { ...base, id: npcDef.id, name: npcDef.name, color: npcDef.color };
+      } else {
+        commoner = monsters.find((m) => m.id === "commoner") ?? monsters[0];
+      }
+    } else {
+      commoner = monsters.find((m) => m.id === "commoner") ?? monsters[0];
+    }
     const { cols, rows, passable } = this.gameMap;
     const candidates: [number, number][] = [];
     for (let r = 0; r < rows; r++) {
@@ -675,39 +704,77 @@ export class GameScene extends Phaser.Scene {
   }
 
   private onCommunicate(): void {
-    if (this.riddleOverlay) return;
+    if (this.riddleOverlay || this.aiChatOverlay) return;
     if (!this.selectedNPC) {
       this.combat.addLogs(["No target selected."]);
       this.updateHUD();
       return;
     }
-    if (this.npcTalkedTo) return;
+    if (this.npcTalkedTo && !this.encounterTypes.includes("ai_dialogue")) return;
     if (chebyshev(this.player.tileX, this.player.tileY, this.selectedNPC.tileX, this.selectedNPC.tileY) > 1) {
       this.combat.addLogs(["Target is too far away."]);
       this.updateHUD();
       return;
     }
-    this.riddleOverlay = new RiddleOverlay(
-      this,
-      this.npc!.def.name,
-      pickRiddle(),
-      (correct) => {
-        if (correct) {
-          this.combat.awardGold(10);
-          this.combat.addLogs(["Correct! The villager rewards you with +10 GP."]);
-        } else {
-          this.combat.addLogs(["Wrong answer — the villager shakes their head."]);
-        }
-        this.npcTalkedTo = true;
-        this.npc?.setInteractionHint(false);
-        this.quests.onNPCTalkedTo();
-        this.updateHUD();
-      },
-      () => {
-        this.riddleOverlay = null;
-        this.updateHUD();
-      },
-    );
+
+    if (this.encounterTypes.includes("ai_dialogue")) {
+      this.aiChatOverlay = new AIChatOverlay(
+        this,
+        this.npc!.def.id,
+        this.npc!.def.name,
+        this.buildChatPlayerState(),
+        this.npcChatHistory,
+        () => {
+          if (!this.npcTalkedTo) {
+            this.npcTalkedTo = true;
+            this.npc?.setInteractionHint(false);
+            this.quests.onNPCTalkedTo();
+            this.updateHUD();
+          }
+        },
+        (history) => {
+          this.npcChatHistory = history;
+          this.aiChatOverlay = null;
+          this.input.keyboard?.enableGlobalCapture();
+          this.updateHUD();
+        },
+      );
+    } else {
+      this.riddleOverlay = new RiddleOverlay(
+        this,
+        this.npc!.def.name,
+        pickRiddle(),
+        (correct) => {
+          if (correct) {
+            this.combat.awardGold(10);
+            this.combat.addLogs(["Correct! The villager rewards you with +10 GP."]);
+          } else {
+            this.combat.addLogs(["Wrong answer — the villager shakes their head."]);
+          }
+          this.npcTalkedTo = true;
+          this.npc?.setInteractionHint(false);
+          this.quests.onNPCTalkedTo();
+          this.updateHUD();
+        },
+        () => {
+          this.riddleOverlay = null;
+          this.updateHUD();
+        },
+      );
+    }
+  }
+
+  private buildChatPlayerState(): ChatPlayerState {
+    const def = this.combat.playerDef;
+    return {
+      name: def.name,
+      className: def.className,
+      level: def.level,
+      hp: this.combat.playerHp,
+      maxHp: def.maxHp,
+      xp: this.combat.playerXp,
+      gold: this.combat.playerGold,
+    };
   }
 
   private spawnSecrets(): void {

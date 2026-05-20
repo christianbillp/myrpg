@@ -45,21 +45,19 @@ const SIMPLE_COMBAT: EncounterTypeDef = {
 const SOCIAL_INTERACTION: EncounterTypeDef = {
   id: "social_interaction",
   title: "Social Interaction",
-  lines: [
-    "Speak with a villager,",
-    "solve their riddle,",
-    "and earn your reward.",
-  ],
+  lines: ["Speak with a villager,", "solve their riddle."],
 };
 
 const EXPLORATION: EncounterTypeDef = {
   id: "exploration",
   title: "Exploration",
-  lines: [
-    "Secrets are hidden across",
-    "the map. Use the Search",
-    "action to find them.",
-  ],
+  lines: ["Find hidden secrets", "using the Search action."],
+};
+
+const AI_DIALOGUE: EncounterTypeDef = {
+  id: "ai_dialogue",
+  title: "AI Dialogue",
+  lines: ["Converse with a sage", "powered by Claude AI."],
 };
 
 const OPEN_MAP: MapTypeDef = {
@@ -174,27 +172,14 @@ export class EncounterSetupScene extends Phaser.Scene {
       })
       .setOrigin(0.5, 0);
 
-    const encounterCardH = 155;
-    const encounterCardGap = 15;
+    const encounterCardH = 130;
+    const encounterCardGap = 10;
     const encStep = encounterCardH + encounterCardGap;
-    this.buildEncounterCard(
-      SIMPLE_COMBAT,
-      encounterCx,
-      CONTENT_CY - encStep,
-      encounterCardH,
-    );
-    this.buildEncounterCard(
-      SOCIAL_INTERACTION,
-      encounterCx,
-      CONTENT_CY,
-      encounterCardH,
-    );
-    this.buildEncounterCard(
-      EXPLORATION,
-      encounterCx,
-      CONTENT_CY + encStep,
-      encounterCardH,
-    );
+    const encContentCY = CONTENT_CY + 10;
+    this.buildEncounterCard(SIMPLE_COMBAT,      encounterCx, encContentCY - 1.5 * encStep, encounterCardH);
+    this.buildEncounterCard(SOCIAL_INTERACTION, encounterCx, encContentCY - 0.5 * encStep, encounterCardH);
+    this.buildEncounterCard(EXPLORATION,        encounterCx, encContentCY + 0.5 * encStep, encounterCardH);
+    this.buildEncounterCard(AI_DIALOGUE,        encounterCx, encContentCY + 1.5 * encStep, encounterCardH);
 
     const mapCardH = 155;
     const mapCardGap = 18;
@@ -275,9 +260,9 @@ export class EncounterSetupScene extends Phaser.Scene {
 
     const top = cy - cardH / 2;
 
-    this.add.rectangle(cx, top + 30, 36, 36, 0xe2b96f).setAlpha(0.15);
+    this.add.rectangle(cx, top + 22, 28, 28, 0xe2b96f).setAlpha(0.15);
     this.add
-      .text(cx, top + 54, def.title, {
+      .text(cx, top + 42, def.title, {
         fontSize: "13px",
         color: "#ffffff",
         fontFamily: "monospace",
@@ -285,21 +270,21 @@ export class EncounterSetupScene extends Phaser.Scene {
       })
       .setOrigin(0.5, 0);
 
-    this.add.rectangle(cx, top + 74, cardW - 24, 1, 0x334455);
+    this.add.rectangle(cx, top + 60, cardW - 24, 1, 0x334455);
 
     this.add
-      .text(cx, top + 86, def.lines.join("\n"), {
+      .text(cx, top + 70, def.lines.join("\n"), {
         fontSize: "11px",
         color: "#99aabb",
         fontFamily: "monospace",
         resolution: DPR,
         align: "center",
-        lineSpacing: 6,
+        lineSpacing: 4,
       })
       .setOrigin(0.5, 0);
 
     this.add
-      .text(cx, top + cardH - 18, "SELECT", {
+      .text(cx, top + cardH - 14, "SELECT", {
         fontSize: "11px",
         color: "#e2b96f",
         fontFamily: "monospace",
