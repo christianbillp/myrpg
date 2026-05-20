@@ -15,10 +15,11 @@ import { ALDRIC, PlayerDef } from "../data/player";
 import { GOBLIN_MINION, BANDIT } from "../data/enemies";
 import { HEALTH_POTION } from "../data/items";
 import { MapItem } from "../entities/MapItem";
-import { CombatManager } from "../systems/CombatManager";
+import { EncounterManager } from "../systems/EncounterManager";
 import { EnemyAI, chebyshev } from "../systems/EnemyAI";
 import { generateMap, GameMap } from "../systems/MapGenerator";
 import { generateRoomsMap } from "../systems/RoomsMapGenerator";
+import { shuffle } from "../systems/MapUtils";
 import { NPC } from "../entities/NPC";
 import { COMMONER } from "../data/npcs";
 import { pickRiddle } from "../data/riddles";
@@ -26,20 +27,18 @@ import { SecretDef, pickSecrets } from "../data/secrets";
 import { d20 } from "../systems/Dice";
 import { EncounterType } from "../data/encounterTypes";
 import { RiddleOverlay } from "../ui/RiddleOverlay";
-import { TurnOrderBar, TurnChip } from "../ui/TurnOrderBar";
+import { HUD, HUDState } from "../ui/HUD";
 import { QuestDisplay, combatQuests, explorationQuests, socialQuests } from "../data/quests";
 import { QuestManager } from "../systems/QuestManager";
 
 const GRID_H = GRID_ROWS * TILE_SIZE;
 const GRID_W = GRID_COLS * TILE_SIZE;
-const W = PLAYER_PANEL_WIDTH + GRID_W + TARGET_PANEL_WIDTH;
-const DPR = window.devicePixelRatio;
 
 export class GameScene extends Phaser.Scene {
   private player!: Player;
   private enemies: Enemy[] = [];
   private mapItems: MapItem[] = [];
-  private combat!: CombatManager;
+  private combat!: EncounterManager;
 
   private cursors!: Phaser.Types.Input.Keyboard.CursorKeys;
   private wasd!: {
@@ -49,19 +48,8 @@ export class GameScene extends Phaser.Scene {
     right: Phaser.Input.Keyboard.Key;
   };
 
-  private enemyInfoText!: Phaser.GameObjects.Text;
-  private phaseText!: Phaser.GameObjects.Text;
-  private logText!: Phaser.GameObjects.Text;
-  private logScrollHint!: Phaser.GameObjects.Text;
-  private attackBtn!: Phaser.GameObjects.Container;
-  private secondWindBtn!: Phaser.GameObjects.Container;
-  private hideBtn!: Phaser.GameObjects.Container;
-  private endTurnBtn!: Phaser.GameObjects.Container;
-  private deathSaveBtn!: Phaser.GameObjects.Container;
-  private searchBtn!: Phaser.GameObjects.Container;
-  private communicateBtn!: Phaser.GameObjects.Container;
   private riddleOverlay: RiddleOverlay | null = null;
-  private turnOrderBar!: TurnOrderBar;
+  private hud!: HUD;
   private quests!: QuestManager;
 
   private mapSecrets: { tileX: number; tileY: number; def: SecretDef }[] = [];
@@ -94,7 +82,7 @@ export class GameScene extends Phaser.Scene {
     this.savedMap = data?.savedMap ?? null;
     this.encounterTypes = data?.encounterTypes ?? ["simple_combat"];
     const def = data?.playerDef ?? ALDRIC;
-    this.combat = new CombatManager(
+    this.combat = new EncounterManager(
       def,
       () => this.updateHUD(),
       (delay) => this.time.delayedCall(delay, () => this.runEnemyTurn()),
@@ -251,8 +239,8 @@ export class GameScene extends Phaser.Scene {
     this.quests = new QuestManager(
       questDefs,
       (quest) => {
-        this.combat.playerXp += quest.rewardXp;
-        this.combat.playerGold += quest.rewardGp;
+        this.combat.awardXP(quest.rewardXp);
+        this.combat.awardGold(quest.rewardGp);
         this.combat.addLogs([`Quest complete: ${quest.title}! +${quest.rewardXp} XP  +${quest.rewardGp} GP`]);
         this.updateHUD();
       },
@@ -416,146 +404,49 @@ export class GameScene extends Phaser.Scene {
   // --- HUD ---
 
   private buildHUD(): void {
-    const y = GRID_H;
-    const cx = PLAYER_PANEL_WIDTH + GRID_W / 2;
-    const lx = PLAYER_PANEL_WIDTH + 12;
-
     this.playerPanel = new PlayerPanel(this, this.combat.playerDef, () => this.combat.usePotion());
     this.targetPanel = new TargetPanel(this);
-    this.turnOrderBar = new TurnOrderBar(this);
-
-    this.add
-      .rectangle(W / 2, y + HUD_HEIGHT / 2, W, HUD_HEIGHT, 0x0d0d1e)
-      .setDepth(10);
-    this.add.rectangle(W / 2, y + 1, W, 2, 0x445566).setDepth(10);
-
-    this.enemyInfoText = this.add
-      .text(W - 12, y + 10, "", {
-        fontSize: "12px",
-        color: "#e74c3c",
-        fontFamily: "monospace",
-        resolution: DPR,
-      })
-      .setOrigin(1, 0)
-      .setDepth(11);
-
-    this.phaseText = this.add
-      .text(cx, y + 10, "", {
-        fontSize: "13px",
-        color: "#e2b96f",
-        fontFamily: "monospace",
-        resolution: DPR,
-      })
-      .setOrigin(0.5, 0)
-      .setDepth(11);
-
-    this.logText = this.add
-      .text(lx, y + 30, "", {
-        fontSize: "11px",
-        color: "#aabbcc",
-        fontFamily: "monospace",
-        resolution: DPR,
-        wordWrap: { width: GRID_W - 24 },
-        lineSpacing: 4,
-      })
-      .setDepth(11);
-
-    this.logScrollHint = this.add
-      .text(W - 12, y + 114, "", {
-        fontSize: "10px",
-        color: "#445566",
-        fontFamily: "monospace",
-        resolution: DPR,
-      })
-      .setOrigin(1, 0)
-      .setDepth(12);
-
-    const logZone = this.add
-      .zone(cx, y + 72, GRID_W, 90)
-      .setInteractive()
-      .setDepth(13);
-    logZone.on("wheel", (_p: unknown, _dx: number, dy: number) => {
-      this.combat.scrollLog(dy > 0 ? -1 : 1);
-      this.updateLogDisplay();
+    this.hud = new HUD(this, {
+      onAttack:      () => this.onAttack(),
+      onHide:        () => this.onHide(),
+      onSecondWind:  () => this.onSecondWind(),
+      onEndTurn:     () => this.onEndTurn(),
+      onDeathSave:   () => this.onDeathSave(),
+      onSearch:      () => this.onSearch(),
+      onCommunicate: () => this.onCommunicate(),
+      onResetView:   () => this.resetGridView(),
+      onScrollLog:   (dy) => {
+        this.combat.scrollLog(dy > 0 ? -1 : 1);
+        this.updateHUD();
+      },
     });
-
-    this.add.rectangle(W / 2, y + 122, W, 1, 0x334455).setDepth(11);
-
-    const btnY = y + 148;
-    this.makeButton(
-      PLAYER_PANEL_WIDTH + 80,
-      y + 10,
-      "RESET VIEW",
-      0x1a2a3a,
-      () => this.resetGridView(),
-    );
-    this.attackBtn = this.makeButton(
-      PLAYER_PANEL_WIDTH + 130,
-      btnY,
-      "ATTACK",
-      0x1a4a1e,
-      () => this.onAttack(),
-    );
-    this.secondWindBtn = this.makeButton(
-      cx,
-      btnY,
-      "SECOND WIND",
-      0x1a3a5a,
-      () => this.onSecondWind(),
-    );
-    this.hideBtn = this.makeButton(cx, btnY, "HIDE", 0x1a3a1a, () =>
-      this.onHide(),
-    );
-    this.endTurnBtn = this.makeButton(W - 130, btnY, "END TURN", 0x3a3020, () =>
-      this.onEndTurn(),
-    );
-    this.deathSaveBtn = this.makeButton(
-      cx,
-      btnY,
-      "ROLL DEATH SAVE",
-      0x5a1a1a,
-      () => this.onDeathSave(),
-    );
-    this.searchBtn = this.makeButton(
-      W - 130,
-      btnY,
-      "SEARCH",
-      0x1a2a3a,
-      () => this.onSearch(),
-    );
-    this.communicateBtn = this.makeButton(
-      cx,
-      btnY,
-      "COMMUNICATE",
-      0x2a1a3a,
-      () => this.onCommunicate(),
-    );
   }
 
-  private makeButton(
-    x: number,
-    y: number,
-    label: string,
-    color: number,
-    onClick: () => void,
-  ): Phaser.GameObjects.Container {
-    const bg = this.add
-      .rectangle(0, 0, 160, 34, color)
-      .setStrokeStyle(1, 0x556677);
-    const text = this.add
-      .text(0, 0, label, {
-        fontSize: "12px",
-        color: "#ffffff",
-        fontFamily: "monospace",
-        resolution: DPR,
-      })
-      .setOrigin(0.5);
-    const container = this.add.container(x, y, [bg, text]).setDepth(12);
-    bg.setInteractive({ useHandCursor: true });
-    bg.on("pointerover", () => bg.setAlpha(0.75));
-    bg.on("pointerout", () => bg.setAlpha(1));
-    bg.on("pointerdown", onClick);
-    return container;
+  private buildHUDState(): HUDState {
+    return {
+      mode:               this.combat.mode,
+      playerDef:          this.combat.playerDef,
+      playerHp:           this.combat.playerHp,
+      movesLeft:          this.combat.movesLeft,
+      actionUsed:         this.combat.actionUsed,
+      bonusActionUsed:    this.combat.bonusActionUsed,
+      playerHidden:       this.combat.playerHidden,
+      secondWindUses:     this.combat.secondWindUses,
+      activeEnemy:        this.combat.activeEnemy,
+      combatEnemies:      this.combat.combatEnemies,
+      enemyVexed:         this.combat.enemyVexed,
+      enemyHidden:        this.combat.enemyHidden,
+      deathSaveSuccesses: this.combat.deathSaveSuccesses,
+      deathSaveFailures:  this.combat.deathSaveFailures,
+      combatLog:          this.combat.combatLog,
+      logScrollOffset:    this.combat.logScrollOffset,
+      selectedEnemy:      this.selectedEnemy,
+      playerTileX:        this.player.tileX,
+      playerTileY:        this.player.tileY,
+      encounterTypes:     this.encounterTypes,
+      secretsRemaining:   this.mapSecrets.length,
+      npcTalkedTo:        this.npcTalkedTo,
+    };
   }
 
   private updatePanel(): void {
@@ -580,148 +471,8 @@ export class GameScene extends Phaser.Scene {
     this.updatePanel();
     if (this.selectedEnemy)
       this.targetPanel.refresh(this.selectedEnemy.hp, this.selectedEnemy.maxHp);
-
-    const displayEnemy =
-      this.selectedEnemy && !this.selectedEnemy.isDead()
-        ? this.selectedEnemy
-        : this.combat.activeEnemy;
-    if (displayEnemy) {
-      const isActive = displayEnemy === this.combat.activeEnemy;
-      const vexedPart = isActive && this.combat.enemyVexed ? "  [VEXED]" : "";
-      const hiddenPart = isActive && this.combat.enemyHidden ? "  [HIDDEN]" : "";
-      this.enemyInfoText.setText(
-        `${displayEnemy.def.name}  ${displayEnemy.hp}/${displayEnemy.maxHp} HP${hiddenPart}${vexedPart}`,
-      );
-    } else {
-      this.enemyInfoText.setText("");
-    }
-
-    const inCombat = this.combat.mode !== "exploring" && this.combat.combatEnemies.length > 0;
-    this.turnOrderBar.setVisible(inCombat);
-    if (inCombat) {
-      const chips: TurnChip[] = [
-        {
-          label: "",
-          name: this.combat.playerDef.name,
-          color: this.combat.playerDef.color,
-          isActive:
-            this.combat.mode === "player_turn" ||
-            this.combat.mode === "death_saves",
-          isDead: this.combat.playerHp <= 0,
-        },
-        ...this.combat.combatEnemies.map((e) => ({
-          label: e.label,
-          name: e.def.name,
-          color: e.def.color,
-          isActive: this.combat.activeEnemy === e,
-          isDead: e.isDead(),
-        })),
-      ];
-      this.turnOrderBar.refresh(chips);
-    }
-
-    this.updateLogDisplay();
+    this.hud.refresh(this.buildHUDState());
     this.drawHighlights();
-
-    this.attackBtn.setVisible(false);
-    this.secondWindBtn.setVisible(false);
-    this.hideBtn.setVisible(false);
-    this.endTurnBtn.setVisible(false);
-    this.deathSaveBtn.setVisible(false);
-    this.searchBtn.setVisible(false);
-    this.communicateBtn.setVisible(false);
-    this.phaseText.setColor("#e2b96f");
-
-    switch (this.combat.mode) {
-      case "exploring":
-        this.phaseText.setText("Exploring — WASD / arrow keys to move");
-        if (this.encounterTypes.includes("exploration"))
-          this.searchBtn.setVisible(true);
-        if (this.encounterTypes.includes("social_interaction"))
-          this.communicateBtn.setVisible(true);
-        break;
-
-      case "player_turn": {
-        const hiddenLabel = this.combat.playerHidden ? "  [HIDDEN]" : "";
-        const actedLabel = this.combat.actionUsed ? "  · action used" : "";
-        const bonusLabel = this.combat.bonusActionUsed ? "  · bonus used" : "";
-        this.phaseText.setText(
-          `Your turn — ${this.combat.movesLeft}/${this.combat.playerDef.speed} moves${hiddenLabel}${actedLabel}${bonusLabel}`,
-        );
-        this.endTurnBtn.setVisible(true);
-
-        if (!this.combat.actionUsed) {
-          const hasAdjacentTarget = this.combat.combatEnemies.some(
-            (e) =>
-              !e.isDead() &&
-              chebyshev(this.player.tileX, this.player.tileY, e.tileX, e.tileY) <= 1,
-          );
-          if (hasAdjacentTarget) this.attackBtn.setVisible(true);
-        }
-
-        if (
-          !this.combat.bonusActionUsed &&
-          this.combat.playerDef.secondWindMaxUses > 0 &&
-          this.combat.secondWindUses > 0 &&
-          this.combat.playerHp < this.combat.playerDef.maxHp
-        ) {
-          this.secondWindBtn.setVisible(true);
-        }
-        if (
-          !this.combat.bonusActionUsed &&
-          this.combat.playerDef.sneakAttackDice > 0 &&
-          !this.combat.playerHidden &&
-          this.combat.combatEnemies.some((e) => !e.isDead())
-        ) {
-          this.hideBtn.setVisible(true);
-        }
-        break;
-      }
-
-      case "enemy_turn": {
-        const ae = this.combat.activeEnemy;
-        const labelPart = ae?.label ? `${ae.label} · ` : "";
-        this.phaseText.setText(`${labelPart}${ae?.def.name ?? "Enemy"}'s turn...`);
-        break;
-      }
-
-      case "death_saves":
-        this.phaseText.setColor("#ff7777");
-        this.phaseText.setText(
-          `${this.combat.playerDef.name} is unconscious!  ✓ ${this.combat.deathSaveSuccesses}/3  ✗ ${this.combat.deathSaveFailures}/3`,
-        );
-        this.deathSaveBtn.setVisible(true);
-        break;
-
-      case "defeat":
-        this.phaseText.setColor("#ff4444");
-        this.phaseText.setText(
-          this.combat.deathSaveSuccesses >= 3
-            ? "💀 Stabilized — combat over."
-            : "☠ You have died.",
-        );
-        break;
-    }
-  }
-
-  private updateLogDisplay(): void {
-    const total = this.combat.combatLog.length;
-    const offset = Math.min(
-      this.combat.logScrollOffset,
-      Math.max(0, total - 6),
-    );
-    this.combat.logScrollOffset = offset;
-    const end = total - offset;
-    const start = Math.max(0, end - 6);
-    this.logText.setText(this.combat.combatLog.slice(start, end).join("\n"));
-
-    if (offset > 0) {
-      this.logScrollHint.setText(`▼ ${offset} newer`);
-    } else if (total > 6) {
-      this.logScrollHint.setText("↑ scroll for history");
-    } else {
-      this.logScrollHint.setText("");
-    }
   }
 
   private drawHighlights(): void {
@@ -813,10 +564,7 @@ export class GameScene extends Phaser.Scene {
         }
       }
     }
-    for (let i = candidates.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [candidates[i], candidates[j]] = [candidates[j], candidates[i]];
-    }
+    shuffle(candidates);
     const count = Math.min(3, candidates.length);
     for (let i = 0; i < count; i++) {
       const [r, c] = candidates[i];
@@ -867,10 +615,7 @@ export class GameScene extends Phaser.Scene {
         }
       }
     }
-    for (let i = candidates.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [candidates[i], candidates[j]] = [candidates[j], candidates[i]];
-    }
+    shuffle(candidates);
     const defs = [GOBLIN_MINION, BANDIT];
     const target = 2 + Math.floor(Math.random() * 3); // 2, 3, or 4
     const count = Math.min(target, candidates.length);
@@ -953,10 +698,7 @@ export class GameScene extends Phaser.Scene {
         }
       }
     }
-    for (let i = candidates.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [candidates[i], candidates[j]] = [candidates[j], candidates[i]];
-    }
+    shuffle(candidates);
     const secrets = pickSecrets(4);
     const count = Math.min(secrets.length, candidates.length);
     for (let i = 0; i < count; i++) {

@@ -29,7 +29,7 @@ const ENEMY_TURN_DELAY: Record<string, number> = {
   deathSave: 900,
 };
 
-export class CombatManager {
+export class EncounterManager {
   mode: CombatMode = 'exploring';
   playerHp: number;
   playerXp: number;
@@ -284,6 +284,11 @@ export class CombatManager {
     }
 
     this.endEnemyTurn();
+  }
+
+  awardXP(amount: number): void {
+    this.playerXp += amount;
+    this.onChange();
   }
 
   awardGold(amount: number): void {

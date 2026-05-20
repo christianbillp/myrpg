@@ -33,9 +33,8 @@ export class QuestManager {
       if (q.progress >= q.def.goal.target) {
         q.completed = true;
         this.onComplete(q.def);
-      } else {
-        this.onChange();
       }
+      this.onChange();
     }
   }
 }

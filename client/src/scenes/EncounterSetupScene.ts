@@ -266,25 +266,42 @@ export class EncounterSetupScene extends Phaser.Scene {
       .setOrigin(0.5, 0);
   }
 
-  private buildMapTypeCard(
+  private buildMapCardBase(
     def: MapTypeDef,
     cx: number,
     cy: number,
     cardH: number,
-  ): void {
+    actionLabel: string,
+  ): { bg: Phaser.GameObjects.Rectangle; descText: Phaser.GameObjects.Text } {
     const cardW = 240;
     const accentHex = "#" + def.accent.toString(16).padStart(6, "0");
+    const top = cy - cardH / 2;
 
     const bg = this.add
       .rectangle(cx, cy, cardW, cardH, 0x111122)
       .setStrokeStyle(2, 0x334455)
       .setInteractive({ useHandCursor: true });
-
     this.mapTypeCardBgs.set(def.id, bg);
 
+    this.add.rectangle(cx, top + 30, 36, 36, def.accent).setAlpha(0.15);
+    this.add
+      .text(cx, top + 54, def.title, { fontSize: "13px", color: "#ffffff", fontFamily: "monospace", resolution: DPR })
+      .setOrigin(0.5, 0);
+    this.add.rectangle(cx, top + 74, cardW - 24, 1, 0x334455);
+    const descText = this.add
+      .text(cx, top + 86, def.lines.join("\n"), { fontSize: "11px", color: "#99aabb", fontFamily: "monospace", resolution: DPR, align: "center", lineSpacing: 6 })
+      .setOrigin(0.5, 0);
+    this.add
+      .text(cx, top + cardH - 18, actionLabel, { fontSize: "11px", color: accentHex, fontFamily: "monospace", resolution: DPR })
+      .setOrigin(0.5, 0);
+
+    return { bg, descText };
+  }
+
+  private buildMapTypeCard(def: MapTypeDef, cx: number, cy: number, cardH: number): void {
+    const { bg } = this.buildMapCardBase(def, cx, cy, cardH, "SELECT");
     bg.on("pointerover", () => {
-      if (this.selectedMapType?.id !== def.id)
-        bg.setStrokeStyle(2, def.accent & 0x7f7f7f);
+      if (this.selectedMapType?.id !== def.id) bg.setStrokeStyle(2, def.accent & 0x7f7f7f);
     });
     bg.on("pointerout", () => {
       if (this.selectedMapType?.id !== def.id) bg.setStrokeStyle(2, 0x334455);
@@ -295,93 +312,14 @@ export class EncounterSetupScene extends Phaser.Scene {
       this.selectedMapType = def;
       this.refreshBeginButton();
     });
-
-    const top = cy - cardH / 2;
-
-    this.add.rectangle(cx, top + 30, 36, 36, def.accent).setAlpha(0.15);
-
-    this.add
-      .text(cx, top + 54, def.title, {
-        fontSize: "13px",
-        color: "#ffffff",
-        fontFamily: "monospace",
-        resolution: DPR,
-      })
-      .setOrigin(0.5, 0);
-
-    this.add.rectangle(cx, top + 74, cardW - 24, 1, 0x334455);
-
-    this.add
-      .text(cx, top + 86, def.lines.join("\n"), {
-        fontSize: "11px",
-        color: "#99aabb",
-        fontFamily: "monospace",
-        resolution: DPR,
-        align: "center",
-        lineSpacing: 6,
-      })
-      .setOrigin(0.5, 0);
-
-    this.add
-      .text(cx, top + cardH - 18, "SELECT", {
-        fontSize: "11px",
-        color: accentHex,
-        fontFamily: "monospace",
-        resolution: DPR,
-      })
-      .setOrigin(0.5, 0);
   }
 
   private buildSavedMapCard(cx: number, cy: number, cardH: number): void {
     const def = SAVED_MAP;
-    const cardW = 240;
-    const accentHex = "#" + def.accent.toString(16).padStart(6, "0");
-
-    const bg = this.add
-      .rectangle(cx, cy, cardW, cardH, 0x111122)
-      .setStrokeStyle(2, 0x334455)
-      .setInteractive({ useHandCursor: true });
-
-    this.mapTypeCardBgs.set(def.id, bg);
-
-    const top = cy - cardH / 2;
-
-    this.add.rectangle(cx, top + 30, 36, 36, def.accent).setAlpha(0.15);
-
-    this.add
-      .text(cx, top + 54, def.title, {
-        fontSize: "13px",
-        color: "#ffffff",
-        fontFamily: "monospace",
-        resolution: DPR,
-      })
-      .setOrigin(0.5, 0);
-
-    this.add.rectangle(cx, top + 74, cardW - 24, 1, 0x334455);
-
-    this.savedMapNameLabel = this.add
-      .text(cx, top + 86, def.lines.join("\n"), {
-        fontSize: "11px",
-        color: "#99aabb",
-        fontFamily: "monospace",
-        resolution: DPR,
-        align: "center",
-        lineSpacing: 6,
-      })
-      .setOrigin(0.5, 0);
-
-    this.add
-      .text(cx, top + cardH - 18, "PICK MAP", {
-        fontSize: "11px",
-        color: accentHex,
-        fontFamily: "monospace",
-        resolution: DPR,
-      })
-      .setOrigin(0.5, 0);
-
+    const { bg, descText } = this.buildMapCardBase(def, cx, cy, cardH, "PICK MAP");
+    this.savedMapNameLabel = descText;
     bg.on("pointerover", () => {
-      if (this.selectedMapType?.id !== def.id)
-        bg.setStrokeStyle(2, def.accent & 0x7f7f7f);
+      if (this.selectedMapType?.id !== def.id) bg.setStrokeStyle(2, def.accent & 0x7f7f7f);
     });
     bg.on("pointerout", () => {
       if (this.selectedMapType?.id !== def.id) bg.setStrokeStyle(2, 0x334455);
@@ -394,14 +332,11 @@ export class EncounterSetupScene extends Phaser.Scene {
           this.selectedMapType = def;
           for (const [id, b] of this.mapTypeCardBgs)
             b.setStrokeStyle(2, id === def.id ? def.accent : 0x334455);
-          this.savedMapNameLabel
-            .setText(chosenMap.name)
-            .setColor("#e2b96f");
+          this.savedMapNameLabel.setText(chosenMap.name).setColor("#e2b96f");
           this.refreshBeginButton();
         },
         () => {
-          if (this.selectedMapType?.id !== def.id)
-            bg.setStrokeStyle(2, 0x334455);
+          if (this.selectedMapType?.id !== def.id) bg.setStrokeStyle(2, 0x334455);
         },
       );
     });

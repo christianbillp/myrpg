@@ -1,6 +1,6 @@
 import { Enemy } from '../entities/Enemy';
 import { tryNimbleEscape, enemyAttack } from './CombatSystem';
-import { EnemyTurnResult } from './CombatManager';
+import { EnemyTurnResult } from './EncounterManager';
 import { EnemyAttack } from '../data/enemies';
 
 export interface EnemyTurnConfig {
