@@ -80,11 +80,13 @@ export class GameScene extends Phaser.Scene {
     super({ key: "GameScene" });
   }
 
-  private mapType: "open" | "rooms" = "open";
+  private mapType: "open" | "rooms" | "saved" = "open";
+  private savedMap: GameMap | null = null;
   private encounterTypes: EncounterType[] = ["simple_combat"];
 
-  init(data: { playerDef?: PlayerDef; mapType?: "open" | "rooms"; encounterTypes?: EncounterType[] }): void {
+  init(data: { playerDef?: PlayerDef; mapType?: "open" | "rooms" | "saved"; encounterTypes?: EncounterType[]; savedMap?: GameMap }): void {
     this.mapType = data?.mapType ?? "open";
+    this.savedMap = data?.savedMap ?? null;
     this.encounterTypes = data?.encounterTypes ?? ["simple_combat"];
     const def = data?.playerDef ?? ALDRIC;
     this.combat = new CombatManager(
@@ -113,7 +115,9 @@ export class GameScene extends Phaser.Scene {
     this.isPanning = false;
     this.panStartedInGameMap = false;
 
-    this.gameMap = this.mapType === "rooms" ? generateRoomsMap() : generateMap();
+    this.gameMap =
+      this.savedMap ??
+      (this.mapType === "rooms" ? generateRoomsMap() : generateMap());
 
     this.mapContainer = this.add.container(PLAYER_PANEL_WIDTH, 0);
     this.mapContainer.add(this.drawMapTiles());

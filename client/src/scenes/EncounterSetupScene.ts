@@ -1,6 +1,8 @@
 import Phaser from "phaser";
 import { ALDRIC, MIRIEL, PlayerDef } from "../data/player";
 import { EncounterType } from "../data/encounterTypes";
+import { SavedMapDef, toGameMap } from "../data/maps";
+import { SavedMapPickerOverlay } from "../ui/SavedMapPickerOverlay";
 import {
   TILE_SIZE,
   GRID_COLS,
@@ -25,7 +27,7 @@ interface EncounterTypeDef {
 }
 
 interface MapTypeDef {
-  id: "open" | "rooms";
+  id: "open" | "rooms" | "saved";
   title: string;
   lines: string[];
   accent: number;
@@ -71,15 +73,24 @@ const ROOMS_MAP: MapTypeDef = {
   lines: ["Connected rectangular", "rooms with corridors."],
 };
 
+const SAVED_MAP: MapTypeDef = {
+  id: "saved",
+  title: "Saved Map",
+  accent: 0xe28f6e,
+  lines: ["Choose from a collection", "of hand-crafted maps."],
+};
+
 export class EncounterSetupScene extends Phaser.Scene {
   private selectedEncounterTypeIds: Set<string> = new Set();
   private selectedMapType: MapTypeDef | null = null;
+  private selectedSavedMap: SavedMapDef | null = null;
   private selectedPlayer: PlayerDef | null = null;
 
   private encounterCardBgs: Map<string, Phaser.GameObjects.Rectangle> =
     new Map();
   private mapTypeCardBgs: Map<string, Phaser.GameObjects.Rectangle> = new Map();
   private charCardBgs: Map<string, Phaser.GameObjects.Rectangle> = new Map();
+  private savedMapNameLabel!: Phaser.GameObjects.Text;
   private beginBg!: Phaser.GameObjects.Rectangle;
   private beginLabel!: Phaser.GameObjects.Text;
 
@@ -90,6 +101,7 @@ export class EncounterSetupScene extends Phaser.Scene {
   create(): void {
     this.selectedEncounterTypeIds.clear();
     this.selectedMapType = null;
+    this.selectedSavedMap = null;
     this.selectedPlayer = null;
     this.encounterCardBgs.clear();
     this.mapTypeCardBgs.clear();
@@ -169,12 +181,12 @@ export class EncounterSetupScene extends Phaser.Scene {
       encounterCardH,
     );
 
-    const mapCardH = 200;
-    const mapCardGap = 20;
-    const mapTopCY = CONTENT_CY - (mapCardH + mapCardGap) / 2;
-    const mapBotCY = CONTENT_CY + (mapCardH + mapCardGap) / 2;
-    this.buildMapTypeCard(OPEN_MAP, mapCx, mapTopCY, mapCardH);
-    this.buildMapTypeCard(ROOMS_MAP, mapCx, mapBotCY, mapCardH);
+    const mapCardH = 155;
+    const mapCardGap = 18;
+    const mapStep = mapCardH + mapCardGap;
+    this.buildMapTypeCard(OPEN_MAP, mapCx, CONTENT_CY - mapStep, mapCardH);
+    this.buildMapTypeCard(ROOMS_MAP, mapCx, CONTENT_CY, mapCardH);
+    this.buildSavedMapCard(mapCx, CONTENT_CY + mapStep, mapCardH);
 
     const spread = 170;
     this.buildCharCard(ALDRIC, charCx - spread, CONTENT_CY);
@@ -318,6 +330,81 @@ export class EncounterSetupScene extends Phaser.Scene {
         resolution: DPR,
       })
       .setOrigin(0.5, 0);
+  }
+
+  private buildSavedMapCard(cx: number, cy: number, cardH: number): void {
+    const def = SAVED_MAP;
+    const cardW = 240;
+    const accentHex = "#" + def.accent.toString(16).padStart(6, "0");
+
+    const bg = this.add
+      .rectangle(cx, cy, cardW, cardH, 0x111122)
+      .setStrokeStyle(2, 0x334455)
+      .setInteractive({ useHandCursor: true });
+
+    this.mapTypeCardBgs.set(def.id, bg);
+
+    const top = cy - cardH / 2;
+
+    this.add.rectangle(cx, top + 30, 36, 36, def.accent).setAlpha(0.15);
+
+    this.add
+      .text(cx, top + 54, def.title, {
+        fontSize: "13px",
+        color: "#ffffff",
+        fontFamily: "monospace",
+        resolution: DPR,
+      })
+      .setOrigin(0.5, 0);
+
+    this.add.rectangle(cx, top + 74, cardW - 24, 1, 0x334455);
+
+    this.savedMapNameLabel = this.add
+      .text(cx, top + 86, def.lines.join("\n"), {
+        fontSize: "11px",
+        color: "#99aabb",
+        fontFamily: "monospace",
+        resolution: DPR,
+        align: "center",
+        lineSpacing: 6,
+      })
+      .setOrigin(0.5, 0);
+
+    this.add
+      .text(cx, top + cardH - 18, "PICK MAP", {
+        fontSize: "11px",
+        color: accentHex,
+        fontFamily: "monospace",
+        resolution: DPR,
+      })
+      .setOrigin(0.5, 0);
+
+    bg.on("pointerover", () => {
+      if (this.selectedMapType?.id !== def.id)
+        bg.setStrokeStyle(2, def.accent & 0x7f7f7f);
+    });
+    bg.on("pointerout", () => {
+      if (this.selectedMapType?.id !== def.id) bg.setStrokeStyle(2, 0x334455);
+    });
+    bg.on("pointerdown", () => {
+      new SavedMapPickerOverlay(
+        this,
+        (chosenMap) => {
+          this.selectedSavedMap = chosenMap;
+          this.selectedMapType = def;
+          for (const [id, b] of this.mapTypeCardBgs)
+            b.setStrokeStyle(2, id === def.id ? def.accent : 0x334455);
+          this.savedMapNameLabel
+            .setText(chosenMap.name)
+            .setColor("#e2b96f");
+          this.refreshBeginButton();
+        },
+        () => {
+          if (this.selectedMapType?.id !== def.id)
+            bg.setStrokeStyle(2, 0x334455);
+        },
+      );
+    });
   }
 
   private buildCharCard(def: PlayerDef, cx: number, cy: number): void {
@@ -468,16 +555,20 @@ export class EncounterSetupScene extends Phaser.Scene {
         playerDef: this.selectedPlayer,
         mapType: this.selectedMapType!.id,
         encounterTypes: Array.from(this.selectedEncounterTypeIds) as EncounterType[],
+        savedMap:
+          this.selectedMapType!.id === "saved" && this.selectedSavedMap
+            ? toGameMap(this.selectedSavedMap)
+            : undefined,
       });
     });
   }
 
   private isReady(): boolean {
-    return (
-      this.selectedEncounterTypeIds.size > 0 &&
-      this.selectedMapType !== null &&
-      this.selectedPlayer !== null
-    );
+    if (this.selectedEncounterTypeIds.size === 0) return false;
+    if (this.selectedMapType === null) return false;
+    if (this.selectedMapType.id === "saved" && this.selectedSavedMap === null)
+      return false;
+    return this.selectedPlayer !== null;
   }
 
   private refreshBeginButton(): void {
