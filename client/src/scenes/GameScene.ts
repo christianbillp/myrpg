@@ -27,6 +27,8 @@ import { d20 } from "../systems/Dice";
 import { EncounterType } from "../data/encounterTypes";
 import { RiddleOverlay } from "../ui/RiddleOverlay";
 import { TurnOrderBar, TurnChip } from "../ui/TurnOrderBar";
+import { QuestDisplay, combatQuests, explorationQuests, socialQuests } from "../data/quests";
+import { QuestManager } from "../systems/QuestManager";
 
 const GRID_H = GRID_ROWS * TILE_SIZE;
 const GRID_W = GRID_COLS * TILE_SIZE;
@@ -60,6 +62,7 @@ export class GameScene extends Phaser.Scene {
   private communicateBtn!: Phaser.GameObjects.Container;
   private riddleOverlay: RiddleOverlay | null = null;
   private turnOrderBar!: TurnOrderBar;
+  private quests!: QuestManager;
 
   private mapSecrets: { tileX: number; tileY: number; def: SecretDef }[] = [];
 
@@ -103,6 +106,7 @@ export class GameScene extends Phaser.Scene {
         enemy.destroy();
         this.enemies = this.enemies.filter((e) => e !== enemy);
         this.highlightLayer.clear();
+        this.quests.onKill();
       },
     );
   }
@@ -238,6 +242,22 @@ export class GameScene extends Phaser.Scene {
       this.isPanning = false;
       this.panStartedInGameMap = false;
     });
+
+    const questDefs = [
+      ...(this.encounterTypes.includes("simple_combat") ? combatQuests(this.enemies.length) : []),
+      ...(this.encounterTypes.includes("exploration") ? explorationQuests() : []),
+      ...(this.encounterTypes.includes("social_interaction") ? socialQuests() : []),
+    ];
+    this.quests = new QuestManager(
+      questDefs,
+      (quest) => {
+        this.combat.playerXp += quest.rewardXp;
+        this.combat.playerGold += quest.rewardGp;
+        this.combat.addLogs([`Quest complete: ${quest.title}! +${quest.rewardXp} XP  +${quest.rewardGp} GP`]);
+        this.updateHUD();
+      },
+      () => this.updateHUD(),
+    );
 
     this.buildHUD();
     this.updateHUD();
@@ -539,6 +559,12 @@ export class GameScene extends Phaser.Scene {
   }
 
   private updatePanel(): void {
+    const questDisplays: QuestDisplay[] = this.quests.quests.map(q => ({
+      title: q.def.title,
+      progress: q.progress,
+      target: q.def.goal.target,
+      completed: q.completed,
+    }));
     this.playerPanel.refresh(
       this.combat.playerHp,
       this.combat.playerDef.maxHp,
@@ -546,6 +572,7 @@ export class GameScene extends Phaser.Scene {
       this.combat.playerGold,
       this.combat.inventory,
       this.combat.mode === "player_turn" && this.combat.bonusActionUsed,
+      questDisplays,
     );
   }
 
@@ -808,6 +835,7 @@ export class GameScene extends Phaser.Scene {
     this.combat.addItem(item.def);
     item.destroy();
     this.mapItems.splice(idx, 1);
+    this.quests.onItemCollected();
   }
 
   private findPlayerSpawn(): [number, number] {
@@ -900,6 +928,7 @@ export class GameScene extends Phaser.Scene {
         }
         this.npcTalkedTo = true;
         this.npc?.setInteractionHint(false);
+        this.quests.onNPCTalkedTo();
         this.updateHUD();
       },
       () => {
@@ -956,6 +985,7 @@ export class GameScene extends Phaser.Scene {
     this.mapSecrets = this.mapSecrets.filter((s) => s !== secret);
 
     if (success) {
+      this.quests.onSecretFound();
       this.combat.addLogs([`Search (${roll} vs DC ${secret.def.dc}) — ${secret.def.successText}`]);
       const r = secret.def.reward;
       if (r.type === "gold") {

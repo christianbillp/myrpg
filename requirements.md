@@ -36,13 +36,13 @@ A browser-based 2D single-player RPG built with modern web technologies.
 - **US-023** As a player, I want to select a hand-crafted saved map so that I can play on a specific layout. Four maps are available: Arena, Dungeon, Ruins, and Catacombs. In the Encounter Setup screen the Map Type column shows a third card "Saved Map"; clicking it opens a picker overlay. Confirming a selection closes the overlay and marks the card as selected; the chosen map name is displayed on the card. The encounter cannot begin until a map is confirmed.
 - **US-024** As a player, I want to fight multiple enemies in a single combat encounter so that battles feel more strategic. Simple Combat spawns 2–4 enemies chosen randomly from available enemy types (Goblin Minion and Bandit). All map enemies join combat the moment one triggers it. Enemies are labeled A, B, C… on the map and in the Turn Order Bar at the top of the Game Map. Enemies act sequentially during the enemy phase; the active chip in the Turn Order Bar is highlighted green and dead chips are dimmed. Combat ends only when all enemies are defeated.
 - **US-025** As a player, I want the action economy to follow D&D 5e SRD rules so that combat feels authentic. Each player turn grants one Action and one Bonus Action. Attack consumes the Action; Second Wind (Fighter) and Hide via Cunning Action (Rogue) consume the Bonus Action. Drinking a Health Potion costs the Bonus Action in combat and is free during exploration. The player remains in their turn after spending either resource and must press End Turn to hand initiative to the enemies. The Phase Text appends "· action used" or "· bonus used" when the respective resource is spent; buttons that require a spent resource are dimmed and disabled.
+- **US-007** As a player, I want to receive and track quests so that I have clear goals and a sense of progression. Quests are assigned automatically at encounter start based on the active encounter types. Combat encounters assign: First Blood (slay 1 enemy, +10 XP +5 GP), Slay All (slay every enemy spawned, +25 XP +15 GP), and Treasure Hunt (collect 2 Health Potions, +10 XP +5 GP). Exploration encounters assign: Keen Eye (find 2 secrets, +15 XP +10 GP). Social Interaction encounters assign: Make Contact (answer the NPC's riddle, +10 XP +5 GP, awarded on any answer). The Player Panel shows a QUESTS section listing each quest as "· Title  N/M" while in progress and "✓ Title" when complete. Quest rewards are added to XP and GP and logged in the Combat Log on completion.
 
 ### Now
 
 ### Next
 
 - **US-004** As a player, I want to talk to NPCs and read their dialogue so that I can learn about the world and advance the story.
-- **US-007** As a player, I want to receive and track quests so that I have clear goals and a sense of progression.
 - **US-008** As a player, I want my game state saved and loaded automatically so that I can continue where I left off.
 
 ### Player Progression

@@ -2,6 +2,7 @@ import Phaser from "phaser";
 import { PLAYER_PANEL_WIDTH } from "../constants";
 import { PlayerDef } from "../data/player";
 import { ItemDef } from "../data/items";
+import { QuestDisplay } from "../data/quests";
 
 const DPR = window.devicePixelRatio;
 
@@ -12,6 +13,7 @@ export class PlayerPanel {
   private gpText: Phaser.GameObjects.Text;
   private inventoryText: Phaser.GameObjects.Text;
   private usePotionBg: Phaser.GameObjects.Rectangle;
+  private questsText: Phaser.GameObjects.Text;
 
   constructor(scene: Phaser.Scene, def: PlayerDef, onUsePotion: () => void) {
     const colorHex = "#" + def.color.toString(16).padStart(6, "0");
@@ -212,9 +214,30 @@ export class PlayerPanel {
     this.usePotionBg.on("pointerover", () => { if (this.usePotionBg.alpha > 0.5) this.usePotionBg.setAlpha(0.75); });
     this.usePotionBg.on("pointerout", () => { if (this.usePotionBg.alpha > 0.5) this.usePotionBg.setAlpha(1); });
     this.usePotionBg.on("pointerdown", onUsePotion);
+
+    scene.add
+      .rectangle(PLAYER_PANEL_WIDTH / 2, 422, PLAYER_PANEL_WIDTH - 16, 1, 0x334455)
+      .setDepth(11);
+    scene.add
+      .text(12, 428, "QUESTS", {
+        fontSize: "10px",
+        color: "#889aaa",
+        fontFamily: "monospace",
+        resolution: DPR,
+      })
+      .setDepth(11);
+    this.questsText = scene.add
+      .text(12, 444, "", {
+        fontSize: "10px",
+        color: "#aabbcc",
+        fontFamily: "monospace",
+        resolution: DPR,
+        lineSpacing: 6,
+      })
+      .setDepth(11);
   }
 
-  refresh(hp: number, maxHp: number, xp: number, gold: number, inventory: ItemDef[], bonusActionUsed = false): void {
+  refresh(hp: number, maxHp: number, xp: number, gold: number, inventory: ItemDef[], bonusActionUsed = false, quests: QuestDisplay[] = []): void {
     const pct = maxHp > 0 ? hp / maxHp : 0;
     const width = PLAYER_PANEL_WIDTH - 24;
     this.hpBar.clear();
@@ -230,5 +253,17 @@ export class PlayerPanel {
     const potions = inventory.filter(i => i.type === "consumable").length;
     this.inventoryText.setText(potions > 0 ? `Health Potion  ×${potions}` : "Empty");
     this.usePotionBg.setAlpha(potions > 0 && !bonusActionUsed ? 1 : 0.4);
+
+    if (quests.length === 0) {
+      this.questsText.setText("None");
+    } else {
+      this.questsText.setText(
+        quests.map(q =>
+          q.completed
+            ? `✓ ${q.title}`
+            : `· ${q.title}  ${q.progress}/${q.target}`
+        ).join("\n")
+      );
+    }
   }
 }

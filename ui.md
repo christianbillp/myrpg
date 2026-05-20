@@ -37,6 +37,7 @@ Defined in `client/src/ui/PlayerPanel.ts`. Always visible. Displays the active p
 | **GP Display**     | Current gold pieces (awarded from kills at 10 × CR)                                                      |
 | **Inventory**      | Item count per type (e.g. "Health Potion ×2") or "Empty"                                                 |
 | **Use Potion**     | Button below the inventory list; dimmed when no potions held or bonus action already spent; clicking drinks one potion (2d4+2 HP, SRD); costs the Bonus Action in combat, free during exploring |
+| **Quests**         | Section below Use Potion listing quests assigned at encounter start. Each quest shows "· Title  N/M" while in progress and "✓ Title" when complete. "None" when no quests are active for the current encounter type. |
 
 ---
 
