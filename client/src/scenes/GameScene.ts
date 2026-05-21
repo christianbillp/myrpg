@@ -70,8 +70,10 @@ export class GameScene extends Phaser.Scene {
   private targetPanel!: TargetPanel;
   private selectedEnemy: Enemy | null = null;
   private selectedNPC: NPC | null = null;
-  private npc: NPC | null = null;
+  private sage: NPC | null = null;
+  private socialNpc: NPC | null = null;
   private npcTalkedTo = false;
+  private socialNpcTalkedTo = false;
 
   constructor() {
     super({ key: "GameScene" });
@@ -126,8 +128,10 @@ export class GameScene extends Phaser.Scene {
     this.mapSecrets = [];
     this.selectedEnemy = null;
     this.selectedNPC = null;
-    this.npc = null;
+    this.sage = null;
+    this.socialNpc = null;
     this.npcTalkedTo = false;
+    this.socialNpcTalkedTo = false;
     this.riddleOverlay = null;
     this.aiChatOverlay = null;
     this.npcChatHistory = [];
@@ -152,9 +156,8 @@ export class GameScene extends Phaser.Scene {
       this.spawnEnemies();
       this.spawnItems();
     }
-    if (this.encounterTypes.includes("social_interaction") || this.encounterTypes.includes("ai_dialogue")) {
-      this.spawnNPC();
-    }
+    if (this.encounterTypes.includes("ai_dialogue")) this.spawnSage();
+    if (this.encounterTypes.includes("social_interaction")) this.spawnSocialNpc();
     if (this.encounterTypes.includes("exploration")) {
       this.spawnSecrets();
     }
@@ -242,8 +245,10 @@ export class GameScene extends Phaser.Scene {
           const enemy = this.enemies.find((e) => e.tileX === tileX && e.tileY === tileY) ?? null;
           if (enemy) {
             this.selectEnemy(enemy);
-          } else if (this.npc?.tileX === tileX && this.npc?.tileY === tileY) {
-            this.selectNPC(this.npc);
+          } else if (this.sage?.tileX === tileX && this.sage?.tileY === tileY) {
+            this.selectNPC(this.sage);
+          } else if (this.socialNpc?.tileX === tileX && this.socialNpc?.tileY === tileY) {
+            this.selectNPC(this.socialNpc);
           } else {
             this.selectEnemy(null);
           }
@@ -306,7 +311,8 @@ export class GameScene extends Phaser.Scene {
       if (!adjX && !adjY) return;
     }
     if (this.enemies.some((e) => e.tileX === nx && e.tileY === ny)) return;
-    if (this.npc && this.npc.tileX === nx && this.npc.tileY === ny) return;
+    if (this.sage && this.sage.tileX === nx && this.sage.tileY === ny) return;
+    if (this.socialNpc && this.socialNpc.tileX === nx && this.socialNpc.tileY === ny) return;
     if (this.combat.mode === "player_turn" && this.combat.movesLeft <= 0)
       return;
 
@@ -476,7 +482,7 @@ export class GameScene extends Phaser.Scene {
       playerTileY:        this.player.tileY,
       encounterTypes:     this.encounterTypes,
       secretsRemaining:   this.mapSecrets.length,
-      npcTalkedTo:        this.npcTalkedTo,
+      npcTalkedTo:        this.socialNpcTalkedTo,
     };
   }
 
@@ -528,7 +534,8 @@ export class GameScene extends Phaser.Scene {
         if (nr < 0 || nr >= rows || nc < 0 || nc >= cols) continue;
         if (!passable[nr][nc]) continue;
         if (this.enemies.some((e) => e.tileX === nc && e.tileY === nr)) continue;
-        if (this.npc && this.npc.tileX === nc && this.npc.tileY === nr) continue;
+        if (this.sage && this.sage.tileX === nc && this.sage.tileY === nr) continue;
+        if (this.socialNpc && this.socialNpc.tileX === nc && this.socialNpc.tileY === nr) continue;
         if (dist[nr][nc] !== -1) continue;
         dist[nr][nc] = dist[cy][cx] + 1;
         queue.push([nr, nc]);
@@ -669,21 +676,7 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
-  private spawnNPC(): void {
-    const monsters = this.registry.get("monsters") as MonsterDef[];
-    let commoner: MonsterDef;
-    if (this.encounterTypes.includes("ai_dialogue")) {
-      const npcs = (this.registry.get("npcs") as NPCDef[] | null) ?? [];
-      const npcDef = npcs.find((n) => n.persona) ?? npcs[0];
-      if (npcDef) {
-        const base = monsters.find((m) => m.id === npcDef.monsterClass) ?? monsters[0];
-        commoner = { ...base, id: npcDef.id, name: npcDef.name, color: npcDef.color };
-      } else {
-        commoner = monsters.find((m) => m.id === "commoner") ?? monsters[0];
-      }
-    } else {
-      commoner = monsters.find((m) => m.id === "commoner") ?? monsters[0];
-    }
+  private pickNpcSpawn(): [number, number] {
     const { cols, rows, passable } = this.gameMap;
     const candidates: [number, number][] = [];
     for (let r = 0; r < rows; r++) {
@@ -691,16 +684,42 @@ export class GameScene extends Phaser.Scene {
         if (
           passable[r][c] &&
           chebyshev(c, r, this.player.tileX, this.player.tileY) >= 5 &&
-          !this.enemies.some((e) => e.tileX === c && e.tileY === r)
+          !this.enemies.some((e) => e.tileX === c && e.tileY === r) &&
+          !(this.sage && this.sage.tileX === c && this.sage.tileY === r) &&
+          !(this.socialNpc && this.socialNpc.tileX === c && this.socialNpc.tileY === r)
         ) {
           candidates.push([c, r]);
         }
       }
     }
-    if (candidates.length === 0) return;
-    const [nx, ny] = candidates[Math.floor(Math.random() * candidates.length)];
-    this.npc = new NPC(this, commoner, nx, ny);
-    this.mapContainer.add(this.npc.gameObject);
+    if (candidates.length === 0) return [-1, -1];
+    return candidates[Math.floor(Math.random() * candidates.length)];
+  }
+
+  private spawnSage(): void {
+    const monsters = this.registry.get("monsters") as MonsterDef[];
+    const npcs = (this.registry.get("npcs") as NPCDef[] | null) ?? [];
+    const npcDef = npcs.find((n) => n.persona) ?? npcs[0];
+    let def: MonsterDef;
+    if (npcDef) {
+      const base = monsters.find((m) => m.id === npcDef.monsterClass) ?? monsters[0];
+      def = { ...base, id: npcDef.id, name: npcDef.name, color: npcDef.color };
+    } else {
+      def = monsters.find((m) => m.id === "commoner") ?? monsters[0];
+    }
+    const [nx, ny] = this.pickNpcSpawn();
+    if (nx === -1) return;
+    this.sage = new NPC(this, def, nx, ny);
+    this.mapContainer.add(this.sage.gameObject);
+  }
+
+  private spawnSocialNpc(): void {
+    const monsters = this.registry.get("monsters") as MonsterDef[];
+    const def = monsters.find((m) => m.id === "commoner") ?? monsters[0];
+    const [nx, ny] = this.pickNpcSpawn();
+    if (nx === -1) return;
+    this.socialNpc = new NPC(this, def, nx, ny);
+    this.mapContainer.add(this.socialNpc.gameObject);
   }
 
   private onCommunicate(): void {
@@ -710,24 +729,23 @@ export class GameScene extends Phaser.Scene {
       this.updateHUD();
       return;
     }
-    if (this.npcTalkedTo && !this.encounterTypes.includes("ai_dialogue")) return;
     if (chebyshev(this.player.tileX, this.player.tileY, this.selectedNPC.tileX, this.selectedNPC.tileY) > 1) {
       this.combat.addLogs(["Target is too far away."]);
       this.updateHUD();
       return;
     }
 
-    if (this.encounterTypes.includes("ai_dialogue")) {
+    if (this.selectedNPC === this.sage) {
       this.aiChatOverlay = new AIChatOverlay(
         this,
-        this.npc!.def.id,
-        this.npc!.def.name,
+        this.sage.def.id,
+        this.sage.def.name,
         this.buildChatPlayerState(),
         this.npcChatHistory,
         () => {
           if (!this.npcTalkedTo) {
             this.npcTalkedTo = true;
-            this.npc?.setInteractionHint(false);
+            this.sage?.setInteractionHint(false);
             this.quests.onNPCTalkedTo();
             this.updateHUD();
           }
@@ -739,10 +757,10 @@ export class GameScene extends Phaser.Scene {
           this.updateHUD();
         },
       );
-    } else {
+    } else if (this.selectedNPC === this.socialNpc && !this.socialNpcTalkedTo) {
       this.riddleOverlay = new RiddleOverlay(
         this,
-        this.npc!.def.name,
+        this.socialNpc.def.name,
         pickRiddle(),
         (correct) => {
           if (correct) {
@@ -751,9 +769,12 @@ export class GameScene extends Phaser.Scene {
           } else {
             this.combat.addLogs(["Wrong answer — the villager shakes their head."]);
           }
-          this.npcTalkedTo = true;
-          this.npc?.setInteractionHint(false);
-          this.quests.onNPCTalkedTo();
+          this.socialNpcTalkedTo = true;
+          this.socialNpc?.setInteractionHint(false);
+          if (!this.npcTalkedTo) {
+            this.npcTalkedTo = true;
+            this.quests.onNPCTalkedTo();
+          }
           this.updateHUD();
         },
         () => {
@@ -786,7 +807,8 @@ export class GameScene extends Phaser.Scene {
           passable[r][c] &&
           chebyshev(c, r, this.player.tileX, this.player.tileY) >= 3 &&
           !this.enemies.some((e) => e.tileX === c && e.tileY === r) &&
-          !(this.npc?.tileX === c && this.npc?.tileY === r)
+          !(this.sage?.tileX === c && this.sage?.tileY === r) &&
+          !(this.socialNpc?.tileX === c && this.socialNpc?.tileY === r)
         ) {
           candidates.push([r, c]);
         }
