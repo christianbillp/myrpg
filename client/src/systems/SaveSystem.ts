@@ -2,7 +2,8 @@ import { ItemDef } from '../data/items';
 import { ResumeState } from './EncounterManager';
 import { EncounterContext, EncounterType } from '../data/encounterContext';
 
-const SAVE_KEY = 'myrpg_save';
+const LAST_CHAR_KEY = 'myrpg_last_character';
+const saveKey = (characterId: string) => `myrpg_save_${characterId}`;
 const API_URL = 'http://localhost:3000';
 
 export interface SaveData {
@@ -41,38 +42,42 @@ export function resumeFromSave(save: SaveData, items: ItemDef[]): ResumeState {
 }
 
 export const SaveSystem = {
-  /** Write to localStorage and POST to server (fire-and-forget). */
+  /** Write to localStorage (keyed by character) and POST to server. */
   save(data: SaveData): void {
-    localStorage.setItem(SAVE_KEY, JSON.stringify(data));
-    fetch(`${API_URL}/save`, {
+    localStorage.setItem(saveKey(data.playerDefId), JSON.stringify(data));
+    localStorage.setItem(LAST_CHAR_KEY, data.playerDefId);
+    fetch(`${API_URL}/save/${data.playerDefId}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data),
     }).catch(() => {});
   },
 
-  /** Fast synchronous read from localStorage. Returns null if no save exists. */
-  load(): SaveData | null {
-    const raw = localStorage.getItem(SAVE_KEY);
+  load(characterId: string): SaveData | null {
+    const raw = localStorage.getItem(saveKey(characterId));
     if (!raw) return null;
     try { return JSON.parse(raw) as SaveData; } catch { return null; }
   },
 
-  /** Async load from server — used on first boot when localStorage is empty. */
-  async loadFromServer(): Promise<SaveData | null> {
+  async loadFromServer(characterId: string): Promise<SaveData | null> {
     try {
-      const res = await fetch(`${API_URL}/save`);
+      const res = await fetch(`${API_URL}/save/${characterId}`);
       if (!res.ok) return null;
       const data = await res.json() as SaveData;
-      localStorage.setItem(SAVE_KEY, JSON.stringify(data));
+      localStorage.setItem(saveKey(characterId), JSON.stringify(data));
+      localStorage.setItem(LAST_CHAR_KEY, characterId);
       return data;
     } catch {
       return null;
     }
   },
 
-  hasExistingSave(): boolean {
-    return localStorage.getItem(SAVE_KEY) !== null;
+  hasExistingSave(characterId: string): boolean {
+    return localStorage.getItem(saveKey(characterId)) !== null;
+  },
+
+  getLastCharacterId(): string | null {
+    return localStorage.getItem(LAST_CHAR_KEY);
   },
 
   /** POST encounter config to server, which generates the context and persists it in the save file. */
@@ -90,12 +95,8 @@ export const SaveSystem = {
     }
   },
 
-  clear(): void {
-    localStorage.removeItem(SAVE_KEY);
-    fetch(`${API_URL}/save`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ playerDefId: 'aldric', hp: 12, xp: 0, gold: 0, inventoryIds: [], secondWindUses: 2 }),
-    }).catch(() => {});
+  clear(characterId: string): void {
+    localStorage.removeItem(saveKey(characterId));
+    localStorage.removeItem(LAST_CHAR_KEY);
   },
 };

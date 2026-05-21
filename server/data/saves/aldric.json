@@ -1,0 +1,10 @@
+{
+  "playerDefId": "aldric",
+  "hp": 11,
+  "xp": 240,
+  "gold": 56,
+  "inventoryIds": [
+    "health_potion"
+  ],
+  "secondWindUses": 0
+}

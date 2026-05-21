@@ -1,0 +1,7 @@
+{
+  "id": "dungeon_crawl",
+  "title": "Dungeon Crawl",
+  "description": "Two chambers divided by shadow. Enemies patrol the corridors and secrets lie buried in the walls.",
+  "encounterTypes": ["simple_combat", "exploration"],
+  "mapId": "dungeon"
+}

@@ -1,0 +1,7 @@
+{
+  "id": "full_assault",
+  "title": "Full Assault",
+  "description": "Steel, riddles, secrets, and counsel — the dungeon has it all. Bring your wits and your blade.",
+  "encounterTypes": ["simple_combat", "social_interaction", "exploration", "ai_dialogue"],
+  "mapId": "dungeon"
+}

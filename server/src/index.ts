@@ -12,7 +12,11 @@ const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const DATA_DIR = join(__dirname, '../data');
-const SAVE_FILE = join(DATA_DIR, 'character.json');
+const SAVES_DIR = join(DATA_DIR, 'saves');
+
+function saveFilePath(characterId: string): string {
+  return join(SAVES_DIR, `${characterId}.json`);
+}
 
 async function readDir(dir: string): Promise<unknown[]> {
   const files = await readdir(dir);
@@ -23,40 +27,41 @@ async function readDir(dir: string): Promise<unknown[]> {
   );
 }
 
-async function defaultSave(): Promise<unknown> {
-  const chars = await readDir(join(DATA_DIR, 'characters'));
-  const first = chars[0] as Record<string, unknown>;
+async function defaultSave(characterId: string): Promise<unknown> {
+  const chars = await readDir(join(DATA_DIR, 'characters')) as Record<string, unknown>[];
+  const char = chars.find((c) => c['id'] === characterId) ?? chars[0];
   return {
-    playerDefId: first['id'],
-    hp: first['maxHp'],
+    playerDefId: char?.['id'] ?? characterId,
+    hp: char?.['maxHp'] ?? 1,
     xp: 0,
     gold: 0,
     inventoryIds: [],
-    secondWindUses: first['secondWindMaxUses'],
+    secondWindUses: char?.['secondWindMaxUses'] ?? 0,
   };
 }
 
-async function readSave(): Promise<unknown> {
+async function readSave(characterId: string): Promise<unknown> {
   try {
-    return JSON.parse(await readFile(SAVE_FILE, 'utf-8'));
+    return JSON.parse(await readFile(saveFilePath(characterId), 'utf-8'));
   } catch {
-    return defaultSave();
+    return defaultSave(characterId);
   }
 }
 
-async function writeSave(data: unknown): Promise<void> {
-  await mkdir(DATA_DIR, { recursive: true });
-  await writeFile(SAVE_FILE, JSON.stringify(data, null, 2));
+async function writeSave(characterId: string, data: unknown): Promise<void> {
+  await mkdir(SAVES_DIR, { recursive: true });
+  await writeFile(saveFilePath(characterId), JSON.stringify(data, null, 2));
 }
 
 const server = Fastify({ logger: false });
 
 await server.register(cors, { origin: 'http://localhost:5173' });
 
-server.get('/characters', async () => readDir(join(DATA_DIR, 'characters')));
-server.get('/monsters',   async () => readDir(join(DATA_DIR, 'monsters')));
-server.get('/npcs',       async () => readDir(join(DATA_DIR, 'npcs')));
-server.get('/items',      async () => readDir(join(DATA_DIR, 'items')));
+server.get('/characters',         async () => readDir(join(DATA_DIR, 'characters')));
+server.get('/monsters',           async () => readDir(join(DATA_DIR, 'monsters')));
+server.get('/npcs',               async () => readDir(join(DATA_DIR, 'npcs')));
+server.get('/items',              async () => readDir(join(DATA_DIR, 'items')));
+server.get('/premade-encounters', async () => readDir(join(DATA_DIR, 'premade-encounters')));
 server.get('/maps', async () => {
   interface RawMap { id: string; name: string; description: string; rows: string[]; }
   const raw = await readDir(join(DATA_DIR, 'maps')) as RawMap[];
@@ -68,7 +73,10 @@ server.get('/maps', async () => {
   }));
 });
 
-server.get('/save', async () => readSave());
+server.get('/save/:characterId', async (request) => {
+  const { characterId } = request.params as { characterId: string };
+  return readSave(characterId);
+});
 
 interface ChatMessage { role: 'user' | 'assistant'; content: string; }
 interface PlayerState { name: string; className: string; level: number; hp: number; maxHp: number; xp: number; gold: number; }
@@ -101,8 +109,9 @@ The adventurer you are speaking with is ${name}, a level ${level} ${className}. 
   }
 });
 
-server.post('/save', async (request, reply) => {
-  await writeSave(request.body);
+server.post('/save/:characterId', async (request, reply) => {
+  const { characterId } = request.params as { characterId: string };
+  await writeSave(characterId, request.body);
   return reply.code(200).send({ ok: true });
 });
 
@@ -223,8 +232,8 @@ function buildEncounter(req: EncounterStartRequest) {
 server.post('/encounter/start', async (request, reply) => {
   const body = request.body as EncounterStartRequest;
   const encounterContext = buildEncounter(body);
-  const existing = await readSave() as Record<string, unknown>;
-  await writeSave({ ...existing, encounterContext });
+  const existing = await readSave(body.playerDefId) as Record<string, unknown>;
+  await writeSave(body.playerDefId, { ...existing, encounterContext });
   return reply.send(encounterContext);
 });
 

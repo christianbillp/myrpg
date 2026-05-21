@@ -29,6 +29,14 @@ export interface Riddle {
   correctIndex: 0 | 1 | 2;
 }
 
+export interface PremadeEncounterDef {
+  id: string;
+  title: string;
+  description: string;
+  encounterTypes: EncounterType[];
+  mapId: string;
+}
+
 export interface EncounterContext {
   introduction: string;
   context: string;
