@@ -1,5 +1,5 @@
 import Phaser from "phaser";
-import { Riddle } from "../data/riddles";
+import { Riddle } from "../data/encounterContext";
 import { PLAYER_PANEL_WIDTH, GRID_COLS, TILE_SIZE, TARGET_PANEL_WIDTH } from "../constants";
 import { BaseOverlay } from "./BaseOverlay";
 

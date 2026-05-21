@@ -7,13 +7,10 @@ import {
   TILE_SIZE,
   GRID_COLS,
   GRID_ROWS,
-  HUD_HEIGHT,
   PLAYER_PANEL_WIDTH,
-  TARGET_PANEL_WIDTH,
 } from "../constants";
 import { PlayerDef } from "../data/player";
-import { MonsterDef } from "../data/monsters";
-import { NPCDef } from "../data/npcs";
+import { MonsterDef, NPCDef } from "../data/monsters";
 import { ItemDef } from "../data/items";
 import { MapItem } from "../entities/MapItem";
 import { EncounterManager, ResumeState } from "../systems/EncounterManager";
@@ -23,14 +20,13 @@ import { generateMap, GameMap } from "../systems/MapGenerator";
 import { generateRoomsMap } from "../systems/RoomsMapGenerator";
 import { shuffle } from "../systems/MapUtils";
 import { NPC } from "../entities/NPC";
-import { pickRiddle } from "../data/riddles";
-import { SecretDef, pickSecrets } from "../data/secrets";
+import { SecretDef, EncounterType, EncounterContext } from "../data/encounterContext";
 import { d20 } from "../systems/Dice";
-import { EncounterType } from "../data/encounterTypes";
 import { RiddleOverlay } from "../ui/RiddleOverlay";
 import { AIChatOverlay, ChatPlayerState, ChatMessage } from "../ui/AIChatOverlay";
+import { IntroductionOverlay } from "../ui/IntroductionOverlay";
 import { HUD, HUDState } from "../ui/HUD";
-import { QuestDisplay, combatQuests, explorationQuests, socialQuests } from "../data/quests";
+import { QuestDisplay } from "../ui/PlayerPanel";
 import { QuestManager } from "../systems/QuestManager";
 
 const GRID_H = GRID_ROWS * TILE_SIZE;
@@ -50,9 +46,11 @@ export class GameScene extends Phaser.Scene {
     right: Phaser.Input.Keyboard.Key;
   };
 
+  private introOverlay: IntroductionOverlay | null = null;
   private riddleOverlay: RiddleOverlay | null = null;
   private aiChatOverlay: AIChatOverlay | null = null;
   private npcChatHistory: ChatMessage[] = [];
+  private encounterContext?: EncounterContext;
   private hud!: HUD;
   private quests!: QuestManager;
 
@@ -83,7 +81,8 @@ export class GameScene extends Phaser.Scene {
   private savedMap: GameMap | null = null;
   private encounterTypes: EncounterType[] = ["simple_combat"];
 
-  init(data: { playerDef?: PlayerDef; mapType?: "open" | "rooms" | "saved"; encounterTypes?: EncounterType[]; savedMap?: GameMap; resumeState?: ResumeState }): void {
+  init(data: { playerDef?: PlayerDef; mapType?: "open" | "rooms" | "saved"; encounterTypes?: EncounterType[]; savedMap?: GameMap; resumeState?: ResumeState; encounterContext?: EncounterContext }): void {
+    this.encounterContext = data?.encounterContext;
     this.mapType = data?.mapType ?? "open";
     this.savedMap = data?.savedMap ?? null;
     this.encounterTypes = data?.encounterTypes ?? ["simple_combat"];
@@ -132,6 +131,7 @@ export class GameScene extends Phaser.Scene {
     this.socialNpc = null;
     this.npcTalkedTo = false;
     this.socialNpcTalkedTo = false;
+    this.introOverlay = null;
     this.riddleOverlay = null;
     this.aiChatOverlay = null;
     this.npcChatHistory = [];
@@ -178,7 +178,7 @@ export class GameScene extends Phaser.Scene {
         _dx: number,
         dy: number,
       ) => {
-        if (this.aiChatOverlay || this.riddleOverlay) return;
+        if (this.introOverlay || this.aiChatOverlay || this.riddleOverlay) return;
         if (
           pointer.x < PLAYER_PANEL_WIDTH ||
           pointer.x >= PLAYER_PANEL_WIDTH + GRID_W
@@ -260,11 +260,7 @@ export class GameScene extends Phaser.Scene {
       this.panStartedInGameMap = false;
     });
 
-    const questDefs = [
-      ...(this.encounterTypes.includes("simple_combat") ? combatQuests(this.enemies.length) : []),
-      ...(this.encounterTypes.includes("exploration") ? explorationQuests() : []),
-      ...(this.encounterTypes.includes("social_interaction") || this.encounterTypes.includes("ai_dialogue") ? socialQuests() : []),
-    ];
+    const questDefs = this.encounterContext?.quests ?? [];
     this.quests = new QuestManager(
       questDefs,
       (quest) => {
@@ -276,13 +272,23 @@ export class GameScene extends Phaser.Scene {
       () => this.updateHUD(),
     );
 
-    this.centerViewOnPlayer();
+    this.initView();
     this.buildHUD();
     this.updateHUD();
+
+    if (this.encounterContext) {
+      this.introOverlay = new IntroductionOverlay(
+        this,
+        this.encounterTypes,
+        this.combat.playerDef,
+        this.encounterContext,
+        () => { this.introOverlay = null; },
+      );
+    }
   }
 
   update(): void {
-    if (this.aiChatOverlay || this.riddleOverlay) return;
+    if (this.introOverlay || this.aiChatOverlay || this.riddleOverlay) return;
     if (this.combat.mode !== "exploring" && this.combat.mode !== "player_turn")
       return;
 
@@ -582,6 +588,22 @@ export class GameScene extends Phaser.Scene {
     );
   }
 
+  private initView(): void {
+    const mapW = this.gameMap.cols * TILE_SIZE;
+    const mapH = this.gameMap.rows * TILE_SIZE;
+    const fitZoom = Math.min(GRID_W / mapW, GRID_H / mapH);
+    this.gridZoom = Phaser.Math.Clamp(fitZoom, 0.5, 3);
+    this.mapContainer.setScale(this.gridZoom);
+
+    if (fitZoom >= 0.5) {
+      this.mapContainer.x = PLAYER_PANEL_WIDTH;
+      this.mapContainer.y = GRID_H - mapH * this.gridZoom;
+      this.clampGridPan();
+    } else {
+      this.centerViewOnPlayer();
+    }
+  }
+
   private centerViewOnPlayer(): void {
     const px = this.player.tileX * TILE_SIZE + TILE_SIZE / 2;
     const py = this.player.tileY * TILE_SIZE + TILE_SIZE / 2;
@@ -591,9 +613,7 @@ export class GameScene extends Phaser.Scene {
   }
 
   private resetGridView(): void {
-    this.gridZoom = 1;
-    this.mapContainer.setScale(1);
-    this.centerViewOnPlayer();
+    this.initView();
   }
 
   private spawnItems(): void {
@@ -666,7 +686,7 @@ export class GameScene extends Phaser.Scene {
       }
     }
     shuffle(candidates);
-    const target = 2 + Math.floor(Math.random() * 3);
+    const target = this.encounterContext?.enemyCount ?? 2 + Math.floor(Math.random() * 3);
     const count = Math.min(target, candidates.length);
     for (let i = 0; i < count; i++) {
       const [r, c] = candidates[i];
@@ -758,10 +778,12 @@ export class GameScene extends Phaser.Scene {
         },
       );
     } else if (this.selectedNPC === this.socialNpc && !this.socialNpcTalkedTo) {
+      const riddle = this.encounterContext?.riddle;
+      if (!riddle) return;
       this.riddleOverlay = new RiddleOverlay(
         this,
         this.socialNpc.def.name,
-        pickRiddle(),
+        riddle,
         (correct) => {
           if (correct) {
             this.combat.awardGold(10);
@@ -815,7 +837,7 @@ export class GameScene extends Phaser.Scene {
       }
     }
     shuffle(candidates);
-    const secrets = pickSecrets(4);
+    const secrets = this.encounterContext?.secrets ?? [];
     const count = Math.min(secrets.length, candidates.length);
     for (let i = 0; i < count; i++) {
       const [r, c] = candidates[i];

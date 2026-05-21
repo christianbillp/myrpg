@@ -1,5 +1,6 @@
 import { ItemDef } from '../data/items';
 import { ResumeState } from './EncounterManager';
+import { EncounterContext, EncounterType } from '../data/encounterContext';
 
 const SAVE_KEY = 'myrpg_save';
 const API_URL = 'http://localhost:3000';
@@ -11,6 +12,21 @@ export interface SaveData {
   gold: number;
   inventoryIds: string[];
   secondWindUses: number;
+  encounterContext?: EncounterContext;
+}
+
+export interface EncounterStartConfig {
+  encounterTypes: EncounterType[];
+  mapType: 'open' | 'rooms' | 'saved';
+  playerDefId: string;
+  playerName: string;
+  playerSpeciesName: string;
+  playerClassName: string;
+  playerLevel: number;
+  playerMaxHp: number;
+  playerAc: number;
+  savedMapName?: string;
+  savedMapDescription?: string;
 }
 
 export function resumeFromSave(save: SaveData, items: ItemDef[]): ResumeState {
@@ -57,6 +73,21 @@ export const SaveSystem = {
 
   hasExistingSave(): boolean {
     return localStorage.getItem(SAVE_KEY) !== null;
+  },
+
+  /** POST encounter config to server, which generates the context and persists it in the save file. */
+  async startEncounter(config: EncounterStartConfig): Promise<EncounterContext | null> {
+    try {
+      const res = await fetch(`${API_URL}/encounter/start`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(config),
+      });
+      if (!res.ok) return null;
+      return await res.json() as EncounterContext;
+    } catch {
+      return null;
+    }
   },
 
   clear(): void {

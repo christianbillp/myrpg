@@ -1,7 +1,14 @@
 import { PlayerDef } from '../data/player';
 import { Enemy } from '../entities/Enemy';
-import { crGoldReward } from '../data/monsters';
 import { ItemDef } from '../data/items';
+
+function crGoldReward(cr: string): number {
+  if (cr.includes('/')) {
+    const [num, den] = cr.split('/').map(Number);
+    return Math.floor(10 * num / den);
+  }
+  return 10 * Number(cr);
+}
 import {
   rollInitiative,
   playerMeleeAttack,

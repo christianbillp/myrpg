@@ -1,4 +1,4 @@
-import { QuestDef, QuestGoalType } from '../data/quests';
+import { QuestDef, QuestGoalType } from '../data/encounterContext';
 
 export interface QuestState {
   def: QuestDef;

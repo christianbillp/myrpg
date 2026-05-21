@@ -1,11 +1,3 @@
-export function crGoldReward(cr: string): number {
-  if (cr.includes('/')) {
-    const [num, den] = cr.split('/').map(Number);
-    return Math.floor(10 * num / den);
-  }
-  return 10 * Number(cr);
-}
-
 export interface MonsterAttack {
   name: string;
   attackType: 'melee' | 'ranged' | 'both';
@@ -17,6 +9,14 @@ export interface MonsterAttack {
   damageSides: number;
   damageBonus: number;
   damageType: string;
+}
+
+export interface NPCDef {
+  id: string;
+  name: string;
+  monsterClass: string;
+  color: number;
+  persona?: string;
 }
 
 export interface MonsterDef {

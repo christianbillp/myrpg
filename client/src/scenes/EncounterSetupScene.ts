@@ -1,10 +1,10 @@
 import Phaser from "phaser";
 import { PlayerDef } from "../data/player";
 import { ItemDef } from "../data/items";
-import { EncounterType } from "../data/encounterTypes";
-import { SavedMapDef, toGameMap } from "../data/maps";
+import { EncounterType } from "../data/encounterContext";
+import { SavedMapDef } from "../data/maps";
 import { SavedMapPickerOverlay } from "../ui/SavedMapPickerOverlay";
-import { SaveSystem, SaveData, resumeFromSave } from "../systems/SaveSystem";
+import { SaveSystem, SaveData, resumeFromSave, EncounterStartConfig } from "../systems/SaveSystem";
 import { ResumeState } from "../systems/EncounterManager";
 import {
   TILE_SIZE,
@@ -519,15 +519,36 @@ export class EncounterSetupScene extends Phaser.Scene {
       const resume = this.resumeState && this.savedCharDefId === selectedId
         ? this.resumeState
         : undefined;
-      this.scene.start("GameScene", {
-        playerDef: this.selectedPlayer,
-        mapType: this.selectedMapType!.id,
-        encounterTypes: Array.from(this.selectedEncounterTypeIds) as EncounterType[],
-        savedMap:
-          this.selectedMapType!.id === "saved" && this.selectedSavedMap
-            ? toGameMap(this.selectedSavedMap)
-            : undefined,
-        resumeState: resume,
+      const encounterTypes = Array.from(this.selectedEncounterTypeIds) as EncounterType[];
+      const mapType = this.selectedMapType!.id;
+      const savedMap = mapType === "saved" && this.selectedSavedMap
+        ? this.selectedSavedMap
+        : undefined;
+
+      const config: EncounterStartConfig = {
+        encounterTypes,
+        mapType,
+        playerDefId:       this.selectedPlayer!.id,
+        playerName:        this.selectedPlayer!.name,
+        playerSpeciesName: this.selectedPlayer!.speciesName,
+        playerClassName:   this.selectedPlayer!.className,
+        playerLevel:       this.selectedPlayer!.level,
+        playerMaxHp:       this.selectedPlayer!.maxHp,
+        playerAc:          this.selectedPlayer!.ac,
+        savedMapName:        this.selectedSavedMap?.name,
+        savedMapDescription: this.selectedSavedMap?.description,
+      };
+
+      this.beginBg.disableInteractive();
+      SaveSystem.startEncounter(config).then((encounterContext) => {
+        this.scene.start("GameScene", {
+          playerDef: this.selectedPlayer,
+          mapType,
+          encounterTypes,
+          savedMap,
+          resumeState: resume,
+          encounterContext: encounterContext ?? undefined,
+        });
       });
     });
   }

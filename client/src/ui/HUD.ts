@@ -10,7 +10,7 @@ import {
 import { CombatMode } from "../systems/EncounterManager";
 import { Enemy } from "../entities/Enemy";
 import { PlayerDef } from "../data/player";
-import { EncounterType } from "../data/encounterTypes";
+import { EncounterType } from "../data/encounterContext";
 import { TurnOrderBar, TurnChip } from "./TurnOrderBar";
 import { chebyshev } from "../systems/EnemyAI";
 

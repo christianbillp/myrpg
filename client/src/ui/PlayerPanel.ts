@@ -2,7 +2,13 @@ import Phaser from "phaser";
 import { PLAYER_PANEL_WIDTH } from "../constants";
 import { PlayerDef } from "../data/player";
 import { ItemDef } from "../data/items";
-import { QuestDisplay } from "../data/quests";
+
+export interface QuestDisplay {
+  title: string;
+  progress: number;
+  target: number;
+  completed: boolean;
+}
 
 const DPR = window.devicePixelRatio;
 
