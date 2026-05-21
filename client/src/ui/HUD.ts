@@ -41,7 +41,6 @@ export interface HUDState {
   playerTileY: number;
   encounterTypes: EncounterType[];
   secretsRemaining: number;
-  npcTalkedTo: boolean;
 }
 
 export interface HUDCallbacks {
@@ -172,9 +171,7 @@ export class HUD {
         this.phaseText.setText("Exploring — WASD / arrow keys to move");
         if (state.encounterTypes.includes("exploration") && state.secretsRemaining > 0)
           this.searchBtn.setVisible(true);
-        if (state.encounterTypes.includes("social_interaction") && !state.npcTalkedTo)
-          this.communicateBtn.setVisible(true);
-        if (state.encounterTypes.includes("ai_dialogue"))
+        if (state.encounterTypes.includes("social_interaction"))
           this.communicateBtn.setVisible(true);
         break;
 

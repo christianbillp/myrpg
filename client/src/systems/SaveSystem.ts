@@ -28,6 +28,7 @@ export interface EncounterStartConfig {
   playerAc: number;
   savedMapName?: string;
   savedMapDescription?: string;
+  npcId?: string;
 }
 
 export function resumeFromSave(save: SaveData, items: ItemDef[]): ResumeState {

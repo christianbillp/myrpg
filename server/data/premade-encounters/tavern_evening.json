@@ -1,0 +1,9 @@
+{
+  "id": "tavern_evening",
+  "title": "A Night at the Flagon",
+  "description": "The Rusty Flagon is busy tonight. Locals fill the tables and the keeper, Bram Holdfast, watches from behind the bar. He knows things — if you can get him talking.",
+  "encounterTypes": ["social_interaction"],
+  "mapId": "tavern",
+  "npcId": "tavern_keeper",
+  "passiveNpcCount": 3
+}

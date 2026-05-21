@@ -117,7 +117,7 @@ server.post('/save/:characterId', async (request, reply) => {
 
 // --- Encounter types ---
 
-type EncounterType = 'simple_combat' | 'social_interaction' | 'exploration' | 'ai_dialogue';
+type EncounterType = 'simple_combat' | 'social_interaction' | 'exploration';
 type QuestGoalType = 'kill' | 'collect' | 'explore' | 'talk';
 
 type SecretReward =
@@ -140,6 +140,7 @@ interface EncounterStartRequest {
   playerAc: number;
   savedMapName?: string;
   savedMapDescription?: string;
+  npcId?: string;
 }
 
 // --- Data pools ---
@@ -175,7 +176,7 @@ function buildQuests(types: EncounterType[], enemyCount: number): QuestDef[] {
   }
   if (types.includes('exploration'))
     quests.push({ id: 'keen_eye',   title: 'Keen Eye',    goal: { type: 'explore', target: 2 }, rewardXp: 15, rewardGp: 10 });
-  if (types.includes('social_interaction') || types.includes('ai_dialogue'))
+  if (types.includes('social_interaction'))
     quests.push({ id: 'make_contact', title: 'Make Contact', goal: { type: 'talk', target: 1 }, rewardXp: 10, rewardGp: 5 });
   return quests;
 }
@@ -184,14 +185,12 @@ function buildQuests(types: EncounterType[], enemyCount: number): QuestDef[] {
 
 const TYPE_NARRATIVE: Record<EncounterType, string> = {
   simple_combat:      'Hostile figures have been spotted — combat is unavoidable.',
-  social_interaction: 'A lone villager waits nearby, cautious but willing to speak.',
-  ai_dialogue:        'A wandering sage sits in contemplation, carrying wisdom from distant lands.',
+  social_interaction: 'A local NPC is nearby, cautious but willing to speak.',
   exploration:        'Something feels hidden here — secrets reward the observant.',
 };
 const TYPE_CONTEXT: Record<EncounterType, string> = {
   simple_combat:      'Combat against hostile creatures; the player must defeat all enemies.',
-  social_interaction: 'A commoner NPC with a riddle challenge; a correct answer awards gold.',
-  ai_dialogue:        'A wandering sage NPC available for freeform conversation.',
+  social_interaction: 'An NPC available for conversation; AI dialogue with riddle fallback.',
   exploration:        'Four hidden secrets on the map, found via Wisdom (Perception) checks.',
 };
 
@@ -204,9 +203,10 @@ function buildEncounter(req: EncounterStartRequest) {
     req.mapType === 'saved' && req.savedMapName ? req.savedMapName
     : req.mapType === 'rooms' ? 'dungeon' : 'open terrain';
 
-  const charOpener = req.playerDefId === 'miriel'
-    ? `${req.playerName} moves in silence across ${mapDescription}.`
-    : `${req.playerName} strides into ${mapDescription}, greatsword drawn.`;
+  const isCombat = req.encounterTypes.includes('simple_combat');
+  const charOpener = isCombat
+    ? `${req.playerName} the ${req.playerClassName} enters ${mapDescription}, senses sharp and weapon ready.`
+    : `${req.playerName} the ${req.playerClassName} steps into ${mapDescription}.`;
 
   const introduction = [charOpener, ...req.encounterTypes.map((t) => TYPE_NARRATIVE[t])].join(' ');
   const context = [
@@ -223,9 +223,10 @@ function buildEncounter(req: EncounterStartRequest) {
     introduction,
     context,
     enemyCount,
-    secrets:  req.encounterTypes.includes('exploration')        ? pickSecrets(4)           : [],
-    riddle:   req.encounterTypes.includes('social_interaction') ? pickRandom(RIDDLES)      : null,
+    secrets:  req.encounterTypes.includes('exploration')                                                          ? pickSecrets(4)      : [],
+    riddle:   req.encounterTypes.includes('social_interaction') ? pickRandom(RIDDLES) : null,
     quests:   buildQuests(req.encounterTypes, enemyCount),
+    npcId:    req.npcId,
   };
 }
 

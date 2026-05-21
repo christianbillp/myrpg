@@ -10,7 +10,6 @@ const TYPE_LABEL: Record<EncounterType, string> = {
   simple_combat:      "Combat",
   social_interaction: "Social Interaction",
   exploration:        "Exploration",
-  ai_dialogue:        "AI Dialogue",
 };
 
 export class IntroductionOverlay extends BaseOverlay {

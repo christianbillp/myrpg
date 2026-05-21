@@ -39,7 +39,9 @@ export class AIChatOverlay extends BaseOverlay {
   private inputValue = "";
   private history: ChatMessage[] = [];
   private thinking = false;
+  private readonly npcName: string;
   private onFirstReply: () => void;
+  private onFallback?: () => void;
   private firstReplySent = false;
   private scrollPos = 0;
   private readonly areaTop: number;
@@ -56,6 +58,7 @@ export class AIChatOverlay extends BaseOverlay {
     initialHistory: ChatMessage[],
     onFirstReply: () => void,
     onClose: (history: ChatMessage[]) => void,
+    onFallback?: () => void,
   ) {
     super(scene, 580, 420, 0x9b59b6, () => {
       scene.input.keyboard?.enableGlobalCapture();
@@ -66,7 +69,9 @@ export class AIChatOverlay extends BaseOverlay {
     });
 
     this.scene = scene;
+    this.npcName = npcName;
     this.onFirstReply = onFirstReply;
+    this.onFallback = onFallback;
     this.history = [...initialHistory];
 
     scene.input.keyboard?.disableGlobalCapture();
@@ -261,7 +266,7 @@ export class AIChatOverlay extends BaseOverlay {
     this.thinking = true;
     this.history.push({ role: "user", content: text });
     this.renderHistory();
-    this.statusText.setText("Sage is thinking…");
+    this.statusText.setText(`${this.npcName} is thinking…`);
 
     try {
       const res = await fetch(`${API_URL}/npc/chat`, {
@@ -282,7 +287,11 @@ export class AIChatOverlay extends BaseOverlay {
         this.onFirstReply();
       }
     } catch {
-      this.history.push({ role: "assistant", content: "(The sage falls silent.)" });
+      if (!this.firstReplySent && this.onFallback) {
+        this.onFallback();
+        return;
+      }
+      this.history.push({ role: "assistant", content: "(The NPC falls silent.)" });
     }
 
     this.thinking = false;

@@ -49,7 +49,7 @@ export class GameScene extends Phaser.Scene {
   private introOverlay: IntroductionOverlay | null = null;
   private riddleOverlay: RiddleOverlay | null = null;
   private aiChatOverlay: AIChatOverlay | null = null;
-  private npcChatHistory: ChatMessage[] = [];
+  private npcChatHistories: Map<NPC, ChatMessage[]> = new Map();
   private encounterContext?: EncounterContext;
   private hud!: HUD;
   private quests!: QuestManager;
@@ -68,10 +68,9 @@ export class GameScene extends Phaser.Scene {
   private targetPanel!: TargetPanel;
   private selectedEnemy: Enemy | null = null;
   private selectedNPC: NPC | null = null;
-  private sage: NPC | null = null;
-  private socialNpc: NPC | null = null;
+  private npc: NPC | null = null;
+  private passiveNpcs: NPC[] = [];
   private npcTalkedTo = false;
-  private socialNpcTalkedTo = false;
 
   constructor() {
     super({ key: "GameScene" });
@@ -80,9 +79,13 @@ export class GameScene extends Phaser.Scene {
   private mapType: "open" | "rooms" | "saved" = "open";
   private savedMap: GameMap | null = null;
   private encounterTypes: EncounterType[] = ["simple_combat"];
+  private npcId?: string;
+  private passiveNpcCount = 0;
 
-  init(data: { playerDef?: PlayerDef; mapType?: "open" | "rooms" | "saved"; encounterTypes?: EncounterType[]; savedMap?: GameMap; resumeState?: ResumeState; encounterContext?: EncounterContext }): void {
+  init(data: { playerDef?: PlayerDef; mapType?: "open" | "rooms" | "saved"; encounterTypes?: EncounterType[]; savedMap?: GameMap; resumeState?: ResumeState; encounterContext?: EncounterContext; npcId?: string; passiveNpcCount?: number }): void {
     this.encounterContext = data?.encounterContext;
+    this.npcId = data?.npcId ?? data?.encounterContext?.npcId;
+    this.passiveNpcCount = data?.passiveNpcCount ?? 0;
     this.mapType = data?.mapType ?? "open";
     this.savedMap = data?.savedMap ?? null;
     this.encounterTypes = data?.encounterTypes ?? ["simple_combat"];
@@ -127,14 +130,13 @@ export class GameScene extends Phaser.Scene {
     this.mapSecrets = [];
     this.selectedEnemy = null;
     this.selectedNPC = null;
-    this.sage = null;
-    this.socialNpc = null;
+    this.npc = null;
+    this.passiveNpcs = [];
     this.npcTalkedTo = false;
-    this.socialNpcTalkedTo = false;
     this.introOverlay = null;
     this.riddleOverlay = null;
     this.aiChatOverlay = null;
-    this.npcChatHistory = [];
+    this.npcChatHistories = new Map();
     this.gridZoom = 1;
     this.isPanning = false;
     this.panStartedInGameMap = false;
@@ -156,8 +158,8 @@ export class GameScene extends Phaser.Scene {
       this.spawnEnemies();
       this.spawnItems();
     }
-    if (this.encounterTypes.includes("ai_dialogue")) this.spawnSage();
-    if (this.encounterTypes.includes("social_interaction")) this.spawnSocialNpc();
+    if (this.encounterTypes.includes("social_interaction")) this.spawnNpc();
+    if (this.passiveNpcCount > 0) this.spawnPassiveNpcs();
     if (this.encounterTypes.includes("exploration")) {
       this.spawnSecrets();
     }
@@ -245,10 +247,10 @@ export class GameScene extends Phaser.Scene {
           const enemy = this.enemies.find((e) => e.tileX === tileX && e.tileY === tileY) ?? null;
           if (enemy) {
             this.selectEnemy(enemy);
-          } else if (this.sage?.tileX === tileX && this.sage?.tileY === tileY) {
-            this.selectNPC(this.sage);
-          } else if (this.socialNpc?.tileX === tileX && this.socialNpc?.tileY === tileY) {
-            this.selectNPC(this.socialNpc);
+          } else if (this.npc?.tileX === tileX && this.npc?.tileY === tileY) {
+            this.selectNPC(this.npc);
+          } else if (this.passiveNpcs.find((n) => n.tileX === tileX && n.tileY === tileY)) {
+            this.selectNPC(this.passiveNpcs.find((n) => n.tileX === tileX && n.tileY === tileY)!);
           } else {
             this.selectEnemy(null);
           }
@@ -317,8 +319,8 @@ export class GameScene extends Phaser.Scene {
       if (!adjX && !adjY) return;
     }
     if (this.enemies.some((e) => e.tileX === nx && e.tileY === ny)) return;
-    if (this.sage && this.sage.tileX === nx && this.sage.tileY === ny) return;
-    if (this.socialNpc && this.socialNpc.tileX === nx && this.socialNpc.tileY === ny) return;
+    if (this.npc && this.npc.tileX === nx && this.npc.tileY === ny) return;
+    if (this.passiveNpcs.some((n) => n.tileX === nx && n.tileY === ny)) return;
     if (this.combat.mode === "player_turn" && this.combat.movesLeft <= 0)
       return;
 
@@ -488,7 +490,6 @@ export class GameScene extends Phaser.Scene {
       playerTileY:        this.player.tileY,
       encounterTypes:     this.encounterTypes,
       secretsRemaining:   this.mapSecrets.length,
-      npcTalkedTo:        this.socialNpcTalkedTo,
     };
   }
 
@@ -540,8 +541,8 @@ export class GameScene extends Phaser.Scene {
         if (nr < 0 || nr >= rows || nc < 0 || nc >= cols) continue;
         if (!passable[nr][nc]) continue;
         if (this.enemies.some((e) => e.tileX === nc && e.tileY === nr)) continue;
-        if (this.sage && this.sage.tileX === nc && this.sage.tileY === nr) continue;
-        if (this.socialNpc && this.socialNpc.tileX === nc && this.socialNpc.tileY === nr) continue;
+        if (this.npc && this.npc.tileX === nc && this.npc.tileY === nr) continue;
+        if (this.passiveNpcs.some((n) => n.tileX === nc && n.tileY === nr)) continue;
         if (dist[nr][nc] !== -1) continue;
         dist[nr][nc] = dist[cy][cx] + 1;
         queue.push([nr, nc]);
@@ -705,8 +706,8 @@ export class GameScene extends Phaser.Scene {
           passable[r][c] &&
           chebyshev(c, r, this.player.tileX, this.player.tileY) >= 5 &&
           !this.enemies.some((e) => e.tileX === c && e.tileY === r) &&
-          !(this.sage && this.sage.tileX === c && this.sage.tileY === r) &&
-          !(this.socialNpc && this.socialNpc.tileX === c && this.socialNpc.tileY === r)
+          !(this.npc && this.npc.tileX === c && this.npc.tileY === r) &&
+          !this.passiveNpcs.some((n) => n.tileX === c && n.tileY === r)
         ) {
           candidates.push([c, r]);
         }
@@ -716,30 +717,58 @@ export class GameScene extends Phaser.Scene {
     return candidates[Math.floor(Math.random() * candidates.length)];
   }
 
-  private spawnSage(): void {
+  private spawnNpc(): void {
     const monsters = this.registry.get("monsters") as MonsterDef[];
     const npcs = (this.registry.get("npcs") as NPCDef[] | null) ?? [];
-    const npcDef = npcs.find((n) => n.persona) ?? npcs[0];
+    let npcDef: NPCDef | undefined;
+    if (this.npcId) {
+      npcDef = npcs.find((n) => n.id === this.npcId);
+    } else {
+      npcDef = npcs.find((n) => n.id === "villager") ?? npcs.find((n) => n.persona);
+    }
+    npcDef = npcDef ?? npcs[0];
     let def: MonsterDef;
     if (npcDef) {
-      const base = monsters.find((m) => m.id === npcDef.monsterClass) ?? monsters[0];
+      const base = monsters.find((m) => m.id === npcDef!.monsterClass) ?? monsters[0];
       def = { ...base, id: npcDef.id, name: npcDef.name, color: npcDef.color };
     } else {
       def = monsters.find((m) => m.id === "commoner") ?? monsters[0];
     }
     const [nx, ny] = this.pickNpcSpawn();
     if (nx === -1) return;
-    this.sage = new NPC(this, def, nx, ny);
-    this.mapContainer.add(this.sage.gameObject);
+    this.npc = new NPC(this, def, nx, ny);
+    this.mapContainer.add(this.npc.gameObject);
   }
 
-  private spawnSocialNpc(): void {
+  private spawnPassiveNpcs(): void {
     const monsters = this.registry.get("monsters") as MonsterDef[];
-    const def = monsters.find((m) => m.id === "commoner") ?? monsters[0];
-    const [nx, ny] = this.pickNpcSpawn();
-    if (nx === -1) return;
-    this.socialNpc = new NPC(this, def, nx, ny);
-    this.mapContainer.add(this.socialNpc.gameObject);
+    const npcs = (this.registry.get("npcs") as NPCDef[] | null) ?? [];
+    const villagerNpc = npcs.find((n) => n.id === "villager");
+    const base = monsters.find((m) => m.id === (villagerNpc?.monsterClass ?? "commoner")) ?? monsters[0];
+    const def: MonsterDef = villagerNpc
+      ? { ...base, id: "villager", name: "Villager", color: villagerNpc.color }
+      : { ...base, name: "Villager" };
+
+    const { cols, rows, passable } = this.gameMap;
+    const occupied = new Set<string>();
+    occupied.add(`${this.player.tileX},${this.player.tileY}`);
+    if (this.npc) occupied.add(`${this.npc.tileX},${this.npc.tileY}`);
+
+    for (let i = 0; i < this.passiveNpcCount; i++) {
+      const candidates: [number, number][] = [];
+      for (let r = 0; r < rows; r++) {
+        for (let c = 0; c < cols; c++) {
+          if (passable[r][c] && !occupied.has(`${c},${r}`)) candidates.push([c, r]);
+        }
+      }
+      if (candidates.length === 0) break;
+      const [cx, cy] = candidates[Math.floor(Math.random() * candidates.length)];
+      occupied.add(`${cx},${cy}`);
+      const passive = new NPC(this, def, cx, cy);
+      passive.setInteractionHint(false);
+      this.passiveNpcs.push(passive);
+      this.mapContainer.add(passive.gameObject);
+    }
   }
 
   private onCommunicate(): void {
@@ -755,56 +784,61 @@ export class GameScene extends Phaser.Scene {
       return;
     }
 
-    if (this.selectedNPC === this.sage) {
-      this.aiChatOverlay = new AIChatOverlay(
-        this,
-        this.sage.def.id,
-        this.sage.def.name,
-        this.buildChatPlayerState(),
-        this.npcChatHistory,
-        () => {
-          if (!this.npcTalkedTo) {
-            this.npcTalkedTo = true;
-            this.sage?.setInteractionHint(false);
-            this.quests.onNPCTalkedTo();
+    const target = this.selectedNPC;
+    const history = this.npcChatHistories.get(target) ?? [];
+
+    const fallback = !this.npcTalkedTo ? (): void => {
+      const overlay = this.aiChatOverlay;
+      this.aiChatOverlay = null;
+      this.time.delayedCall(0, () => {
+        overlay?.destroy();
+        const riddle = this.encounterContext?.riddle;
+        if (!riddle) return;
+        this.riddleOverlay = new RiddleOverlay(
+          this,
+          target.def.name,
+          riddle,
+          (correct) => {
+            if (correct) {
+              this.combat.awardGold(10);
+              this.combat.addLogs(["Correct! +10 GP."]);
+            } else {
+              this.combat.addLogs(["Wrong answer."]);
+            }
+            target.setInteractionHint(false);
+            if (!this.npcTalkedTo) {
+              this.npcTalkedTo = true;
+              this.quests.onNPCTalkedTo();
+            }
             this.updateHUD();
-          }
-        },
-        (history) => {
-          this.npcChatHistory = history;
-          this.aiChatOverlay = null;
-          this.input.keyboard?.enableGlobalCapture();
+          },
+          () => { this.riddleOverlay = null; this.updateHUD(); },
+        );
+      });
+    } : undefined;
+
+    this.aiChatOverlay = new AIChatOverlay(
+      this,
+      target.def.id,
+      target.def.name,
+      this.buildChatPlayerState(),
+      history,
+      () => {
+        if (!this.npcTalkedTo) {
+          this.npcTalkedTo = true;
+          target.setInteractionHint(false);
+          this.quests.onNPCTalkedTo();
           this.updateHUD();
-        },
-      );
-    } else if (this.selectedNPC === this.socialNpc && !this.socialNpcTalkedTo) {
-      const riddle = this.encounterContext?.riddle;
-      if (!riddle) return;
-      this.riddleOverlay = new RiddleOverlay(
-        this,
-        this.socialNpc.def.name,
-        riddle,
-        (correct) => {
-          if (correct) {
-            this.combat.awardGold(10);
-            this.combat.addLogs(["Correct! The villager rewards you with +10 GP."]);
-          } else {
-            this.combat.addLogs(["Wrong answer — the villager shakes their head."]);
-          }
-          this.socialNpcTalkedTo = true;
-          this.socialNpc?.setInteractionHint(false);
-          if (!this.npcTalkedTo) {
-            this.npcTalkedTo = true;
-            this.quests.onNPCTalkedTo();
-          }
-          this.updateHUD();
-        },
-        () => {
-          this.riddleOverlay = null;
-          this.updateHUD();
-        },
-      );
-    }
+        }
+      },
+      (newHistory) => {
+        this.npcChatHistories.set(target, newHistory);
+        this.aiChatOverlay = null;
+        this.input.keyboard?.enableGlobalCapture();
+        this.updateHUD();
+      },
+      fallback,
+    );
   }
 
   private buildChatPlayerState(): ChatPlayerState {
@@ -829,8 +863,8 @@ export class GameScene extends Phaser.Scene {
           passable[r][c] &&
           chebyshev(c, r, this.player.tileX, this.player.tileY) >= 3 &&
           !this.enemies.some((e) => e.tileX === c && e.tileY === r) &&
-          !(this.sage?.tileX === c && this.sage?.tileY === r) &&
-          !(this.socialNpc?.tileX === c && this.socialNpc?.tileY === r)
+          !(this.npc?.tileX === c && this.npc?.tileY === r) &&
+          !this.passiveNpcs.some((n) => n.tileX === c && n.tileY === r)
         ) {
           candidates.push([r, c]);
         }

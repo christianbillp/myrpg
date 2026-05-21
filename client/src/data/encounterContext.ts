@@ -1,4 +1,4 @@
-export type EncounterType = "simple_combat" | "social_interaction" | "exploration" | "ai_dialogue";
+export type EncounterType = "simple_combat" | "social_interaction" | "exploration";
 
 export type QuestGoalType = 'kill' | 'collect' | 'explore' | 'talk';
 
@@ -35,6 +35,8 @@ export interface PremadeEncounterDef {
   description: string;
   encounterTypes: EncounterType[];
   mapId: string;
+  npcId?: string;
+  passiveNpcCount?: number;
 }
 
 export interface EncounterContext {
@@ -44,4 +46,5 @@ export interface EncounterContext {
   secrets: SecretDef[];
   riddle: Riddle | null;
   quests: QuestDef[];
+  npcId?: string;
 }

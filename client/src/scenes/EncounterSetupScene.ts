@@ -24,7 +24,7 @@ const CHAR2_CX = 460;
 const CONTENT_CY = Math.round(80 + (H - 80 - 100) / 2);
 
 const ENC_CARD_W = 480;
-const ENC_CARD_H = 180;
+const ENC_CARD_H = 155;
 const ENC_COL1_CX = 920;
 const ENC_COL2_CX = 1420;
 
@@ -32,13 +32,11 @@ const TYPE_COLOR: Record<EncounterType, number> = {
   simple_combat:      0xcc4444,
   exploration:        0x44aa66,
   social_interaction: 0x4488cc,
-  ai_dialogue:        0x7755cc,
 };
 const TYPE_LABEL: Record<EncounterType, string> = {
   simple_combat:      "Combat",
   exploration:        "Exploration",
   social_interaction: "Social",
-  ai_dialogue:        "AI Dialogue",
 };
 
 export class EncounterSetupScene extends Phaser.Scene {
@@ -104,9 +102,10 @@ export class EncounterSetupScene extends Phaser.Scene {
     });
 
     const encPositions: [number, number][] = [
-      [ENC_COL1_CX, 261], [ENC_COL2_CX, 261],
-      [ENC_COL1_CX, 465], [ENC_COL2_CX, 465],
-      [ENC_COL1_CX, 669], [ENC_COL2_CX, 669],
+      [ENC_COL1_CX, 211], [ENC_COL2_CX, 211],
+      [ENC_COL1_CX, 380], [ENC_COL2_CX, 380],
+      [ENC_COL1_CX, 549], [ENC_COL2_CX, 549],
+      [ENC_COL1_CX, 718], [ENC_COL2_CX, 718],
     ];
     this.premadeEncounters.forEach((enc, i) => {
       const [cx, cy] = encPositions[i] ?? [ENC_COL1_CX, 216 + i * 161];
@@ -339,6 +338,7 @@ export class EncounterSetupScene extends Phaser.Scene {
         playerAc:          this.selectedPlayer!.ac,
         savedMapName:        savedMap?.name,
         savedMapDescription: savedMap?.description,
+        npcId:               this.selectedEncounter!.npcId,
       };
 
       this.beginBg.disableInteractive();
@@ -350,6 +350,8 @@ export class EncounterSetupScene extends Phaser.Scene {
           savedMap,
           resumeState: resume,
           encounterContext: encounterContext ?? undefined,
+          npcId: this.selectedEncounter!.npcId,
+          passiveNpcCount: this.selectedEncounter!.passiveNpcCount ?? 0,
         });
       });
     });
