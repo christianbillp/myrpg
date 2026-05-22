@@ -1,0 +1,13 @@
+{
+  "id": "shortbow",
+  "name": "Shortbow",
+  "type": "weapon",
+  "statKey": "dex",
+  "damageDice": 1,
+  "damageSides": 6,
+  "damageType": "Piercing",
+  "mastery": null,
+  "finesse": false,
+  "twoHanded": true,
+  "cost": 25
+}

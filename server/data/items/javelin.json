@@ -1,0 +1,13 @@
+{
+  "id": "javelin",
+  "name": "Javelin",
+  "type": "weapon",
+  "statKey": "str",
+  "damageDice": 1,
+  "damageSides": 6,
+  "damageType": "Piercing",
+  "mastery": "slow",
+  "finesse": false,
+  "twoHanded": false,
+  "cost": 1
+}

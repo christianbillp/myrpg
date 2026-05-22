@@ -298,7 +298,12 @@ const AIDM_TOOLS = [
   },
   {
     name: 'add_item',
-    description: 'Give the player an item (goes to inventory; player can equip gear from the GEAR overlay). Valid item_id values: "health_potion", "greatsword", "shortsword", "flail", "longsword", "rapier", "dagger", "chain_mail", "leather_armor", "studded_leather", "scale_mail", "breastplate", "splint_armor", "plate_armor", "shield".',
+    description: 'Give the player an item (goes to inventory; player can equip gear from the INVENTORY overlay). Valid item_id values: "health_potion", "greatsword", "shortsword", "flail", "longsword", "rapier", "dagger", "javelin", "shortbow", "chain_mail", "leather_armor", "studded_leather", "scale_mail", "breastplate", "splint_armor", "plate_armor", "shield".',
+    input_schema: { type: 'object' as const, properties: { item_id: { type: 'string' }, reason: { type: 'string' } }, required: ['item_id', 'reason'] },
+  },
+  {
+    name: 'remove_item',
+    description: 'Remove one instance of an item from the player\'s inventory. Use when the player throws, consumes, loses, or spends an item through narrative action (e.g. throws a javelin, drops a weapon, item is destroyed). Use the same item_id values as add_item. Has no effect if the item is not in inventory.',
     input_schema: { type: 'object' as const, properties: { item_id: { type: 'string' }, reason: { type: 'string' } }, required: ['item_id', 'reason'] },
   },
   {

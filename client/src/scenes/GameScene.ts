@@ -958,6 +958,16 @@ export class GameScene extends Phaser.Scene {
         }
         break;
       }
+      case "remove_item": {
+        const itemId = action["item_id"] as string;
+        const reason = action["reason"] as string;
+        const items = this.registry.get("items") as ItemDef[];
+        const item = items.find((i) => i.id === itemId);
+        if (item && this.combat.removeItem(itemId)) {
+          this.combat.addLogs([`[DM] ${item.name} removed from inventory — ${reason}`]);
+        }
+        break;
+      }
       case "end_combat": {
         const reason = action["reason"] as string;
         this.combat.addLogs([`[DM] ${reason}`]);
@@ -1033,12 +1043,16 @@ export class GameScene extends Phaser.Scene {
   private onOpenGear(): void {
     if (this.aidmOverlay || this.equipmentOverlay) return;
     const allItems = this.registry.get("items") as ItemDef[];
+    const canUseConsumable =
+      this.combat.mode === "exploring" ||
+      (this.combat.mode === "player_turn" && !this.combat.bonusActionUsed);
     this.equipmentOverlay = new EquipmentOverlay(
       this,
       this.combat.playerDef,
       { ...this.combat.equippedSlots },
       [...this.combat.inventory],
       allItems,
+      canUseConsumable,
       (slot, itemId) => {
         this.combat.equip(slot, itemId, allItems);
         this.equipmentOverlay?.destroy();
@@ -1051,6 +1065,14 @@ export class GameScene extends Phaser.Scene {
         this.equipmentOverlay?.destroy();
         this.equipmentOverlay = null;
         SaveSystem.save(this.buildSaveData());
+        this.onOpenGear();
+      },
+      (_itemId) => {
+        this.combat.usePotion();
+        this.equipmentOverlay?.destroy();
+        this.equipmentOverlay = null;
+        SaveSystem.save(this.buildSaveData());
+        this.updateHUD();
         this.onOpenGear();
       },
       () => { this.equipmentOverlay = null; },

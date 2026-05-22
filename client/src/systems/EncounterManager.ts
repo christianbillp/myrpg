@@ -116,7 +116,8 @@ export class EncounterManager {
       if (currentItem) this.inventory.push(currentItem);
     }
 
-    this.inventory = this.inventory.filter((i) => i.id !== itemId);
+    const removeIdx = this.inventory.findIndex((i) => i.id === itemId);
+    if (removeIdx !== -1) this.inventory.splice(removeIdx, 1);
     this.equippedSlots[slotKey] = itemId;
     applyEquipment(this.playerDef, this.equippedSlots, allItems);
     this.onChange();
@@ -137,6 +138,14 @@ export class EncounterManager {
     this.inventory.push(item);
     this.addLogs([`Picked up ${item.name}!`]);
     this.onChange();
+  }
+
+  removeItem(itemId: string): boolean {
+    const idx = this.inventory.findIndex((i) => i.id === itemId);
+    if (idx === -1) return false;
+    this.inventory.splice(idx, 1);
+    this.onChange();
+    return true;
   }
 
   usePotion(): void {

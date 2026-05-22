@@ -107,7 +107,7 @@ export class AIDMOverlay extends BaseOverlay {
 
     const sep1 = scene.add.rectangle(0, top + 44, panelW - 32, 1, 0x334455);
 
-    scene.add.rectangle(0, top + 44 + historyAreaH / 2 + 4, panelW - 32, historyAreaH, 0x080812);
+    const historyBg = scene.add.rectangle(0, top + 44 + historyAreaH / 2 + 4, panelW - 32, historyAreaH, 0x080812);
 
     this.historyText = scene.add.text(
       -(panelW / 2 - 24),
@@ -132,7 +132,7 @@ export class AIDMOverlay extends BaseOverlay {
 
     const sbX = panelW / 2 - 20;
     const sbCY = (this.areaTop + this.areaBottom) / 2;
-    scene.add.rectangle(sbX, sbCY, 4, this.visibleH, 0x1a1a2e).setAlpha(0.8);
+    const scrollTrack = scene.add.rectangle(sbX, sbCY, 4, this.visibleH, 0x1a1a2e).setAlpha(0.8);
     this.scrollThumb = scene.add
       .rectangle(sbX, this.areaTop + 10, 4, 20, ACCENT)
       .setAlpha(0.7)
@@ -153,7 +153,7 @@ export class AIDMOverlay extends BaseOverlay {
     const inputW = inputRight - inputLeft;
     const inputCX = inputLeft + inputW / 2;
 
-    scene.add.rectangle(inputCX, inputAreaY, inputW, 30, 0x111122).setStrokeStyle(1, 0x554422);
+    const inputBg = scene.add.rectangle(inputCX, inputAreaY, inputW, 30, 0x111122).setStrokeStyle(1, 0x554422);
 
     this.inputText = scene.add
       .text(inputLeft + 6, inputAreaY, "█", {
@@ -176,9 +176,9 @@ export class AIDMOverlay extends BaseOverlay {
 
     this.container.add([
       titleText, sep1,
-      this.historyText, this.scrollThumb,
+      historyBg, this.historyText, scrollTrack, this.scrollThumb,
       this.statusText, sep2,
-      this.inputText,
+      inputBg, this.inputText,
       sendBg, sendLabel,
     ]);
 

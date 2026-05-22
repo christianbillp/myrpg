@@ -47,7 +47,7 @@
     "weaponId": "greatsword",
     "shieldId": null
   },
-  "defaultInventoryIds": ["flail"],
+  "defaultInventoryIds": ["flail", "javelin", "javelin", "javelin", "javelin", "javelin", "javelin", "javelin", "javelin"],
   "mainAttack": {
     "name": "Greatsword",
     "statKey": "str",

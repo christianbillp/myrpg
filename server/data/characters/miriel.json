@@ -47,7 +47,7 @@
     "weaponId": "shortsword",
     "shieldId": null
   },
-  "defaultInventoryIds": ["dagger", "dagger"],
+  "defaultInventoryIds": ["dagger", "dagger", "dagger", "dagger", "shortbow"],
   "mainAttack": {
     "name": "Shortsword",
     "statKey": "dex",
