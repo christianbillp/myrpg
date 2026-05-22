@@ -16,7 +16,11 @@ const config: Phaser.Types.Core.GameConfig = {
   width: PLAYER_PANEL_WIDTH + GRID_COLS * TILE_SIZE + TARGET_PANEL_WIDTH,
   height: GRID_ROWS * TILE_SIZE + HUD_HEIGHT,
   backgroundColor: "#000000",
-  dom: { createContainer: true },
+  scale: {
+    parent: 'game',
+    mode: Phaser.Scale.FIT,
+    autoCenter: Phaser.Scale.CENTER_BOTH,
+  },
   scene: [BootScene, EncounterSetupScene, GameScene],
 };
 

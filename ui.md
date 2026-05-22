@@ -15,9 +15,9 @@ Canonical names for all UI regions and components. Use these consistently in cod
 +--------------------------------------------------------------------+
 ```
 
-- **Player Panel** — 160 px wide left sidebar, full canvas height
+- **Player Panel** — 300 px wide left sidebar, full canvas height
 - **Game Map** — tile-based play area between the two panels
-- **Target Panel** — 160 px wide right sidebar, full canvas height; visible only when a creature is selected
+- **Target Panel** — 300 px wide right sidebar, full canvas height; visible only when a creature is selected
 - **HUD** — 200 px tall bar at the bottom, spanning full canvas width
 
 ---
