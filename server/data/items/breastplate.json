@@ -1,0 +1,12 @@
+{
+  "id": "breastplate",
+  "name": "Breastplate",
+  "type": "armor",
+  "category": "medium",
+  "baseAc": 14,
+  "addDex": true,
+  "maxDex": 2,
+  "stealthDisadv": false,
+  "minStr": null,
+  "cost": 400
+}

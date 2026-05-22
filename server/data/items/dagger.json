@@ -1,0 +1,13 @@
+{
+  "id": "dagger",
+  "name": "Dagger",
+  "type": "weapon",
+  "statKey": "str",
+  "damageDice": 1,
+  "damageSides": 4,
+  "damageType": "Piercing",
+  "mastery": "nick",
+  "finesse": true,
+  "twoHanded": false,
+  "cost": 2
+}

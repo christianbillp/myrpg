@@ -1,0 +1,7 @@
+{
+  "id": "shield",
+  "name": "Shield",
+  "type": "shield",
+  "acBonus": 2,
+  "cost": 10
+}

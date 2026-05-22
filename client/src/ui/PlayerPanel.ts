@@ -20,8 +20,11 @@ export class PlayerPanel {
   private inventoryText: Phaser.GameObjects.Text;
   private usePotionBg: Phaser.GameObjects.Rectangle;
   private questsText: Phaser.GameObjects.Text;
+  private combatStatsText: Phaser.GameObjects.Text;
+  private readonly playerDef: PlayerDef;
 
   constructor(scene: Phaser.Scene, def: PlayerDef, onUsePotion: () => void) {
+    this.playerDef = def;
     const colorHex = "#" + def.color.toString(16).padStart(6, "0");
     const className = `${def.speciesName} · ${def.className} ${def.level}`;
     const statMod = (v: number) => Math.floor((v - 10) / 2);
@@ -99,16 +102,11 @@ export class PlayerPanel {
       .setDepth(11);
 
     const initBonus = statMod(def.dex);
-    scene.add
+    this.combatStatsText = scene.add
       .text(
         12,
         116,
-        [
-          `AC     ${def.ac}`,
-          `Speed  ${def.speedFt} ft`,
-          `Prof   +${def.proficiencyBonus}`,
-          `Init   ${initBonus >= 0 ? "+" : ""}${initBonus}`,
-        ].join("\n"),
+        this.buildCombatStatsLines(statMod(def.dex)),
         {
           fontSize: "10px",
           color: "#aabbcc",
@@ -243,7 +241,18 @@ export class PlayerPanel {
       .setDepth(11);
   }
 
+  private buildCombatStatsLines(initBonus: number): string {
+    const sign = initBonus >= 0 ? "+" : "";
+    return [
+      `AC     ${this.playerDef.ac}`,
+      `Speed  ${this.playerDef.speedFt} ft`,
+      `Prof   +${this.playerDef.proficiencyBonus}`,
+      `Init   ${sign}${initBonus}`,
+    ].join("\n");
+  }
+
   refresh(hp: number, maxHp: number, xp: number, gold: number, inventory: ItemDef[], bonusActionUsed = false, quests: QuestDisplay[] = []): void {
+    this.combatStatsText.setText(this.buildCombatStatsLines(Math.floor((this.playerDef.dex - 10) / 2)));
     const pct = maxHp > 0 ? hp / maxHp : 0;
     const width = PLAYER_PANEL_WIDTH - 24;
     this.hpBar.clear();

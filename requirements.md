@@ -47,13 +47,17 @@ A browser-based 2D single-player RPG built with modern web technologies.
 
 ### Player Progression
 
+### Done
+
+- **US-032** As a player, I want to find and equip gear with stats so that my equipment choices meaningfully affect gameplay. Each character has a default loadout (Aldric: Chain Mail + Greatsword + Flail in inventory; Miriel: Leather Armor + Shortsword + 2 Daggers). Equipment is split into three slot types — armor, weapon, offhand (shield) — stored in `EquipmentSlots`. Armor AC is computed per SRD category (light: base+DEX; medium: base+min(DEX,2); heavy: fixed base) plus +1 for Fighting Style: Defense and +2 for a shield. Finesse weapons use the higher of STR/DEX for attack and damage. A GEAR button in the HUD opens the Equipment Overlay, which shows the three equipped slots with computed stats and UNEQUIP buttons, a carried-items list with EQUIP buttons, and a live AC + attack summary bar. Equipping a two-handed weapon auto-unequips any held shield. The Player Panel AC stat updates live whenever gear changes. Equipped items are persisted in the save file. The AIDM is aware of equipped armor, weapon, and shield and can grant new items via `add_item`.
+- **US-033** As a player, I want to see my save information inside the character selection card so that I know where each character left off. Each character card in the Encounter Setup Scene shows HP / XP / GP from the saved state and the currently equipped weapon and armor. A DELETE SAVE button inside the card clears the save from localStorage and the server without leaving the setup screen. On load, each card asynchronously syncs from the server if no local save is present, updating in-place when the data arrives. The last-played character's card is pre-selected on boot.
+
 ### Now
 
 ### Next
 
 - As a player, I want to earn experience points and level up so that my character grows stronger over time.
 - As a player, I want a skill or attribute system so that I can customise my character's playstyle.
-- As a player, I want to find and equip gear with stats so that my equipment choices meaningfully affect gameplay.
 - As a player, I can read an adventure log which tracks all the encounters I have been on and what happened, so I can build a track record of my adventures and character progression.
 
 ### World

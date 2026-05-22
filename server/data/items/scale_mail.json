@@ -1,0 +1,12 @@
+{
+  "id": "scale_mail",
+  "name": "Scale Mail",
+  "type": "armor",
+  "category": "medium",
+  "baseAc": 14,
+  "addDex": true,
+  "maxDex": 2,
+  "stealthDisadv": true,
+  "minStr": null,
+  "cost": 50
+}

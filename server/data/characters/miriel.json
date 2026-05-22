@@ -21,6 +21,14 @@
   "speedFt": 35,
   "color": 10181046,
   "xp": 0,
+  "savageAttacker": false,
+  "fightingStyleDefense": false,
+  "defaultEquipment": {
+    "armorId": "leather_armor",
+    "weaponId": "shortsword",
+    "shieldId": null
+  },
+  "defaultInventoryIds": ["dagger", "dagger"],
   "mainAttack": {
     "name": "Shortsword",
     "statKey": "dex",

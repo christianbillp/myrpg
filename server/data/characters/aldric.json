@@ -21,6 +21,14 @@
   "speedFt": 30,
   "color": 5227511,
   "xp": 0,
+  "savageAttacker": true,
+  "fightingStyleDefense": true,
+  "defaultEquipment": {
+    "armorId": "chain_mail",
+    "weaponId": "greatsword",
+    "shieldId": null
+  },
+  "defaultInventoryIds": ["flail"],
   "mainAttack": {
     "name": "Greatsword",
     "statKey": "str",

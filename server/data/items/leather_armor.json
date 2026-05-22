@@ -1,0 +1,12 @@
+{
+  "id": "leather_armor",
+  "name": "Leather Armor",
+  "type": "armor",
+  "category": "light",
+  "baseAc": 11,
+  "addDex": true,
+  "maxDex": null,
+  "stealthDisadv": false,
+  "minStr": null,
+  "cost": 10
+}

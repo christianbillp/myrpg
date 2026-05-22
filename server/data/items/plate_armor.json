@@ -1,0 +1,12 @@
+{
+  "id": "plate_armor",
+  "name": "Plate Armor",
+  "type": "armor",
+  "category": "heavy",
+  "baseAc": 18,
+  "addDex": false,
+  "maxDex": null,
+  "stealthDisadv": true,
+  "minStr": 15,
+  "cost": 1500
+}

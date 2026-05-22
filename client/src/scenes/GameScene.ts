@@ -25,6 +25,8 @@ import { d20 } from "../systems/Dice";
 import { RiddleOverlay } from "../ui/RiddleOverlay";
 import { AIChatOverlay, ChatPlayerState, ChatMessage } from "../ui/AIChatOverlay";
 import { AIDMOverlay, AIDMGameState, AIDMAction, AIDMNpcPersona } from "../ui/AIDMOverlay";
+import { EquipmentOverlay } from "../ui/EquipmentOverlay";
+import { applyEquipment } from "../systems/EquipmentSystem";
 import { IntroductionOverlay } from "../ui/IntroductionOverlay";
 import { HUD, HUDState } from "../ui/HUD";
 import { QuestDisplay } from "../ui/PlayerPanel";
@@ -52,6 +54,7 @@ export class GameScene extends Phaser.Scene {
   private riddleOverlay: RiddleOverlay | null = null;
   private aiChatOverlay: AIChatOverlay | null = null;
   private aidmOverlay: AIDMOverlay | null = null;
+  private equipmentOverlay: EquipmentOverlay | null = null;
   private aidmHistory: ChatMessage[] = [];
   private aidmLastLogLength = 0;
   private npcChatHistories: Map<NPC, ChatMessage[]> = new Map();
@@ -99,13 +102,16 @@ export class GameScene extends Phaser.Scene {
     this.encounterMapName = (data?.savedMap as SavedMapDef | undefined)?.name ?? "Unknown Map";
     const characters = this.registry.get("characters") as PlayerDef[];
     const def = data?.playerDef ?? characters[0];
+    const allItems = this.registry.get("items") as ItemDef[];
+    const resumeState = data?.resumeState ?? this.buildDefaultResumeState(def, allItems);
     this.combat = new EncounterManager(
       def,
       () => this.updateHUD(),
       (delay) => this.time.delayedCall(delay, () => this.runEnemyTurn()),
       (enemy) => this.handleEnemyKilled(enemy),
-      data?.resumeState,
+      resumeState,
     );
+    applyEquipment(def, this.combat.equippedSlots, allItems);
   }
 
   private handleEnemyKilled(enemy: Enemy): void {
@@ -128,6 +134,18 @@ export class GameScene extends Phaser.Scene {
     SaveSystem.save(this.buildSaveData());
   }
 
+  private buildDefaultResumeState(def: PlayerDef, allItems: ItemDef[]): ResumeState {
+    const byId = Object.fromEntries(allItems.map((i) => [i.id, i]));
+    return {
+      hp: def.maxHp,
+      xp: def.xp,
+      gold: 0,
+      inventory: (def.defaultInventoryIds ?? []).map((id) => byId[id]).filter(Boolean) as ItemDef[],
+      secondWindUses: def.secondWindMaxUses,
+      equippedSlots: { ...def.defaultEquipment },
+    };
+  }
+
   private buildSaveData(): SaveData {
     return {
       playerDefId: this.combat.playerDef.id,
@@ -136,6 +154,7 @@ export class GameScene extends Phaser.Scene {
       gold: this.combat.playerGold,
       inventoryIds: this.combat.inventory.map((i) => i.id),
       secondWindUses: this.combat.secondWindUses,
+      equippedSlots: { ...this.combat.equippedSlots },
     };
   }
 
@@ -152,6 +171,7 @@ export class GameScene extends Phaser.Scene {
     this.riddleOverlay = null;
     this.aiChatOverlay = null;
     this.aidmOverlay = null;
+    this.equipmentOverlay = null;
     this.aidmHistory = [];
     this.aidmLastLogLength = 0;
     this.npcChatHistories = new Map();
@@ -199,7 +219,7 @@ export class GameScene extends Phaser.Scene {
         _dx: number,
         dy: number,
       ) => {
-        if (this.introOverlay || this.aiChatOverlay || this.aidmOverlay || this.riddleOverlay) return;
+        if (this.introOverlay || this.aiChatOverlay || this.aidmOverlay || this.riddleOverlay || this.equipmentOverlay) return;
         if (
           pointer.x < PLAYER_PANEL_WIDTH ||
           pointer.x >= PLAYER_PANEL_WIDTH + GRID_W
@@ -474,6 +494,7 @@ export class GameScene extends Phaser.Scene {
       onSearch:      () => this.onSearch(),
       onCommunicate: () => this.onCommunicate(),
       onOpenDM:      () => this.onOpenDM(),
+      onOpenGear:    () => this.onOpenGear(),
       onResetView:      () => this.resetGridView(),
       onNewEncounter:   () => {
         const saveData = this.buildSaveData();
@@ -900,6 +921,9 @@ export class GameScene extends Phaser.Scene {
         bonusActionUsed: this.combat.bonusActionUsed,
         movesLeft: this.combat.movesLeft,
         secondWindUses: this.combat.secondWindUses,
+        equippedArmor: this.combat.equippedSlots.armorId,
+        equippedWeapon: this.combat.equippedSlots.weaponId,
+        equippedShield: this.combat.equippedSlots.shieldId,
       },
       enemies: this.enemies.map((e, i) => ({
         label: e.label || String(i),
@@ -1081,6 +1105,33 @@ export class GameScene extends Phaser.Scene {
       }
     }
     this.updateHUD();
+  }
+
+  private onOpenGear(): void {
+    if (this.riddleOverlay || this.aiChatOverlay || this.aidmOverlay || this.equipmentOverlay) return;
+    const allItems = this.registry.get("items") as ItemDef[];
+    this.equipmentOverlay = new EquipmentOverlay(
+      this,
+      this.combat.playerDef,
+      { ...this.combat.equippedSlots },
+      [...this.combat.inventory],
+      allItems,
+      (slot, itemId) => {
+        this.combat.equip(slot, itemId, allItems);
+        this.equipmentOverlay?.destroy();
+        this.equipmentOverlay = null;
+        SaveSystem.save(this.buildSaveData());
+        this.onOpenGear();
+      },
+      (slot) => {
+        this.combat.unequip(slot, allItems);
+        this.equipmentOverlay?.destroy();
+        this.equipmentOverlay = null;
+        SaveSystem.save(this.buildSaveData());
+        this.onOpenGear();
+      },
+      () => { this.equipmentOverlay = null; },
+    );
   }
 
   private onOpenDM(): void {

@@ -39,20 +39,27 @@ const TYPE_LABEL: Record<EncounterType, string> = {
   social_interaction: "Social",
 };
 
+interface SaveDisplay {
+  infoText: Phaser.GameObjects.Text;
+  equippedText: Phaser.GameObjects.Text;
+  deleteBg: Phaser.GameObjects.Rectangle;
+  deleteLabel: Phaser.GameObjects.Text;
+}
+
 export class EncounterSetupScene extends Phaser.Scene {
   private selectedPlayer: PlayerDef | null = null;
   private selectedEncounter: PremadeEncounterDef | null = null;
 
   private charCardBgs: Map<string, Phaser.GameObjects.Rectangle> = new Map();
   private encounterCardBgs: Map<string, Phaser.GameObjects.Rectangle> = new Map();
+  private saveDisplays: Map<string, SaveDisplay> = new Map();
   private beginBg!: Phaser.GameObjects.Rectangle;
   private beginLabel!: Phaser.GameObjects.Text;
-  private saveBannerText!: Phaser.GameObjects.Text;
 
   private characters: PlayerDef[] = [];
   private premadeEncounters: PremadeEncounterDef[] = [];
+  private allSaves: Map<string, SaveData> = new Map();
   private resumeState: ResumeState | null = null;
-  private savedCharDefId: string | null = null;
   private incomingSaveData: SaveData | null = null;
 
   constructor() {
@@ -69,32 +76,33 @@ export class EncounterSetupScene extends Phaser.Scene {
     this.selectedPlayer = null;
     this.selectedEncounter = null;
     this.resumeState = null;
-    this.savedCharDefId = null;
+    this.allSaves.clear();
     this.charCardBgs.clear();
     this.encounterCardBgs.clear();
+    this.saveDisplays.clear();
+
+    // Load saves for all characters from localStorage (sync)
+    for (const char of this.characters) {
+      const save = this.incomingSaveData?.playerDefId === char.id
+        ? this.incomingSaveData
+        : SaveSystem.load(char.id);
+      if (save) this.allSaves.set(char.id, save);
+    }
 
     this.add.rectangle(W / 2, H / 2, W, H, 0x0d0d1e);
-
-    this.add
-      .text(W / 2, 28, "ENCOUNTER SETUP", {
-        fontSize: "22px", color: "#e2b96f", fontFamily: "monospace", resolution: DPR,
-      })
-      .setOrigin(0.5, 0);
+    this.add.text(W / 2, 28, "ENCOUNTER SETUP", {
+      fontSize: "22px", color: "#e2b96f", fontFamily: "monospace", resolution: DPR,
+    }).setOrigin(0.5, 0);
 
     this.add.rectangle(W / 2, 66, W - 64, 1, 0x334455);
     this.add.rectangle(CHAR_DIVIDER_X, H / 2, 1, H - 140, 0x334455).setOrigin(0.5, 0.5);
 
-    this.add
-      .text(CHAR_DIVIDER_X / 2, 78, "CHARACTER", {
-        fontSize: "11px", color: "#556677", fontFamily: "monospace", resolution: DPR, letterSpacing: 2,
-      })
-      .setOrigin(0.5, 0);
-
-    this.add
-      .text(CHAR_DIVIDER_X + (W - CHAR_DIVIDER_X) / 2, 78, "PREMADE ENCOUNTER", {
-        fontSize: "11px", color: "#556677", fontFamily: "monospace", resolution: DPR, letterSpacing: 2,
-      })
-      .setOrigin(0.5, 0);
+    this.add.text(CHAR_DIVIDER_X / 2, 78, "CHARACTER", {
+      fontSize: "11px", color: "#556677", fontFamily: "monospace", resolution: DPR, letterSpacing: 2,
+    }).setOrigin(0.5, 0);
+    this.add.text(CHAR_DIVIDER_X + (W - CHAR_DIVIDER_X) / 2, 78, "PREMADE ENCOUNTER", {
+      fontSize: "11px", color: "#556677", fontFamily: "monospace", resolution: DPR, letterSpacing: 2,
+    }).setOrigin(0.5, 0);
 
     this.characters.forEach((char, i) => {
       const cx = i === 0 ? CHAR1_CX : CHAR2_CX;
@@ -112,61 +120,68 @@ export class EncounterSetupScene extends Phaser.Scene {
       this.buildPremadeCard(enc, cx, cy);
     });
 
-    this.saveBannerText = this.add
-      .text(W / 2, H - 76, "", { fontSize: "11px", color: "#667788", fontFamily: "monospace", resolution: DPR })
-      .setOrigin(0.5, 0)
-      .setDepth(1);
-
     this.add.rectangle(W / 2, H - 58, W - 64, 1, 0x334455);
     this.buildBeginButton(W / 2, H - 36);
     this.refreshBeginButton();
 
-    if (this.incomingSaveData) {
-      this.applySave(this.incomingSaveData);
-    } else {
-      const lastId = SaveSystem.getLastCharacterId();
-      if (lastId) {
-        if (SaveSystem.hasExistingSave(lastId)) {
-          this.applySave(SaveSystem.load(lastId)!);
-        } else {
-          SaveSystem.loadFromServer(lastId).then((save) => {
-            if (save) this.applySave(save);
-          });
-        }
+    // Auto-select last played character
+    const lastId = SaveSystem.getLastCharacterId();
+    if (lastId) {
+      const def = this.characters.find((c) => c.id === lastId);
+      if (def) this.selectChar(def);
+    }
+
+    // Async server sync for characters without a local save
+    for (const char of this.characters) {
+      if (!this.allSaves.has(char.id)) {
+        SaveSystem.loadFromServer(char.id).then((save) => {
+          if (save && this.scene.isActive()) {
+            this.allSaves.set(char.id, save);
+            this.updateSaveDisplay(char, save);
+          }
+        });
       }
     }
   }
 
-  private applySave(save: SaveData): void {
-    const savedDef = this.characters.find((c) => c.id === save.playerDefId) ?? this.characters[0];
-    if (!savedDef) return;
+  private updateSaveDisplay(def: PlayerDef, save: SaveData): void {
+    const display = this.saveDisplays.get(def.id);
+    if (!display) return;
     const items = this.registry.get("items") as ItemDef[];
-    this.resumeState = resumeFromSave(save, items);
-    this.savedCharDefId = savedDef.id;
-    this.selectChar(savedDef);
-    this.saveBannerText.setText(
-      `Saved: ${savedDef.name}  ·  HP ${save.hp}/${savedDef.maxHp}  ·  ${save.xp} XP  ·  ${save.gold} GP`,
-    );
+    display.infoText.setText(this.saveInfoLine(save, def));
+    display.equippedText.setText(this.equippedLine(save, items));
+    display.deleteBg.setInteractive({ useHandCursor: true });
+    display.deleteBg.setAlpha(1);
+    display.deleteLabel.setAlpha(1);
+  }
+
+  private saveInfoLine(save: SaveData, def: PlayerDef): string {
+    return `HP ${save.hp}/${def.maxHp}  ·  ${save.xp} XP  ·  ${save.gold} GP`;
+  }
+
+  private equippedLine(save: SaveData, items: ItemDef[]): string {
+    const byId = Object.fromEntries(items.map((i) => [i.id, i]));
+    const weapon = save.equippedSlots?.weaponId ? byId[save.equippedSlots.weaponId]?.name : null;
+    const armor  = save.equippedSlots?.armorId  ? byId[save.equippedSlots.armorId]?.name  : null;
+    const shield = save.equippedSlots?.shieldId ? byId[save.equippedSlots.shieldId]?.name : null;
+    return [weapon, armor, shield].filter(Boolean).join("  ·  ") || "—";
   }
 
   private buildCharCard(def: PlayerDef, cx: number, cy: number): void {
     const cardW = 270;
-    const cardH = 480;
+    const cardH = 490;
     const colorHex = "#" + def.color.toString(16).padStart(6, "0");
     const statMod = (v: number) => Math.floor((v - 10) / 2);
+    const items = this.registry.get("items") as ItemDef[];
+    const save = this.allSaves.get(def.id) ?? null;
 
     const bg = this.add
       .rectangle(cx, cy, cardW, cardH, 0x111122)
       .setStrokeStyle(2, 0x334455)
       .setInteractive({ useHandCursor: true });
     this.charCardBgs.set(def.id, bg);
-
-    bg.on("pointerover", () => {
-      if (this.selectedPlayer?.id !== def.id) bg.setStrokeStyle(2, def.color & 0x7f7f7f);
-    });
-    bg.on("pointerout", () => {
-      if (this.selectedPlayer?.id !== def.id) bg.setStrokeStyle(2, 0x334455);
-    });
+    bg.on("pointerover", () => { if (this.selectedPlayer?.id !== def.id) bg.setStrokeStyle(2, def.color & 0x7f7f7f); });
+    bg.on("pointerout",  () => { if (this.selectedPlayer?.id !== def.id) bg.setStrokeStyle(2, 0x334455); });
     bg.on("pointerdown", () => this.selectChar(def));
 
     const top = cy - cardH / 2;
@@ -191,14 +206,55 @@ export class EncounterSetupScene extends Phaser.Scene {
       align: "center", lineSpacing: 6,
     }).setOrigin(0.5, 0);
 
-    this.add.rectangle(cx, top + 202, cardW - 32, 1, 0x334455);
+    this.add.rectangle(cx, top + 200, cardW - 32, 1, 0x334455);
 
-    this.add.text(cx, top + 214, this.charFeatures(def).join("\n"), {
+    this.add.text(cx, top + 212, this.charFeatures(def).join("\n"), {
       fontSize: "11px", color: "#99bbcc", fontFamily: "monospace", resolution: DPR,
       align: "center", lineSpacing: 8,
     }).setOrigin(0.5, 0);
 
-    this.add.text(cx, top + cardH - 32, "SELECT", {
+    // ── Save section ──────────────────────────────────────────────
+    this.add.rectangle(cx, top + 308, cardW - 32, 1, 0x223344);
+
+    const infoText = this.add.text(cx, top + 320, save ? this.saveInfoLine(save, def) : "No save data", {
+      fontSize: "10px", color: save ? "#aabbcc" : "#445566", fontFamily: "monospace", resolution: DPR,
+    }).setOrigin(0.5, 0);
+
+    const equippedText = this.add.text(cx, top + 338, save ? this.equippedLine(save, items) : "", {
+      fontSize: "10px", color: "#667788", fontFamily: "monospace", resolution: DPR,
+    }).setOrigin(0.5, 0);
+
+    const deleteBg = this.add
+      .rectangle(cx, top + 366, 110, 22, 0x1a0808)
+      .setStrokeStyle(1, save ? 0x663333 : 0x222222)
+      .setAlpha(save ? 1 : 0.3);
+    const deleteLabel = this.add
+      .text(cx, top + 366, "DELETE SAVE", {
+        fontSize: "10px", color: save ? "#995555" : "#445566", fontFamily: "monospace", resolution: DPR,
+      })
+      .setOrigin(0.5)
+      .setAlpha(save ? 1 : 0.3);
+
+    if (save) {
+      deleteBg.setInteractive({ useHandCursor: true });
+      deleteBg.on("pointerover", () => { deleteBg.setStrokeStyle(1, 0xaa4444); deleteLabel.setColor("#cc6666"); });
+      deleteBg.on("pointerout",  () => { deleteBg.setStrokeStyle(1, 0x663333); deleteLabel.setColor("#995555"); });
+      deleteBg.on("pointerdown", (pointer: Phaser.Input.Pointer) => {
+        pointer.event.stopPropagation();
+        SaveSystem.deleteSave(def.id);
+        this.allSaves.delete(def.id);
+        if (this.selectedPlayer?.id === def.id) this.resumeState = null;
+        infoText.setText("No save data").setColor("#445566");
+        equippedText.setText("");
+        deleteBg.disableInteractive().setStrokeStyle(1, 0x222222).setAlpha(0.3);
+        deleteLabel.setColor("#445566").setAlpha(0.3);
+      });
+    }
+
+    this.saveDisplays.set(def.id, { infoText, equippedText, deleteBg, deleteLabel });
+
+    // ── SELECT label ──────────────────────────────────────────────
+    this.add.text(cx, top + cardH - 24, "SELECT", {
       fontSize: "13px", color: colorHex, fontFamily: "monospace", resolution: DPR,
     }).setOrigin(0.5, 0);
   }
@@ -207,6 +263,13 @@ export class EncounterSetupScene extends Phaser.Scene {
     for (const [id, b] of this.charCardBgs)
       b.setStrokeStyle(2, id === def.id ? def.color : 0x334455);
     this.selectedPlayer = def;
+    const save = this.allSaves.get(def.id);
+    if (save) {
+      const items = this.registry.get("items") as ItemDef[];
+      this.resumeState = resumeFromSave(save, items, def.defaultEquipment);
+    } else {
+      this.resumeState = null;
+    }
     this.refreshBeginButton();
   }
 
@@ -236,34 +299,24 @@ export class EncounterSetupScene extends Phaser.Scene {
       .setStrokeStyle(1, 0x334455)
       .setInteractive({ useHandCursor: true });
     this.encounterCardBgs.set(def.id, bg);
-
-    bg.on("pointerover", () => {
-      if (this.selectedEncounter?.id !== def.id) bg.setStrokeStyle(1, 0x556677);
-    });
-    bg.on("pointerout", () => {
-      if (this.selectedEncounter?.id !== def.id) bg.setStrokeStyle(1, 0x334455);
-    });
+    bg.on("pointerover", () => { if (this.selectedEncounter?.id !== def.id) bg.setStrokeStyle(1, 0x556677); });
+    bg.on("pointerout",  () => { if (this.selectedEncounter?.id !== def.id) bg.setStrokeStyle(1, 0x334455); });
     bg.on("pointerdown", () => this.selectEncounter(def));
 
-    // Map label
     this.add.text(left + 14, top + 10, def.mapId.toUpperCase(), {
       fontSize: "9px", color: "#445566", fontFamily: "monospace", resolution: DPR, letterSpacing: 1,
     }).setOrigin(0, 0);
-
-    // Title
     this.add.text(cx, top + 26, def.title, {
       fontSize: "14px", color: "#e8e8f8", fontFamily: "monospace", resolution: DPR,
     }).setOrigin(0.5, 0);
 
-    // Type chips
     let chipX = left + 14;
     const chipY = top + 52;
     def.encounterTypes.forEach((t) => {
-      const label = TYPE_LABEL[t];
-      const color = TYPE_COLOR[t];
+      const label = TYPE_LABEL[t as EncounterType];
+      const color = TYPE_COLOR[t as EncounterType];
       const chipW = label.length * 7 + 12;
-      this.add.rectangle(chipX + chipW / 2, chipY + 8, chipW, 16, color, 0.2)
-        .setStrokeStyle(1, color);
+      this.add.rectangle(chipX + chipW / 2, chipY + 8, chipW, 16, color, 0.2).setStrokeStyle(1, color);
       this.add.text(chipX + chipW / 2, chipY + 8, label, {
         fontSize: "9px", color: "#" + color.toString(16).padStart(6, "0"),
         fontFamily: "monospace", resolution: DPR,
@@ -271,7 +324,6 @@ export class EncounterSetupScene extends Phaser.Scene {
       chipX += chipW + 6;
     });
 
-    // Description
     this.add.text(cx, top + 78, def.description, {
       fontSize: "10px", color: "#8899aa", fontFamily: "monospace", resolution: DPR,
       wordWrap: { width: ENC_CARD_W - 28 }, lineSpacing: 4, align: "left",
@@ -308,19 +360,10 @@ export class EncounterSetupScene extends Phaser.Scene {
       .setAlpha(0.4);
 
     this.beginBg.setInteractive({ useHandCursor: true });
-    this.beginBg.on("pointerover", () => {
-      if (this.isReady()) this.beginBg.setAlpha(0.75);
-    });
-    this.beginBg.on("pointerout", () => {
-      if (this.isReady()) this.beginBg.setAlpha(1);
-    });
+    this.beginBg.on("pointerover", () => { if (this.isReady()) this.beginBg.setAlpha(0.75); });
+    this.beginBg.on("pointerout",  () => { if (this.isReady()) this.beginBg.setAlpha(1); });
     this.beginBg.on("pointerdown", () => {
       if (!this.isReady()) return;
-
-      const selectedId = this.selectedPlayer!.id;
-      const resume = this.resumeState && this.savedCharDefId === selectedId
-        ? this.resumeState
-        : undefined;
 
       const encounterTypes = this.selectedEncounter!.encounterTypes as EncounterType[];
       const maps = this.registry.get("maps") as SavedMapDef[];
@@ -329,13 +372,13 @@ export class EncounterSetupScene extends Phaser.Scene {
       const config: EncounterStartConfig = {
         encounterTypes,
         mapType: "saved",
-        playerDefId:       this.selectedPlayer!.id,
-        playerName:        this.selectedPlayer!.name,
-        playerSpeciesName: this.selectedPlayer!.speciesName,
-        playerClassName:   this.selectedPlayer!.className,
-        playerLevel:       this.selectedPlayer!.level,
-        playerMaxHp:       this.selectedPlayer!.maxHp,
-        playerAc:          this.selectedPlayer!.ac,
+        playerDefId:         this.selectedPlayer!.id,
+        playerName:          this.selectedPlayer!.name,
+        playerSpeciesName:   this.selectedPlayer!.speciesName,
+        playerClassName:     this.selectedPlayer!.className,
+        playerLevel:         this.selectedPlayer!.level,
+        playerMaxHp:         this.selectedPlayer!.maxHp,
+        playerAc:            this.selectedPlayer!.ac,
         savedMapName:        savedMap?.name,
         savedMapDescription: savedMap?.description,
         npcId:               this.selectedEncounter!.npcId,
@@ -344,13 +387,13 @@ export class EncounterSetupScene extends Phaser.Scene {
       this.beginBg.disableInteractive();
       SaveSystem.startEncounter(config).then((encounterContext) => {
         this.scene.start("GameScene", {
-          playerDef: this.selectedPlayer,
-          mapType: "saved",
+          playerDef:      this.selectedPlayer,
+          mapType:        "saved",
           encounterTypes,
           savedMap,
-          resumeState: resume,
+          resumeState:    this.resumeState ?? undefined,
           encounterContext: encounterContext ?? undefined,
-          npcId: this.selectedEncounter!.npcId,
+          npcId:           this.selectedEncounter!.npcId,
           passiveNpcCount: this.selectedEncounter!.passiveNpcCount ?? 0,
         });
       });

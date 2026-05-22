@@ -4,7 +4,7 @@ loadEnv({ path: resolve(dirname(fileURLToPath(import.meta.url)), '../../.env') }
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import Anthropic from '@anthropic-ai/sdk';
-import { readFile, readdir, writeFile, mkdir } from 'fs/promises';
+import { readFile, readdir, writeFile, mkdir, unlink } from 'fs/promises';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 
@@ -112,6 +112,12 @@ The adventurer you are speaking with is ${name}, a level ${level} ${className}. 
 server.post('/save/:characterId', async (request, reply) => {
   const { characterId } = request.params as { characterId: string };
   await writeSave(characterId, request.body);
+  return reply.code(200).send({ ok: true });
+});
+
+server.delete('/save/:characterId', async (request, reply) => {
+  const { characterId } = request.params as { characterId: string };
+  try { await unlink(saveFilePath(characterId)); } catch { /* already gone */ }
   return reply.code(200).send({ ok: true });
 });
 
@@ -249,6 +255,7 @@ interface AIDMPlayerState {
   name: string; className: string; level: number;
   hp: number; maxHp: number; xp: number; gold: number;
   ac: number; tileX: number; tileY: number; inventory: string[];
+  equippedArmor: string | null; equippedWeapon: string | null; equippedShield: string | null;
 }
 interface AIDMSelectedTarget {
   type: 'enemy' | 'npc'; name: string; id: string; label?: string;
@@ -323,7 +330,7 @@ const AIDM_TOOLS = [
   },
   {
     name: 'add_item',
-    description: 'Give the player an item. Valid item_id values: "health_potion".',
+    description: 'Give the player an item (goes to inventory; player can equip gear from the GEAR overlay). Valid item_id values: "health_potion", "greatsword", "shortsword", "flail", "longsword", "rapier", "dagger", "chain_mail", "leather_armor", "studded_leather", "scale_mail", "breastplate", "splint_armor", "plate_armor", "shield".',
     input_schema: { type: 'object' as const, properties: { item_id: { type: 'string' }, reason: { type: 'string' } }, required: ['item_id', 'reason'] },
   },
   {
@@ -421,7 +428,8 @@ CONTEXT: ${encounterContext}
 
 PLAYER: ${p.name}, Level ${p.level} ${p.className}
   HP ${p.hp}/${p.maxHp} · AC ${p.ac} · XP ${p.xp} · ${p.gold} GP · tile (${p.tileX},${p.tileY})
-  Inventory: ${p.inventory.join(', ') || 'empty'}
+  Equipped: ${[p.equippedArmor, p.equippedWeapon, p.equippedShield].filter(Boolean).join(', ') || 'nothing'}
+  Carrying: ${p.inventory.join(', ') || 'empty'}
   ${combatStateFlags ? combatStateFlags + '\n  ' : ''}${focusLine}
 
 ENEMIES:

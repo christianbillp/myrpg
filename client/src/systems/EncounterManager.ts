@@ -1,6 +1,7 @@
-import { PlayerDef } from '../data/player';
+import { PlayerDef, EquipmentSlots } from '../data/player';
 import { Enemy } from '../entities/Enemy';
-import { ItemDef } from '../data/items';
+import { ItemDef, WeaponDef } from '../data/items';
+import { applyEquipment } from './EquipmentSystem';
 
 function crGoldReward(cr: string): number {
   if (cr.includes('/')) {
@@ -26,6 +27,7 @@ export interface ResumeState {
   gold: number;
   inventory: ItemDef[];
   secondWindUses: number;
+  equippedSlots: EquipmentSlots;
 }
 
 export interface EnemyTurnResult {
@@ -50,6 +52,7 @@ export class EncounterManager {
   playerXp: number;
   secondWindUses: number;
   inventory: ItemDef[] = [];
+  equippedSlots: EquipmentSlots;
   playerGold = 0;
   playerHidden = false;
   enemyVexed = false;
@@ -83,9 +86,51 @@ export class EncounterManager {
     this.playerGold = resume?.gold ?? 0;
     this.inventory = resume?.inventory ?? [];
     this.secondWindUses = resume?.secondWindUses ?? playerDef.secondWindMaxUses;
+    this.equippedSlots = resume?.equippedSlots ?? { ...playerDef.defaultEquipment };
     this.onChange = onChange;
     this.onEnemyTurn = onEnemyTurn;
     this.onEnemyKilled = onEnemyKilled;
+  }
+
+  equip(slot: 'armor' | 'weapon' | 'shield', itemId: string, allItems: ItemDef[]): void {
+    const item = this.inventory.find((i) => i.id === itemId);
+    if (!item) return;
+
+    const slotKey = `${slot}Id` as keyof EquipmentSlots;
+
+    if (slot === 'shield') {
+      const weapon = allItems.find((i) => i.id === this.equippedSlots.weaponId) as WeaponDef | undefined;
+      if (weapon?.twoHanded) return;
+    }
+    if (slot === 'weapon') {
+      const incoming = allItems.find((i) => i.id === itemId) as WeaponDef | undefined;
+      if (incoming?.twoHanded && this.equippedSlots.shieldId) {
+        this.inventory.push(allItems.find((i) => i.id === this.equippedSlots.shieldId)!);
+        this.equippedSlots.shieldId = null;
+      }
+    }
+
+    const currentId = this.equippedSlots[slotKey];
+    if (currentId) {
+      const currentItem = allItems.find((i) => i.id === currentId);
+      if (currentItem) this.inventory.push(currentItem);
+    }
+
+    this.inventory = this.inventory.filter((i) => i.id !== itemId);
+    this.equippedSlots[slotKey] = itemId;
+    applyEquipment(this.playerDef, this.equippedSlots, allItems);
+    this.onChange();
+  }
+
+  unequip(slot: 'armor' | 'weapon' | 'shield', allItems: ItemDef[]): void {
+    const slotKey = `${slot}Id` as keyof EquipmentSlots;
+    const currentId = this.equippedSlots[slotKey];
+    if (!currentId) return;
+    const item = allItems.find((i) => i.id === currentId);
+    if (item) this.inventory.push(item);
+    this.equippedSlots[slotKey] = null;
+    applyEquipment(this.playerDef, this.equippedSlots, allItems);
+    this.onChange();
   }
 
   addItem(item: ItemDef): void {
@@ -100,7 +145,7 @@ export class EncounterManager {
     if (this.mode === 'player_turn' && this.bonusActionUsed) return;
     if (this.mode !== 'player_turn' && this.mode !== 'exploring') return;
     const item = this.inventory.splice(idx, 1)[0];
-    const { healed, logs } = drinkPotion(item);
+    const { healed, logs } = drinkPotion(item as import('../data/items').ConsumableDef);
     const before = this.playerHp;
     this.playerHp = Math.min(this.playerDef.maxHp, this.playerHp + healed);
     this.addLogs([...logs, `HP: ${before} → ${this.playerHp}/${this.playerDef.maxHp}`]);

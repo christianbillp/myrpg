@@ -1,0 +1,12 @@
+{
+  "id": "chain_mail",
+  "name": "Chain Mail",
+  "type": "armor",
+  "category": "heavy",
+  "baseAc": 16,
+  "addDex": false,
+  "maxDex": null,
+  "stealthDisadv": true,
+  "minStr": 13,
+  "cost": 75
+}

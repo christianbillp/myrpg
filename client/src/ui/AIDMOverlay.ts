@@ -23,6 +23,7 @@ export interface AIDMGameState {
     ac: number; tileX: number; tileY: number; inventory: string[];
     hidden: boolean; actionUsed: boolean; bonusActionUsed: boolean;
     movesLeft: number; secondWindUses: number;
+    equippedArmor: string | null; equippedWeapon: string | null; equippedShield: string | null;
   };
   enemies: Array<{
     label?: string; id: string; name: string;

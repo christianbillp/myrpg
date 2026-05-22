@@ -1,0 +1,12 @@
+{
+  "id": "splint_armor",
+  "name": "Splint Armor",
+  "type": "armor",
+  "category": "heavy",
+  "baseAc": 17,
+  "addDex": false,
+  "maxDex": null,
+  "stealthDisadv": true,
+  "minStr": 15,
+  "cost": 200
+}

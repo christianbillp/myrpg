@@ -1,0 +1,13 @@
+{
+  "id": "shortsword",
+  "name": "Shortsword",
+  "type": "weapon",
+  "statKey": "dex",
+  "damageDice": 1,
+  "damageSides": 6,
+  "damageType": "Piercing",
+  "mastery": "vex",
+  "finesse": true,
+  "twoHanded": false,
+  "cost": 10
+}

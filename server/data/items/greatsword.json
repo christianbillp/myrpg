@@ -1,0 +1,13 @@
+{
+  "id": "greatsword",
+  "name": "Greatsword",
+  "type": "weapon",
+  "statKey": "str",
+  "damageDice": 2,
+  "damageSides": 6,
+  "damageType": "Slashing",
+  "mastery": "graze",
+  "finesse": false,
+  "twoHanded": true,
+  "cost": 50
+}

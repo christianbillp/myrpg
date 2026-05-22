@@ -1,0 +1,13 @@
+{
+  "id": "longsword",
+  "name": "Longsword",
+  "type": "weapon",
+  "statKey": "str",
+  "damageDice": 1,
+  "damageSides": 8,
+  "damageType": "Slashing",
+  "mastery": "sap",
+  "finesse": false,
+  "twoHanded": false,
+  "cost": 15
+}

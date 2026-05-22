@@ -1,6 +1,7 @@
 import { ItemDef } from '../data/items';
 import { ResumeState } from './EncounterManager';
 import { EncounterContext, EncounterType } from '../data/encounterContext';
+import { EquipmentSlots } from '../data/player';
 
 const LAST_CHAR_KEY = 'myrpg_last_character';
 const saveKey = (characterId: string) => `myrpg_save_${characterId}`;
@@ -13,6 +14,7 @@ export interface SaveData {
   gold: number;
   inventoryIds: string[];
   secondWindUses: number;
+  equippedSlots?: EquipmentSlots;
   encounterContext?: EncounterContext;
 }
 
@@ -31,7 +33,7 @@ export interface EncounterStartConfig {
   npcId?: string;
 }
 
-export function resumeFromSave(save: SaveData, items: ItemDef[]): ResumeState {
+export function resumeFromSave(save: SaveData, items: ItemDef[], defaultEquipment: EquipmentSlots): ResumeState {
   const itemsById = Object.fromEntries(items.map((i) => [i.id, i]));
   return {
     hp: save.hp,
@@ -39,6 +41,7 @@ export function resumeFromSave(save: SaveData, items: ItemDef[]): ResumeState {
     gold: save.gold,
     inventory: save.inventoryIds.map((id) => itemsById[id]).filter(Boolean) as ItemDef[],
     secondWindUses: save.secondWindUses,
+    equippedSlots: save.equippedSlots ?? { ...defaultEquipment },
   };
 }
 
@@ -94,6 +97,14 @@ export const SaveSystem = {
     } catch {
       return null;
     }
+  },
+
+  deleteSave(characterId: string): void {
+    localStorage.removeItem(saveKey(characterId));
+    if (localStorage.getItem(LAST_CHAR_KEY) === characterId) {
+      localStorage.removeItem(LAST_CHAR_KEY);
+    }
+    fetch(`${API_URL}/save/${characterId}`, { method: 'DELETE' }).catch(() => {});
   },
 
   clear(characterId: string): void {

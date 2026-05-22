@@ -1,0 +1,12 @@
+{
+  "id": "studded_leather",
+  "name": "Studded Leather Armor",
+  "type": "armor",
+  "category": "light",
+  "baseAc": 12,
+  "addDex": true,
+  "maxDex": null,
+  "stealthDisadv": false,
+  "minStr": null,
+  "cost": 45
+}

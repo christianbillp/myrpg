@@ -8,6 +8,12 @@ export interface PlayerAttack {
   vex: boolean;
 }
 
+export interface EquipmentSlots {
+  armorId: string | null;
+  weaponId: string | null;
+  shieldId: string | null;
+}
+
 export interface PlayerDef {
   id: string;
   name: string;
@@ -31,5 +37,9 @@ export interface PlayerDef {
   speedFt: number;
   color: number;
   xp: number;
+  savageAttacker: boolean;
+  fightingStyleDefense: boolean;
+  defaultEquipment: EquipmentSlots;
+  defaultInventoryIds: string[];
   mainAttack: PlayerAttack;
 }

@@ -1,0 +1,13 @@
+{
+  "id": "flail",
+  "name": "Flail",
+  "type": "weapon",
+  "statKey": "str",
+  "damageDice": 1,
+  "damageSides": 8,
+  "damageType": "Bludgeoning",
+  "mastery": "sap",
+  "finesse": false,
+  "twoHanded": false,
+  "cost": 10
+}
