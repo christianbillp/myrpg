@@ -12,6 +12,7 @@
   "wis": 10,
   "cha": 10,
   "proficiencyBonus": 2,
+  "initiativeBonus": 1,
   "stealthBonus": 1,
   "passivePerception": 10,
   "speed": 6,

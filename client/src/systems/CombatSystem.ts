@@ -10,7 +10,7 @@ export function rollInitiative(
   const pRoll = d20();
   const eRoll = d20();
   const pMod = mod(player.dex);
-  const eMod = mod(enemy.dex);
+  const eMod = enemy.initiativeBonus;
   const pTotal = pRoll + pMod;
   const eTotal = eRoll + eMod;
   const playerFirst = pTotal >= eTotal;

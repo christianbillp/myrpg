@@ -59,6 +59,7 @@ A browser-based 2D single-player RPG built with modern web technologies.
 - As a player, I want to earn experience points and level up so that my character grows stronger over time.
 - As a player, I want a skill or attribute system so that I can customise my character's playstyle.
 - As a player, I can read an adventure log which tracks all the encounters I have been on and what happened, so I can build a track record of my adventures and character progression.
+- As a player, I can start a multi-encounter adventure with a coherent story arc, so I can experience a more immersive gameplay experience.
 
 ### World
 

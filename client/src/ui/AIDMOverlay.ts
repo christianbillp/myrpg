@@ -7,7 +7,11 @@ import {
   TARGET_PANEL_WIDTH,
 } from "../constants";
 import { BaseOverlay } from "./BaseOverlay";
-import { ChatMessage } from "./AIChatOverlay";
+
+export interface ChatMessage {
+  role: "user" | "assistant";
+  content: string;
+}
 
 const DPR = window.devicePixelRatio;
 const API_URL = "http://localhost:3000";
@@ -36,7 +40,6 @@ export interface AIDMGameState {
   quests: Array<{ id: string; title: string; progress: number; target: number; completed: boolean }>;
   mapItems: Array<{ name: string; tileX: number; tileY: number }>;
   secretsRemaining: number;
-  npcConversations: Array<{ npcId: string; npcName: string; messages: Array<{ role: "user" | "assistant"; content: string }> }>;
   combatLog: string[];
   encounterTypes: string[];
   mapName: string;

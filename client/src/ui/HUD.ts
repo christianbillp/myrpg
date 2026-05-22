@@ -50,7 +50,6 @@ export interface HUDCallbacks {
   onEndTurn: () => void;
   onDeathSave: () => void;
   onSearch: () => void;
-  onCommunicate: () => void;
   onOpenDM: () => void;
   onOpenGear: () => void;
   onResetView: () => void;
@@ -70,7 +69,6 @@ export class HUD {
   private readonly endTurnBtn: Phaser.GameObjects.Container;
   private readonly deathSaveBtn: Phaser.GameObjects.Container;
   private readonly searchBtn: Phaser.GameObjects.Container;
-  private readonly communicateBtn: Phaser.GameObjects.Container;
 
   constructor(scene: Phaser.Scene, callbacks: HUDCallbacks) {
     const y = GRID_H;
@@ -115,7 +113,6 @@ export class HUD {
     this.endTurnBtn   = HUD.makeButton(scene, W - 130,                  btnY, "END TURN",         0x3a3020, callbacks.onEndTurn);
     this.deathSaveBtn = HUD.makeButton(scene, cx,                       btnY, "ROLL DEATH SAVE",  0x5a1a1a, callbacks.onDeathSave);
     this.searchBtn    = HUD.makeButton(scene, W - 130,                  btnY, "SEARCH",           0x1a2a3a, callbacks.onSearch);
-    this.communicateBtn = HUD.makeButton(scene, cx,                     btnY, "COMMUNICATE",      0x2a1a3a, callbacks.onCommunicate);
   }
 
   refresh(state: HUDState): void {
@@ -167,7 +164,6 @@ export class HUD {
     this.endTurnBtn.setVisible(false);
     this.deathSaveBtn.setVisible(false);
     this.searchBtn.setVisible(false);
-    this.communicateBtn.setVisible(false);
     this.phaseText.setColor("#e2b96f");
 
     switch (state.mode) {
@@ -175,8 +171,6 @@ export class HUD {
         this.phaseText.setText("Exploring — WASD / arrow keys to move");
         if (state.encounterTypes.includes("exploration") && state.secretsRemaining > 0)
           this.searchBtn.setVisible(true);
-        if (state.encounterTypes.includes("social_interaction"))
-          this.communicateBtn.setVisible(true);
         break;
 
       case "player_turn": {

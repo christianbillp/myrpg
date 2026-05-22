@@ -22,9 +22,7 @@ import { shuffle } from "../systems/MapUtils";
 import { NPC } from "../entities/NPC";
 import { SecretDef, EncounterType, EncounterContext } from "../data/encounterContext";
 import { d20 } from "../systems/Dice";
-import { RiddleOverlay } from "../ui/RiddleOverlay";
-import { AIChatOverlay, ChatPlayerState, ChatMessage } from "../ui/AIChatOverlay";
-import { AIDMOverlay, AIDMGameState, AIDMAction, AIDMNpcPersona } from "../ui/AIDMOverlay";
+import { AIDMOverlay, AIDMGameState, AIDMAction, AIDMNpcPersona, ChatMessage } from "../ui/AIDMOverlay";
 import { EquipmentOverlay } from "../ui/EquipmentOverlay";
 import { applyEquipment } from "../systems/EquipmentSystem";
 import { IntroductionOverlay } from "../ui/IntroductionOverlay";
@@ -51,13 +49,10 @@ export class GameScene extends Phaser.Scene {
   };
 
   private introOverlay: IntroductionOverlay | null = null;
-  private riddleOverlay: RiddleOverlay | null = null;
-  private aiChatOverlay: AIChatOverlay | null = null;
   private aidmOverlay: AIDMOverlay | null = null;
   private equipmentOverlay: EquipmentOverlay | null = null;
   private aidmHistory: ChatMessage[] = [];
   private aidmLastLogLength = 0;
-  private npcChatHistories: Map<NPC, ChatMessage[]> = new Map();
   private npcPersonas: AIDMNpcPersona[] = [];
   private encounterContext?: EncounterContext;
   private encounterMapName = "Unknown Map";
@@ -80,7 +75,6 @@ export class GameScene extends Phaser.Scene {
   private selectedNPC: NPC | null = null;
   private npc: NPC | null = null;
   private passiveNpcs: NPC[] = [];
-  private npcTalkedTo = false;
 
   constructor() {
     super({ key: "GameScene" });
@@ -166,15 +160,11 @@ export class GameScene extends Phaser.Scene {
     this.selectedNPC = null;
     this.npc = null;
     this.passiveNpcs = [];
-    this.npcTalkedTo = false;
     this.introOverlay = null;
-    this.riddleOverlay = null;
-    this.aiChatOverlay = null;
     this.aidmOverlay = null;
     this.equipmentOverlay = null;
     this.aidmHistory = [];
     this.aidmLastLogLength = 0;
-    this.npcChatHistories = new Map();
     this.npcPersonas = [];
     this.gridZoom = 1;
     this.isPanning = false;
@@ -219,7 +209,7 @@ export class GameScene extends Phaser.Scene {
         _dx: number,
         dy: number,
       ) => {
-        if (this.introOverlay || this.aiChatOverlay || this.aidmOverlay || this.riddleOverlay || this.equipmentOverlay) return;
+        if (this.introOverlay || this.aidmOverlay || this.equipmentOverlay) return;
         if (
           pointer.x < PLAYER_PANEL_WIDTH ||
           pointer.x >= PLAYER_PANEL_WIDTH + GRID_W
@@ -329,7 +319,7 @@ export class GameScene extends Phaser.Scene {
   }
 
   update(): void {
-    if (this.introOverlay || this.aiChatOverlay || this.aidmOverlay || this.riddleOverlay) return;
+    if (this.introOverlay || this.aidmOverlay) return;
     if (this.combat.mode !== "exploring" && this.combat.mode !== "player_turn")
       return;
 
@@ -492,7 +482,6 @@ export class GameScene extends Phaser.Scene {
       onEndTurn:     () => this.onEndTurn(),
       onDeathSave:   () => this.onDeathSave(),
       onSearch:      () => this.onSearch(),
-      onCommunicate: () => this.onCommunicate(),
       onOpenDM:      () => this.onOpenDM(),
       onOpenGear:    () => this.onOpenGear(),
       onResetView:      () => this.resetGridView(),
@@ -818,89 +807,6 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
-  private onCommunicate(): void {
-    if (this.riddleOverlay || this.aiChatOverlay) return;
-    if (!this.selectedNPC) {
-      this.combat.addLogs(["No target selected."]);
-      this.updateHUD();
-      return;
-    }
-    if (chebyshev(this.player.tileX, this.player.tileY, this.selectedNPC.tileX, this.selectedNPC.tileY) > 1) {
-      this.combat.addLogs(["Target is too far away."]);
-      this.updateHUD();
-      return;
-    }
-
-    const target = this.selectedNPC;
-    const history = this.npcChatHistories.get(target) ?? [];
-
-    const fallback = !this.npcTalkedTo ? (): void => {
-      const overlay = this.aiChatOverlay;
-      this.aiChatOverlay = null;
-      this.time.delayedCall(0, () => {
-        overlay?.destroy();
-        const riddle = this.encounterContext?.riddle;
-        if (!riddle) return;
-        this.riddleOverlay = new RiddleOverlay(
-          this,
-          target.def.name,
-          riddle,
-          (correct) => {
-            if (correct) {
-              this.combat.awardGold(10);
-              this.combat.addLogs(["Correct! +10 GP."]);
-            } else {
-              this.combat.addLogs(["Wrong answer."]);
-            }
-            target.setInteractionHint(false);
-            if (!this.npcTalkedTo) {
-              this.npcTalkedTo = true;
-              this.quests.onNPCTalkedTo();
-            }
-            this.updateHUD();
-          },
-          () => { this.riddleOverlay = null; this.updateHUD(); },
-        );
-      });
-    } : undefined;
-
-    this.aiChatOverlay = new AIChatOverlay(
-      this,
-      target.def.id,
-      target.def.name,
-      this.buildChatPlayerState(),
-      history,
-      () => {
-        if (!this.npcTalkedTo) {
-          this.npcTalkedTo = true;
-          target.setInteractionHint(false);
-          this.quests.onNPCTalkedTo();
-          this.updateHUD();
-        }
-      },
-      (newHistory) => {
-        this.npcChatHistories.set(target, newHistory);
-        this.aiChatOverlay = null;
-        this.input.keyboard?.enableGlobalCapture();
-        this.updateHUD();
-      },
-      fallback,
-    );
-  }
-
-  private buildChatPlayerState(): ChatPlayerState {
-    const def = this.combat.playerDef;
-    return {
-      name: def.name,
-      className: def.className,
-      level: def.level,
-      hp: this.combat.playerHp,
-      maxHp: def.maxHp,
-      xp: this.combat.playerXp,
-      gold: this.combat.playerGold,
-    };
-  }
-
   private buildAIDMGameState(): AIDMGameState {
     const def = this.combat.playerDef;
     return {
@@ -957,9 +863,6 @@ export class GameScene extends Phaser.Scene {
       })),
       mapItems: this.mapItems.map((i) => ({ name: i.def.name, tileX: i.tileX, tileY: i.tileY })),
       secretsRemaining: this.mapSecrets.length,
-      npcConversations: Array.from(this.npcChatHistories.entries())
-        .filter(([, msgs]) => msgs.length > 0)
-        .map(([npc, msgs]) => ({ npcId: npc.def.id, npcName: npc.def.name, messages: msgs })),
       combatLog: this.combat.combatLog.slice(-20),
       encounterTypes: this.encounterTypes,
       mapName: this.encounterMapName,
@@ -1108,7 +1011,7 @@ export class GameScene extends Phaser.Scene {
   }
 
   private onOpenGear(): void {
-    if (this.riddleOverlay || this.aiChatOverlay || this.aidmOverlay || this.equipmentOverlay) return;
+    if (this.aidmOverlay || this.equipmentOverlay) return;
     const allItems = this.registry.get("items") as ItemDef[];
     this.equipmentOverlay = new EquipmentOverlay(
       this,
@@ -1135,7 +1038,7 @@ export class GameScene extends Phaser.Scene {
   }
 
   private onOpenDM(): void {
-    if (this.riddleOverlay || this.aiChatOverlay || this.aidmOverlay) return;
+    if (this.aidmOverlay) return;
 
     const newEntries = this.combat.combatLog.slice(this.aidmLastLogLength);
     if (newEntries.length > 0 && this.aidmHistory.length > 0) {

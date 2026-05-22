@@ -79,35 +79,6 @@ server.get('/save/:characterId', async (request) => {
 });
 
 interface ChatMessage { role: 'user' | 'assistant'; content: string; }
-interface PlayerState { name: string; className: string; level: number; hp: number; maxHp: number; xp: number; gold: number; }
-interface ChatRequest { npcId: string; history: ChatMessage[]; playerMessage: string; playerState: PlayerState; }
-
-server.post('/npc/chat', async (request, reply) => {
-  const body = request.body as ChatRequest;
-  const npcs = await readDir(join(DATA_DIR, 'npcs')) as Record<string, unknown>[];
-  const npc = npcs.find((n) => n['id'] === body.npcId);
-  if (!npc || !npc['persona']) return reply.code(404).send({ error: 'NPC not found or has no persona' });
-
-  const { name, className, level, hp, maxHp, xp, gold } = body.playerState;
-  const system = `${npc['persona']}
-
-The adventurer you are speaking with is ${name}, a level ${level} ${className}. They have ${hp}/${maxHp} HP, ${xp} XP, and ${gold} GP.`;
-
-  try {
-    const response = await anthropic.messages.create({
-      model: 'claude-haiku-4-5-20251001',
-      max_tokens: 150,
-      system,
-      messages: [...body.history, { role: 'user', content: body.playerMessage }],
-    });
-    const reply_text = response.content[0].type === 'text' ? response.content[0].text : '';
-    return { reply: reply_text };
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    console.error('Anthropic API error:', message);
-    return reply.code(502).send({ error: message });
-  }
-});
 
 server.post('/save/:characterId', async (request, reply) => {
   const { characterId } = request.params as { characterId: string };
@@ -196,7 +167,7 @@ const TYPE_NARRATIVE: Record<EncounterType, string> = {
 };
 const TYPE_CONTEXT: Record<EncounterType, string> = {
   simple_combat:      'Combat against hostile creatures; the player must defeat all enemies.',
-  social_interaction: 'An NPC available for conversation; AI dialogue with riddle fallback.',
+  social_interaction: 'An NPC available for conversation; the player speaks with all creatures through the Dungeon Master overlay.',
   exploration:        'Four hidden secrets on the map, found via Wisdom (Perception) checks.',
 };
 
@@ -266,10 +237,6 @@ interface AIDMQuestState {
 interface AIDMMapItem {
   name: string; tileX: number; tileY: number;
 }
-interface AIDMNpcConversation {
-  npcId: string; npcName: string;
-  messages: { role: 'user' | 'assistant'; content: string }[];
-}
 interface AIDMGameState {
   player: AIDMPlayerState & {
     hidden: boolean; actionUsed: boolean; bonusActionUsed: boolean;
@@ -281,7 +248,6 @@ interface AIDMGameState {
   quests: AIDMQuestState[];
   mapItems: AIDMMapItem[];
   secretsRemaining: number;
-  npcConversations: AIDMNpcConversation[];
   combatLog: string[];
   encounterTypes: string[];
   mapName: string;
@@ -404,16 +370,6 @@ function buildAIDMSystemPrompt(req: AIDMChatRequest): string {
     ? gs.mapItems.map((i) => `  ${i.name} at tile (${i.tileX},${i.tileY})`).join('\n')
     : '  None on the ground';
 
-  // NPC conversations
-  const conversationLines = gs.npcConversations.length > 0
-    ? gs.npcConversations.map((c) => {
-        const lines = c.messages.map((m) =>
-          m.role === 'user' ? `  Player: ${m.content}` : `  ${c.npcName}: ${m.content}`
-        ).join('\n');
-        return `  [${c.npcName}]\n${lines}`;
-      }).join('\n\n')
-    : '  None yet.';
-
   // NPC personas
   const personaLines = npcPersonas.length > 0
     ? npcPersonas.map((n) => `  ${n.name}: ${n.persona}`).join('\n\n')
@@ -438,9 +394,6 @@ ${enemyLines}
 NPCs:
 ${npcLines}
 
-NPC CONVERSATIONS SO FAR:
-${conversationLines}
-
 QUESTS:
 ${questLines}
 
@@ -455,7 +408,7 @@ RECENT COMBAT LOG:
   ${recentLog}
 
 INSTRUCTIONS:
-Respond in 1-3 concise sentences. Use tools freely to make game effects real — adjust HP for traps or environmental effects, award XP/GP for clever solutions, set enemy HP to reflect narrative wounds, move entities to create drama, give items as rewards, start or end combat as the story demands, complete quests when the player earns it, toggle stealth. When the player says "them", "it", "him", "her", or "that one", resolve it to whoever they are currently focused on. When addressing an NPC, speak in that NPC's voice, limited to what they would plausibly know. Never break immersion or disclaim game-state knowledge.`;
+Respond in 1-3 concise sentences. Use tools freely to make game effects real — adjust HP for traps or environmental effects, award XP/GP for clever solutions, set enemy HP to reflect narrative wounds, move entities to create drama, give items as rewards, start or end combat as the story demands, complete quests when the player earns it, toggle stealth. When the player says "them", "it", "him", "her", or "that one", resolve it to whoever they are currently focused on. When the player speaks to or addresses any creature (NPC or enemy), respond in that creature's voice, limited to what they would plausibly know or say. Enemies may taunt, threaten, plead, or bargain depending on the situation. When the player first successfully engages in conversation with an NPC in a social encounter and the 'make_contact' quest is not yet complete, call complete_quest with quest_id 'make_contact'. Never break immersion or disclaim game-state knowledge.`;
 }
 
 server.post('/aidm/chat', async (request, reply) => {
