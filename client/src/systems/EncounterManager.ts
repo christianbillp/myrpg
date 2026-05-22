@@ -314,6 +314,29 @@ export class EncounterManager {
     this.onChange();
   }
 
+  adjustPlayerHp(delta: number): void {
+    const before = this.playerHp;
+    this.playerHp = Math.max(0, Math.min(this.playerDef.maxHp, this.playerHp + delta));
+    this.addLogs([`HP: ${before} → ${this.playerHp}/${this.playerDef.maxHp}`]);
+    if (this.playerHp <= 0 && this.mode === 'exploring') this.mode = 'defeat';
+    this.onChange();
+  }
+
+  setPlayerHidden(hidden: boolean): void {
+    this.playerHidden = hidden;
+    this.onChange();
+  }
+
+  endCombat(): void {
+    this.mode = 'exploring';
+    this.activeEnemy = null;
+    this.combatEnemies = [];
+    this.enemyVexed = false;
+    this.enemyHidden = false;
+    this.playerHidden = false;
+    this.onChange();
+  }
+
   addLogs(lines: string[]): void {
     this.combatLog.push(...lines);
     this.logScrollOffset = 0;

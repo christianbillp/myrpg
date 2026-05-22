@@ -58,6 +58,10 @@ A browser-based 2D single-player RPG built with modern web technologies.
 
 ### World
 
+### Done
+
+- **US-031** As a player, I can open a conversation with an AI dungeon master (AIDM) at any time during an encounter so that I can interact with the world through free-form text. A persistent "DUNGEON MASTER" button in the HUD opens a full-screen chat overlay powered by Claude Sonnet. The AIDM receives complete, real-time encounter state on every message: player stats (HP, XP, gold, AC, inventory, hidden status, action/bonus used, moves left, Second Wind charges), all enemies (HP, AC, position, active-turn flag, vexed/hidden status), all NPCs with stable per-instance identifiers (name, id, position), quest progress, items on the ground, secrets remaining, the selected target, and the last 20 combat log entries. The AIDM can control all aspects of the encounter via tool use: adjust player HP, award XP/gold, set enemy HP (killing enemies properly via the combat system), add narrative log entries, teleport entities (enemies resolved by label or array index; passive NPCs by per-instance index), give the player items, start or end combat, force-complete quests, and toggle player stealth. When `trigger_combat` is called in a social encounter with no enemies, all present NPCs are converted to enemy combatants in-place (same position and stats), cleared from the NPC roster, and combat begins. When moving multiple entities to the same tile, each is placed on the nearest free passable tile that is not already occupied by any other entity. The AIDM roleplays all NPCs in their own voice, constrained by their persona and knowledge. When the DM overlay is re-opened after the player has taken actions, new combat log entries since the last conversation are automatically injected as a context update so the DM is always current. Pronouns ("them", "it") are resolved to the player's currently selected target. Conversation history is preserved across open/close cycles for the duration of the encounter.
+
 ### Now
 
 ### Next
@@ -65,7 +69,7 @@ A browser-based 2D single-player RPG built with modern web technologies.
 - As a player, I want the world built from tilemaps (Tiled format) so that levels are visually rich and easy to author.
 - As a player, I want to see animated sprites for my character and NPCs so that the world feels alive.
 - As a player, I want smooth transitions between areas so that moving through the world feels seamless.
-- As a player, I can open a conversation with an AI dungeon master, so I can interact with the world through free form text explanations. The AI dungeon master (AIDM) is able to control all aspects of the encounter, such as xp, gold, hp, movement, actions etc. of enemies, npcs and players. AIDM roleplays all NPCs, and has full knowledge of everything going on in the encounter (including the combat log), but respects the persona and knowledge limitations the specific npc might have.
+- As a player, I can choose between multiple personas for my AIDM, so I can create a game which suits my mood.
 
 ## Non-Functional Requirements
 

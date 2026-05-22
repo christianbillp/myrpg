@@ -24,10 +24,12 @@ import { SecretDef, EncounterType, EncounterContext } from "../data/encounterCon
 import { d20 } from "../systems/Dice";
 import { RiddleOverlay } from "../ui/RiddleOverlay";
 import { AIChatOverlay, ChatPlayerState, ChatMessage } from "../ui/AIChatOverlay";
+import { AIDMOverlay, AIDMGameState, AIDMAction, AIDMNpcPersona } from "../ui/AIDMOverlay";
 import { IntroductionOverlay } from "../ui/IntroductionOverlay";
 import { HUD, HUDState } from "../ui/HUD";
 import { QuestDisplay } from "../ui/PlayerPanel";
 import { QuestManager } from "../systems/QuestManager";
+import { SavedMapDef } from "../data/maps";
 
 const GRID_H = GRID_ROWS * TILE_SIZE;
 const GRID_W = GRID_COLS * TILE_SIZE;
@@ -49,8 +51,13 @@ export class GameScene extends Phaser.Scene {
   private introOverlay: IntroductionOverlay | null = null;
   private riddleOverlay: RiddleOverlay | null = null;
   private aiChatOverlay: AIChatOverlay | null = null;
+  private aidmOverlay: AIDMOverlay | null = null;
+  private aidmHistory: ChatMessage[] = [];
+  private aidmLastLogLength = 0;
   private npcChatHistories: Map<NPC, ChatMessage[]> = new Map();
+  private npcPersonas: AIDMNpcPersona[] = [];
   private encounterContext?: EncounterContext;
+  private encounterMapName = "Unknown Map";
   private hud!: HUD;
   private quests!: QuestManager;
 
@@ -89,24 +96,32 @@ export class GameScene extends Phaser.Scene {
     this.mapType = data?.mapType ?? "open";
     this.savedMap = data?.savedMap ?? null;
     this.encounterTypes = data?.encounterTypes ?? ["simple_combat"];
+    this.encounterMapName = (data?.savedMap as SavedMapDef | undefined)?.name ?? "Unknown Map";
     const characters = this.registry.get("characters") as PlayerDef[];
     const def = data?.playerDef ?? characters[0];
     this.combat = new EncounterManager(
       def,
       () => this.updateHUD(),
       (delay) => this.time.delayedCall(delay, () => this.runEnemyTurn()),
-      (enemy) => {
-        if (this.selectedEnemy === enemy) {
-          const next = this.enemies.find((e) => e !== enemy && !e.isDead()) ?? null;
-          this.selectEnemy(next);
-        }
-        enemy.destroy();
-        this.enemies = this.enemies.filter((e) => e !== enemy);
-        this.highlightLayer.clear();
-        this.quests.onKill();
-      },
+      (enemy) => this.handleEnemyKilled(enemy),
       data?.resumeState,
     );
+  }
+
+  private handleEnemyKilled(enemy: Enemy): void {
+    if (this.selectedEnemy === enemy) {
+      const next = this.enemies.find((e) => e !== enemy && !e.isDead()) ?? null;
+      this.selectEnemy(next);
+    }
+    if (this.combat.activeEnemy === enemy) this.combat.activeEnemy = null;
+    enemy.destroy();
+    this.enemies = this.enemies.filter((e) => e !== enemy);
+    this.combat.combatEnemies = this.combat.combatEnemies.filter((e) => e !== enemy);
+    this.highlightLayer.clear();
+    this.quests.onKill();
+    if (this.combat.mode !== "exploring" && this.combat.combatEnemies.every((e) => e.isDead())) {
+      this.combat.mode = "exploring";
+    }
   }
 
   shutdown(): void {
@@ -136,7 +151,11 @@ export class GameScene extends Phaser.Scene {
     this.introOverlay = null;
     this.riddleOverlay = null;
     this.aiChatOverlay = null;
+    this.aidmOverlay = null;
+    this.aidmHistory = [];
+    this.aidmLastLogLength = 0;
     this.npcChatHistories = new Map();
+    this.npcPersonas = [];
     this.gridZoom = 1;
     this.isPanning = false;
     this.panStartedInGameMap = false;
@@ -180,7 +199,7 @@ export class GameScene extends Phaser.Scene {
         _dx: number,
         dy: number,
       ) => {
-        if (this.introOverlay || this.aiChatOverlay || this.riddleOverlay) return;
+        if (this.introOverlay || this.aiChatOverlay || this.aidmOverlay || this.riddleOverlay) return;
         if (
           pointer.x < PLAYER_PANEL_WIDTH ||
           pointer.x >= PLAYER_PANEL_WIDTH + GRID_W
@@ -290,7 +309,7 @@ export class GameScene extends Phaser.Scene {
   }
 
   update(): void {
-    if (this.introOverlay || this.aiChatOverlay || this.riddleOverlay) return;
+    if (this.introOverlay || this.aiChatOverlay || this.aidmOverlay || this.riddleOverlay) return;
     if (this.combat.mode !== "exploring" && this.combat.mode !== "player_turn")
       return;
 
@@ -454,6 +473,7 @@ export class GameScene extends Phaser.Scene {
       onDeathSave:   () => this.onDeathSave(),
       onSearch:      () => this.onSearch(),
       onCommunicate: () => this.onCommunicate(),
+      onOpenDM:      () => this.onOpenDM(),
       onResetView:      () => this.resetGridView(),
       onNewEncounter:   () => {
         const saveData = this.buildSaveData();
@@ -734,6 +754,9 @@ export class GameScene extends Phaser.Scene {
     } else {
       def = monsters.find((m) => m.id === "commoner") ?? monsters[0];
     }
+    if (npcDef?.persona) {
+      this.npcPersonas.push({ id: npcDef.id, name: npcDef.name, persona: npcDef.persona });
+    }
     const [nx, ny] = this.pickNpcSpawn();
     if (nx === -1) return;
     this.npc = new NPC(this, def, nx, ny);
@@ -748,6 +771,9 @@ export class GameScene extends Phaser.Scene {
     const def: MonsterDef = villagerNpc
       ? { ...base, id: "villager", name: "Villager", color: villagerNpc.color }
       : { ...base, name: "Villager" };
+    if (villagerNpc?.persona && !this.npcPersonas.some((p) => p.id === "villager")) {
+      this.npcPersonas.push({ id: "villager", name: "Villager", persona: villagerNpc.persona });
+    }
 
     const { cols, rows, passable } = this.gameMap;
     const occupied = new Set<string>();
@@ -854,6 +880,235 @@ export class GameScene extends Phaser.Scene {
     };
   }
 
+  private buildAIDMGameState(): AIDMGameState {
+    const def = this.combat.playerDef;
+    return {
+      player: {
+        name: def.name,
+        className: def.className,
+        level: def.level,
+        hp: this.combat.playerHp,
+        maxHp: def.maxHp,
+        xp: this.combat.playerXp,
+        gold: this.combat.playerGold,
+        ac: def.ac,
+        tileX: this.player.tileX,
+        tileY: this.player.tileY,
+        inventory: this.combat.inventory.map((i) => i.name),
+        hidden: this.combat.playerHidden,
+        actionUsed: this.combat.actionUsed,
+        bonusActionUsed: this.combat.bonusActionUsed,
+        movesLeft: this.combat.movesLeft,
+        secondWindUses: this.combat.secondWindUses,
+      },
+      enemies: this.enemies.map((e, i) => ({
+        label: e.label || String(i),
+        id: e.def.id,
+        name: e.def.name,
+        hp: e.hp,
+        maxHp: e.maxHp,
+        ac: e.def.ac,
+        tileX: e.tileX,
+        tileY: e.tileY,
+        alive: !e.isDead(),
+        isActive: this.combat.activeEnemy === e,
+        vexed: this.combat.activeEnemy === e ? this.combat.enemyVexed : false,
+        hidden: this.combat.activeEnemy === e ? this.combat.enemyHidden : false,
+      })),
+      npcs: [
+        ...(this.npc ? [{ id: this.npc.def.id, name: this.npc.def.name, tileX: this.npc.tileX, tileY: this.npc.tileY }] : []),
+        ...this.passiveNpcs.map((n, i) => ({ id: `passive_${i}`, name: n.def.name, tileX: n.tileX, tileY: n.tileY })),
+      ],
+      selectedTarget: this.selectedEnemy && !this.selectedEnemy.isDead()
+        ? { type: "enemy" as const, name: this.selectedEnemy.def.name, id: this.selectedEnemy.def.id, label: this.selectedEnemy.label || undefined }
+        : this.selectedNPC
+          ? { type: "npc" as const, name: this.selectedNPC.def.name, id: this.selectedNPC.def.id }
+          : undefined,
+      quests: this.quests.quests.map((q) => ({
+        id: q.def.id,
+        title: q.def.title,
+        progress: q.progress,
+        target: q.def.goal.target,
+        completed: q.completed,
+      })),
+      mapItems: this.mapItems.map((i) => ({ name: i.def.name, tileX: i.tileX, tileY: i.tileY })),
+      secretsRemaining: this.mapSecrets.length,
+      npcConversations: Array.from(this.npcChatHistories.entries())
+        .filter(([, msgs]) => msgs.length > 0)
+        .map(([npc, msgs]) => ({ npcId: npc.def.id, npcName: npc.def.name, messages: msgs })),
+      combatLog: this.combat.combatLog.slice(-20),
+      encounterTypes: this.encounterTypes,
+      mapName: this.encounterMapName,
+      combatPhase: this.combat.mode,
+    };
+  }
+
+  private applyAIDMAction(action: AIDMAction): void {
+    switch (action.type) {
+      case "adjust_player_hp": {
+        const delta = action["delta"] as number;
+        const reason = action["reason"] as string;
+        this.combat.addLogs([`[DM] ${delta >= 0 ? "+" : ""}${delta} HP — ${reason}`]);
+        this.combat.adjustPlayerHp(delta);
+        break;
+      }
+      case "award_xp": {
+        const amount = action["amount"] as number;
+        const reason = action["reason"] as string;
+        this.combat.addLogs([`[DM] +${amount} XP — ${reason}`]);
+        this.combat.awardXP(amount);
+        break;
+      }
+      case "award_gold": {
+        const amount = action["amount"] as number;
+        const reason = action["reason"] as string;
+        this.combat.addLogs([`[DM] +${amount} GP — ${reason}`]);
+        this.combat.awardGold(amount);
+        break;
+      }
+      case "set_enemy_hp": {
+        const label = action["enemy_label"] as string;
+        const hp = action["hp"] as number;
+        const reason = action["reason"] as string;
+        const enemy = this.enemies.find((e) => e.label === label);
+        if (!enemy) break;
+        const wasAlive = !enemy.isDead();
+        enemy.setHp(hp);
+        this.combat.addLogs([`[DM] ${enemy.def.name} HP → ${enemy.hp}/${enemy.maxHp} — ${reason}`]);
+        if (enemy.isDead() && wasAlive) this.handleEnemyKilled(enemy);
+        break;
+      }
+      case "add_log_entry": {
+        const text = action["text"] as string;
+        this.combat.addLogs([`[DM] ${text}`]);
+        break;
+      }
+      case "move_entity": {
+        const entity = action["entity"] as string;
+        const tx = action["tile_x"] as number;
+        const ty = action["tile_y"] as number;
+        const reason = action["reason"] as string;
+        if (!this.gameMap.passable[ty]?.[tx]) break;
+        if (entity === "player") {
+          this.player.teleport(tx, ty);
+          this.combat.addLogs([`[DM] ${this.combat.playerDef.name} moved — ${reason}`]);
+        } else if (entity.startsWith("enemy_")) {
+          const ref = entity.slice(6);
+          let e = this.enemies.find((en) => en.label !== "" && en.label === ref);
+          if (!e) { const idx = parseInt(ref, 10); if (!isNaN(idx)) e = this.enemies[idx]; }
+          if (e && !e.isDead()) { e.moveTo(tx, ty, () => {}); this.combat.addLogs([`[DM] ${e.def.name} moved — ${reason}`]); }
+        } else if (entity.startsWith("npc_")) {
+          const id = entity.slice(4);
+          let npc: NPC | undefined;
+          if (this.npc?.def.id === id) {
+            npc = this.npc;
+          } else if (id.startsWith("passive_")) {
+            const idx = parseInt(id.slice(8), 10);
+            if (!isNaN(idx)) npc = this.passiveNpcs[idx];
+          } else {
+            npc = this.passiveNpcs.find((n) => n.def.id === id);
+          }
+          if (npc) {
+            const [ftx, fty] = this.findFreeTileNear(tx, ty, npc);
+            npc.teleport(ftx, fty);
+            this.combat.addLogs([`[DM] ${npc.def.name} moved — ${reason}`]);
+          }
+        }
+        break;
+      }
+      case "add_item": {
+        const itemId = action["item_id"] as string;
+        const reason = action["reason"] as string;
+        const items = this.registry.get("items") as ItemDef[];
+        const item = items.find((i) => i.id === itemId);
+        if (item) {
+          this.combat.addItem(item);
+          this.combat.addLogs([`[DM] ${item.name} added to inventory — ${reason}`]);
+          this.quests.onItemCollected();
+        }
+        break;
+      }
+      case "end_combat": {
+        const reason = action["reason"] as string;
+        this.combat.addLogs([`[DM] ${reason}`]);
+        for (const enemy of [...this.enemies]) {
+          enemy.destroy();
+        }
+        this.enemies = [];
+        this.selectedEnemy = null;
+        this.targetPanel.hide();
+        this.highlightLayer.clear();
+        this.combat.endCombat();
+        break;
+      }
+      case "trigger_combat": {
+        const reason = action["reason"] as string;
+        if (this.combat.mode !== "exploring") break;
+        if (this.enemies.length === 0) {
+          const npcsToConvert = [...(this.npc ? [this.npc] : []), ...this.passiveNpcs];
+          if (npcsToConvert.length === 0) break;
+          for (const npc of npcsToConvert) {
+            const enemy = new Enemy(this, npc.def, npc.tileX, npc.tileY);
+            this.enemies.push(enemy);
+            this.mapContainer.add(enemy.gameObject);
+            npc.destroy();
+          }
+          this.npc = null;
+          this.passiveNpcs = [];
+          this.selectedNPC = null;
+        }
+        if (this.enemies.length === 0) break;
+        this.enemies.forEach((e, i) => e.setLabel(String.fromCharCode(65 + i)));
+        this.combat.addLogs([`[DM] ${reason}`]);
+        this.combat.startCombat(this.enemies);
+        const first = this.enemies.find((e) => !e.isDead()) ?? null;
+        if (first) this.selectEnemy(first);
+        break;
+      }
+      case "complete_quest": {
+        const questId = action["quest_id"] as string;
+        const reason = action["reason"] as string;
+        this.combat.addLogs([`[DM] ${reason}`]);
+        this.quests.forceComplete(questId);
+        break;
+      }
+      case "set_player_hidden": {
+        const hidden = action["hidden"] as boolean;
+        const reason = action["reason"] as string;
+        this.combat.addLogs([`[DM] ${this.combat.playerDef.name} is now ${hidden ? "hidden" : "revealed"} — ${reason}`]);
+        this.combat.setPlayerHidden(hidden);
+        break;
+      }
+    }
+    this.updateHUD();
+  }
+
+  private onOpenDM(): void {
+    if (this.riddleOverlay || this.aiChatOverlay || this.aidmOverlay) return;
+
+    const newEntries = this.combat.combatLog.slice(this.aidmLastLogLength);
+    if (newEntries.length > 0 && this.aidmHistory.length > 0) {
+      this.aidmHistory.push({ role: "user", content: `[Events since we last spoke:\n${newEntries.join("\n")}]` });
+      this.aidmHistory.push({ role: "assistant", content: "*The Dungeon Master notes what has transpired.*" });
+    }
+    this.aidmLastLogLength = this.combat.combatLog.length;
+
+    this.aidmOverlay = new AIDMOverlay(
+      this,
+      () => this.buildAIDMGameState(),
+      this.npcPersonas,
+      this.encounterContext?.context ?? "",
+      this.aidmHistory,
+      (action) => this.applyAIDMAction(action),
+      (history) => {
+        this.aidmHistory = history;
+        this.aidmOverlay = null;
+        this.input.keyboard?.enableGlobalCapture();
+        this.updateHUD();
+      },
+    );
+  }
+
   private spawnSecrets(): void {
     const { cols, rows, passable } = this.gameMap;
     const candidates: [number, number][] = [];
@@ -920,6 +1175,29 @@ export class GameScene extends Phaser.Scene {
     }
 
     this.updateHUD();
+  }
+
+  private findFreeTileNear(tx: number, ty: number, excludeNpc?: NPC): [number, number] {
+    const { cols, rows, passable } = this.gameMap;
+    const isFree = (c: number, r: number): boolean => {
+      if (!passable[r]?.[c]) return false;
+      if (this.player.tileX === c && this.player.tileY === r) return false;
+      if (this.enemies.some((e) => !e.isDead() && e.tileX === c && e.tileY === r)) return false;
+      if (this.npc && this.npc !== excludeNpc && this.npc.tileX === c && this.npc.tileY === r) return false;
+      if (this.passiveNpcs.some((n) => n !== excludeNpc && n.tileX === c && n.tileY === r)) return false;
+      return true;
+    };
+    if (isFree(tx, ty)) return [tx, ty];
+    for (let radius = 1; radius < Math.max(cols, rows); radius++) {
+      for (let dc = -radius; dc <= radius; dc++) {
+        for (let dr = -radius; dr <= radius; dr++) {
+          if (Math.abs(dc) !== radius && Math.abs(dr) !== radius) continue;
+          const c = tx + dc, r = ty + dr;
+          if (c >= 0 && c < cols && r >= 0 && r < rows && isFree(c, r)) return [c, r];
+        }
+      }
+    }
+    return [tx, ty];
   }
 
   private drawMapTiles(): Phaser.GameObjects.Graphics {

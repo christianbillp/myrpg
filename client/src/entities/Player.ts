@@ -25,6 +25,12 @@ export class Player {
 
   get gameObject(): Phaser.GameObjects.Rectangle { return this.sprite; }
 
+  teleport(tx: number, ty: number): void {
+    this.tileX = tx;
+    this.tileY = ty;
+    this.sprite.setPosition(tx * TILE_SIZE + TILE_SIZE / 2, ty * TILE_SIZE + TILE_SIZE / 2);
+  }
+
   move(dx: number, dy: number, cols: number, rows: number): void {
     if (this.moving) return;
 

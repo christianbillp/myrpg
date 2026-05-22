@@ -77,6 +77,11 @@ export class Enemy {
     this.refreshHpBar();
   }
 
+  setHp(hp: number): void {
+    this.hp = Math.max(0, Math.min(this.maxHp, hp));
+    this.refreshHpBar();
+  }
+
   setLabel(label: string): void {
     this.label = label;
     this.labelText.setText(label);

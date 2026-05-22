@@ -51,6 +51,7 @@ export interface HUDCallbacks {
   onDeathSave: () => void;
   onSearch: () => void;
   onCommunicate: () => void;
+  onOpenDM: () => void;
   onResetView: () => void;
   onNewEncounter: () => void;
   onScrollLog: (dy: number) => void;
@@ -104,6 +105,7 @@ export class HUD {
 
     HUD.makeButton(scene, PLAYER_PANEL_WIDTH + 80,  y + 10, "RESET VIEW",    0x1a2a3a, callbacks.onResetView);
     HUD.makeButton(scene, PLAYER_PANEL_WIDTH + 250, y + 10, "NEW ENCOUNTER", 0x2a1a1a, callbacks.onNewEncounter);
+    HUD.makeButton(scene, W - TARGET_PANEL_WIDTH - 250, y + 10, "DUNGEON MASTER", 0x1a1020, callbacks.onOpenDM);
 
     this.attackBtn    = HUD.makeButton(scene, PLAYER_PANEL_WIDTH + 130, btnY, "ATTACK",          0x1a4a1e, callbacks.onAttack);
     this.secondWindBtn = HUD.makeButton(scene, cx,                       btnY, "SECOND WIND",     0x1a3a5a, callbacks.onSecondWind);

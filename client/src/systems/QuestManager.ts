@@ -26,6 +26,15 @@ export class QuestManager {
   onSecretFound(): void { this.advance('explore'); }
   onNPCTalkedTo(): void { this.advance('talk'); }
 
+  forceComplete(questId: string): void {
+    const q = this.quests.find((qs) => qs.def.id === questId && !qs.completed);
+    if (!q) return;
+    q.progress = q.def.goal.target;
+    q.completed = true;
+    this.onComplete(q.def);
+    this.onChange();
+  }
+
   private advance(type: QuestGoalType): void {
     for (const q of this.quests) {
       if (q.def.goal.type !== type || q.completed) continue;

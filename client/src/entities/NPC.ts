@@ -47,6 +47,12 @@ export class NPC {
   get tileY(): number { return this._tileY; }
   get gameObject(): Phaser.GameObjects.Container { return this.container; }
 
+  teleport(tx: number, ty: number): void {
+    this._tileX = tx;
+    this._tileY = ty;
+    this.container.setPosition(tx * TILE_SIZE + TILE_SIZE / 2, ty * TILE_SIZE + TILE_SIZE / 2);
+  }
+
   setInteractionHint(visible: boolean): void {
     this.hint.setVisible(visible);
   }
