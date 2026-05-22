@@ -4,5 +4,5 @@
   "description": "A wandering sage rests among the scattered ruins, carrying wisdom from distant lands. Seek their counsel.",
   "encounterTypes": ["social_interaction"],
   "mapId": "ruins",
-  "npcId": "wanderer"
+  "npcIds": ["wanderer"]
 }

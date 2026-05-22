@@ -1,4 +1,4 @@
-import { GameMap } from "../systems/MapGenerator";
+import { GameMap } from "../net/types";
 
 export interface SavedMapDef extends GameMap {
   id: string;

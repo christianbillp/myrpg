@@ -1,7 +1,10 @@
 {
   "name": "myrpg",
   "private": true,
-  "workspaces": ["client", "server"],
+  "workspaces": [
+    "client",
+    "server"
+  ],
   "scripts": {
     "dev:client": "npm run dev --workspace=client",
     "dev:server": "npm run dev --workspace=server",
@@ -10,6 +13,7 @@
     "build": "npm run build --workspace=client"
   },
   "devDependencies": {
+    "@types/ws": "^8.18.1",
     "concurrently": "^9.0.0"
   }
 }

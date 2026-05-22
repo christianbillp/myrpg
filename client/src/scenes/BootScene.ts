@@ -1,5 +1,6 @@
 import Phaser from "phaser";
 import { PlayerDef } from "../data/player";
+import { gameClient } from "../net/GameClient";
 
 const API_URL = "http://localhost:3000";
 const ABILITIES = ["str", "dex", "con", "int", "wis", "cha"] as const;
@@ -19,7 +20,7 @@ export class BootScene extends Phaser.Scene {
     this.load.json("premade-encounters", `${API_URL}/premade-encounters`);
   }
 
-  create(): void {
+  async create(): Promise<void> {
     const rawChars = this.cache.json.get("characters") as PlayerDef[];
     const characters = rawChars.map((c) => ({
       ...c,
@@ -36,6 +37,15 @@ export class BootScene extends Phaser.Scene {
     this.registry.set("items",              this.cache.json.get("items"));
     this.registry.set("maps",               this.cache.json.get("maps"));
     this.registry.set("premade-encounters", this.cache.json.get("premade-encounters"));
-    this.scene.start("EncounterSetupScene");
+
+    const world = await gameClient.loadWorld();
+    if (world) {
+      const playerDef = (characters as PlayerDef[]).find(c => c.id === world.state.player.defId)
+        ?? (characters as PlayerDef[])[0];
+      gameClient.resumeSession(world.sessionId);
+      this.scene.start("GameScene", { sessionId: world.sessionId, playerDef });
+    } else {
+      this.scene.start("EncounterSetupScene");
+    }
   }
 }

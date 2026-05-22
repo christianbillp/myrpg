@@ -7,12 +7,14 @@ import {
   PLAYER_PANEL_WIDTH,
   TARGET_PANEL_WIDTH,
 } from "../constants";
-import { CombatMode } from "../systems/EncounterManager";
+import { CombatMode, EncounterType } from "../net/types";
 import { Enemy } from "../entities/Enemy";
 import { PlayerDef } from "../data/player";
-import { EncounterType } from "../data/encounterContext";
 import { TurnOrderBar, TurnChip } from "./TurnOrderBar";
-import { chebyshev } from "../systems/EnemyAI";
+
+function chebyshev(x1: number, y1: number, x2: number, y2: number): number {
+  return Math.max(Math.abs(x1 - x2), Math.abs(y1 - y2));
+}
 
 const GRID_H = GRID_ROWS * TILE_SIZE;
 const GRID_W = GRID_COLS * TILE_SIZE;

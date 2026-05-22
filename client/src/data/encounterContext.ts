@@ -35,8 +35,7 @@ export interface PremadeEncounterDef {
   description: string;
   encounterTypes: EncounterType[];
   mapId: string;
-  npcId?: string;
-  passiveNpcCount?: number;
+  npcIds?: string[];
 }
 
 export interface EncounterContext {
@@ -46,5 +45,5 @@ export interface EncounterContext {
   secrets: SecretDef[];
   riddle: Riddle | null;
   quests: QuestDef[];
-  npcId?: string;
+  npcIds?: string[];
 }

@@ -3,8 +3,19 @@ import { PLAYER_PANEL_WIDTH, GRID_COLS, GRID_ROWS, TILE_SIZE, TARGET_PANEL_WIDTH
 import { BaseOverlay } from "./BaseOverlay";
 import { PlayerDef, EquipmentSlots } from "../data/player";
 import { ItemDef, ArmorDef, WeaponDef, ShieldDef, EquipmentDef } from "../data/items";
-import { mod } from "../systems/Dice";
-import { attackSummary } from "../systems/EquipmentSystem";
+import { PlayerAttack } from "../data/player";
+
+function mod(score: number): number { return Math.floor((score - 10) / 2); }
+
+function attackSummary(attack: PlayerAttack, statMod: number): string {
+  const diceStr = `${attack.damageDice}d${attack.damageSides}`;
+  const sign = statMod >= 0 ? "+" : "";
+  const masteries: string[] = [];
+  if (attack.graze) masteries.push("Graze");
+  if (attack.vex) masteries.push("Vex");
+  const masteryStr = masteries.length ? ` (${masteries.join(", ")})` : "";
+  return `${diceStr}${sign}${statMod}${masteryStr}`;
+}
 
 const DPR = window.devicePixelRatio;
 const W = PLAYER_PANEL_WIDTH + GRID_COLS * TILE_SIZE + TARGET_PANEL_WIDTH;

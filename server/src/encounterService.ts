@@ -1,6 +1,17 @@
 export type EncounterType = 'simple_combat' | 'social_interaction' | 'exploration';
 export type QuestGoalType = 'kill' | 'collect' | 'explore' | 'talk';
 
+export interface EncounterContext {
+  introduction: string;
+  context: string;
+  mapName: string;
+  enemyCount: number;
+  secrets: SecretDef[];
+  riddle: Riddle | null;
+  quests: QuestDef[];
+  npcIds?: string[];
+}
+
 export type SecretReward =
   | { type: 'gold'; amount: number }
   | { type: 'item'; itemId: string }
@@ -28,7 +39,7 @@ export interface EncounterStartRequest {
   playerAc: number;
   savedMapName?: string;
   savedMapDescription?: string;
-  npcId?: string;
+  npcIds?: string[];
 }
 
 const SECRET_POOL: SecretDef[] = [
@@ -78,7 +89,7 @@ const TYPE_CONTEXT: Record<EncounterType, string> = {
   exploration:        'Four hidden secrets on the map, found via Wisdom (Perception) checks.',
 };
 
-export function buildEncounter(req: EncounterStartRequest) {
+export function buildEncounter(req: EncounterStartRequest): EncounterContext {
   const mapDescription =
     req.mapType === 'saved' && req.savedMapDescription ? req.savedMapDescription
     : req.mapType === 'rooms' ? 'a labyrinth of stone corridors and shadowed chambers'
@@ -106,10 +117,11 @@ export function buildEncounter(req: EncounterStartRequest) {
   return {
     introduction,
     context,
+    mapName: mapLabel,
     enemyCount,
     secrets:  req.encounterTypes.includes('exploration') ? pickSecrets(4) : [],
     riddle:   req.encounterTypes.includes('social_interaction') ? pickRandom(RIDDLES) : null,
     quests:   buildQuests(req.encounterTypes, enemyCount),
-    npcId:    req.npcId,
+    npcIds:   req.npcIds,
   };
 }

@@ -13,46 +13,13 @@ export interface ChatMessage {
   content: string;
 }
 
+export type DMPersona = "regular" | "dev";
+
 const DPR = window.devicePixelRatio;
-const API_URL = "http://localhost:3000";
 const W = PLAYER_PANEL_WIDTH + GRID_COLS * TILE_SIZE + TARGET_PANEL_WIDTH;
 const GRID_H = GRID_ROWS * TILE_SIZE;
 const LINE_H = 16;
 const ACCENT = 0xe2b96f;
-
-export interface AIDMGameState {
-  player: {
-    name: string; className: string; level: number;
-    hp: number; maxHp: number; xp: number; gold: number;
-    ac: number; tileX: number; tileY: number; inventory: string[];
-    hidden: boolean; actionUsed: boolean; bonusActionUsed: boolean;
-    movesLeft: number; secondWindUses: number;
-    equippedArmor: string | null; equippedWeapon: string | null; equippedShield: string | null;
-    skills: Record<string, number>;
-    savingThrows: Record<string, number>;
-  };
-  enemies: Array<{
-    label?: string; id: string; name: string;
-    hp: number; maxHp: number; ac: number;
-    tileX: number; tileY: number; alive: boolean;
-    isActive: boolean; vexed: boolean; hidden: boolean;
-  }>;
-  npcs: Array<{ id: string; name: string; tileX: number; tileY: number }>;
-  selectedTarget?: { type: "enemy" | "npc"; name: string; id: string; label?: string };
-  quests: Array<{ id: string; title: string; progress: number; target: number; completed: boolean }>;
-  mapItems: Array<{ name: string; tileX: number; tileY: number }>;
-  secretsRemaining: number;
-  combatLog: string[];
-  encounterTypes: string[];
-  mapName: string;
-  combatPhase: string;
-}
-
-export interface AIDMNpcPersona { id: string; name: string; persona: string; }
-
-export interface AIDMAction { type: string; [key: string]: unknown; }
-
-export type DMPersona = "regular" | "dev";
 
 export class AIDMOverlay extends BaseOverlay {
   private readonly scene: Phaser.Scene;
@@ -71,15 +38,13 @@ export class AIDMOverlay extends BaseOverlay {
   private keyHandler: (e: KeyboardEvent) => void;
   private wheelHandler: (e: WheelEvent) => void;
   private dmPersona: DMPersona;
+  private readonly onSend: (playerMessage: string, history: ChatMessage[], dmPersona: DMPersona) => Promise<string>;
 
   constructor(
     scene: Phaser.Scene,
-    getGameState: () => AIDMGameState,
-    npcPersonas: AIDMNpcPersona[],
-    encounterContext: string,
     initialHistory: ChatMessage[],
     initialPersona: DMPersona,
-    onAction: (action: AIDMAction) => string | void,
+    onSend: (playerMessage: string, history: ChatMessage[], dmPersona: DMPersona) => Promise<string>,
     onClose: (history: ChatMessage[], persona: DMPersona) => void,
   ) {
     super(scene, 640, 480, ACCENT, () => {
@@ -91,7 +56,7 @@ export class AIDMOverlay extends BaseOverlay {
     });
 
     this.dmPersona = initialPersona;
-
+    this.onSend = onSend;
     this.scene = scene;
     this.history = [...initialHistory];
 
@@ -162,7 +127,7 @@ export class AIDMOverlay extends BaseOverlay {
 
     const sbX = panelW / 2 - 20;
     const sbCY = (this.areaTop + this.areaBottom) / 2;
-    const scrollTrack = scene.add.rectangle(sbX, sbCY, 4, this.visibleH, 0x1a1a2e).setAlpha(0.8);
+    scene.add.rectangle(sbX, sbCY, 4, this.visibleH, 0x1a1a2e).setAlpha(0.8);
     this.scrollThumb = scene.add
       .rectangle(sbX, this.areaTop + 10, 4, 20, ACCENT)
       .setAlpha(0.7)
@@ -202,11 +167,11 @@ export class AIDMOverlay extends BaseOverlay {
       .setOrigin(0.5);
     sendBg.on("pointerover", () => sendBg.setAlpha(0.75));
     sendBg.on("pointerout",  () => sendBg.setAlpha(1));
-    sendBg.on("pointerdown", () => this.send(getGameState, npcPersonas, encounterContext, onAction));
+    sendBg.on("pointerdown", () => this.send());
 
     this.container.add([
       titleText, storyBg, storyTxt, devBg, devTxt, sep1,
-      historyBg, this.historyText, scrollTrack, this.scrollThumb,
+      historyBg, this.historyText, this.scrollThumb,
       this.statusText, sep2,
       inputBg, this.inputText,
       sendBg, sendLabel,
@@ -216,7 +181,7 @@ export class AIDMOverlay extends BaseOverlay {
 
     this.keyHandler = (e: KeyboardEvent) => {
       if (e.key === "Enter") {
-        this.send(getGameState, npcPersonas, encounterContext, onAction);
+        this.send();
       } else if (e.key === "Backspace") {
         this.inputValue = this.inputValue.slice(0, -1);
         this.renderInput();
@@ -270,56 +235,24 @@ export class AIDMOverlay extends BaseOverlay {
     this.inputText.setText(this.inputValue + "█");
   }
 
-  private async send(
-    getGameState: () => AIDMGameState,
-    npcPersonas: AIDMNpcPersona[],
-    encounterContext: string,
-    onAction: (action: AIDMAction) => string | void,
-  ): Promise<void> {
+  private async send(): Promise<void> {
     const text = this.inputValue.trim();
     if (!text || this.thinking) return;
-
     this.inputValue = "";
     this.renderInput();
-    await this.sendText(text, getGameState, npcPersonas, encounterContext, onAction);
+    await this.sendText(text);
   }
 
-  private async sendText(
-    text: string,
-    getGameState: () => AIDMGameState,
-    npcPersonas: AIDMNpcPersona[],
-    encounterContext: string,
-    onAction: (action: AIDMAction) => string | void,
-  ): Promise<void> {
+  private async sendText(text: string): Promise<void> {
     if (this.thinking) return;
-
     this.thinking = true;
     this.history.push({ role: "user", content: text });
     this.renderHistory();
     this.statusText.setText("The Dungeon Master considers…");
 
-    const followUps: string[] = [];
     try {
-      const res = await fetch(`${API_URL}/aidm/chat`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          playerMessage: text,
-          history: this.history.slice(0, -1),
-          gameState: getGameState(),
-          encounterContext,
-          npcPersonas,
-          dmPersona: this.dmPersona,
-        }),
-      });
-      const data = (await res.json()) as { reply?: string; actions?: AIDMAction[]; error?: string };
-      if (!res.ok || !data.reply) throw new Error(data.error ?? `HTTP ${res.status}`);
-
-      for (const action of data.actions ?? []) {
-        const followUp = onAction(action);
-        if (followUp) followUps.push(followUp);
-      }
-      this.history.push({ role: "assistant", content: data.reply });
+      const reply = await this.onSend(text, this.history.slice(0, -1), this.dmPersona);
+      this.history.push({ role: "assistant", content: reply });
     } catch {
       this.history.push({ role: "assistant", content: "(The Dungeon Master is silent.)" });
     }
@@ -328,14 +261,10 @@ export class AIDMOverlay extends BaseOverlay {
     this.statusText.setText("");
     this.renderHistory();
     this.scene.input.keyboard?.disableGlobalCapture();
-
-    for (const followUp of followUps) {
-      await this.sendText(followUp, getGameState, npcPersonas, encounterContext, onAction);
-    }
   }
 
   private renderHistory(): void {
-    const lines = this.history.map((m) =>
+    const lines = this.history.map(m =>
       m.role === "user" ? `> ${m.content}` : `  ${m.content}`,
     );
     this.historyText.setText(lines.join("\n"));

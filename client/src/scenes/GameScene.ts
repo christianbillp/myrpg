@@ -1,45 +1,58 @@
 import Phaser from "phaser";
 import { Player } from "../entities/Player";
 import { Enemy } from "../entities/Enemy";
-import { PlayerPanel } from "../ui/PlayerPanel";
+import { NPC } from "../entities/NPC";
+import { MapItem } from "../entities/MapItem";
+import { PlayerPanel, QuestDisplay } from "../ui/PlayerPanel";
 import { TargetPanel } from "../ui/TargetPanel";
-import {
-  TILE_SIZE,
-  GRID_COLS,
-  GRID_ROWS,
-  PLAYER_PANEL_WIDTH,
-} from "../constants";
+import { HUD, HUDState } from "../ui/HUD";
+import { AIDMOverlay, ChatMessage, DMPersona } from "../ui/AIDMOverlay";
+import { InventoryOverlay } from "../ui/InventoryOverlay";
+import { IntroductionOverlay } from "../ui/IntroductionOverlay";
+import { TILE_SIZE, GRID_COLS, GRID_ROWS, PLAYER_PANEL_WIDTH } from "../constants";
 import { PlayerDef } from "../data/player";
 import { MonsterDef, NPCDef } from "../data/monsters";
 import { ItemDef } from "../data/items";
-import { MapItem } from "../entities/MapItem";
-import { EncounterManager, ResumeState } from "../systems/EncounterManager";
-import { SaveSystem, SaveData } from "../systems/SaveSystem";
-import { EnemyAI, chebyshev } from "../systems/EnemyAI";
-import { generateMap, GameMap } from "../systems/MapGenerator";
-import { generateRoomsMap } from "../systems/RoomsMapGenerator";
-import { shuffle } from "../systems/MapUtils";
-import { NPC } from "../entities/NPC";
-import { SecretDef, EncounterType, EncounterContext } from "../data/encounterContext";
-import { d20 } from "../systems/Dice";
-import { AIDMOverlay, AIDMGameState, AIDMAction, AIDMNpcPersona, ChatMessage, DMPersona } from "../ui/AIDMOverlay";
-import { InventoryOverlay } from "../ui/InventoryOverlay";
-import { AIDMActionHandler } from "../systems/AIDMActionHandler";
-import { applyEquipment } from "../systems/EquipmentSystem";
-import { IntroductionOverlay } from "../ui/IntroductionOverlay";
-import { HUD, HUDState } from "../ui/HUD";
-import { QuestDisplay } from "../ui/PlayerPanel";
-import { QuestManager } from "../systems/QuestManager";
-import { SavedMapDef } from "../data/maps";
+import { gameClient } from "../net/GameClient";
+import type { GameState, GameEvent, GameMap } from "../net/types";
 
 const GRID_H = GRID_ROWS * TILE_SIZE;
 const GRID_W = GRID_COLS * TILE_SIZE;
 
 export class GameScene extends Phaser.Scene {
-  private player!: Player;
-  private enemies: Enemy[] = [];
-  private mapItems: MapItem[] = [];
-  private combat!: EncounterManager;
+  private playerDef!: PlayerDef;
+
+  private gameState!: GameState;
+  private eventQueue: GameEvent[] = [];
+  private animating = false;
+  private mapDrawn = false;
+  private introShown = false;
+
+  private player: Player | null = null;
+  private enemyTokens = new Map<string, Enemy>();
+  private npcTokens = new Map<string, NPC>();
+  private itemTokens = new Map<string, MapItem>();
+
+  private selectedEnemyId: string | null = null;
+  private selectedNPCId: string | null = null;
+
+  private playerPanel!: PlayerPanel;
+  private targetPanel!: TargetPanel;
+  private hud!: HUD;
+  private introOverlay: IntroductionOverlay | null = null;
+  private aidmOverlay: AIDMOverlay | null = null;
+  private inventoryOverlay: InventoryOverlay | null = null;
+  private aidmHistory: ChatMessage[] = [];
+  private aidmPersona: DMPersona = "regular";
+  private localLogScrollOffset = 0;
+
+  private highlightLayer!: Phaser.GameObjects.Graphics;
+  private mapContainer!: Phaser.GameObjects.Container;
+  private gridZoom = 1;
+  private isPanning = false;
+  private panStartedInGameMap = false;
+  private panLastX = 0;
+  private panLastY = 0;
 
   private cursors!: Phaser.Types.Input.Keyboard.CursorKeys;
   private wasd!: {
@@ -49,191 +62,246 @@ export class GameScene extends Phaser.Scene {
     right: Phaser.Input.Keyboard.Key;
   };
 
-  private introOverlay: IntroductionOverlay | null = null;
-  private aidmOverlay: AIDMOverlay | null = null;
-  private inventoryOverlay: InventoryOverlay | null = null;
-  private aidmActionHandler!: AIDMActionHandler;
-  private aidmHistory: ChatMessage[] = [];
-  private aidmPersona: DMPersona = "regular";
-  private aidmLastLogLength = 0;
-  private npcPersonas: AIDMNpcPersona[] = [];
-  private encounterContext?: EncounterContext;
-  private encounterMapName = "Unknown Map";
-  private hud!: HUD;
-  private quests!: QuestManager;
-
-  private mapSecrets: { tileX: number; tileY: number; def: SecretDef }[] = [];
-
-  private highlightLayer!: Phaser.GameObjects.Graphics;
-  private mapContainer!: Phaser.GameObjects.Container;
-  private gameMap!: GameMap;
-  private gridZoom = 1;
-  private isPanning = false;
-  private panStartedInGameMap = false;
-  private panLastX = 0;
-  private panLastY = 0;
-  private playerPanel!: PlayerPanel;
-  private targetPanel!: TargetPanel;
-  private selectedEnemy: Enemy | null = null;
-  private selectedNPC: NPC | null = null;
-  private npc: NPC | null = null;
-  private passiveNpcs: NPC[] = [];
-
   constructor() {
     super({ key: "GameScene" });
   }
 
-  private mapType: "open" | "rooms" | "saved" = "open";
-  private savedMap: GameMap | null = null;
-  private encounterTypes: EncounterType[] = ["simple_combat"];
-  private npcId?: string;
-  private passiveNpcCount = 0;
-
-  init(data: { playerDef?: PlayerDef; mapType?: "open" | "rooms" | "saved"; encounterTypes?: EncounterType[]; savedMap?: GameMap; resumeState?: ResumeState; encounterContext?: EncounterContext; npcId?: string; passiveNpcCount?: number }): void {
-    this.encounterContext = data?.encounterContext;
-    this.npcId = data?.npcId ?? data?.encounterContext?.npcId;
-    this.passiveNpcCount = data?.passiveNpcCount ?? 0;
-    this.mapType = data?.mapType ?? "open";
-    this.savedMap = data?.savedMap ?? null;
-    this.encounterTypes = data?.encounterTypes ?? ["simple_combat"];
-    this.encounterMapName = (data?.savedMap as SavedMapDef | undefined)?.name ?? "Unknown Map";
-    const characters = this.registry.get("characters") as PlayerDef[];
-    const def = data?.playerDef ?? characters[0];
-    const allItems = this.registry.get("items") as ItemDef[];
-    const resumeState = data?.resumeState ?? this.buildDefaultResumeState(def, allItems);
-    this.combat = new EncounterManager(
-      def,
-      () => this.updateHUD(),
-      (delay) => this.time.delayedCall(delay, () => this.runEnemyTurn()),
-      (enemy) => this.handleEnemyKilled(enemy),
-      resumeState,
-    );
-    applyEquipment(def, this.combat.equippedSlots, allItems);
-  }
-
-  private handleEnemyKilled(enemy: Enemy): void {
-    if (this.selectedEnemy === enemy) {
-      const next = this.enemies.find((e) => e !== enemy && !e.isDead()) ?? null;
-      this.selectEnemy(next);
-    }
-    if (this.combat.activeEnemy === enemy) this.combat.activeEnemy = null;
-    enemy.destroy();
-    this.enemies = this.enemies.filter((e) => e !== enemy);
-    this.combat.combatEnemies = this.combat.combatEnemies.filter((e) => e !== enemy);
-    this.highlightLayer.clear();
-    this.quests.onKill();
-    if (this.combat.mode !== "exploring" && this.combat.combatEnemies.every((e) => e.isDead())) {
-      this.combat.mode = "exploring";
-    }
-  }
-
-  shutdown(): void {
-    SaveSystem.save(this.buildSaveData());
-  }
-
-  private buildDefaultResumeState(def: PlayerDef, allItems: ItemDef[]): ResumeState {
-    const byId = Object.fromEntries(allItems.map((i) => [i.id, i]));
-    return {
-      hp: def.maxHp,
-      xp: def.xp,
-      gold: 0,
-      inventory: (def.defaultInventoryIds ?? []).map((id) => byId[id]).filter(Boolean) as ItemDef[],
-      secondWindUses: def.secondWindMaxUses,
-      equippedSlots: { ...def.defaultEquipment },
-    };
-  }
-
-  private buildSaveData(): SaveData {
-    return {
-      playerDefId: this.combat.playerDef.id,
-      hp: this.combat.playerHp,
-      xp: this.combat.playerXp,
-      gold: this.combat.playerGold,
-      inventoryIds: this.combat.inventory.map((i) => i.id),
-      secondWindUses: this.combat.secondWindUses,
-      equippedSlots: { ...this.combat.equippedSlots },
-      skills: { ...this.combat.playerDef.skills },
-    };
-  }
-
-  create(): void {
-    this.enemies = [];
-    this.mapItems = [];
-    this.mapSecrets = [];
-    this.selectedEnemy = null;
-    this.selectedNPC = null;
-    this.npc = null;
-    this.passiveNpcs = [];
+  init(data: { sessionId: string; playerDef: PlayerDef }): void {
+    this.playerDef = data.playerDef;
+    this.player = null;
+    this.eventQueue = [];
+    this.animating = false;
+    this.mapDrawn = false;
+    this.introShown = false;
+    this.enemyTokens = new Map();
+    this.npcTokens = new Map();
+    this.itemTokens = new Map();
+    this.selectedEnemyId = null;
+    this.selectedNPCId = null;
     this.introOverlay = null;
     this.aidmOverlay = null;
     this.inventoryOverlay = null;
     this.aidmHistory = [];
-    this.aidmLastLogLength = 0;
-    this.npcPersonas = [];
-    this.gridZoom = 1;
-    this.isPanning = false;
-    this.panStartedInGameMap = false;
+    this.aidmPersona = "regular";
+    this.localLogScrollOffset = 0;
+  }
 
-    this.gameMap =
-      this.savedMap ??
-      (this.mapType === "rooms" ? generateRoomsMap() : generateMap());
-
+  create(): void {
     this.mapContainer = this.add.container(PLAYER_PANEL_WIDTH, 0);
-    this.mapContainer.add(this.drawMapTiles());
     this.highlightLayer = this.add.graphics();
     this.mapContainer.add(this.highlightLayer);
 
-    const [startX, startY] = this.findPlayerSpawn();
-    this.player = new Player(this, startX, startY, this.combat.playerDef.color);
-    this.mapContainer.add(this.player.gameObject);
+    this.setupInput();
+    this.buildHUD();
 
-    if (this.encounterTypes.includes("simple_combat")) {
-      this.spawnEnemies();
-      this.spawnItems();
+    gameClient.setStateUpdateHandler((state, events) => this.handleStateUpdate(state, events));
+    gameClient.connectWebSocket();
+  }
+
+  shutdown(): void {
+    gameClient.disconnect();
+  }
+
+  // ── State update pipeline ─────────────────────────────────────────────────
+
+  private handleStateUpdate(state: GameState, events: GameEvent[]): void {
+    this.gameState = state;
+    this.localLogScrollOffset = state.logScrollOffset;
+    for (const ev of events) {
+      if (ev.type === "entity_move") this.eventQueue.push(ev);
     }
-    if (this.encounterTypes.includes("social_interaction")) this.spawnNpc();
-    if (this.passiveNpcCount > 0) this.spawnPassiveNpcs();
-    if (this.encounterTypes.includes("exploration")) {
-      this.spawnSecrets();
+    if (!this.animating) this.processNextEvent();
+  }
+
+  private processNextEvent(): void {
+    if (this.eventQueue.length === 0) {
+      this.applyState(this.gameState);
+      return;
+    }
+    const event = this.eventQueue.shift()!;
+    this.animating = true;
+    if (event.type === "entity_move") {
+      const token = this.enemyTokens.get(event.entityId);
+      if (token) {
+        token.moveTo(event.toX, event.toY, () => {
+          this.animating = false;
+          this.processNextEvent();
+        });
+        return;
+      }
+    }
+    this.animating = false;
+    this.processNextEvent();
+  }
+
+  private applyState(state: GameState): void {
+    this.animating = false;
+
+    if (!this.mapDrawn) {
+      this.mapContainer.addAt(this.drawMapTiles(state.map), 0);
+      this.mapDrawn = true;
+      this.initView(state.map);
     }
 
+    if (!this.player) {
+      this.player = new Player(this, state.player.tileX, state.player.tileY, this.playerDef.color);
+      this.mapContainer.add(this.player.gameObject);
+    } else {
+      this.player.teleport(state.player.tileX, state.player.tileY);
+    }
+
+    this.reconcileEnemies(state);
+    this.reconcileNpcs(state);
+    this.reconcileItems(state);
+    this.reconcileSelection(state);
+
+    if (!this.introShown && state.introduction) {
+      this.introShown = true;
+      this.introOverlay = new IntroductionOverlay(
+        this,
+        state.encounterTypes,
+        this.playerDef,
+        { introduction: state.introduction, context: state.encounterContext, enemyCount: 0, secrets: [], riddle: null, quests: [] },
+        () => { this.introOverlay = null; },
+      );
+    }
+
+    this.updateHUD(state);
+  }
+
+  // ── Entity reconciliation ─────────────────────────────────────────────────
+
+  private reconcileEnemies(state: GameState): void {
+    const liveIds = new Set(state.enemies.filter(e => e.hp > 0).map(e => e.id));
+    for (const [id, token] of this.enemyTokens) {
+      if (!liveIds.has(id)) {
+        token.destroy();
+        this.enemyTokens.delete(id);
+        if (this.selectedEnemyId === id) {
+          this.selectedEnemyId = null;
+          this.targetPanel.hide();
+        }
+      }
+    }
+    for (const eState of state.enemies) {
+      if (eState.hp <= 0) continue;
+      let token = this.enemyTokens.get(eState.id);
+      if (!token) {
+        const def = this.findMonsterDef(eState.defId);
+        token = new Enemy(this, def, eState.tileX, eState.tileY);
+        this.enemyTokens.set(eState.id, token);
+        this.mapContainer.add(token.gameObject);
+      }
+      token.setLabel(eState.label);
+      token.setHp(eState.hp);
+    }
+  }
+
+  private reconcileNpcs(state: GameState): void {
+    const serverIds = new Set(state.npcs.map(n => n.id));
+    for (const [id, token] of this.npcTokens) {
+      if (!serverIds.has(id)) {
+        token.destroy();
+        this.npcTokens.delete(id);
+        if (this.selectedNPCId === id) {
+          this.selectedNPCId = null;
+          this.targetPanel.hide();
+        }
+      }
+    }
+    for (const nState of state.npcs) {
+      let token = this.npcTokens.get(nState.id);
+      if (!token) {
+        const def = this.findNpcMonsterDef(nState.defId);
+        token = new NPC(this, def, nState.tileX, nState.tileY);
+        token.setInteractionHint(true);
+        this.npcTokens.set(nState.id, token);
+        this.mapContainer.add(token.gameObject);
+      } else {
+        token.teleport(nState.tileX, nState.tileY);
+      }
+    }
+  }
+
+  private reconcileItems(state: GameState): void {
+    const serverIds = new Set(state.mapItems.map(i => i.id));
+    for (const [id, token] of this.itemTokens) {
+      if (!serverIds.has(id)) {
+        token.destroy();
+        this.itemTokens.delete(id);
+      }
+    }
+    for (const iState of state.mapItems) {
+      if (!this.itemTokens.has(iState.id)) {
+        const def = this.findItemDef(iState.defId);
+        const token = new MapItem(this, def, iState.tileX, iState.tileY);
+        this.itemTokens.set(iState.id, token);
+        this.mapContainer.add(token.gameObject);
+      }
+    }
+  }
+
+  private reconcileSelection(state: GameState): void {
+    const serverId = state.selectedTargetId;
+    if (serverId === this.selectedEnemyId || serverId === this.selectedNPCId) {
+      if (this.selectedEnemyId) {
+        const eState = state.enemies.find(e => e.id === this.selectedEnemyId);
+        if (eState && eState.hp > 0) this.targetPanel.refresh(eState.hp, eState.maxHp);
+      }
+      return;
+    }
+
+    if (this.selectedEnemyId) {
+      this.enemyTokens.get(this.selectedEnemyId)?.setSelected(false);
+      this.selectedEnemyId = null;
+    }
+    if (this.selectedNPCId) {
+      this.npcTokens.get(this.selectedNPCId)?.setSelected(false);
+      this.selectedNPCId = null;
+    }
+
+    if (!serverId) { this.targetPanel.hide(); return; }
+
+    const eState = state.enemies.find(e => e.id === serverId);
+    if (eState && eState.hp > 0) {
+      this.selectedEnemyId = serverId;
+      this.enemyTokens.get(serverId)?.setSelected(true);
+      this.targetPanel.show(this.findMonsterDef(eState.defId), eState.hp);
+      return;
+    }
+    const nState = state.npcs.find(n => n.id === serverId);
+    if (nState) {
+      this.selectedNPCId = serverId;
+      this.npcTokens.get(serverId)?.setSelected(true);
+      const def = this.findNpcMonsterDef(nState.defId);
+      this.targetPanel.show(def, def.maxHp);
+    }
+  }
+
+  // ── Input ─────────────────────────────────────────────────────────────────
+
+  private setupInput(): void {
     this.cursors = this.input.keyboard!.createCursorKeys();
     this.wasd = {
-      up: this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.W),
-      down: this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.S),
-      left: this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.A),
+      up:    this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.W),
+      down:  this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.S),
+      left:  this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.A),
       right: this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.D),
     };
 
-    this.input.on(
-      "wheel",
-      (
-        pointer: Phaser.Input.Pointer,
-        _go: unknown,
-        _dx: number,
-        dy: number,
-      ) => {
-        if (this.introOverlay || this.aidmOverlay || this.inventoryOverlay) return;
-        if (
-          pointer.x < PLAYER_PANEL_WIDTH ||
-          pointer.x >= PLAYER_PANEL_WIDTH + GRID_W
-        )
-          return;
-        if (pointer.y < 0 || pointer.y >= GRID_H) return;
-        const newZoom = Phaser.Math.Clamp(
-          this.gridZoom * (dy < 0 ? 1.15 : 1 / 1.15),
-          0.5,
-          3,
-        );
-        const pivotX = pointer.x - this.mapContainer.x;
-        const pivotY = pointer.y - this.mapContainer.y;
-        this.mapContainer.x = pointer.x - pivotX * (newZoom / this.gridZoom);
-        this.mapContainer.y = pointer.y - pivotY * (newZoom / this.gridZoom);
-        this.gridZoom = newZoom;
-        this.mapContainer.setScale(newZoom);
-        this.clampGridPan();
-      },
-    );
+    this.input.on("wheel", (pointer: Phaser.Input.Pointer, _go: unknown, _dx: number, dy: number) => {
+      if (this.introOverlay || this.aidmOverlay || this.inventoryOverlay) return;
+      if (pointer.x < PLAYER_PANEL_WIDTH || pointer.x >= PLAYER_PANEL_WIDTH + GRID_W) return;
+      if (pointer.y < 0 || pointer.y >= GRID_H) return;
+      const newZoom = Phaser.Math.Clamp(this.gridZoom * (dy < 0 ? 1.15 : 1 / 1.15), 0.5, 3);
+      const pivotX = pointer.x - this.mapContainer.x;
+      const pivotY = pointer.y - this.mapContainer.y;
+      this.mapContainer.x = pointer.x - pivotX * (newZoom / this.gridZoom);
+      this.mapContainer.y = pointer.y - pivotY * (newZoom / this.gridZoom);
+      this.gridZoom = newZoom;
+      this.mapContainer.setScale(newZoom);
+      this.clampGridPan();
+    });
 
     this.input.on("pointerdown", (pointer: Phaser.Input.Pointer) => {
       this.panStartedInGameMap = false;
@@ -250,8 +318,7 @@ export class GameScene extends Phaser.Scene {
       if (!pointer.leftButtonDown()) return;
       const dx = pointer.x - this.panLastX;
       const dy = pointer.y - this.panLastY;
-      if (!this.isPanning && (Math.abs(dx) > 3 || Math.abs(dy) > 3))
-        this.isPanning = true;
+      if (!this.isPanning && (Math.abs(dx) > 3 || Math.abs(dy) > 3)) this.isPanning = true;
       if (this.isPanning) {
         this.mapContainer.x += dx;
         this.mapContainer.y += dy;
@@ -262,344 +329,247 @@ export class GameScene extends Phaser.Scene {
     });
 
     this.input.on("pointerup", (pointer: Phaser.Input.Pointer) => {
-      if (
-        this.panStartedInGameMap &&
-        !this.isPanning &&
-        this.isPointerInGameMap(pointer)
-      ) {
-        const localX = (pointer.x - this.mapContainer.x) / this.gridZoom;
-        const localY = (pointer.y - this.mapContainer.y) / this.gridZoom;
-        const tileX = Math.floor(localX / TILE_SIZE);
-        const tileY = Math.floor(localY / TILE_SIZE);
-        if (
-          tileX >= 0 &&
-          tileX < this.gameMap.cols &&
-          tileY >= 0 &&
-          tileY < this.gameMap.rows
-        ) {
-          const enemy = this.enemies.find((e) => e.tileX === tileX && e.tileY === tileY) ?? null;
-          if (enemy) {
-            this.selectEnemy(enemy);
-          } else if (this.npc?.tileX === tileX && this.npc?.tileY === tileY) {
-            this.selectNPC(this.npc);
-          } else if (this.passiveNpcs.find((n) => n.tileX === tileX && n.tileY === tileY)) {
-            this.selectNPC(this.passiveNpcs.find((n) => n.tileX === tileX && n.tileY === tileY)!);
-          } else {
-            this.selectEnemy(null);
-          }
-        } else {
-          this.selectEnemy(null);
-        }
+      if (this.panStartedInGameMap && !this.isPanning && this.isPointerInGameMap(pointer)) {
+        this.handleMapClick(pointer);
       }
       this.isPanning = false;
       this.panStartedInGameMap = false;
     });
+  }
 
-    const questDefs = this.encounterContext?.quests ?? [];
-    this.quests = new QuestManager(
-      questDefs,
-      (quest) => {
-        this.combat.awardXP(quest.rewardXp);
-        this.combat.awardGold(quest.rewardGp);
-        this.combat.addLogs([`Quest complete: ${quest.title}! +${quest.rewardXp} XP  +${quest.rewardGp} GP`]);
-        this.updateHUD();
-      },
-      () => this.updateHUD(),
-    );
+  private handleMapClick(pointer: Phaser.Input.Pointer): void {
+    if (!this.gameState) return;
+    const localX = (pointer.x - this.mapContainer.x) / this.gridZoom;
+    const localY = (pointer.y - this.mapContainer.y) / this.gridZoom;
+    const tileX = Math.floor(localX / TILE_SIZE);
+    const tileY = Math.floor(localY / TILE_SIZE);
+    const { cols, rows } = this.gameState.map;
+    if (tileX < 0 || tileX >= cols || tileY < 0 || tileY >= rows) return;
 
-    this.initView();
-    this.buildHUD();
-    this.aidmActionHandler = new AIDMActionHandler({
-      scene: this,
-      combat: this.combat,
-      quests: this.quests,
-      mapContainer: this.mapContainer,
-      highlightLayer: this.highlightLayer,
-      getPlayer: () => this.player,
-      getGameMap: () => this.gameMap,
-      getEnemies: () => this.enemies,
-      setEnemies: (v) => { this.enemies = v; },
-      getNpc: () => this.npc,
-      setNpc: (v) => { this.npc = v; },
-      getPassiveNpcs: () => this.passiveNpcs,
-      setPassiveNpcs: (v) => { this.passiveNpcs = v; },
-      getSelectedNpc: () => this.selectedNPC,
-      setSelectedNpc: (v) => { this.selectedNPC = v; },
-      setSelectedEnemy: (v) => { this.selectedEnemy = v; },
-      selectEnemy: (enemy) => this.selectEnemy(enemy),
-      hideTargetPanel: () => this.targetPanel.hide(),
-      handleEnemyKilled: (enemy) => this.handleEnemyKilled(enemy),
-      updateHUD: () => this.updateHUD(),
-      findFreeTileNear: (tx, ty, npc) => this.findFreeTileNear(tx, ty, npc),
-    });
-    this.updateHUD();
+    const eState = this.gameState.enemies.find(e => e.hp > 0 && e.tileX === tileX && e.tileY === tileY);
+    const nState = this.gameState.npcs.find(n => n.tileX === tileX && n.tileY === tileY);
 
-    if (this.encounterContext) {
-      this.introOverlay = new IntroductionOverlay(
-        this,
-        this.encounterTypes,
-        this.combat.playerDef,
-        this.encounterContext,
-        () => { this.introOverlay = null; },
-      );
+    if (eState) {
+      this.selectEnemy(eState.id);
+    } else if (nState) {
+      this.selectNPC(nState.id);
+    } else {
+      this.clearSelection();
     }
+  }
+
+  private selectEnemy(id: string): void {
+    if (this.selectedNPCId) {
+      this.npcTokens.get(this.selectedNPCId)?.setSelected(false);
+      this.selectedNPCId = null;
+    }
+    if (this.selectedEnemyId === id) return;
+    if (this.selectedEnemyId) this.enemyTokens.get(this.selectedEnemyId)?.setSelected(false);
+    this.selectedEnemyId = id;
+    this.enemyTokens.get(id)?.setSelected(true);
+    const eState = this.gameState.enemies.find(e => e.id === id);
+    if (eState) this.targetPanel.show(this.findMonsterDef(eState.defId), eState.hp);
+    gameClient.sendAction({ type: "selectTarget", entityId: id });
+    if (this.gameState) this.updateHUD(this.gameState);
+  }
+
+  private selectNPC(id: string): void {
+    if (this.selectedEnemyId) {
+      this.enemyTokens.get(this.selectedEnemyId)?.setSelected(false);
+      this.selectedEnemyId = null;
+    }
+    if (this.selectedNPCId === id) return;
+    if (this.selectedNPCId) this.npcTokens.get(this.selectedNPCId)?.setSelected(false);
+    this.selectedNPCId = id;
+    this.npcTokens.get(id)?.setSelected(true);
+    const nState = this.gameState.npcs.find(n => n.id === id);
+    if (nState) {
+      const def = this.findNpcMonsterDef(nState.defId);
+      this.targetPanel.show(def, def.maxHp);
+    }
+    gameClient.sendAction({ type: "selectTarget", entityId: id });
+    if (this.gameState) this.updateHUD(this.gameState);
+  }
+
+  private clearSelection(): void {
+    if (this.selectedEnemyId) {
+      this.enemyTokens.get(this.selectedEnemyId)?.setSelected(false);
+      this.selectedEnemyId = null;
+    }
+    if (this.selectedNPCId) {
+      this.npcTokens.get(this.selectedNPCId)?.setSelected(false);
+      this.selectedNPCId = null;
+    }
+    this.targetPanel.hide();
+    gameClient.sendAction({ type: "selectTarget", entityId: null });
+    if (this.gameState) this.updateHUD(this.gameState);
   }
 
   update(): void {
     if (this.introOverlay || this.aidmOverlay) return;
-    if (this.combat.mode !== "exploring" && this.combat.mode !== "player_turn")
-      return;
+    if (!this.gameState || !this.player) return;
 
-    const leftJust = Phaser.Input.Keyboard.JustDown(this.cursors.left) || Phaser.Input.Keyboard.JustDown(this.wasd.left);
+    const phase = this.gameState.phase;
+    if (phase !== "exploring" && phase !== "player_turn") return;
+
+    const leftJust  = Phaser.Input.Keyboard.JustDown(this.cursors.left)  || Phaser.Input.Keyboard.JustDown(this.wasd.left);
     const rightJust = Phaser.Input.Keyboard.JustDown(this.cursors.right) || Phaser.Input.Keyboard.JustDown(this.wasd.right);
-    const upJust = Phaser.Input.Keyboard.JustDown(this.cursors.up) || Phaser.Input.Keyboard.JustDown(this.wasd.up);
-    const downJust = Phaser.Input.Keyboard.JustDown(this.cursors.down) || Phaser.Input.Keyboard.JustDown(this.wasd.down);
+    const upJust    = Phaser.Input.Keyboard.JustDown(this.cursors.up)    || Phaser.Input.Keyboard.JustDown(this.wasd.up);
+    const downJust  = Phaser.Input.Keyboard.JustDown(this.cursors.down)  || Phaser.Input.Keyboard.JustDown(this.wasd.down);
 
-    let dx = 0;
-    let dy = 0;
-    if (leftJust && !rightJust) dx = -1;
-    else if (rightJust && !leftJust) dx = 1;
-    if (upJust && !downJust) dy = -1;
-    else if (downJust && !upJust) dy = 1;
-
+    let dx = 0, dy = 0;
+    if (leftJust  && !rightJust) dx = -1;
+    else if (rightJust && !leftJust) dx =  1;
+    if (upJust    && !downJust)  dy = -1;
+    else if (downJust  && !upJust)  dy =  1;
     if (dx === 0 && dy === 0) return;
 
-    const nx = this.player.tileX + dx;
-    const ny = this.player.tileY + dy;
+    const { map, player: ps, enemies, npcs } = this.gameState;
+    const px = this.player.tileX;
+    const py = this.player.tileY;
+    const nx = px + dx, ny = py + dy;
 
-    if (nx < 0 || ny < 0 || nx >= this.gameMap.cols || ny >= this.gameMap.rows) return;
-    if (!this.gameMap.passable[ny][nx]) return;
-    if (dx !== 0 && dy !== 0) {
-      const adjX = this.gameMap.passable[this.player.tileY][nx];
-      const adjY = this.gameMap.passable[ny][this.player.tileX];
-      if (!adjX && !adjY) return;
-    }
-    if (this.enemies.some((e) => e.tileX === nx && e.tileY === ny)) return;
-    if (this.npc && this.npc.tileX === nx && this.npc.tileY === ny) return;
-    if (this.passiveNpcs.some((n) => n.tileX === nx && n.tileY === ny)) return;
-    if (this.combat.mode === "player_turn" && this.combat.movesLeft <= 0)
-      return;
+    if (nx < 0 || ny < 0 || nx >= map.cols || ny >= map.rows) return;
+    if (!map.passable[ny][nx]) return;
+    if (dx !== 0 && dy !== 0 && !map.passable[py][nx] && !map.passable[ny][px]) return;
+    if (enemies.some(e => e.hp > 0 && e.tileX === nx && e.tileY === ny)) return;
+    if (npcs.some(n => n.tileX === nx && n.tileY === ny)) return;
+    if (phase === "player_turn" && ps.movesLeft <= 0) return;
 
-    this.player.move(dx, dy, this.gameMap.cols, this.gameMap.rows);
-    this.checkItemPickup();
-
-    if (this.combat.mode === "player_turn") {
-      this.combat.movesLeft--;
-    } else {
-      this.checkCombatTrigger();
-    }
-    this.updateHUD();
+    this.player.move(dx, dy, map.cols, map.rows);
+    gameClient.sendAction({ type: "move", dx, dy });
   }
 
-  private checkCombatTrigger(): void {
-    for (const enemy of this.enemies) {
-      if (
-        chebyshev(
-          this.player.tileX,
-          this.player.tileY,
-          enemy.tileX,
-          enemy.tileY,
-        ) <= 2
-      ) {
-        if (this.enemies.length > 1) {
-          this.enemies.forEach((e, i) =>
-            e.setLabel(String.fromCharCode(65 + i)),
-          );
-        }
-        this.combat.startCombat(this.enemies);
-        this.selectEnemy(enemy);
-        return;
-      }
-    }
-  }
-
-  private runEnemyTurn(): void {
-    if (!this.combat.activeEnemy) {
-      this.combat.enterPlayerTurn();
-      return;
-    }
-    const acting = this.combat.activeEnemy;
-    EnemyAI.runTurn(
-      acting,
-      {
-        playerTileX: this.player.tileX,
-        playerTileY: this.player.tileY,
-        playerAc: this.combat.playerDef.ac,
-        playerHp: this.combat.playerHp,
-        playerHidden: this.combat.playerHidden,
-        enemyVexed: this.combat.enemyVexed,
-        enemyCurrentlyHidden: this.combat.enemyHidden,
-        passivePerception: 10 + (this.combat.playerDef.skills["perception"] ?? 0),
-        passable: this.gameMap.passable,
-        mapCols: this.gameMap.cols,
-        mapRows: this.gameMap.rows,
-        occupiedTiles: this.enemies
-          .filter((e) => e !== acting && !e.isDead())
-          .map((e) => [e.tileX, e.tileY] as [number, number]),
-      },
-      (result) => this.combat.applyEnemyTurnResult(result),
-    );
-  }
-
-  // --- Action Button Handlers ---
-
-  private onAttack(): void {
-    if (this.combat.mode !== "player_turn") return;
-    const isAdjacent = (e: Enemy) =>
-      !e.isDead() &&
-      chebyshev(this.player.tileX, this.player.tileY, e.tileX, e.tileY) <= 1;
-    const target =
-      (this.selectedEnemy && isAdjacent(this.selectedEnemy)
-        ? this.selectedEnemy
-        : this.combat.combatEnemies.find(isAdjacent)) ?? null;
-    if (!target) return;
-    this.combat.activeEnemy = target;
-    this.combat.onAttack();
-  }
-
-  private onHide(): void {
-    this.combat.onHide();
-  }
-
-  private onSecondWind(): void {
-    this.combat.onSecondWind();
-  }
-
-  private onEndTurn(): void {
-    this.combat.onEndTurn();
-  }
-
-  private onDeathSave(): void {
-    this.combat.onDeathSave();
-  }
-
-  private selectEnemy(enemy: Enemy | null): void {
-    if (this.selectedNPC) { this.selectedNPC.setSelected(false); this.selectedNPC = null; }
-    if (this.selectedEnemy) this.selectedEnemy.setSelected(false);
-    this.selectedEnemy = enemy;
-    if (enemy) {
-      enemy.setSelected(true);
-      this.targetPanel.show(enemy.def, enemy.hp);
-    } else {
-      this.targetPanel.hide();
-    }
-  }
-
-  private selectNPC(npc: NPC | null): void {
-    if (this.selectedEnemy) { this.selectedEnemy.setSelected(false); this.selectedEnemy = null; }
-    if (this.selectedNPC) this.selectedNPC.setSelected(false);
-    this.selectedNPC = npc;
-    if (npc) {
-      npc.setSelected(true);
-      this.targetPanel.show(npc.def, npc.def.maxHp);
-    } else {
-      this.targetPanel.hide();
-    }
-  }
-
-  // --- HUD ---
+  // ── HUD ──────────────────────────────────────────────────────────────────
 
   private buildHUD(): void {
-    this.playerPanel = new PlayerPanel(this, this.combat.playerDef, () => this.combat.usePotion());
+    this.playerPanel = new PlayerPanel(
+      this,
+      this.playerDef,
+      () => gameClient.sendAction({ type: "usePotion" }),
+    );
     this.targetPanel = new TargetPanel(this);
     this.hud = new HUD(this, {
-      onAttack:      () => this.onAttack(),
-      onHide:        () => this.onHide(),
-      onSecondWind:  () => this.onSecondWind(),
-      onEndTurn:     () => this.onEndTurn(),
-      onDeathSave:   () => this.onDeathSave(),
-      onSearch:      () => this.onSearch(),
-      onOpenDM:      () => this.onOpenDM(),
-      onOpenInventory:    () => this.onOpenInventory(),
-      onResetView:      () => this.resetGridView(),
-      onNewEncounter:   () => {
-        const saveData = this.buildSaveData();
-        SaveSystem.save(saveData);
-        this.scene.start("EncounterSetupScene", { saveData });
+      onAttack:       () => gameClient.sendAction({ type: "attack" }),
+      onHide:         () => gameClient.sendAction({ type: "hide" }),
+      onSecondWind:   () => gameClient.sendAction({ type: "secondWind" }),
+      onEndTurn:      () => gameClient.sendAction({ type: "endTurn" }),
+      onDeathSave:    () => gameClient.sendAction({ type: "rollDeathSave" }),
+      onSearch:       () => gameClient.sendAction({ type: "search" }),
+      onOpenDM:       () => this.onOpenDM(),
+      onOpenInventory:() => this.onOpenInventory(),
+      onResetView:    () => this.resetGridView(),
+      onNewEncounter: () => {
+        gameClient.disconnect();
+        this.scene.start("EncounterSetupScene");
       },
-      onScrollLog:      (dy) => {
-        this.combat.scrollLog(dy > 0 ? -1 : 1);
-        this.updateHUD();
+      onScrollLog: (dy) => {
+        this.localLogScrollOffset = Math.max(0, this.localLogScrollOffset + (dy > 0 ? -1 : 1));
+        if (this.gameState) this.updateHUD(this.gameState);
       },
     });
   }
 
-  private buildHUDState(): HUDState {
+  private buildHUDState(state: GameState): HUDState {
+    const activeEnemyState = state.enemies.find(e => e.isActive);
+    const activeEnemy = activeEnemyState ? (this.enemyTokens.get(activeEnemyState.id) ?? null) : null;
+    const selectedEnemy = this.selectedEnemyId ? (this.enemyTokens.get(this.selectedEnemyId) ?? null) : null;
+    const combatEnemies = state.enemies
+      .filter(e => e.hp > 0)
+      .map(e => this.enemyTokens.get(e.id))
+      .filter((e): e is Enemy => e !== undefined);
+
     return {
-      mode:               this.combat.mode,
-      playerDef:          this.combat.playerDef,
-      playerHp:           this.combat.playerHp,
-      movesLeft:          this.combat.movesLeft,
-      actionUsed:         this.combat.actionUsed,
-      bonusActionUsed:    this.combat.bonusActionUsed,
-      playerHidden:       this.combat.playerHidden,
-      secondWindUses:     this.combat.secondWindUses,
-      activeEnemy:        this.combat.activeEnemy,
-      combatEnemies:      this.combat.combatEnemies,
-      enemyVexed:         this.combat.enemyVexed,
-      enemyHidden:        this.combat.enemyHidden,
-      deathSaveSuccesses: this.combat.deathSaveSuccesses,
-      deathSaveFailures:  this.combat.deathSaveFailures,
-      combatLog:          this.combat.combatLog,
-      logScrollOffset:    this.combat.logScrollOffset,
-      selectedEnemy:      this.selectedEnemy,
-      playerTileX:        this.player.tileX,
-      playerTileY:        this.player.tileY,
-      encounterTypes:     this.encounterTypes,
-      secretsRemaining:   this.mapSecrets.length,
+      mode:               state.phase,
+      playerDef:          this.playerDef,
+      playerHp:           state.player.hp,
+      movesLeft:          state.player.movesLeft,
+      actionUsed:         state.player.actionUsed,
+      bonusActionUsed:    state.player.bonusActionUsed,
+      playerHidden:       state.player.hidden,
+      secondWindUses:     state.player.secondWindUses,
+      activeEnemy,
+      combatEnemies,
+      enemyVexed:         activeEnemyState?.vexed ?? false,
+      enemyHidden:        activeEnemyState?.hidden ?? false,
+      deathSaveSuccesses: state.player.deathSaveSuccesses,
+      deathSaveFailures:  state.player.deathSaveFailures,
+      combatLog:          state.combatLog,
+      logScrollOffset:    this.localLogScrollOffset,
+      selectedEnemy,
+      playerTileX:        this.player?.tileX ?? state.player.tileX,
+      playerTileY:        this.player?.tileY ?? state.player.tileY,
+      encounterTypes:     state.encounterTypes,
+      secretsRemaining:   state.secrets.length,
     };
   }
 
-  private updatePanel(): void {
-    const questDisplays: QuestDisplay[] = this.quests.quests.map(q => ({
-      title: q.def.title,
-      progress: q.progress,
-      target: q.def.goal.target,
+  private updateHUD(state: GameState): void {
+    const allItems = this.registry.get("items") as ItemDef[];
+    const byId = Object.fromEntries(allItems.map(i => [i.id, i]));
+    const inventory = state.player.inventoryIds.map(id => byId[id]).filter(Boolean) as ItemDef[];
+
+    const quests: QuestDisplay[] = state.quests.map(q => ({
+      title:     q.title,
+      progress:  q.progress,
+      target:    q.goalTarget,
       completed: q.completed,
     }));
+
     this.playerPanel.refresh(
-      this.combat.playerHp,
-      this.combat.playerDef.maxHp,
-      this.combat.playerXp,
-      this.combat.playerGold,
-      this.combat.inventory,
-      this.combat.mode === "player_turn" && this.combat.bonusActionUsed,
-      questDisplays,
+      state.player.hp,
+      this.playerDef.maxHp,
+      state.player.xp,
+      state.player.gold,
+      inventory,
+      state.phase === "player_turn" && state.player.bonusActionUsed,
+      quests,
     );
+
+    if (this.selectedEnemyId) {
+      const eState = state.enemies.find(e => e.id === this.selectedEnemyId);
+      if (eState && eState.hp > 0) this.targetPanel.refresh(eState.hp, eState.maxHp);
+    }
+
+    this.hud.refresh(this.buildHUDState(state));
+    this.drawHighlights(state);
   }
 
-  private updateHUD(): void {
-    this.updatePanel();
-    if (this.selectedEnemy)
-      this.targetPanel.refresh(this.selectedEnemy.hp, this.selectedEnemy.maxHp);
-    this.hud.refresh(this.buildHUDState());
-    this.drawHighlights();
+  // ── Map drawing ───────────────────────────────────────────────────────────
+
+  private drawMapTiles(map: GameMap): Phaser.GameObjects.Graphics {
+    const g = this.add.graphics();
+    for (let row = 0; row < map.rows; row++) {
+      for (let col = 0; col < map.cols; col++) {
+        g.fillStyle(map.passable[row][col] ? 0x16213e : 0x05080f);
+        g.fillRect(col * TILE_SIZE + 1, row * TILE_SIZE + 1, TILE_SIZE - 2, TILE_SIZE - 2);
+      }
+    }
+    return g;
   }
 
-  private drawHighlights(): void {
+  private drawHighlights(state: GameState): void {
     this.highlightLayer.clear();
-    if (this.combat.mode !== "player_turn" || this.combat.movesLeft <= 0)
-      return;
+    if (state.phase !== "player_turn" || state.player.movesLeft <= 0) return;
+    if (!this.player) return;
 
-    const { cols, rows, passable } = this.gameMap;
+    const { cols, rows, passable } = state.map;
     const px = this.player.tileX;
     const py = this.player.tileY;
 
     const dist: number[][] = Array.from({ length: rows }, () => new Array<number>(cols).fill(-1));
     dist[py][px] = 0;
     const queue: [number, number][] = [[py, px]];
-    const dirs: [number, number][] = [[0, 1], [0, -1], [1, 0], [-1, 0]];
 
     while (queue.length > 0) {
       const [cy, cx] = queue.shift()!;
-      if (dist[cy][cx] >= this.combat.movesLeft) continue;
-      for (const [dr, dc] of dirs) {
+      if (dist[cy][cx] >= state.player.movesLeft) continue;
+      for (const [dr, dc] of [[0, 1], [0, -1], [1, 0], [-1, 0]] as [number, number][]) {
         const nr = cy + dr, nc = cx + dc;
         if (nr < 0 || nr >= rows || nc < 0 || nc >= cols) continue;
         if (!passable[nr][nc]) continue;
-        if (this.enemies.some((e) => e.tileX === nc && e.tileY === nr)) continue;
-        if (this.npc && this.npc.tileX === nc && this.npc.tileY === nr) continue;
-        if (this.passiveNpcs.some((n) => n.tileX === nc && n.tileY === nr)) continue;
+        if (state.enemies.some(e => e.hp > 0 && e.tileX === nc && e.tileY === nr)) continue;
+        if (state.npcs.some(n => n.tileX === nc && n.tileY === nr)) continue;
         if (dist[nr][nc] !== -1) continue;
         dist[nr][nc] = dist[cy][cx] + 1;
         queue.push([nr, nc]);
@@ -610,21 +580,47 @@ export class GameScene extends Phaser.Scene {
     for (let row = 0; row < rows; row++) {
       for (let col = 0; col < cols; col++) {
         if (dist[row][col] > 0) {
-          this.highlightLayer.fillRect(
-            col * TILE_SIZE + 1,
-            row * TILE_SIZE + 1,
-            TILE_SIZE - 2,
-            TILE_SIZE - 2,
-          );
+          this.highlightLayer.fillRect(col * TILE_SIZE + 1, row * TILE_SIZE + 1, TILE_SIZE - 2, TILE_SIZE - 2);
         }
       }
     }
   }
 
+  // ── View ─────────────────────────────────────────────────────────────────
+
+  private initView(map: GameMap): void {
+    const mapW = map.cols * TILE_SIZE;
+    const mapH = map.rows * TILE_SIZE;
+    const fitZoom = Math.min(GRID_W / mapW, GRID_H / mapH);
+    this.gridZoom = Phaser.Math.Clamp(fitZoom, 0.5, 3);
+    this.mapContainer.setScale(this.gridZoom);
+    if (fitZoom >= 0.5) {
+      this.mapContainer.x = PLAYER_PANEL_WIDTH;
+      this.mapContainer.y = GRID_H - mapH * this.gridZoom;
+      this.clampGridPan();
+    } else {
+      this.centerViewOnPlayer();
+    }
+  }
+
+  private centerViewOnPlayer(): void {
+    if (!this.player) return;
+    const px = this.player.tileX * TILE_SIZE + TILE_SIZE / 2;
+    const py = this.player.tileY * TILE_SIZE + TILE_SIZE / 2;
+    this.mapContainer.x = PLAYER_PANEL_WIDTH + GRID_W / 2 - px * this.gridZoom;
+    this.mapContainer.y = GRID_H / 2 - py * this.gridZoom;
+    this.clampGridPan();
+  }
+
+  private resetGridView(): void {
+    if (this.gameState) this.initView(this.gameState.map);
+  }
+
   private clampGridPan(): void {
+    if (!this.gameState) return;
     const margin = TILE_SIZE;
-    const contentW = this.gameMap.cols * TILE_SIZE;
-    const contentH = this.gameMap.rows * TILE_SIZE;
+    const contentW = this.gameState.map.cols * TILE_SIZE;
+    const contentH = this.gameState.map.rows * TILE_SIZE;
     this.mapContainer.x = Phaser.Math.Clamp(
       this.mapContainer.x,
       PLAYER_PANEL_WIDTH + margin - contentW * this.gridZoom,
@@ -638,443 +634,81 @@ export class GameScene extends Phaser.Scene {
   }
 
   private isPointerInGameMap(pointer: Phaser.Input.Pointer): boolean {
-    return (
-      pointer.x >= PLAYER_PANEL_WIDTH &&
-      pointer.x < PLAYER_PANEL_WIDTH + GRID_W &&
-      pointer.y >= 0 &&
-      pointer.y < GRID_H
-    );
+    return pointer.x >= PLAYER_PANEL_WIDTH && pointer.x < PLAYER_PANEL_WIDTH + GRID_W
+      && pointer.y >= 0 && pointer.y < GRID_H;
   }
 
-  private initView(): void {
-    const mapW = this.gameMap.cols * TILE_SIZE;
-    const mapH = this.gameMap.rows * TILE_SIZE;
-    const fitZoom = Math.min(GRID_W / mapW, GRID_H / mapH);
-    this.gridZoom = Phaser.Math.Clamp(fitZoom, 0.5, 3);
-    this.mapContainer.setScale(this.gridZoom);
-
-    if (fitZoom >= 0.5) {
-      this.mapContainer.x = PLAYER_PANEL_WIDTH;
-      this.mapContainer.y = GRID_H - mapH * this.gridZoom;
-      this.clampGridPan();
-    } else {
-      this.centerViewOnPlayer();
-    }
-  }
-
-  private centerViewOnPlayer(): void {
-    const px = this.player.tileX * TILE_SIZE + TILE_SIZE / 2;
-    const py = this.player.tileY * TILE_SIZE + TILE_SIZE / 2;
-    this.mapContainer.x = PLAYER_PANEL_WIDTH + GRID_W / 2 - px * this.gridZoom;
-    this.mapContainer.y = GRID_H / 2 - py * this.gridZoom;
-    this.clampGridPan();
-  }
-
-  private resetGridView(): void {
-    this.initView();
-  }
-
-  private spawnItems(): void {
-    const items = this.registry.get("items") as ItemDef[];
-    const healthPotion = items.find((i) => i.id === "health_potion") ?? items[0];
-    const { cols, rows, passable } = this.gameMap;
-    const candidates: [number, number][] = [];
-    for (let r = 0; r < rows; r++) {
-      for (let c = 0; c < cols; c++) {
-        if (
-          passable[r][c] &&
-          chebyshev(c, r, this.player.tileX, this.player.tileY) >= 3 &&
-          !this.enemies.some((e) => e.tileX === c && e.tileY === r)
-        ) {
-          candidates.push([r, c]);
-        }
-      }
-    }
-    shuffle(candidates);
-    const count = Math.min(3, candidates.length);
-    for (let i = 0; i < count; i++) {
-      const [r, c] = candidates[i];
-      const item = new MapItem(this, healthPotion, c, r);
-      this.mapItems.push(item);
-      this.mapContainer.add(item.gameObject);
-    }
-  }
-
-  private checkItemPickup(): void {
-    const idx = this.mapItems.findIndex(
-      (i) => i.tileX === this.player.tileX && i.tileY === this.player.tileY,
-    );
-    if (idx === -1) return;
-    const item = this.mapItems[idx];
-    this.combat.addItem(item.def);
-    item.destroy();
-    this.mapItems.splice(idx, 1);
-    this.quests.onItemCollected();
-  }
-
-  private findPlayerSpawn(): [number, number] {
-    const { cols, rows, passable } = this.gameMap;
-    const candidates: [number, number][] = [];
-    for (let r = 0; r < rows; r++) {
-      for (let c = 0; c < Math.floor(cols / 3); c++) {
-        if (passable[r][c]) candidates.push([c, r]);
-      }
-    }
-    if (candidates.length > 0) {
-      return candidates[Math.floor(Math.random() * candidates.length)];
-    }
-    for (let r = 0; r < rows; r++) {
-      for (let c = 0; c < cols; c++) {
-        if (passable[r][c]) return [c, r];
-      }
-    }
-    return [0, 0];
-  }
-
-  private spawnEnemies(): void {
-    const monsters = this.registry.get("monsters") as MonsterDef[];
-    const defs = monsters.filter((m) => m.cr !== "0");
-    const { cols, rows, passable } = this.gameMap;
-    const candidates: [number, number][] = [];
-    for (let r = 0; r < rows; r++) {
-      for (let c = 0; c < cols; c++) {
-        if (passable[r][c] && chebyshev(c, r, this.player.tileX, this.player.tileY) >= 5) {
-          candidates.push([r, c]);
-        }
-      }
-    }
-    shuffle(candidates);
-    const target = this.encounterContext?.enemyCount ?? 2 + Math.floor(Math.random() * 3);
-    const count = Math.min(target, candidates.length);
-    for (let i = 0; i < count; i++) {
-      const [r, c] = candidates[i];
-      const enemy = new Enemy(this, defs[Math.floor(Math.random() * defs.length)], c, r);
-      this.enemies.push(enemy);
-      this.mapContainer.add(enemy.gameObject);
-    }
-  }
-
-  private pickNpcSpawn(): [number, number] {
-    const { cols, rows, passable } = this.gameMap;
-    const candidates: [number, number][] = [];
-    for (let r = 0; r < rows; r++) {
-      for (let c = 0; c < cols; c++) {
-        if (
-          passable[r][c] &&
-          chebyshev(c, r, this.player.tileX, this.player.tileY) >= 5 &&
-          !this.enemies.some((e) => e.tileX === c && e.tileY === r) &&
-          !(this.npc && this.npc.tileX === c && this.npc.tileY === r) &&
-          !this.passiveNpcs.some((n) => n.tileX === c && n.tileY === r)
-        ) {
-          candidates.push([c, r]);
-        }
-      }
-    }
-    if (candidates.length === 0) return [-1, -1];
-    return candidates[Math.floor(Math.random() * candidates.length)];
-  }
-
-  private spawnNpc(): void {
-    const monsters = this.registry.get("monsters") as MonsterDef[];
-    const npcs = (this.registry.get("npcs") as NPCDef[] | null) ?? [];
-    let npcDef: NPCDef | undefined;
-    if (this.npcId) {
-      npcDef = npcs.find((n) => n.id === this.npcId);
-    } else {
-      npcDef = npcs.find((n) => n.id === "villager") ?? npcs.find((n) => n.persona);
-    }
-    npcDef = npcDef ?? npcs[0];
-    let def: MonsterDef;
-    if (npcDef) {
-      const base = monsters.find((m) => m.id === npcDef!.monsterClass) ?? monsters[0];
-      def = { ...base, id: npcDef.id, name: npcDef.name, color: npcDef.color };
-    } else {
-      def = monsters.find((m) => m.id === "commoner") ?? monsters[0];
-    }
-    if (npcDef?.persona) {
-      this.npcPersonas.push({ id: npcDef.id, name: npcDef.name, persona: npcDef.persona });
-    }
-    const [nx, ny] = this.pickNpcSpawn();
-    if (nx === -1) return;
-    this.npc = new NPC(this, def, nx, ny);
-    this.mapContainer.add(this.npc.gameObject);
-  }
-
-  private spawnPassiveNpcs(): void {
-    const monsters = this.registry.get("monsters") as MonsterDef[];
-    const npcs = (this.registry.get("npcs") as NPCDef[] | null) ?? [];
-    const villagerNpc = npcs.find((n) => n.id === "villager");
-    const base = monsters.find((m) => m.id === (villagerNpc?.monsterClass ?? "commoner")) ?? monsters[0];
-    const def: MonsterDef = villagerNpc
-      ? { ...base, id: "villager", name: "Villager", color: villagerNpc.color }
-      : { ...base, name: "Villager" };
-    if (villagerNpc?.persona && !this.npcPersonas.some((p) => p.id === "villager")) {
-      this.npcPersonas.push({ id: "villager", name: "Villager", persona: villagerNpc.persona });
-    }
-
-    const { cols, rows, passable } = this.gameMap;
-    const occupied = new Set<string>();
-    occupied.add(`${this.player.tileX},${this.player.tileY}`);
-    if (this.npc) occupied.add(`${this.npc.tileX},${this.npc.tileY}`);
-
-    for (let i = 0; i < this.passiveNpcCount; i++) {
-      const candidates: [number, number][] = [];
-      for (let r = 0; r < rows; r++) {
-        for (let c = 0; c < cols; c++) {
-          if (passable[r][c] && !occupied.has(`${c},${r}`)) candidates.push([c, r]);
-        }
-      }
-      if (candidates.length === 0) break;
-      const [cx, cy] = candidates[Math.floor(Math.random() * candidates.length)];
-      occupied.add(`${cx},${cy}`);
-      const passive = new NPC(this, def, cx, cy);
-      passive.setInteractionHint(false);
-      this.passiveNpcs.push(passive);
-      this.mapContainer.add(passive.gameObject);
-    }
-  }
-
-  private buildAIDMGameState(): AIDMGameState {
-    const def = this.combat.playerDef;
-    return {
-      player: {
-        name: def.name,
-        className: def.className,
-        level: def.level,
-        hp: this.combat.playerHp,
-        maxHp: def.maxHp,
-        xp: this.combat.playerXp,
-        gold: this.combat.playerGold,
-        ac: def.ac,
-        tileX: this.player.tileX,
-        tileY: this.player.tileY,
-        inventory: this.combat.inventory.map((i) => i.name),
-        hidden: this.combat.playerHidden,
-        actionUsed: this.combat.actionUsed,
-        bonusActionUsed: this.combat.bonusActionUsed,
-        movesLeft: this.combat.movesLeft,
-        secondWindUses: this.combat.secondWindUses,
-        equippedArmor: this.combat.equippedSlots.armorId,
-        equippedWeapon: this.combat.equippedSlots.weaponId,
-        equippedShield: this.combat.equippedSlots.shieldId,
-        skills: this.combat.playerDef.skills,
-        savingThrows: this.combat.playerDef.savingThrows,
-      },
-      enemies: this.enemies.map((e, i) => ({
-        label: e.label || String(i),
-        id: e.def.id,
-        name: e.def.name,
-        hp: e.hp,
-        maxHp: e.maxHp,
-        ac: e.def.ac,
-        tileX: e.tileX,
-        tileY: e.tileY,
-        alive: !e.isDead(),
-        isActive: this.combat.activeEnemy === e,
-        vexed: this.combat.activeEnemy === e ? this.combat.enemyVexed : false,
-        hidden: this.combat.activeEnemy === e ? this.combat.enemyHidden : false,
-      })),
-      npcs: [
-        ...(this.npc ? [{ id: this.npc.def.id, name: this.npc.def.name, tileX: this.npc.tileX, tileY: this.npc.tileY }] : []),
-        ...this.passiveNpcs.map((n, i) => ({ id: `passive_${i}`, name: n.def.name, tileX: n.tileX, tileY: n.tileY })),
-      ],
-      selectedTarget: this.selectedEnemy && !this.selectedEnemy.isDead()
-        ? { type: "enemy" as const, name: this.selectedEnemy.def.name, id: this.selectedEnemy.def.id, label: this.selectedEnemy.label || undefined }
-        : this.selectedNPC
-          ? { type: "npc" as const, name: this.selectedNPC.def.name, id: this.selectedNPC === this.npc ? this.npc.def.id : `passive_${this.passiveNpcs.indexOf(this.selectedNPC)}` }
-          : undefined,
-      quests: this.quests.quests.map((q) => ({
-        id: q.def.id,
-        title: q.def.title,
-        progress: q.progress,
-        target: q.def.goal.target,
-        completed: q.completed,
-      })),
-      mapItems: this.mapItems.map((i) => ({ name: i.def.name, tileX: i.tileX, tileY: i.tileY })),
-      secretsRemaining: this.mapSecrets.length,
-      combatLog: this.combat.combatLog.slice(-20),
-      encounterTypes: this.encounterTypes,
-      mapName: this.encounterMapName,
-      combatPhase: this.combat.mode,
-    };
-  }
-
-  private applyAIDMAction(action: AIDMAction): string | void {
-    return this.aidmActionHandler.apply(action);
-  }
+  // ── Overlays ──────────────────────────────────────────────────────────────
 
   private onOpenInventory(): void {
-    if (this.aidmOverlay || this.inventoryOverlay) return;
+    if (this.aidmOverlay || this.inventoryOverlay || !this.gameState) return;
     const allItems = this.registry.get("items") as ItemDef[];
-    const canUseConsumable =
-      this.combat.mode === "exploring" ||
-      (this.combat.mode === "player_turn" && !this.combat.bonusActionUsed);
+    const byId = Object.fromEntries(allItems.map(i => [i.id, i]));
+    const inventory = this.gameState.player.inventoryIds.map(id => byId[id]).filter(Boolean) as ItemDef[];
+    const { equippedSlots } = this.gameState.player;
+    const canUse = this.gameState.phase === "exploring"
+      || (this.gameState.phase === "player_turn" && !this.gameState.player.bonusActionUsed);
+
     this.inventoryOverlay = new InventoryOverlay(
       this,
-      this.combat.playerDef,
-      { ...this.combat.equippedSlots },
-      [...this.combat.inventory],
+      this.playerDef,
+      { ...equippedSlots },
+      inventory,
       allItems,
-      canUseConsumable,
+      canUse,
       (slot, itemId) => {
-        this.combat.equip(slot, itemId, allItems);
-        this.inventoryOverlay?.destroy();
+        gameClient.sendAction({ type: "equip", slot, itemId });
         this.inventoryOverlay = null;
-        SaveSystem.save(this.buildSaveData());
-        this.onOpenInventory();
       },
       (slot) => {
-        this.combat.unequip(slot, allItems);
-        this.inventoryOverlay?.destroy();
+        gameClient.sendAction({ type: "unequip", slot });
         this.inventoryOverlay = null;
-        SaveSystem.save(this.buildSaveData());
-        this.onOpenInventory();
       },
       (_itemId) => {
-        this.combat.usePotion();
-        this.inventoryOverlay?.destroy();
+        gameClient.sendAction({ type: "usePotion" });
         this.inventoryOverlay = null;
-        SaveSystem.save(this.buildSaveData());
-        this.updateHUD();
-        this.onOpenInventory();
       },
       () => { this.inventoryOverlay = null; },
     );
   }
 
   private onOpenDM(): void {
-    if (this.aidmOverlay) return;
-
-    const newEntries = this.combat.combatLog.slice(this.aidmLastLogLength);
-    if (newEntries.length > 0 && this.aidmHistory.length > 0) {
-      this.aidmHistory.push({ role: "user", content: `[Events since we last spoke:\n${newEntries.join("\n")}]` });
-      this.aidmHistory.push({ role: "assistant", content: "*The Dungeon Master notes what has transpired.*" });
-    }
-    this.aidmLastLogLength = this.combat.combatLog.length;
-
+    if (this.aidmOverlay || !this.gameState) return;
     this.aidmOverlay = new AIDMOverlay(
       this,
-      () => this.buildAIDMGameState(),
-      this.npcPersonas,
-      this.encounterContext?.context ?? "",
       this.aidmHistory,
       this.aidmPersona,
-      (action) => this.applyAIDMAction(action),
+      (playerMessage, history, dmPersona) => gameClient.sendAIDMMessage(playerMessage, history, dmPersona),
       (history, persona) => {
         this.aidmHistory = history;
         this.aidmPersona = persona;
         this.aidmOverlay = null;
         this.input.keyboard?.enableGlobalCapture();
-        this.updateHUD();
+        if (this.gameState) this.updateHUD(this.gameState);
       },
     );
   }
 
-  private spawnSecrets(): void {
-    const { cols, rows, passable } = this.gameMap;
-    const candidates: [number, number][] = [];
-    for (let r = 0; r < rows; r++) {
-      for (let c = 0; c < cols; c++) {
-        if (
-          passable[r][c] &&
-          chebyshev(c, r, this.player.tileX, this.player.tileY) >= 3 &&
-          !this.enemies.some((e) => e.tileX === c && e.tileY === r) &&
-          !(this.npc?.tileX === c && this.npc?.tileY === r) &&
-          !this.passiveNpcs.some((n) => n.tileX === c && n.tileY === r)
-        ) {
-          candidates.push([r, c]);
-        }
-      }
-    }
-    shuffle(candidates);
-    const secrets = this.encounterContext?.secrets ?? [];
-    const count = Math.min(secrets.length, candidates.length);
-    for (let i = 0; i < count; i++) {
-      const [r, c] = candidates[i];
-      this.mapSecrets.push({ tileX: c, tileY: r, def: secrets[i] });
-    }
+  // ── Def lookups ───────────────────────────────────────────────────────────
+
+  private findMonsterDef(defId: string): MonsterDef {
+    const monsters = this.registry.get("monsters") as MonsterDef[];
+    return monsters.find(m => m.id === defId) ?? monsters[0];
   }
 
-  private onSearch(): void {
-    if (this.combat.mode !== "exploring") return;
-
-    const roll = d20() + (this.combat.playerDef.skills["perception"] ?? 0);
-
-    const adj = this.mapSecrets.filter(
-      (s) => chebyshev(this.player.tileX, this.player.tileY, s.tileX, s.tileY) <= 1,
-    );
-
-    if (adj.length === 0) {
-      this.combat.addLogs([`Search (${roll}) — Nothing found.`]);
-      this.updateHUD();
-      return;
+  private findNpcMonsterDef(npcDefId: string): MonsterDef {
+    const monsters = this.registry.get("monsters") as MonsterDef[];
+    const npcs = this.registry.get("npcs") as NPCDef[];
+    const npcDef = npcs.find(n => n.id === npcDefId);
+    if (npcDef) {
+      const base = monsters.find(m => m.id === npcDef.monsterClass) ?? monsters[0];
+      return { ...base, id: npcDef.id, name: npcDef.name, color: npcDef.color };
     }
-
-    const secret = adj[0];
-    const success = roll >= secret.def.dc;
-    this.mapSecrets = this.mapSecrets.filter((s) => s !== secret);
-
-    if (success) {
-      this.quests.onSecretFound();
-      this.combat.addLogs([`Search (${roll} vs DC ${secret.def.dc}) — ${secret.def.successText}`]);
-      const r = secret.def.reward;
-      if (r.type === "gold") {
-        this.combat.awardGold(r.amount);
-        this.combat.addLogs([`+${r.amount} GP`]);
-      } else if (r.type === "item") {
-        const items = this.registry.get("items") as ItemDef[];
-        const item = items.find((i) => i.id === r.itemId);
-        if (item) {
-          this.combat.addItem(item);
-          this.combat.addLogs([`Found: ${item.name}`]);
-        }
-      } else {
-        this.combat.addLogs([`Lore: "${r.text}"`]);
-      }
-    } else {
-      this.combat.addLogs([`Search (${roll} vs DC ${secret.def.dc}) — ${secret.def.failureText}`]);
-    }
-
-    this.updateHUD();
+    return monsters.find(m => m.id === npcDefId) ?? monsters[0];
   }
 
-  private findFreeTileNear(tx: number, ty: number, excludeNpc?: NPC): [number, number] {
-    const { cols, rows, passable } = this.gameMap;
-    const isFree = (c: number, r: number): boolean => {
-      if (!passable[r]?.[c]) return false;
-      if (this.player.tileX === c && this.player.tileY === r) return false;
-      if (this.enemies.some((e) => !e.isDead() && e.tileX === c && e.tileY === r)) return false;
-      if (this.npc && this.npc !== excludeNpc && this.npc.tileX === c && this.npc.tileY === r) return false;
-      if (this.passiveNpcs.some((n) => n !== excludeNpc && n.tileX === c && n.tileY === r)) return false;
-      return true;
-    };
-    if (isFree(tx, ty)) return [tx, ty];
-    for (let radius = 1; radius < Math.max(cols, rows); radius++) {
-      for (let dc = -radius; dc <= radius; dc++) {
-        for (let dr = -radius; dr <= radius; dr++) {
-          if (Math.abs(dc) !== radius && Math.abs(dr) !== radius) continue;
-          const c = tx + dc, r = ty + dr;
-          if (c >= 0 && c < cols && r >= 0 && r < rows && isFree(c, r)) return [c, r];
-        }
-      }
-    }
-    return [tx, ty];
-  }
-
-  private drawMapTiles(): Phaser.GameObjects.Graphics {
-    const g = this.add.graphics();
-    const { cols, rows, passable } = this.gameMap;
-    for (let row = 0; row < rows; row++) {
-      for (let col = 0; col < cols; col++) {
-        g.fillStyle(passable[row][col] ? 0x16213e : 0x05080f);
-        g.fillRect(
-          col * TILE_SIZE + 1,
-          row * TILE_SIZE + 1,
-          TILE_SIZE - 2,
-          TILE_SIZE - 2,
-        );
-      }
-    }
-    return g;
+  private findItemDef(defId: string): ItemDef {
+    const items = this.registry.get("items") as ItemDef[];
+    return items.find(i => i.id === defId) ?? items[0];
   }
 }
