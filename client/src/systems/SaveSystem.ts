@@ -15,6 +15,7 @@ export interface SaveData {
   inventoryIds: string[];
   secondWindUses: number;
   equippedSlots?: EquipmentSlots;
+  skills?: Record<string, number>;
   encounterContext?: EncounterContext;
 }
 

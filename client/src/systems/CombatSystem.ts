@@ -109,13 +109,14 @@ export function playerHide(
   player: PlayerDef,
   enemyPassivePerception: number,
 ): { hidden: boolean; logs: string[] } {
-  const stealthRoll = d20() + player.stealthBonus;
+  const stealthBonus = player.skills["stealth"] ?? 0;
+  const stealthRoll = d20() + stealthBonus;
   if (stealthRoll > enemyPassivePerception) {
     return {
       hidden: true,
       logs: [
         `${player.name} hides!`,
-        `Stealth: d20+${player.stealthBonus} = ${stealthRoll} vs Perception ${enemyPassivePerception} ✓`,
+        `Stealth: d20+${stealthBonus} = ${stealthRoll} vs Perception ${enemyPassivePerception} ✓`,
       ],
     };
   }

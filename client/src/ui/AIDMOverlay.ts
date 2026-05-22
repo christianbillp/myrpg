@@ -28,6 +28,7 @@ export interface AIDMGameState {
     hidden: boolean; actionUsed: boolean; bonusActionUsed: boolean;
     movesLeft: number; secondWindUses: number;
     equippedArmor: string | null; equippedWeapon: string | null; equippedShield: string | null;
+    skills: Record<string, number>;
   };
   enemies: Array<{
     label?: string; id: string; name: string;
@@ -73,7 +74,7 @@ export class AIDMOverlay extends BaseOverlay {
     npcPersonas: AIDMNpcPersona[],
     encounterContext: string,
     initialHistory: ChatMessage[],
-    onAction: (action: AIDMAction) => void,
+    onAction: (action: AIDMAction) => string | void,
     onClose: (history: ChatMessage[]) => void,
   ) {
     super(scene, 640, 480, ACCENT, () => {
@@ -242,18 +243,31 @@ export class AIDMOverlay extends BaseOverlay {
     getGameState: () => AIDMGameState,
     npcPersonas: AIDMNpcPersona[],
     encounterContext: string,
-    onAction: (action: AIDMAction) => void,
+    onAction: (action: AIDMAction) => string | void,
   ): Promise<void> {
     const text = this.inputValue.trim();
     if (!text || this.thinking) return;
 
     this.inputValue = "";
     this.renderInput();
+    await this.sendText(text, getGameState, npcPersonas, encounterContext, onAction);
+  }
+
+  private async sendText(
+    text: string,
+    getGameState: () => AIDMGameState,
+    npcPersonas: AIDMNpcPersona[],
+    encounterContext: string,
+    onAction: (action: AIDMAction) => string | void,
+  ): Promise<void> {
+    if (this.thinking) return;
+
     this.thinking = true;
     this.history.push({ role: "user", content: text });
     this.renderHistory();
     this.statusText.setText("The Dungeon Master considers…");
 
+    const followUps: string[] = [];
     try {
       const res = await fetch(`${API_URL}/aidm/chat`, {
         method: "POST",
@@ -269,7 +283,10 @@ export class AIDMOverlay extends BaseOverlay {
       const data = (await res.json()) as { reply?: string; actions?: AIDMAction[]; error?: string };
       if (!res.ok || !data.reply) throw new Error(data.error ?? `HTTP ${res.status}`);
 
-      for (const action of data.actions ?? []) onAction(action);
+      for (const action of data.actions ?? []) {
+        const followUp = onAction(action);
+        if (followUp) followUps.push(followUp);
+      }
       this.history.push({ role: "assistant", content: data.reply });
     } catch {
       this.history.push({ role: "assistant", content: "(The Dungeon Master is silent.)" });
@@ -279,6 +296,10 @@ export class AIDMOverlay extends BaseOverlay {
     this.statusText.setText("");
     this.renderHistory();
     this.scene.input.keyboard?.disableGlobalCapture();
+
+    for (const followUp of followUps) {
+      await this.sendText(followUp, getGameState, npcPersonas, encounterContext, onAction);
+    }
   }
 
   private renderHistory(): void {

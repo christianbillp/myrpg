@@ -149,6 +149,7 @@ export class GameScene extends Phaser.Scene {
       inventoryIds: this.combat.inventory.map((i) => i.id),
       secondWindUses: this.combat.secondWindUses,
       equippedSlots: { ...this.combat.equippedSlots },
+      skills: { ...this.combat.playerDef.skills },
     };
   }
 
@@ -402,7 +403,7 @@ export class GameScene extends Phaser.Scene {
         playerHidden: this.combat.playerHidden,
         enemyVexed: this.combat.enemyVexed,
         enemyCurrentlyHidden: this.combat.enemyHidden,
-        passivePerception: 10 + this.combat.playerDef.perceptionBonus,
+        passivePerception: 10 + (this.combat.playerDef.skills["perception"] ?? 0),
         passable: this.gameMap.passable,
         mapCols: this.gameMap.cols,
         mapRows: this.gameMap.rows,
@@ -830,6 +831,7 @@ export class GameScene extends Phaser.Scene {
         equippedArmor: this.combat.equippedSlots.armorId,
         equippedWeapon: this.combat.equippedSlots.weaponId,
         equippedShield: this.combat.equippedSlots.shieldId,
+        skills: this.combat.playerDef.skills,
       },
       enemies: this.enemies.map((e, i) => ({
         label: e.label || String(i),
@@ -852,7 +854,7 @@ export class GameScene extends Phaser.Scene {
       selectedTarget: this.selectedEnemy && !this.selectedEnemy.isDead()
         ? { type: "enemy" as const, name: this.selectedEnemy.def.name, id: this.selectedEnemy.def.id, label: this.selectedEnemy.label || undefined }
         : this.selectedNPC
-          ? { type: "npc" as const, name: this.selectedNPC.def.name, id: this.selectedNPC.def.id }
+          ? { type: "npc" as const, name: this.selectedNPC.def.name, id: this.selectedNPC === this.npc ? this.npc.def.id : `passive_${this.passiveNpcs.indexOf(this.selectedNPC)}` }
           : undefined,
       quests: this.quests.quests.map((q) => ({
         id: q.def.id,
@@ -870,7 +872,7 @@ export class GameScene extends Phaser.Scene {
     };
   }
 
-  private applyAIDMAction(action: AIDMAction): void {
+  private applyAIDMAction(action: AIDMAction): string | void {
     switch (action.type) {
       case "adjust_player_hp": {
         const delta = action["delta"] as number;
@@ -1006,6 +1008,23 @@ export class GameScene extends Phaser.Scene {
         this.combat.setPlayerHidden(hidden);
         break;
       }
+      case "request_ability_check": {
+        const skill = action["skill"] as string;
+        const dc = action["dc"] as number;
+        const reason = action["reason"] as string;
+        const bonus = this.combat.playerDef.skills[skill] ?? 0;
+        const roll = d20();
+        const total = roll + bonus;
+        const success = total >= dc;
+        const sign = bonus >= 0 ? "+" : "";
+        const label = skill.replace(/([A-Z])/g, " $1").toLowerCase().replace(/^\w/, c => c.toUpperCase());
+        this.combat.addLogs([
+          `[DM] ${label} check (DC ${dc}) — ${reason}`,
+          `d20(${roll})${sign}${bonus} = ${total} vs DC ${dc} — ${success ? "SUCCESS ✓" : "FAILURE ✗"}`,
+        ]);
+        this.updateHUD();
+        return `[Ability Check Result — ${label}, DC ${dc}: d20(${roll})${sign}${bonus} = ${total} — ${success ? "SUCCESS" : "FAILURE"}. ${reason}]`;
+      }
     }
     this.updateHUD();
   }
@@ -1091,7 +1110,7 @@ export class GameScene extends Phaser.Scene {
   private onSearch(): void {
     if (this.combat.mode !== "exploring") return;
 
-    const roll = d20() + this.combat.playerDef.perceptionBonus;
+    const roll = d20() + (this.combat.playerDef.skills["perception"] ?? 0);
 
     const adj = this.mapSecrets.filter(
       (s) => chebyshev(this.player.tileX, this.player.tileY, s.tileX, s.tileY) <= 1,

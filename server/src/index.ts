@@ -227,6 +227,7 @@ interface AIDMPlayerState {
   hp: number; maxHp: number; xp: number; gold: number;
   ac: number; tileX: number; tileY: number; inventory: string[];
   equippedArmor: string | null; equippedWeapon: string | null; equippedShield: string | null;
+  skills: Record<string, number>;
 }
 interface AIDMSelectedTarget {
   type: 'enemy' | 'npc'; name: string; id: string; label?: string;
@@ -319,6 +320,11 @@ const AIDM_TOOLS = [
     description: 'Set the player\'s hidden (stealth) status.',
     input_schema: { type: 'object' as const, properties: { hidden: { type: 'boolean' }, reason: { type: 'string' } }, required: ['hidden', 'reason'] },
   },
+  {
+    name: 'request_ability_check',
+    description: 'Ask the player to make an ability check when their attempted action has a meaningful chance of failure. The client rolls d20 + the relevant skill modifier and automatically sends the result back so you can narrate success or failure and apply consequences. Use the skill name in camelCase matching the player\'s skills map (e.g. "athletics", "stealth", "sleightOfHand"). Set DC using SRD guidelines: Very Easy 5, Easy 10, Medium 15, Hard 20, Very Hard 25. Do NOT call this for actions that automatically succeed or fail.',
+    input_schema: { type: 'object' as const, properties: { skill: { type: 'string' }, dc: { type: 'integer' }, reason: { type: 'string' } }, required: ['skill', 'dc', 'reason'] },
+  },
 ];
 
 function buildAIDMSystemPrompt(req: AIDMChatRequest): string {
@@ -337,7 +343,7 @@ function buildAIDMSystemPrompt(req: AIDMChatRequest): string {
   const focusLine = gs.selectedTarget
     ? gs.selectedTarget.type === 'enemy'
       ? `Focused on: ${gs.selectedTarget.name}${gs.selectedTarget.label ? ` [${gs.selectedTarget.label}]` : ''} (enemy)`
-      : `Focused on: ${gs.selectedTarget.name} (NPC)`
+      : `Focused on: ${gs.selectedTarget.name} [entity: npc_${gs.selectedTarget.id}] (NPC)`
     : 'Focused on: nothing';
 
   // Enemies block
@@ -355,7 +361,7 @@ function buildAIDMSystemPrompt(req: AIDMChatRequest): string {
 
   // NPCs block
   const npcLines = gs.npcs.length > 0
-    ? gs.npcs.map((n) => `  ${n.name} [id: ${n.id}] at tile (${n.tileX},${n.tileY})`).join('\n')
+    ? gs.npcs.map((n) => `  ${n.name} [entity: npc_${n.id}] at tile (${n.tileX},${n.tileY})`).join('\n')
     : '  None';
 
   // Quests block
@@ -386,6 +392,7 @@ PLAYER: ${p.name}, Level ${p.level} ${p.className}
   HP ${p.hp}/${p.maxHp} · AC ${p.ac} · XP ${p.xp} · ${p.gold} GP · tile (${p.tileX},${p.tileY})
   Equipped: ${[p.equippedArmor, p.equippedWeapon, p.equippedShield].filter(Boolean).join(', ') || 'nothing'}
   Carrying: ${p.inventory.join(', ') || 'empty'}
+  Skills: ${Object.entries(p.skills).map(([k, v]) => `${k} ${v >= 0 ? '+' : ''}${v}`).join(', ')}
   ${combatStateFlags ? combatStateFlags + '\n  ' : ''}${focusLine}
 
 ENEMIES:
@@ -408,7 +415,7 @@ RECENT COMBAT LOG:
   ${recentLog}
 
 INSTRUCTIONS:
-Respond in 1-3 concise sentences. Use tools freely to make game effects real — adjust HP for traps or environmental effects, award XP/GP for clever solutions, set enemy HP to reflect narrative wounds, move entities to create drama, give items as rewards, start or end combat as the story demands, complete quests when the player earns it, toggle stealth. When the player says "them", "it", "him", "her", or "that one", resolve it to whoever they are currently focused on. When the player speaks to or addresses any creature (NPC or enemy), respond in that creature's voice, limited to what they would plausibly know or say. Enemies may taunt, threaten, plead, or bargain depending on the situation. When the player first successfully engages in conversation with an NPC in a social encounter and the 'make_contact' quest is not yet complete, call complete_quest with quest_id 'make_contact'. Never break immersion or disclaim game-state knowledge.`;
+Respond in 1-3 concise sentences. Use tools freely to make game effects real — adjust HP for traps or environmental effects, award XP/GP for clever solutions, set enemy HP to reflect narrative wounds, move entities to create drama, give items as rewards, start or end combat as the story demands, complete quests when the player earns it, toggle stealth. When the player attempts something with a meaningful chance of failure, call request_ability_check with the appropriate skill (camelCase, matching their skills list), a DC per SRD guidelines (Very Easy 5 / Easy 10 / Medium 15 / Hard 20 / Very Hard 25), and the reason. The result is sent back automatically — narrate success or failure and apply consequences with other tools. Do not call request_ability_check for things that trivially succeed or fail. When the player says "them", "it", "him", "her", or "that one", resolve it to whoever they are currently focused on. When the player speaks to or addresses any creature (NPC or enemy), respond in that creature's voice, limited to what they would plausibly know or say. Enemies may taunt, threaten, plead, or bargain depending on the situation. When the player first successfully engages in conversation with an NPC in a social encounter and the 'make_contact' quest is not yet complete, call complete_quest with quest_id 'make_contact'. Never break immersion or disclaim game-state knowledge.`;
 }
 
 server.post('/aidm/chat', async (request, reply) => {

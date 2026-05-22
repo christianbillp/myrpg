@@ -29,10 +29,9 @@ export interface PlayerDef {
   wis: number;
   cha: number;
   proficiencyBonus: number;
-  perceptionBonus: number;
+  skills: Record<string, number>;
   secondWindMaxUses: number;
   sneakAttackDice: number;
-  stealthBonus: number;
   speed: number;
   speedFt: number;
   color: number;
