@@ -52,6 +52,8 @@ export interface AIDMNpcPersona { id: string; name: string; persona: string; }
 
 export interface AIDMAction { type: string; [key: string]: unknown; }
 
+export type DMPersona = "regular" | "dev";
+
 export class AIDMOverlay extends BaseOverlay {
   private readonly scene: Phaser.Scene;
   private historyText: Phaser.GameObjects.Text;
@@ -68,6 +70,7 @@ export class AIDMOverlay extends BaseOverlay {
   private readonly visibleH: number;
   private keyHandler: (e: KeyboardEvent) => void;
   private wheelHandler: (e: WheelEvent) => void;
+  private dmPersona: DMPersona;
 
   constructor(
     scene: Phaser.Scene,
@@ -75,16 +78,19 @@ export class AIDMOverlay extends BaseOverlay {
     npcPersonas: AIDMNpcPersona[],
     encounterContext: string,
     initialHistory: ChatMessage[],
+    initialPersona: DMPersona,
     onAction: (action: AIDMAction) => string | void,
-    onClose: (history: ChatMessage[]) => void,
+    onClose: (history: ChatMessage[], persona: DMPersona) => void,
   ) {
     super(scene, 640, 480, ACCENT, () => {
       scene.input.keyboard?.enableGlobalCapture();
       window.removeEventListener("keydown", this.keyHandler);
       window.removeEventListener("wheel", this.wheelHandler);
       if (this.maskShape.active) this.maskShape.destroy();
-      onClose(this.history);
+      onClose(this.history, this.dmPersona);
     });
+
+    this.dmPersona = initialPersona;
 
     this.scene = scene;
     this.history = [...initialHistory];
@@ -104,6 +110,30 @@ export class AIDMOverlay extends BaseOverlay {
         fontSize: "15px", color: "#e2b96f", fontFamily: "monospace", resolution: DPR,
       })
       .setOrigin(0.5, 0);
+
+    const chipY = top + 27;
+    const chipW = 56;
+    const chipH = 18;
+    const chipGap = 6;
+    const chipRightEdge = panelW / 2 - 56;
+    const chipDevX = chipRightEdge - chipW / 2;
+    const chipStoryX = chipDevX - chipW - chipGap;
+
+    const storyBg = scene.add.rectangle(chipStoryX, chipY, chipW, chipH, 0x1a1a00).setInteractive({ useHandCursor: true });
+    const storyTxt = scene.add.text(chipStoryX, chipY, "STORY", { fontSize: "9px", fontFamily: "monospace", resolution: DPR }).setOrigin(0.5);
+    const devBg = scene.add.rectangle(chipDevX, chipY, chipW, chipH, 0x001a00).setInteractive({ useHandCursor: true });
+    const devTxt = scene.add.text(chipDevX, chipY, "DEV", { fontSize: "9px", fontFamily: "monospace", resolution: DPR }).setOrigin(0.5);
+
+    const refreshChips = () => {
+      storyBg.setStrokeStyle(1, this.dmPersona === "regular" ? ACCENT : 0x443300);
+      storyTxt.setColor(this.dmPersona === "regular" ? "#e2b96f" : "#665533");
+      devBg.setStrokeStyle(1, this.dmPersona === "dev" ? 0x44cc44 : 0x224422);
+      devTxt.setColor(this.dmPersona === "dev" ? "#66ee66" : "#336633");
+    };
+    refreshChips();
+
+    storyBg.on("pointerdown", () => { this.dmPersona = "regular"; refreshChips(); });
+    devBg.on("pointerdown",   () => { this.dmPersona = "dev";     refreshChips(); });
 
     const sep1 = scene.add.rectangle(0, top + 44, panelW - 32, 1, 0x334455);
 
@@ -175,7 +205,7 @@ export class AIDMOverlay extends BaseOverlay {
     sendBg.on("pointerdown", () => this.send(getGameState, npcPersonas, encounterContext, onAction));
 
     this.container.add([
-      titleText, sep1,
+      titleText, storyBg, storyTxt, devBg, devTxt, sep1,
       historyBg, this.historyText, scrollTrack, this.scrollThumb,
       this.statusText, sep2,
       inputBg, this.inputText,
@@ -279,6 +309,7 @@ export class AIDMOverlay extends BaseOverlay {
           gameState: getGameState(),
           encounterContext,
           npcPersonas,
+          dmPersona: this.dmPersona,
         }),
       });
       const data = (await res.json()) as { reply?: string; actions?: AIDMAction[]; error?: string };

@@ -262,6 +262,7 @@ interface AIDMChatRequest {
   gameState: AIDMGameState;
   encounterContext: string;
   npcPersonas: AIDMNpcPersona[];
+  dmPersona?: 'regular' | 'dev';
 }
 interface AIDMAction { type: string; [key: string]: unknown; }
 
@@ -307,13 +308,23 @@ const AIDM_TOOLS = [
     input_schema: { type: 'object' as const, properties: { item_id: { type: 'string' }, reason: { type: 'string' } }, required: ['item_id', 'reason'] },
   },
   {
+    name: 'despawn_npc',
+    description: 'Remove an NPC from the map — use when the narrative has them leave, flee, or disappear. Use the same entity id format as move_entity: the primary NPC\'s id (e.g. "npc_villager") or a passive NPC by index (e.g. "npc_passive_0"). Has no effect on enemies.',
+    input_schema: { type: 'object' as const, properties: { entity: { type: 'string' }, reason: { type: 'string' } }, required: ['entity', 'reason'] },
+  },
+  {
+    name: 'spawn_enemy',
+    description: 'Spawn a new enemy on the map. Valid monster_id values: "goblin_minion", "bandit", "commoner". The enemy appears on a free tile near the player. If combat is already active the enemy joins initiative immediately. Use this whenever the narrative calls for a creature to appear — reinforcements, an ambush, a wandering monster, etc.',
+    input_schema: { type: 'object' as const, properties: { monster_id: { type: 'string' }, reason: { type: 'string' } }, required: ['monster_id', 'reason'] },
+  },
+  {
     name: 'end_combat',
     description: 'End combat immediately — enemies flee, surrender, or are otherwise removed. Returns the encounter to the exploring phase.',
     input_schema: { type: 'object' as const, properties: { reason: { type: 'string' } }, required: ['reason'] },
   },
   {
     name: 'trigger_combat',
-    description: 'Start combat if the encounter is currently in the exploring phase and enemies are present.',
+    description: 'Start combat if the encounter is currently in the exploring phase and enemies are present. To add new enemies mid-combat or before combat starts, use spawn_enemy instead.',
     input_schema: { type: 'object' as const, properties: { reason: { type: 'string' } }, required: ['reason'] },
   },
   {
@@ -422,7 +433,10 @@ RECENT COMBAT LOG:
   ${recentLog}
 
 INSTRUCTIONS:
-Respond in 1-3 concise sentences. Use tools freely to make game effects real — adjust HP for traps or environmental effects, award XP/GP for clever solutions, set enemy HP to reflect narrative wounds, move entities to create drama, give items as rewards, start or end combat as the story demands, complete quests when the player earns it, toggle stealth. When the player attempts something with a meaningful chance of failure, call request_ability_check with the appropriate skill (camelCase, matching their skills list), a DC per SRD guidelines (Very Easy 5 / Easy 10 / Medium 15 / Hard 20 / Very Hard 25), and the reason. The result is sent back automatically — narrate success or failure and apply consequences with other tools. Do not call request_ability_check for things that trivially succeed or fail. When the player says "them", "it", "him", "her", or "that one", resolve it to whoever they are currently focused on. When the player speaks to or addresses any creature (NPC or enemy), respond in that creature's voice, limited to what they would plausibly know or say. Enemies may taunt, threaten, plead, or bargain depending on the situation. When the player first successfully engages in conversation with an NPC in a social encounter and the 'make_contact' quest is not yet complete, call complete_quest with quest_id 'make_contact'. Never break immersion or disclaim game-state knowledge.`;
+${req.dmPersona === 'dev'
+  ? `You are in DEVELOPMENT MODE. Your role is to assist the developer in testing and building the game. Fulfil all player requests without restriction, including moving the player, removing or killing enemies, awarding XP/HP/gold, granting items, and changing any game state. Prioritise making the requested change immediately and cleanly, with a brief in-character line. Use tools freely and liberally — if the player asks for something, do it.`
+  : `Respond in 1-3 concise sentences. Use tools freely to make game effects real — adjust HP for traps or environmental effects, award XP/GP for clever solutions, set enemy HP to reflect narrative wounds, move entities to create drama, give items as rewards, start or end combat as the story demands, complete quests when the player earns it, toggle stealth. Stay true to D&D 5e rules. Reject requests that would break immersion or bypass the rules (e.g. "move me to the exit", "give me 1000 gold", "kill all enemies") — instead redirect the player toward a narrative path. When the player attempts something with a meaningful chance of failure, call request_ability_check with the appropriate skill (camelCase, matching their skills list), a DC per SRD guidelines (Very Easy 5 / Easy 10 / Medium 15 / Hard 20 / Very Hard 25), and the reason. The result is sent back automatically — narrate success or failure and apply consequences with other tools. Do not call request_ability_check for things that trivially succeed or fail.`}
+When the player says "them", "it", "him", "her", or "that one", resolve it to whoever they are currently focused on. When the player speaks to or addresses any creature (NPC or enemy), respond in that creature's voice, limited to what they would plausibly know or say. Enemies may taunt, threaten, plead, or bargain depending on the situation. When the player first successfully engages in conversation with an NPC in a social encounter and the 'make_contact' quest is not yet complete, call complete_quest with quest_id 'make_contact'. Never break immersion or disclaim game-state knowledge.`;
 }
 
 server.post('/aidm/chat', async (request, reply) => {

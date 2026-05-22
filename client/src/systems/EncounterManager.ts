@@ -381,6 +381,13 @@ export class EncounterManager {
     this.onChange();
   }
 
+  addCombatant(enemy: Enemy): void {
+    if (this.mode !== 'exploring') {
+      this.combatEnemies.push(enemy);
+    }
+    this.onChange();
+  }
+
   endCombat(): void {
     this.mode = 'exploring';
     this.activeEnemy = null;

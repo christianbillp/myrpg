@@ -22,7 +22,7 @@ import { shuffle } from "../systems/MapUtils";
 import { NPC } from "../entities/NPC";
 import { SecretDef, EncounterType, EncounterContext } from "../data/encounterContext";
 import { d20 } from "../systems/Dice";
-import { AIDMOverlay, AIDMGameState, AIDMAction, AIDMNpcPersona, ChatMessage } from "../ui/AIDMOverlay";
+import { AIDMOverlay, AIDMGameState, AIDMAction, AIDMNpcPersona, ChatMessage, DMPersona } from "../ui/AIDMOverlay";
 import { EquipmentOverlay } from "../ui/EquipmentOverlay";
 import { applyEquipment } from "../systems/EquipmentSystem";
 import { IntroductionOverlay } from "../ui/IntroductionOverlay";
@@ -52,6 +52,7 @@ export class GameScene extends Phaser.Scene {
   private aidmOverlay: AIDMOverlay | null = null;
   private equipmentOverlay: EquipmentOverlay | null = null;
   private aidmHistory: ChatMessage[] = [];
+  private aidmPersona: DMPersona = "regular";
   private aidmLastLogLength = 0;
   private npcPersonas: AIDMNpcPersona[] = [];
   private encounterContext?: EncounterContext;
@@ -946,6 +947,38 @@ export class GameScene extends Phaser.Scene {
         }
         break;
       }
+      case "despawn_npc": {
+        const entity = action["entity"] as string;
+        const reason = action["reason"] as string;
+        if (!entity.startsWith("npc_")) break;
+        const id = entity.slice(4);
+        let npc: NPC | null = null;
+        if (this.npc?.def.id === id) {
+          npc = this.npc;
+          this.npc = null;
+        } else if (id.startsWith("passive_")) {
+          const idx = parseInt(id.slice(8), 10);
+          if (!isNaN(idx) && this.passiveNpcs[idx]) {
+            npc = this.passiveNpcs[idx];
+            this.passiveNpcs.splice(idx, 1);
+          }
+        } else {
+          const found = this.passiveNpcs.find((n) => n.def.id === id);
+          if (found) {
+            npc = found;
+            this.passiveNpcs = this.passiveNpcs.filter((n) => n !== found);
+          }
+        }
+        if (npc) {
+          if (this.selectedNPC === npc) {
+            this.selectedNPC = null;
+            this.targetPanel.hide();
+          }
+          this.combat.addLogs([`[DM] ${npc.def.name} departs — ${reason}`]);
+          npc.destroy();
+        }
+        break;
+      }
       case "add_item": {
         const itemId = action["item_id"] as string;
         const reason = action["reason"] as string;
@@ -966,6 +999,22 @@ export class GameScene extends Phaser.Scene {
         if (item && this.combat.removeItem(itemId)) {
           this.combat.addLogs([`[DM] ${item.name} removed from inventory — ${reason}`]);
         }
+        break;
+      }
+      case "spawn_enemy": {
+        const monsterId = action["monster_id"] as string;
+        const reason = action["reason"] as string;
+        const monsters = this.registry.get("monsters") as MonsterDef[];
+        const def = monsters.find((m) => m.id === monsterId);
+        if (!def) break;
+        const [sx, sy] = this.findFreeTileNear(this.player.tileX, this.player.tileY);
+        const newEnemy = new Enemy(this, def, sx, sy);
+        const nextLabel = String.fromCharCode(65 + this.enemies.length);
+        newEnemy.setLabel(nextLabel);
+        this.enemies.push(newEnemy);
+        this.mapContainer.add(newEnemy.gameObject);
+        this.combat.addCombatant(newEnemy);
+        this.combat.addLogs([`[DM] ${def.name} (${nextLabel}) appears — ${reason}`]);
         break;
       }
       case "end_combat": {
@@ -1095,9 +1144,11 @@ export class GameScene extends Phaser.Scene {
       this.npcPersonas,
       this.encounterContext?.context ?? "",
       this.aidmHistory,
+      this.aidmPersona,
       (action) => this.applyAIDMAction(action),
-      (history) => {
+      (history, persona) => {
         this.aidmHistory = history;
+        this.aidmPersona = persona;
         this.aidmOverlay = null;
         this.input.keyboard?.enableGlobalCapture();
         this.updateHUD();
