@@ -27,7 +27,7 @@ export class Enemy {
     this.hp = def.maxHp;
     this.maxHp = def.maxHp;
 
-    const body = scene.add.rectangle(0, 0, TILE_SIZE - 8, TILE_SIZE - 8, def.color);
+    const body = scene.add.circle(0, 0, (TILE_SIZE - 8) / 2, def.color);
     this.hpBar = scene.add.graphics();
     this.selectionRing = scene.add.graphics();
     this.labelText = scene.add
@@ -90,9 +90,8 @@ export class Enemy {
   setSelected(selected: boolean): void {
     this.selectionRing.clear();
     if (selected) {
-      const half = (TILE_SIZE - 8) / 2 + 3;
       this.selectionRing.lineStyle(2, this.def.color, 1);
-      this.selectionRing.strokeRect(-half, -half, half * 2, half * 2);
+      this.selectionRing.strokeCircle(0, 0, (TILE_SIZE - 8) / 2 + 3);
     }
   }
 
@@ -108,10 +107,12 @@ export class Enemy {
 
   private refreshHpBar(): void {
     this.hpBar.clear();
+    if (this.hp >= this.maxHp) return;
     const pct = this.hp / this.maxHp;
+    const radius = (TILE_SIZE - 8) / 2;
     const barW = TILE_SIZE - 10;
     const barX = -(barW / 2);
-    const barY = TILE_SIZE / 2 - 7;
+    const barY = -(radius + 7);
     this.hpBar.fillStyle(0x222233);
     this.hpBar.fillRect(barX, barY, barW, 4);
     this.hpBar.fillStyle(0xe74c3c);

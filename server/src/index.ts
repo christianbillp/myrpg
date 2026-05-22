@@ -243,11 +243,11 @@ server.post('/game/session/:id/aidm', async (req, reply) => {
   if (!body.playerMessage) return reply.code(400).send({ error: 'Missing playerMessage' });
 
   try {
-    const { reply: aidmReply, events } = await processAIDMChat(id, engine, body, anthropic);
+    const { reply: aidmReply, events, rollResults } = await processAIDMChat(id, engine, body, anthropic);
     const state = engine.getState();
     pushStateUpdate(id, events, state);
     await saveWorldState(state);
-    return reply.send({ reply: aidmReply });
+    return reply.send({ reply: aidmReply, rollResults });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     console.error('AIDM API error:', message);

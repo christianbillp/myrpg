@@ -75,17 +75,17 @@ export class GameClient {
     playerMessage: string,
     history: ChatMessage[],
     dmPersona: 'regular' | 'dev',
-  ): Promise<string> {
-    if (!this.sessionId) return '';
+  ): Promise<{ reply: string; rollResults: string[] }> {
+    if (!this.sessionId) return { reply: '', rollResults: [] };
     const res = await fetch(`${API_URL}/game/session/${this.sessionId}/aidm`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ playerMessage, history, dmPersona }),
     });
     if (!res.ok) throw new Error(`AIDM request failed: ${res.status}`);
-    const { reply } = await res.json() as { reply: string };
+    const { reply, rollResults } = await res.json() as { reply: string; rollResults: string[] };
     // State update (if AIDM used tools) arrives via WebSocket
-    return reply;
+    return { reply, rollResults: rollResults ?? [] };
   }
 
   // Save / delete (kept for the setup screen)

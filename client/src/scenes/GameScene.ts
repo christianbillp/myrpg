@@ -6,18 +6,14 @@ import { MapItem } from "../entities/MapItem";
 import { PlayerPanel, QuestDisplay } from "../ui/PlayerPanel";
 import { TargetPanel } from "../ui/TargetPanel";
 import { HUD, HUDState } from "../ui/HUD";
-import { AIDMOverlay, ChatMessage, DMPersona } from "../ui/AIDMOverlay";
-import { InventoryOverlay } from "../ui/InventoryOverlay";
-import { IntroductionOverlay } from "../ui/IntroductionOverlay";
-import { TILE_SIZE, GRID_COLS, GRID_ROWS, PLAYER_PANEL_WIDTH } from "../constants";
+import { GridView } from "../systems/GridView";
+import { OverlayManager } from "../systems/OverlayManager";
+import { TILE_SIZE } from "../constants";
 import { PlayerDef } from "../data/player";
 import { MonsterDef, NPCDef } from "../data/monsters";
 import { ItemDef } from "../data/items";
 import { gameClient } from "../net/GameClient";
 import type { GameState, GameEvent, GameMap } from "../net/types";
-
-const GRID_H = GRID_ROWS * TILE_SIZE;
-const GRID_W = GRID_COLS * TILE_SIZE;
 
 export class GameScene extends Phaser.Scene {
   private playerDef!: PlayerDef;
@@ -26,7 +22,6 @@ export class GameScene extends Phaser.Scene {
   private eventQueue: GameEvent[] = [];
   private animating = false;
   private mapDrawn = false;
-  private introShown = false;
 
   private player: Player | null = null;
   private enemyTokens = new Map<string, Enemy>();
@@ -39,20 +34,10 @@ export class GameScene extends Phaser.Scene {
   private playerPanel!: PlayerPanel;
   private targetPanel!: TargetPanel;
   private hud!: HUD;
-  private introOverlay: IntroductionOverlay | null = null;
-  private aidmOverlay: AIDMOverlay | null = null;
-  private inventoryOverlay: InventoryOverlay | null = null;
-  private aidmHistory: ChatMessage[] = [];
-  private aidmPersona: DMPersona = "regular";
-  private localLogScrollOffset = 0;
-
+  private gridView!: GridView;
+  private overlays!: OverlayManager;
   private highlightLayer!: Phaser.GameObjects.Graphics;
-  private mapContainer!: Phaser.GameObjects.Container;
-  private gridZoom = 1;
-  private isPanning = false;
-  private panStartedInGameMap = false;
-  private panLastX = 0;
-  private panLastY = 0;
+  private localLogScrollOffset = 0;
 
   private cursors!: Phaser.Types.Input.Keyboard.CursorKeys;
   private wasd!: {
@@ -72,24 +57,28 @@ export class GameScene extends Phaser.Scene {
     this.eventQueue = [];
     this.animating = false;
     this.mapDrawn = false;
-    this.introShown = false;
     this.enemyTokens = new Map();
     this.npcTokens = new Map();
     this.itemTokens = new Map();
     this.selectedEnemyId = null;
     this.selectedNPCId = null;
-    this.introOverlay = null;
-    this.aidmOverlay = null;
-    this.inventoryOverlay = null;
-    this.aidmHistory = [];
-    this.aidmPersona = "regular";
+    if (this.overlays) this.overlays.reset();
     this.localLogScrollOffset = 0;
   }
 
   create(): void {
-    this.mapContainer = this.add.container(PLAYER_PANEL_WIDTH, 0);
+    this.gridView = new GridView(this);
     this.highlightLayer = this.add.graphics();
-    this.mapContainer.add(this.highlightLayer);
+    this.gridView.container.add(this.highlightLayer);
+
+    this.overlays = new OverlayManager(this, this.playerDef, {
+      onEquip:           (slot, itemId) => gameClient.sendAction({ type: "equip", slot, itemId }),
+      onUnequip:         (slot) => gameClient.sendAction({ type: "unequip", slot }),
+      onUsePotion:       () => gameClient.sendAction({ type: "usePotion" }),
+      onSendAIDM:        (msg, history, persona) => gameClient.sendAIDMMessage(msg, history, persona),
+      onKeyboardCapture: () => this.input.keyboard?.enableGlobalCapture(),
+      onRefresh:         () => { if (this.gameState) this.updateHUD(this.gameState); },
+    });
 
     this.setupInput();
     this.buildHUD();
@@ -138,33 +127,25 @@ export class GameScene extends Phaser.Scene {
     this.animating = false;
 
     if (!this.mapDrawn) {
-      this.mapContainer.addAt(this.drawMapTiles(state.map), 0);
+      this.gridView.container.addAt(this.drawMapTiles(state.map), 0);
       this.mapDrawn = true;
-      this.initView(state.map);
+      this.gridView.initView(state.map, state.player.tileX, state.player.tileY);
     }
 
     if (!this.player) {
       this.player = new Player(this, state.player.tileX, state.player.tileY, this.playerDef.color);
-      this.mapContainer.add(this.player.gameObject);
+      this.gridView.container.add(this.player.gameObject);
     } else {
       this.player.teleport(state.player.tileX, state.player.tileY);
     }
+    this.player.setHp(state.player.hp, this.playerDef.maxHp);
 
     this.reconcileEnemies(state);
     this.reconcileNpcs(state);
     this.reconcileItems(state);
     this.reconcileSelection(state);
 
-    if (!this.introShown && state.introduction) {
-      this.introShown = true;
-      this.introOverlay = new IntroductionOverlay(
-        this,
-        state.encounterTypes,
-        this.playerDef,
-        { introduction: state.introduction, context: state.encounterContext, enemyCount: 0, secrets: [], riddle: null, quests: [] },
-        () => { this.introOverlay = null; },
-      );
-    }
+    this.overlays.showIntroIfNeeded(state);
 
     this.updateHUD(state);
   }
@@ -190,7 +171,7 @@ export class GameScene extends Phaser.Scene {
         const def = this.findMonsterDef(eState.defId);
         token = new Enemy(this, def, eState.tileX, eState.tileY);
         this.enemyTokens.set(eState.id, token);
-        this.mapContainer.add(token.gameObject);
+        this.gridView.container.add(token.gameObject);
       }
       token.setLabel(eState.label);
       token.setHp(eState.hp);
@@ -214,9 +195,8 @@ export class GameScene extends Phaser.Scene {
       if (!token) {
         const def = this.findNpcMonsterDef(nState.defId);
         token = new NPC(this, def, nState.tileX, nState.tileY);
-        token.setInteractionHint(true);
         this.npcTokens.set(nState.id, token);
-        this.mapContainer.add(token.gameObject);
+        this.gridView.container.add(token.gameObject);
       } else {
         token.teleport(nState.tileX, nState.tileY);
       }
@@ -236,7 +216,7 @@ export class GameScene extends Phaser.Scene {
         const def = this.findItemDef(iState.defId);
         const token = new MapItem(this, def, iState.tileX, iState.tileY);
         this.itemTokens.set(iState.id, token);
-        this.mapContainer.add(token.gameObject);
+        this.gridView.container.add(token.gameObject);
       }
     }
   }
@@ -290,64 +270,32 @@ export class GameScene extends Phaser.Scene {
     };
 
     this.input.on("wheel", (pointer: Phaser.Input.Pointer, _go: unknown, _dx: number, dy: number) => {
-      if (this.introOverlay || this.aidmOverlay || this.inventoryOverlay) return;
-      if (pointer.x < PLAYER_PANEL_WIDTH || pointer.x >= PLAYER_PANEL_WIDTH + GRID_W) return;
-      if (pointer.y < 0 || pointer.y >= GRID_H) return;
-      const newZoom = Phaser.Math.Clamp(this.gridZoom * (dy < 0 ? 1.15 : 1 / 1.15), 0.5, 3);
-      const pivotX = pointer.x - this.mapContainer.x;
-      const pivotY = pointer.y - this.mapContainer.y;
-      this.mapContainer.x = pointer.x - pivotX * (newZoom / this.gridZoom);
-      this.mapContainer.y = pointer.y - pivotY * (newZoom / this.gridZoom);
-      this.gridZoom = newZoom;
-      this.mapContainer.setScale(newZoom);
-      this.clampGridPan();
+      if (this.overlays.isAnyOpen) return;
+      if (!this.gridView.isPointerInBounds(pointer)) return;
+      this.gridView.handleWheel(pointer, dy);
     });
 
-    this.input.on("pointerdown", (pointer: Phaser.Input.Pointer) => {
-      this.panStartedInGameMap = false;
-      if (!pointer.leftButtonDown()) return;
-      if (!this.isPointerInGameMap(pointer)) return;
-      this.panStartedInGameMap = true;
-      this.isPanning = false;
-      this.panLastX = pointer.x;
-      this.panLastY = pointer.y;
-    });
-
-    this.input.on("pointermove", (pointer: Phaser.Input.Pointer) => {
-      if (!this.panStartedInGameMap) return;
-      if (!pointer.leftButtonDown()) return;
-      const dx = pointer.x - this.panLastX;
-      const dy = pointer.y - this.panLastY;
-      if (!this.isPanning && (Math.abs(dx) > 3 || Math.abs(dy) > 3)) this.isPanning = true;
-      if (this.isPanning) {
-        this.mapContainer.x += dx;
-        this.mapContainer.y += dy;
-        this.clampGridPan();
-      }
-      this.panLastX = pointer.x;
-      this.panLastY = pointer.y;
-    });
-
-    this.input.on("pointerup", (pointer: Phaser.Input.Pointer) => {
-      if (this.panStartedInGameMap && !this.isPanning && this.isPointerInGameMap(pointer)) {
-        this.handleMapClick(pointer);
-      }
-      this.isPanning = false;
-      this.panStartedInGameMap = false;
+    this.input.on("pointerdown", (p: Phaser.Input.Pointer) => this.gridView.pointerDown(p));
+    this.input.on("pointermove", (p: Phaser.Input.Pointer) => this.gridView.pointerMove(p));
+    this.input.on("pointerup",   (p: Phaser.Input.Pointer) => {
+      if (this.gridView.pointerUp(p)) this.handleMapClick(p);
     });
   }
 
   private handleMapClick(pointer: Phaser.Input.Pointer): void {
     if (!this.gameState) return;
-    const localX = (pointer.x - this.mapContainer.x) / this.gridZoom;
-    const localY = (pointer.y - this.mapContainer.y) / this.gridZoom;
-    const tileX = Math.floor(localX / TILE_SIZE);
-    const tileY = Math.floor(localY / TILE_SIZE);
+    const { tileX, tileY } = this.gridView.toTile(pointer);
     const { cols, rows } = this.gameState.map;
     if (tileX < 0 || tileX >= cols || tileY < 0 || tileY >= rows) return;
 
-    const eState = this.gameState.enemies.find(e => e.hp > 0 && e.tileX === tileX && e.tileY === tileY);
-    const nState = this.gameState.npcs.find(n => n.tileX === tileX && n.tileY === tileY);
+    const { player: ps, enemies, npcs } = this.gameState;
+    if (tileX === ps.tileX && tileY === ps.tileY) {
+      this.playerPanel.toggle();
+      return;
+    }
+
+    const eState = enemies.find(e => e.hp > 0 && e.tileX === tileX && e.tileY === tileY);
+    const nState = npcs.find(n => n.tileX === tileX && n.tileY === tileY);
 
     if (eState) {
       this.selectEnemy(eState.id);
@@ -406,7 +354,7 @@ export class GameScene extends Phaser.Scene {
   }
 
   update(): void {
-    if (this.introOverlay || this.aidmOverlay) return;
+    if (this.overlays.isAnyOpen) return;
     if (!this.gameState || !this.player) return;
 
     const phase = this.gameState.phase;
@@ -443,11 +391,10 @@ export class GameScene extends Phaser.Scene {
   // ── HUD ──────────────────────────────────────────────────────────────────
 
   private buildHUD(): void {
-    this.playerPanel = new PlayerPanel(
-      this,
-      this.playerDef,
-      () => gameClient.sendAction({ type: "usePotion" }),
-    );
+    this.playerPanel = new PlayerPanel(this, this.playerDef, {
+      onOpenInventory: () => { if (this.gameState) this.overlays.openInventory(this.gameState); },
+      onSearch:        () => gameClient.sendAction({ type: "search" }),
+    });
     this.targetPanel = new TargetPanel(this);
     this.hud = new HUD(this, {
       onAttack:       () => gameClient.sendAction({ type: "attack" }),
@@ -455,10 +402,7 @@ export class GameScene extends Phaser.Scene {
       onSecondWind:   () => gameClient.sendAction({ type: "secondWind" }),
       onEndTurn:      () => gameClient.sendAction({ type: "endTurn" }),
       onDeathSave:    () => gameClient.sendAction({ type: "rollDeathSave" }),
-      onSearch:       () => gameClient.sendAction({ type: "search" }),
-      onOpenDM:       () => this.onOpenDM(),
-      onOpenInventory:() => this.onOpenInventory(),
-      onResetView:    () => this.resetGridView(),
+      onOpenDM:       () => this.overlays.openDM(),
       onNewEncounter: () => {
         gameClient.disconnect();
         this.scene.start("EncounterSetupScene");
@@ -499,16 +443,11 @@ export class GameScene extends Phaser.Scene {
       selectedEnemy,
       playerTileX:        this.player?.tileX ?? state.player.tileX,
       playerTileY:        this.player?.tileY ?? state.player.tileY,
-      encounterTypes:     state.encounterTypes,
-      secretsRemaining:   state.secrets.length,
+      searchAvailable:    state.encounterTypes.includes("exploration") && state.secrets.length > 0,
     };
   }
 
   private updateHUD(state: GameState): void {
-    const allItems = this.registry.get("items") as ItemDef[];
-    const byId = Object.fromEntries(allItems.map(i => [i.id, i]));
-    const inventory = state.player.inventoryIds.map(id => byId[id]).filter(Boolean) as ItemDef[];
-
     const quests: QuestDisplay[] = state.quests.map(q => ({
       title:     q.title,
       progress:  q.progress,
@@ -516,14 +455,13 @@ export class GameScene extends Phaser.Scene {
       completed: q.completed,
     }));
 
+    const showSearch = state.encounterTypes.includes("exploration") && state.secrets.length > 0;
     this.playerPanel.refresh(
       state.player.hp,
       this.playerDef.maxHp,
       state.player.xp,
-      state.player.gold,
-      inventory,
-      state.phase === "player_turn" && state.player.bonusActionUsed,
       quests,
+      showSearch,
     );
 
     if (this.selectedEnemyId) {
@@ -584,109 +522,6 @@ export class GameScene extends Phaser.Scene {
         }
       }
     }
-  }
-
-  // ── View ─────────────────────────────────────────────────────────────────
-
-  private initView(map: GameMap): void {
-    const mapW = map.cols * TILE_SIZE;
-    const mapH = map.rows * TILE_SIZE;
-    const fitZoom = Math.min(GRID_W / mapW, GRID_H / mapH);
-    this.gridZoom = Phaser.Math.Clamp(fitZoom, 0.5, 3);
-    this.mapContainer.setScale(this.gridZoom);
-    if (fitZoom >= 0.5) {
-      this.mapContainer.x = PLAYER_PANEL_WIDTH;
-      this.mapContainer.y = GRID_H - mapH * this.gridZoom;
-      this.clampGridPan();
-    } else {
-      this.centerViewOnPlayer();
-    }
-  }
-
-  private centerViewOnPlayer(): void {
-    if (!this.player) return;
-    const px = this.player.tileX * TILE_SIZE + TILE_SIZE / 2;
-    const py = this.player.tileY * TILE_SIZE + TILE_SIZE / 2;
-    this.mapContainer.x = PLAYER_PANEL_WIDTH + GRID_W / 2 - px * this.gridZoom;
-    this.mapContainer.y = GRID_H / 2 - py * this.gridZoom;
-    this.clampGridPan();
-  }
-
-  private resetGridView(): void {
-    if (this.gameState) this.initView(this.gameState.map);
-  }
-
-  private clampGridPan(): void {
-    if (!this.gameState) return;
-    const margin = TILE_SIZE;
-    const contentW = this.gameState.map.cols * TILE_SIZE;
-    const contentH = this.gameState.map.rows * TILE_SIZE;
-    this.mapContainer.x = Phaser.Math.Clamp(
-      this.mapContainer.x,
-      PLAYER_PANEL_WIDTH + margin - contentW * this.gridZoom,
-      PLAYER_PANEL_WIDTH + contentW - margin,
-    );
-    this.mapContainer.y = Phaser.Math.Clamp(
-      this.mapContainer.y,
-      margin - contentH * this.gridZoom,
-      contentH - margin,
-    );
-  }
-
-  private isPointerInGameMap(pointer: Phaser.Input.Pointer): boolean {
-    return pointer.x >= PLAYER_PANEL_WIDTH && pointer.x < PLAYER_PANEL_WIDTH + GRID_W
-      && pointer.y >= 0 && pointer.y < GRID_H;
-  }
-
-  // ── Overlays ──────────────────────────────────────────────────────────────
-
-  private onOpenInventory(): void {
-    if (this.aidmOverlay || this.inventoryOverlay || !this.gameState) return;
-    const allItems = this.registry.get("items") as ItemDef[];
-    const byId = Object.fromEntries(allItems.map(i => [i.id, i]));
-    const inventory = this.gameState.player.inventoryIds.map(id => byId[id]).filter(Boolean) as ItemDef[];
-    const { equippedSlots } = this.gameState.player;
-    const canUse = this.gameState.phase === "exploring"
-      || (this.gameState.phase === "player_turn" && !this.gameState.player.bonusActionUsed);
-
-    this.inventoryOverlay = new InventoryOverlay(
-      this,
-      this.playerDef,
-      { ...equippedSlots },
-      inventory,
-      allItems,
-      canUse,
-      (slot, itemId) => {
-        gameClient.sendAction({ type: "equip", slot, itemId });
-        this.inventoryOverlay = null;
-      },
-      (slot) => {
-        gameClient.sendAction({ type: "unequip", slot });
-        this.inventoryOverlay = null;
-      },
-      (_itemId) => {
-        gameClient.sendAction({ type: "usePotion" });
-        this.inventoryOverlay = null;
-      },
-      () => { this.inventoryOverlay = null; },
-    );
-  }
-
-  private onOpenDM(): void {
-    if (this.aidmOverlay || !this.gameState) return;
-    this.aidmOverlay = new AIDMOverlay(
-      this,
-      this.aidmHistory,
-      this.aidmPersona,
-      (playerMessage, history, dmPersona) => gameClient.sendAIDMMessage(playerMessage, history, dmPersona),
-      (history, persona) => {
-        this.aidmHistory = history;
-        this.aidmPersona = persona;
-        this.aidmOverlay = null;
-        this.input.keyboard?.enableGlobalCapture();
-        if (this.gameState) this.updateHUD(this.gameState);
-      },
-    );
   }
 
   // ── Def lookups ───────────────────────────────────────────────────────────

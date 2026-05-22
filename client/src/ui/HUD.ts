@@ -7,7 +7,8 @@ import {
   PLAYER_PANEL_WIDTH,
   TARGET_PANEL_WIDTH,
 } from "../constants";
-import { CombatMode, EncounterType } from "../net/types";
+import { CombatMode } from "../net/types";
+import { makeButton } from "./UIButton";
 import { Enemy } from "../entities/Enemy";
 import { PlayerDef } from "../data/player";
 import { TurnOrderBar, TurnChip } from "./TurnOrderBar";
@@ -41,8 +42,7 @@ export interface HUDState {
   selectedEnemy: Enemy | null;
   playerTileX: number;
   playerTileY: number;
-  encounterTypes: EncounterType[];
-  secretsRemaining: number;
+  searchAvailable: boolean;
 }
 
 export interface HUDCallbacks {
@@ -51,10 +51,7 @@ export interface HUDCallbacks {
   onSecondWind: () => void;
   onEndTurn: () => void;
   onDeathSave: () => void;
-  onSearch: () => void;
   onOpenDM: () => void;
-  onOpenInventory: () => void;
-  onResetView: () => void;
   onNewEncounter: () => void;
   onScrollLog: (dy: number) => void;
 }
@@ -70,7 +67,6 @@ export class HUD {
   private readonly hideBtn: Phaser.GameObjects.Container;
   private readonly endTurnBtn: Phaser.GameObjects.Container;
   private readonly deathSaveBtn: Phaser.GameObjects.Container;
-  private readonly searchBtn: Phaser.GameObjects.Container;
 
   constructor(scene: Phaser.Scene, callbacks: HUDCallbacks) {
     const y = GRID_H;
@@ -104,17 +100,14 @@ export class HUD {
 
     scene.add.rectangle(W / 2, y + 122, W, 1, 0x334455).setDepth(11);
 
-    HUD.makeButton(scene, PLAYER_PANEL_WIDTH + 80,  y + 10, "RESET VIEW",    0x1a2a3a, callbacks.onResetView);
-    HUD.makeButton(scene, PLAYER_PANEL_WIDTH + 250, y + 10, "NEW ENCOUNTER", 0x2a1a1a, callbacks.onNewEncounter);
-    HUD.makeButton(scene, PLAYER_PANEL_WIDTH + 440, y + 10, "INVENTORY",     0x0a1a2a, callbacks.onOpenInventory);
-    HUD.makeButton(scene, W - TARGET_PANEL_WIDTH - 250, y + 10, "DUNGEON MASTER", 0x1a1020, callbacks.onOpenDM);
+    makeButton(scene, PLAYER_PANEL_WIDTH + 80,  y + 10, "NEW ENCOUNTER", 0x2a1a1a, callbacks.onNewEncounter);
+    makeButton(scene, W - TARGET_PANEL_WIDTH - 250, y + 10, "DUNGEON MASTER", 0x1a1020, callbacks.onOpenDM);
 
-    this.attackBtn    = HUD.makeButton(scene, PLAYER_PANEL_WIDTH + 130, btnY, "ATTACK",          0x1a4a1e, callbacks.onAttack);
-    this.secondWindBtn = HUD.makeButton(scene, cx,                       btnY, "SECOND WIND",     0x1a3a5a, callbacks.onSecondWind);
-    this.hideBtn      = HUD.makeButton(scene, cx,                       btnY, "HIDE",             0x1a3a1a, callbacks.onHide);
-    this.endTurnBtn   = HUD.makeButton(scene, W - 130,                  btnY, "END TURN",         0x3a3020, callbacks.onEndTurn);
-    this.deathSaveBtn = HUD.makeButton(scene, cx,                       btnY, "ROLL DEATH SAVE",  0x5a1a1a, callbacks.onDeathSave);
-    this.searchBtn    = HUD.makeButton(scene, W - 130,                  btnY, "SEARCH",           0x1a2a3a, callbacks.onSearch);
+    this.attackBtn    = makeButton(scene, PLAYER_PANEL_WIDTH + 130, btnY, "ATTACK",          0x1a4a1e, callbacks.onAttack);
+    this.secondWindBtn = makeButton(scene, cx,                       btnY, "SECOND WIND",     0x1a3a5a, callbacks.onSecondWind);
+    this.hideBtn      = makeButton(scene, cx,                       btnY, "HIDE",             0x1a3a1a, callbacks.onHide);
+    this.endTurnBtn   = makeButton(scene, W - 130,                  btnY, "END TURN",         0x3a3020, callbacks.onEndTurn);
+    this.deathSaveBtn = makeButton(scene, cx, btnY, "ROLL DEATH SAVE", 0x5a1a1a, callbacks.onDeathSave);
   }
 
   refresh(state: HUDState): void {
@@ -178,13 +171,11 @@ export class HUD {
     this.hideBtn.setVisible(false);
     this.endTurnBtn.setVisible(false);
     this.deathSaveBtn.setVisible(false);
-    this.searchBtn.setVisible(false);
   }
 
   private refreshExploring(state: HUDState): void {
-    this.phaseText.setText("Exploring — WASD / arrow keys to move");
-    if (state.encounterTypes.includes("exploration") && state.secretsRemaining > 0)
-      this.searchBtn.setVisible(true);
+    const hint = state.searchAvailable ? "  ·  search available" : "";
+    this.phaseText.setText(`Exploring — WASD / arrow keys to move${hint}`);
   }
 
   private refreshPlayerTurn(state: HUDState): void {
@@ -247,23 +238,4 @@ export class HUD {
     }
   }
 
-  private static makeButton(
-    scene: Phaser.Scene,
-    x: number,
-    y: number,
-    label: string,
-    color: number,
-    onClick: () => void,
-  ): Phaser.GameObjects.Container {
-    const bg = scene.add.rectangle(0, 0, 160, 34, color).setStrokeStyle(1, 0x556677);
-    const text = scene.add
-      .text(0, 0, label, { fontSize: "12px", color: "#ffffff", fontFamily: "monospace", resolution: DPR })
-      .setOrigin(0.5);
-    const container = scene.add.container(x, y, [bg, text]).setDepth(12);
-    bg.setInteractive({ useHandCursor: true });
-    bg.on("pointerover", () => bg.setAlpha(0.75));
-    bg.on("pointerout",  () => bg.setAlpha(1));
-    bg.on("pointerdown", onClick);
-    return container;
-  }
 }

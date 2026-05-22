@@ -4,31 +4,47 @@ import { TILE_SIZE } from '../constants';
 const MOVE_DURATION = 150;
 
 export class Player {
-  private sprite: Phaser.GameObjects.Rectangle;
-  private scene: Phaser.Scene;
   tileX: number;
   tileY: number;
+  private container: Phaser.GameObjects.Container;
+  private hpBar: Phaser.GameObjects.Graphics;
+  private scene: Phaser.Scene;
   private moving = false;
 
   constructor(scene: Phaser.Scene, tileX: number, tileY: number, color = 0x4fc3f7) {
     this.scene = scene;
     this.tileX = tileX;
     this.tileY = tileY;
-    this.sprite = scene.add.rectangle(
-      tileX * TILE_SIZE + TILE_SIZE / 2,
-      tileY * TILE_SIZE + TILE_SIZE / 2,
-      TILE_SIZE - 6,
-      TILE_SIZE - 6,
-      color
-    );
+
+    const body = scene.add.circle(0, 0, (TILE_SIZE - 6) / 2, color);
+    this.hpBar = scene.add.graphics();
+
+    this.container = scene.add
+      .container(tileX * TILE_SIZE + TILE_SIZE / 2, tileY * TILE_SIZE + TILE_SIZE / 2, [body, this.hpBar])
+      .setDepth(1);
   }
 
-  get gameObject(): Phaser.GameObjects.Rectangle { return this.sprite; }
+  get gameObject(): Phaser.GameObjects.Container { return this.container; }
+
+  setHp(hp: number, maxHp: number): void {
+    this.hpBar.clear();
+    if (hp >= maxHp || maxHp <= 0) return;
+    const pct = hp / maxHp;
+    const radius = (TILE_SIZE - 6) / 2;
+    const barW = TILE_SIZE - 10;
+    const barX = -(barW / 2);
+    const barY = -(radius + 7);
+    const color = pct > 0.5 ? 0x27ae60 : pct > 0.25 ? 0xf39c12 : 0xe74c3c;
+    this.hpBar.fillStyle(0x222233);
+    this.hpBar.fillRect(barX, barY, barW, 4);
+    this.hpBar.fillStyle(color);
+    this.hpBar.fillRect(barX, barY, Math.floor(barW * pct), 4);
+  }
 
   teleport(tx: number, ty: number): void {
     this.tileX = tx;
     this.tileY = ty;
-    this.sprite.setPosition(tx * TILE_SIZE + TILE_SIZE / 2, ty * TILE_SIZE + TILE_SIZE / 2);
+    this.container.setPosition(tx * TILE_SIZE + TILE_SIZE / 2, ty * TILE_SIZE + TILE_SIZE / 2);
   }
 
   move(dx: number, dy: number, cols: number, rows: number): void {
@@ -44,14 +60,12 @@ export class Player {
     this.moving = true;
 
     this.scene.tweens.add({
-      targets: this.sprite,
+      targets: this.container,
       x: nx * TILE_SIZE + TILE_SIZE / 2,
       y: ny * TILE_SIZE + TILE_SIZE / 2,
       duration: MOVE_DURATION,
       ease: 'Sine.easeInOut',
-      onComplete: () => {
-        this.moving = false;
-      },
+      onComplete: () => { this.moving = false; },
     });
   }
 }

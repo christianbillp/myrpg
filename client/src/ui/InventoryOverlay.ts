@@ -60,6 +60,7 @@ export class InventoryOverlay extends BaseOverlay {
     slots: EquipmentSlots,
     inventory: ItemDef[],
     allItems: ItemDef[],
+    gold: number,
     canUseConsumable: boolean,
     onEquip: (slot: "armor" | "weapon" | "shield", itemId: string) => void,
     onUnequip: (slot: "armor" | "weapon" | "shield") => void,
@@ -151,7 +152,7 @@ export class InventoryOverlay extends BaseOverlay {
     const statMod = playerDef.mainAttack.statKey === "str" ? mod(playerDef.str) : mod(playerDef.dex);
     const atkSummary = attackSummary(playerDef.mainAttack, statMod);
     const statsBar = scene.add
-      .text(0, statsY, `AC ${playerDef.ac}  ·  ${playerDef.mainAttack.name} ${atkSummary}`, {
+      .text(0, statsY, `AC ${playerDef.ac}  ·  ${gold} GP  ·  ${playerDef.mainAttack.name} ${atkSummary}`, {
         fontSize: "11px", color: "#7aadcc", fontFamily: "monospace", resolution: DPR,
       })
       .setOrigin(0.5);

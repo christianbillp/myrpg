@@ -20,10 +20,21 @@ const W = PLAYER_PANEL_WIDTH + GRID_COLS * TILE_SIZE + TARGET_PANEL_WIDTH;
 const GRID_H = GRID_ROWS * TILE_SIZE;
 const LINE_H = 16;
 const ACCENT = 0xe2b96f;
+const MSG_GAP = 8;
+
+const ROLL_PREFIX = "[Roll] ";
+
+function isRollMessage(content: string): boolean {
+  return content.startsWith(ROLL_PREFIX);
+}
+
+function isRollSuccess(content: string): boolean {
+  return /SUCCESS/.test(content);
+}
 
 export class AIDMOverlay extends BaseOverlay {
   private readonly scene: Phaser.Scene;
-  private historyText: Phaser.GameObjects.Text;
+  private blocksContainer!: Phaser.GameObjects.Container;
   private statusText: Phaser.GameObjects.Text;
   private inputText: Phaser.GameObjects.Text;
   private scrollThumb: Phaser.GameObjects.Rectangle;
@@ -32,19 +43,28 @@ export class AIDMOverlay extends BaseOverlay {
   private history: ChatMessage[] = [];
   private thinking = false;
   private scrollPos = 0;
+  private totalContentH = 0;
   private readonly areaTop: number;
   private readonly areaBottom: number;
   private readonly visibleH: number;
   private keyHandler: (e: KeyboardEvent) => void;
   private wheelHandler: (e: WheelEvent) => void;
   private dmPersona: DMPersona;
-  private readonly onSend: (playerMessage: string, history: ChatMessage[], dmPersona: DMPersona) => Promise<string>;
+  private readonly onSend: (
+    playerMessage: string,
+    history: ChatMessage[],
+    dmPersona: DMPersona,
+  ) => Promise<{ reply: string; rollResults: string[] }>;
 
   constructor(
     scene: Phaser.Scene,
     initialHistory: ChatMessage[],
     initialPersona: DMPersona,
-    onSend: (playerMessage: string, history: ChatMessage[], dmPersona: DMPersona) => Promise<string>,
+    onSend: (
+      playerMessage: string,
+      history: ChatMessage[],
+      dmPersona: DMPersona,
+    ) => Promise<{ reply: string; rollResults: string[] }>,
     onClose: (history: ChatMessage[], persona: DMPersona) => void,
   ) {
     super(scene, 640, 480, ACCENT, () => {
@@ -104,16 +124,6 @@ export class AIDMOverlay extends BaseOverlay {
 
     const historyBg = scene.add.rectangle(0, top + 44 + historyAreaH / 2 + 4, panelW - 32, historyAreaH, 0x080812);
 
-    this.historyText = scene.add.text(
-      -(panelW / 2 - 24),
-      this.areaTop,
-      "",
-      {
-        fontSize: "11px", color: "#ccddee", fontFamily: "monospace", resolution: DPR,
-        wordWrap: { width: panelW - 64 }, lineSpacing: 5,
-      },
-    );
-
     this.maskShape = scene.add.graphics();
     this.maskShape.fillStyle(0xffffff);
     this.maskShape.fillRect(
@@ -123,7 +133,9 @@ export class AIDMOverlay extends BaseOverlay {
       historyAreaH,
     );
     this.maskShape.setVisible(false);
-    this.historyText.setMask(this.maskShape.createGeometryMask());
+
+    this.blocksContainer = scene.add.container(-(panelW / 2 - 24), this.areaTop);
+    this.blocksContainer.setMask(this.maskShape.createGeometryMask());
 
     const sbX = panelW / 2 - 20;
     const sbCY = (this.areaTop + this.areaBottom) / 2;
@@ -171,7 +183,7 @@ export class AIDMOverlay extends BaseOverlay {
 
     this.container.add([
       titleText, storyBg, storyTxt, devBg, devTxt, sep1,
-      historyBg, this.historyText, this.scrollThumb,
+      historyBg, this.blocksContainer, this.scrollThumb,
       this.statusText, sep2,
       inputBg, this.inputText,
       sendBg, sendLabel,
@@ -215,11 +227,10 @@ export class AIDMOverlay extends BaseOverlay {
   }
 
   private scroll(lines: number): void {
-    const textH = this.historyText.height;
-    const maxScroll = Math.max(0, textH - this.visibleH);
+    const maxScroll = Math.max(0, this.totalContentH - this.visibleH);
     this.scrollPos = Phaser.Math.Clamp(this.scrollPos + lines * LINE_H, 0, maxScroll);
-    this.historyText.setY(this.areaTop - this.scrollPos);
-    this.updateScrollThumb(textH, maxScroll);
+    this.blocksContainer.setY(this.areaTop - this.scrollPos);
+    this.updateScrollThumb(this.totalContentH, maxScroll);
   }
 
   private updateScrollThumb(textH: number, maxScroll: number): void {
@@ -251,7 +262,10 @@ export class AIDMOverlay extends BaseOverlay {
     this.statusText.setText("The Dungeon Master considers…");
 
     try {
-      const reply = await this.onSend(text, this.history.slice(0, -1), this.dmPersona);
+      const { reply, rollResults } = await this.onSend(text, this.history.slice(0, -1), this.dmPersona);
+      for (const r of rollResults) {
+        this.history.push({ role: "user", content: ROLL_PREFIX + r });
+      }
       this.history.push({ role: "assistant", content: reply });
     } catch {
       this.history.push({ role: "assistant", content: "(The Dungeon Master is silent.)" });
@@ -264,14 +278,44 @@ export class AIDMOverlay extends BaseOverlay {
   }
 
   private renderHistory(): void {
-    const lines = this.history.map(m =>
-      m.role === "user" ? `> ${m.content}` : `  ${m.content}`,
-    );
-    this.historyText.setText(lines.join("\n"));
-    const textH = this.historyText.height;
-    const maxScroll = Math.max(0, textH - this.visibleH);
+    this.blocksContainer.removeAll(true);
+
+    const textW = this.panelW - 64;
+    let y = 0;
+
+    for (const msg of this.history) {
+      const roll = isRollMessage(msg.content);
+      let color: string;
+      let displayText: string;
+
+      if (roll) {
+        color = isRollSuccess(msg.content) ? "#66ee88" : "#ee6644";
+        displayText = "🎲 " + msg.content.slice(ROLL_PREFIX.length);
+      } else if (msg.role === "user") {
+        color = "#e2b96f";
+        displayText = "▸ " + msg.content;
+      } else {
+        color = "#c8d8e8";
+        displayText = msg.content;
+      }
+
+      const block = this.scene.add.text(0, y, displayText, {
+        fontSize: "11px",
+        color,
+        fontFamily: "monospace",
+        resolution: DPR,
+        wordWrap: { width: textW },
+        lineSpacing: 5,
+      });
+
+      this.blocksContainer.add(block);
+      y += block.height + MSG_GAP;
+    }
+
+    this.totalContentH = y;
+    const maxScroll = Math.max(0, this.totalContentH - this.visibleH);
     this.scrollPos = maxScroll;
-    this.historyText.setY(this.areaTop - this.scrollPos);
-    this.updateScrollThumb(textH, maxScroll);
+    this.blocksContainer.setY(this.areaTop - this.scrollPos);
+    this.updateScrollThumb(this.totalContentH, maxScroll);
   }
 }

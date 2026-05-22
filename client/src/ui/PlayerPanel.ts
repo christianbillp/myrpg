@@ -1,7 +1,7 @@
 import Phaser from "phaser";
-import { PLAYER_PANEL_WIDTH } from "../constants";
+import { PLAYER_PANEL_WIDTH, GRID_ROWS, TILE_SIZE } from "../constants";
+import { makeButton } from "./UIButton";
 import { PlayerDef } from "../data/player";
-import { ItemDef } from "../data/items";
 
 export interface QuestDisplay {
   title: string;
@@ -11,25 +11,34 @@ export interface QuestDisplay {
 }
 
 const DPR = window.devicePixelRatio;
+const GRID_H = GRID_ROWS * TILE_SIZE;
+
+type Visible = { setVisible(v: boolean): unknown };
+
+export interface PlayerPanelCallbacks {
+  onOpenInventory: () => void;
+  onSearch: () => void;
+}
 
 export class PlayerPanel {
+  private items: Visible[] = [];
   private hpBar: Phaser.GameObjects.Graphics;
   private hpText: Phaser.GameObjects.Text;
   private xpText: Phaser.GameObjects.Text;
-  private gpText: Phaser.GameObjects.Text;
-  private inventoryText: Phaser.GameObjects.Text;
-  private usePotionBg: Phaser.GameObjects.Rectangle;
   private questsText: Phaser.GameObjects.Text;
   private combatStatsText: Phaser.GameObjects.Text;
+  private searchBtn: Phaser.GameObjects.Container;
   private readonly playerDef: PlayerDef;
 
-  constructor(scene: Phaser.Scene, def: PlayerDef, onUsePotion: () => void) {
+  constructor(scene: Phaser.Scene, def: PlayerDef, callbacks: PlayerPanelCallbacks) {
     this.playerDef = def;
     const colorHex = "#" + def.color.toString(16).padStart(6, "0");
     const className = `${def.speciesName} · ${def.className} ${def.level}`;
     const statMod = (v: number) => Math.floor((v - 10) / 2);
 
-    scene.add
+    const track = <T extends Visible>(obj: T): T => { this.items.push(obj); return obj; };
+
+    track(scene.add
       .rectangle(
         PLAYER_PANEL_WIDTH / 2,
         scene.scale.height / 2,
@@ -37,8 +46,8 @@ export class PlayerPanel {
         scene.scale.height,
         0x080810,
       )
-      .setDepth(10);
-    scene.add
+      .setDepth(10));
+    track(scene.add
       .rectangle(
         PLAYER_PANEL_WIDTH,
         scene.scale.height / 2,
@@ -46,25 +55,25 @@ export class PlayerPanel {
         scene.scale.height,
         0x334455,
       )
-      .setDepth(10);
+      .setDepth(10));
 
-    scene.add
+    track(scene.add
       .text(12, 14, def.name, {
         fontSize: "12px",
         color: colorHex,
         fontFamily: "monospace",
         resolution: DPR,
       })
-      .setDepth(11);
-    scene.add
+      .setDepth(11));
+    track(scene.add
       .text(12, 32, className, {
         fontSize: "10px",
         color: "#667788",
         fontFamily: "monospace",
         resolution: DPR,
       })
-      .setDepth(11);
-    scene.add
+      .setDepth(11));
+    track(scene.add
       .rectangle(
         PLAYER_PANEL_WIDTH / 2,
         50,
@@ -72,26 +81,26 @@ export class PlayerPanel {
         1,
         0x334455,
       )
-      .setDepth(11);
+      .setDepth(11));
 
-    scene.add
+    track(scene.add
       .text(12, 56, "HP", {
         fontSize: "10px",
         color: "#889aaa",
         fontFamily: "monospace",
         resolution: DPR,
       })
-      .setDepth(11);
-    this.hpBar = scene.add.graphics().setDepth(11);
-    this.hpText = scene.add
+      .setDepth(11));
+    this.hpBar = track(scene.add.graphics().setDepth(11));
+    this.hpText = track(scene.add
       .text(12, 92, "", {
         fontSize: "10px",
         color: "#cccccc",
         fontFamily: "monospace",
         resolution: DPR,
       })
-      .setDepth(11);
-    scene.add
+      .setDepth(11));
+    track(scene.add
       .rectangle(
         PLAYER_PANEL_WIDTH / 2,
         110,
@@ -99,10 +108,9 @@ export class PlayerPanel {
         1,
         0x334455,
       )
-      .setDepth(11);
+      .setDepth(11));
 
-    const initBonus = statMod(def.dex);
-    this.combatStatsText = scene.add
+    this.combatStatsText = track(scene.add
       .text(
         12,
         116,
@@ -115,8 +123,8 @@ export class PlayerPanel {
           lineSpacing: 6,
         },
       )
-      .setDepth(11);
-    scene.add
+      .setDepth(11));
+    track(scene.add
       .rectangle(
         PLAYER_PANEL_WIDTH / 2,
         192,
@@ -124,7 +132,7 @@ export class PlayerPanel {
         1,
         0x334455,
       )
-      .setDepth(11);
+      .setDepth(11));
 
     const abilities: [string, number][] = [
       ["STR", def.str],
@@ -134,7 +142,7 @@ export class PlayerPanel {
       ["WIS", def.wis],
       ["CHA", def.cha],
     ];
-    scene.add
+    track(scene.add
       .text(
         12,
         198,
@@ -152,8 +160,8 @@ export class PlayerPanel {
           lineSpacing: 6,
         },
       )
-      .setDepth(11);
-    scene.add
+      .setDepth(11));
+    track(scene.add
       .rectangle(
         PLAYER_PANEL_WIDTH / 2,
         312,
@@ -161,85 +169,67 @@ export class PlayerPanel {
         1,
         0x334455,
       )
-      .setDepth(11);
+      .setDepth(11));
 
-    this.xpText = scene.add
+    this.xpText = track(scene.add
       .text(12, 318, "", {
         fontSize: "10px",
         color: "#aabbcc",
         fontFamily: "monospace",
         resolution: DPR,
       })
-      .setDepth(11);
-    this.gpText = scene.add
-      .text(12, 332, "", {
-        fontSize: "10px",
-        color: "#e2b96f",
-        fontFamily: "monospace",
-        resolution: DPR,
-      })
-      .setDepth(11);
+      .setDepth(11));
 
-    scene.add
-      .rectangle(PLAYER_PANEL_WIDTH / 2, 352, PLAYER_PANEL_WIDTH - 16, 1, 0x334455)
-      .setDepth(11);
-    scene.add
-      .text(12, 358, "INVENTORY", {
+    track(scene.add
+      .rectangle(PLAYER_PANEL_WIDTH / 2, 336, PLAYER_PANEL_WIDTH - 16, 1, 0x334455)
+      .setDepth(11));
+    track(scene.add
+      .text(12, 342, "QUESTS", {
         fontSize: "10px",
         color: "#889aaa",
         fontFamily: "monospace",
         resolution: DPR,
       })
-      .setDepth(11);
-    this.inventoryText = scene.add
-      .text(12, 374, "Empty", {
-        fontSize: "10px",
-        color: "#aabbcc",
-        fontFamily: "monospace",
-        resolution: DPR,
-      })
-      .setDepth(11);
-
-    this.usePotionBg = scene.add
-      .rectangle(PLAYER_PANEL_WIDTH / 2, 400, PLAYER_PANEL_WIDTH - 24, 22, 0x1a3a1a)
-      .setStrokeStyle(1, 0x334455)
-      .setDepth(11)
-      .setAlpha(0.4);
-    scene.add
-      .text(PLAYER_PANEL_WIDTH / 2, 400, "USE POTION", {
-        fontSize: "10px",
-        color: "#ffffff",
-        fontFamily: "monospace",
-        resolution: DPR,
-      })
-      .setOrigin(0.5)
-      .setDepth(12);
-    this.usePotionBg.setInteractive({ useHandCursor: true });
-    this.usePotionBg.on("pointerover", () => { if (this.usePotionBg.alpha > 0.5) this.usePotionBg.setAlpha(0.75); });
-    this.usePotionBg.on("pointerout", () => { if (this.usePotionBg.alpha > 0.5) this.usePotionBg.setAlpha(1); });
-    this.usePotionBg.on("pointerdown", onUsePotion);
-
-    scene.add
-      .rectangle(PLAYER_PANEL_WIDTH / 2, 422, PLAYER_PANEL_WIDTH - 16, 1, 0x334455)
-      .setDepth(11);
-    scene.add
-      .text(12, 428, "QUESTS", {
-        fontSize: "10px",
-        color: "#889aaa",
-        fontFamily: "monospace",
-        resolution: DPR,
-      })
-      .setDepth(11);
-    this.questsText = scene.add
-      .text(12, 444, "", {
+      .setDepth(11));
+    this.questsText = track(scene.add
+      .text(12, 358, "", {
         fontSize: "10px",
         color: "#aabbcc",
         fontFamily: "monospace",
         resolution: DPR,
         lineSpacing: 6,
       })
-      .setDepth(11);
+      .setDepth(11));
+
+    track(scene.add
+      .rectangle(PLAYER_PANEL_WIDTH / 2, GRID_H - 88, PLAYER_PANEL_WIDTH - 16, 1, 0x334455)
+      .setDepth(11));
+    track(makeButton(scene, PLAYER_PANEL_WIDTH / 2, GRID_H - 60, "INVENTORY", 0x0a1a2a, callbacks.onOpenInventory, PLAYER_PANEL_WIDTH - 24, 28, "11px"));
+    this.searchBtn = makeButton(scene, PLAYER_PANEL_WIDTH / 2, GRID_H - 24, "SEARCH", 0x1a2a3a, callbacks.onSearch, PLAYER_PANEL_WIDTH - 24, 28, "11px");
+
+    this.hide();
   }
+
+  private visible = false;
+  private searchEnabled = false;
+
+  show(): void {
+    this.visible = true;
+    this.items.forEach(item => item.setVisible(true));
+    this.searchBtn.setVisible(this.searchEnabled);
+  }
+  hide(): void {
+    this.visible = false;
+    this.items.forEach(item => item.setVisible(false));
+    this.searchBtn.setVisible(false);
+  }
+  toggle(): void { this.visible ? this.hide() : this.show(); }
+
+  setSearchEnabled(enabled: boolean): void {
+    this.searchEnabled = enabled;
+    this.searchBtn.setVisible(this.visible && enabled);
+  }
+
 
   private buildCombatStatsLines(initBonus: number): string {
     const sign = initBonus >= 0 ? "+" : "";
@@ -251,7 +241,8 @@ export class PlayerPanel {
     ].join("\n");
   }
 
-  refresh(hp: number, maxHp: number, xp: number, gold: number, inventory: ItemDef[], bonusActionUsed = false, quests: QuestDisplay[] = []): void {
+  refresh(hp: number, maxHp: number, xp: number, quests: QuestDisplay[] = [], showSearch = false): void {
+    this.setSearchEnabled(showSearch);
     this.combatStatsText.setText(this.buildCombatStatsLines(Math.floor((this.playerDef.dex - 10) / 2)));
     const pct = maxHp > 0 ? hp / maxHp : 0;
     const width = PLAYER_PANEL_WIDTH - 24;
@@ -263,11 +254,6 @@ export class PlayerPanel {
     this.hpBar.fillRect(12, 68, Math.floor(width * pct), 11);
     this.hpText.setText(`${hp} / ${maxHp}`);
     this.xpText.setText(`XP  ${xp}`);
-    this.gpText.setText(`GP  ${gold}`);
-
-    const potions = inventory.filter(i => i.type === "consumable").length;
-    this.inventoryText.setText(potions > 0 ? `Health Potion  ×${potions}` : "Empty");
-    this.usePotionBg.setAlpha(potions > 0 && !bonusActionUsed ? 1 : 0.4);
 
     if (quests.length === 0) {
       this.questsText.setText("None");

@@ -9,9 +9,7 @@ export class NPC {
   private _tileX: number;
   private _tileY: number;
   private container: Phaser.GameObjects.Container;
-  private body: Phaser.GameObjects.Rectangle;
-  private hint: Phaser.GameObjects.Text;
-
+  private body: Phaser.GameObjects.Arc;
   constructor(scene: Phaser.Scene, def: MonsterDef, tileX: number, tileY: number) {
     this.def = def;
     this._tileX = tileX;
@@ -20,7 +18,7 @@ export class NPC {
     const cx = tileX * TILE_SIZE + TILE_SIZE / 2;
     const cy = tileY * TILE_SIZE + TILE_SIZE / 2;
 
-    this.body = scene.add.rectangle(0, 0, TILE_SIZE - 10, TILE_SIZE - 10, def.color);
+    this.body = scene.add.circle(0, 0, (TILE_SIZE - 10) / 2, def.color);
 
     const nameLabel = scene.add
       .text(0, -(TILE_SIZE / 2 + 4), def.name, {
@@ -31,16 +29,7 @@ export class NPC {
       })
       .setOrigin(0.5, 1);
 
-    this.hint = scene.add
-      .text(0, -(TILE_SIZE / 2 + 14), "!", {
-        fontSize: "11px",
-        color: "#e2b96f",
-        fontFamily: "monospace",
-        resolution: DPR,
-      })
-      .setOrigin(0.5, 1);
-
-    this.container = scene.add.container(cx, cy, [this.body, nameLabel, this.hint]);
+    this.container = scene.add.container(cx, cy, [this.body, nameLabel]);
   }
 
   get tileX(): number { return this._tileX; }
@@ -51,10 +40,6 @@ export class NPC {
     this._tileX = tx;
     this._tileY = ty;
     this.container.setPosition(tx * TILE_SIZE + TILE_SIZE / 2, ty * TILE_SIZE + TILE_SIZE / 2);
-  }
-
-  setInteractionHint(visible: boolean): void {
-    this.hint.setVisible(visible);
   }
 
   setSelected(selected: boolean): void {

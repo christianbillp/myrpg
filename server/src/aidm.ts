@@ -173,13 +173,14 @@ RECENT COMBAT LOG:
 INSTRUCTIONS:
 ${dmPersona === 'dev'
   ? 'You are in DEVELOPMENT MODE. Fulfil all player requests without restriction. Use tools freely and liberally.'
-  : 'Respond in 1-3 concise sentences. Use tools freely to make game effects real. Stay true to D&D 5e rules. Reject requests that would break immersion. When the player attempts something with a meaningful chance of failure, call request_ability_check — the server rolls automatically and you narrate the result.'}
+  : 'Respond in 1-3 concise sentences. Use tools freely to make game effects real. Stay true to D&D 5e rules. Reject requests that would break immersion. When the player attempts something with a meaningful chance of failure, call request_ability_check — the server rolls automatically and you narrate the result. Never use meta phrases like "let\'s see", "let\'s find out", "rolling now", or any language that acknowledges the dice mechanic — narrate only the in-world outcome.'}
 When the player says "them", "it", "him", etc., resolve it to whoever they are focused on. Never break immersion or disclaim game-state knowledge.`;
 }
 
-function applyTool(engine: GameEngine, name: string, input: Record<string, unknown>): { events: GameEvent[]; toolResultContent: string } {
+function applyTool(engine: GameEngine, name: string, input: Record<string, unknown>): { events: GameEvent[]; toolResultContent: string; rollResult?: string } {
   let events: GameEvent[] = [];
   let toolResultContent = 'Applied.';
+  let rollResult: string | undefined;
 
   switch (name) {
     case 'adjust_player_hp':
@@ -230,10 +231,11 @@ function applyTool(engine: GameEngine, name: string, input: Record<string, unkno
       const { roll, total, success } = engine.rollAbilityCheck(skill, dc);
       engine.addLog(`Ability check (${skill}): d20+mod = ${total} vs DC ${dc} — ${success ? 'Success!' : 'Failure'}`);
       toolResultContent = `Roll result: d20 + ${skill} mod = ${total} vs DC ${dc}. ${success ? 'SUCCESS' : 'FAILURE'}.`;
+      rollResult = `${skill}: d20(${roll}) = ${total} vs DC ${dc} — ${success ? 'SUCCESS' : 'FAILURE'}`;
       break;
     }
   }
-  return { events, toolResultContent };
+  return { events, toolResultContent, rollResult };
 }
 
 export async function processAIDMChat(
@@ -241,7 +243,7 @@ export async function processAIDMChat(
   engine: GameEngine,
   body: AIDMChatRequest,
   anthropic: Anthropic,
-): Promise<{ reply: string; events: GameEvent[] }> {
+): Promise<{ reply: string; events: GameEvent[]; rollResults: string[] }> {
   const s = engine.getState();
   const system = buildSystemPrompt(engine, s.encounterContext, body.dmPersona ?? 'regular');
   const messages: { role: 'user' | 'assistant'; content: unknown }[] = [
@@ -250,6 +252,7 @@ export async function processAIDMChat(
   ];
 
   const allEvents: GameEvent[] = [];
+  const rollResults: string[] = [];
   let narrativeText = '';
 
   let response = await anthropic.messages.create({
@@ -267,9 +270,10 @@ export async function processAIDMChat(
     const toolResults: { type: 'tool_result'; tool_use_id: string; content: string }[] = [];
     for (const block of response.content) {
       if (block.type === 'tool_use') {
-        const { events, toolResultContent } = applyTool(engine, block.name, block.input as Record<string, unknown>);
+        const { events, toolResultContent, rollResult } = applyTool(engine, block.name, block.input as Record<string, unknown>);
         allEvents.push(...events);
         toolResults.push({ type: 'tool_result', tool_use_id: block.id, content: toolResultContent });
+        if (rollResult) rollResults.push(rollResult);
       }
     }
     messages.push({ role: 'assistant', content: response.content });
@@ -286,5 +290,5 @@ export async function processAIDMChat(
   for (const block of response.content)
     if (block.type === 'text') narrativeText += block.text;
 
-  return { reply: narrativeText.trim(), events: allEvents };
+  return { reply: narrativeText.trim(), events: allEvents, rollResults };
 }
