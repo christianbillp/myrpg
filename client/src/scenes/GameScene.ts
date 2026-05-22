@@ -832,6 +832,7 @@ export class GameScene extends Phaser.Scene {
         equippedWeapon: this.combat.equippedSlots.weaponId,
         equippedShield: this.combat.equippedSlots.shieldId,
         skills: this.combat.playerDef.skills,
+        savingThrows: this.combat.playerDef.savingThrows,
       },
       enemies: this.enemies.map((e, i) => ({
         label: e.label || String(i),

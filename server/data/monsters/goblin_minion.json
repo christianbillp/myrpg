@@ -12,6 +12,7 @@
   "wis": 8,
   "cha": 8,
   "proficiencyBonus": 2,
+  "savingThrows": { "str": -1, "dex": 2, "con": 0, "int": 0, "wis": -1, "cha": -1 },
   "initiativeBonus": 2,
   "stealthBonus": 6,
   "passivePerception": 9,

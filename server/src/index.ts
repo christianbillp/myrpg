@@ -228,6 +228,7 @@ interface AIDMPlayerState {
   ac: number; tileX: number; tileY: number; inventory: string[];
   equippedArmor: string | null; equippedWeapon: string | null; equippedShield: string | null;
   skills: Record<string, number>;
+  savingThrows: Record<string, number>;
 }
 interface AIDMSelectedTarget {
   type: 'enemy' | 'npc'; name: string; id: string; label?: string;
@@ -393,6 +394,7 @@ PLAYER: ${p.name}, Level ${p.level} ${p.className}
   Equipped: ${[p.equippedArmor, p.equippedWeapon, p.equippedShield].filter(Boolean).join(', ') || 'nothing'}
   Carrying: ${p.inventory.join(', ') || 'empty'}
   Skills: ${Object.entries(p.skills).map(([k, v]) => `${k} ${v >= 0 ? '+' : ''}${v}`).join(', ')}
+  Saving throws: ${Object.entries(p.savingThrows).map(([k, v]) => `${k} ${v >= 0 ? '+' : ''}${v}`).join(', ')}
   ${combatStateFlags ? combatStateFlags + '\n  ' : ''}${focusLine}
 
 ENEMIES:

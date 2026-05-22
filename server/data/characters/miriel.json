@@ -13,6 +13,7 @@
   "wis": 10,
   "cha": 8,
   "proficiencyBonus": 2,
+  "savingThrowProficiencies": ["dex", "int"],
   "skills": {
     "acrobatics": 5,
     "animalHandling": 0,

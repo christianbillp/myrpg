@@ -33,6 +33,7 @@ export interface MonsterDef {
   wis: number;
   cha: number;
   proficiencyBonus: number;
+  savingThrows: Record<string, number>;
   initiativeBonus: number;
   stealthBonus: number;
   passivePerception: number;

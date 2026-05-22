@@ -29,6 +29,7 @@ export interface AIDMGameState {
     movesLeft: number; secondWindUses: number;
     equippedArmor: string | null; equippedWeapon: string | null; equippedShield: string | null;
     skills: Record<string, number>;
+    savingThrows: Record<string, number>;
   };
   enemies: Array<{
     label?: string; id: string; name: string;

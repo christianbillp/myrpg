@@ -30,6 +30,8 @@ export interface PlayerDef {
   cha: number;
   proficiencyBonus: number;
   skills: Record<string, number>;
+  savingThrowProficiencies: string[];
+  savingThrows: Record<string, number>;
   secondWindMaxUses: number;
   sneakAttackDice: number;
   speed: number;

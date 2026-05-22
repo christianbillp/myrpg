@@ -1,6 +1,9 @@
 import Phaser from "phaser";
+import { PlayerDef } from "../data/player";
 
 const API_URL = "http://localhost:3000";
+const ABILITIES = ["str", "dex", "con", "int", "wis", "cha"] as const;
+const abilityMod = (score: number) => Math.floor((score - 10) / 2);
 
 export class BootScene extends Phaser.Scene {
   constructor() {
@@ -17,7 +20,17 @@ export class BootScene extends Phaser.Scene {
   }
 
   create(): void {
-    this.registry.set("characters",         this.cache.json.get("characters"));
+    const rawChars = this.cache.json.get("characters") as PlayerDef[];
+    const characters = rawChars.map((c) => ({
+      ...c,
+      savingThrows: Object.fromEntries(
+        ABILITIES.map((a) => [
+          a,
+          abilityMod(c[a]) + (c.savingThrowProficiencies?.includes(a) ? c.proficiencyBonus : 0),
+        ]),
+      ),
+    }));
+    this.registry.set("characters",         characters);
     this.registry.set("monsters",           this.cache.json.get("monsters"));
     this.registry.set("npcs",               this.cache.json.get("npcs"));
     this.registry.set("items",              this.cache.json.get("items"));
