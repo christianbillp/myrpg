@@ -92,6 +92,56 @@ Defined in `client/src/ui/HUD.ts`. Spans the full canvas width below the Game Ma
 | **Hide**            | Bonus Action | Player's turn, bonus action not yet spent, Rogue only, not already hidden    | Attempt to hide (Cunning Action) for Sneak Attack advantage             |
 | **End Turn**        | —            | Player's turn                                                                | Explicitly end the player's turn and pass initiative to the enemies     |
 | **Roll Death Save** | —            | Player unconscious                                                           | Roll a d20 death saving throw                                           |
-| **Communicate**     | —            | Exploring, Social Interaction encounter active                               | Initiate dialogue with selected NPC; logs "No target selected." if none |
-| **Search**          | —            | Exploring, Exploration encounter active                                      | Roll Wisdom (Perception) to detect a secret on an adjacent tile         |
-| **New Encounter**   | —            | Always visible                                                               | Trigger auto-save and return to the Encounter Setup screen              |
+| **Communicate**      | —            | Exploring, Social Interaction encounter active                               | Initiate dialogue with selected NPC; logs "No target selected." if none |
+| **Search**           | —            | Exploring, Exploration encounter active                                      | Roll Wisdom (Perception) to detect a secret on an adjacent tile         |
+| **DUNGEON MASTER**   | —            | Always visible                                                               | Open the AIDM chat overlay; conversation history is preserved across open/close cycles |
+| **INVENTORY**        | —            | Always visible                                                               | Open the Inventory Overlay to inspect and manage equipment and consumables |
+| **New Encounter**    | —            | Always visible                                                               | Trigger auto-save and return to the Encounter Setup screen              |
+
+---
+
+## Overlays
+
+Full-screen panels that appear on top of the game. Clicking the × closes them.
+
+### Introduction Overlay
+
+Appears automatically when the game map loads. Must be dismissed before the player can act.
+
+| Component            | Description                                                               |
+| -------------------- | ------------------------------------------------------------------------- |
+| **Encounter Chips**  | Colour-coded encounter-type chips (Combat red, Exploration green, Social blue) |
+| **Player Summary**   | Player name and class line                                                |
+| **Introduction Text**| Narrative paragraph generated server-side for the encounter              |
+| **Dismiss Button**   | Closes the overlay and begins play                                        |
+
+---
+
+### AIDM Overlay
+
+Defined in `client/src/ui/AIDMOverlay.ts`. Full-screen chat interface powered by Claude Sonnet.
+
+| Component            | Description                                                               |
+| -------------------- | ------------------------------------------------------------------------- |
+| **Title**            | "DUNGEON MASTER" header                                                   |
+| **Persona Chips**    | STORY / DEV toggle in the header. **STORY** (default): enforces SRD 5.2.1 rules, narrative immersion. **DEV**: fulfils all requests without restriction for testing purposes. Persists across open/close cycles. |
+| **History Area**     | Scrollable chat log; player messages prefixed with `>`, DM responses indented |
+| **Scroll Bar**       | Thumb on right edge of history area; auto-scrolls to newest message      |
+| **Input Box**        | Text input for the player's message (max 300 chars)                      |
+| **Send Button**      | Submits the message; also triggered by Enter                             |
+| **Status Text**      | "The Dungeon Master considers…" shown while the AI is responding         |
+
+---
+
+### Inventory Overlay
+
+Defined in `client/src/ui/InventoryOverlay.ts`. Opened via the INVENTORY HUD button.
+
+| Component            | Description                                                               |
+| -------------------- | ------------------------------------------------------------------------- |
+| **Equipment Slots**  | Three rows: Armor, Weapon, Offhand (shield). Each shows the equipped item name and an UNEQUIP button |
+| **Stats Bar**        | Live AC and attack bonus summary updated whenever gear changes            |
+| **Carried Items List** | Scrollable list of unequipped inventory items. Identical items are grouped with a ×N count |
+| **Equip Button**     | Shown on equippable items; moves the item into the appropriate slot       |
+| **Use Button**       | Shown on consumables; dimmed when the Bonus Action has already been spent |
+| **Scroll Bar**       | Thumb on right edge; mouse-wheel scrollable when content overflows        |

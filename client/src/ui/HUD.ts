@@ -51,7 +51,7 @@ export interface HUDCallbacks {
   onDeathSave: () => void;
   onSearch: () => void;
   onOpenDM: () => void;
-  onOpenGear: () => void;
+  onOpenInventory: () => void;
   onResetView: () => void;
   onNewEncounter: () => void;
   onScrollLog: (dy: number) => void;
@@ -104,7 +104,7 @@ export class HUD {
 
     HUD.makeButton(scene, PLAYER_PANEL_WIDTH + 80,  y + 10, "RESET VIEW",    0x1a2a3a, callbacks.onResetView);
     HUD.makeButton(scene, PLAYER_PANEL_WIDTH + 250, y + 10, "NEW ENCOUNTER", 0x2a1a1a, callbacks.onNewEncounter);
-    HUD.makeButton(scene, PLAYER_PANEL_WIDTH + 440, y + 10, "INVENTORY",     0x0a1a2a, callbacks.onOpenGear);
+    HUD.makeButton(scene, PLAYER_PANEL_WIDTH + 440, y + 10, "INVENTORY",     0x0a1a2a, callbacks.onOpenInventory);
     HUD.makeButton(scene, W - TARGET_PANEL_WIDTH - 250, y + 10, "DUNGEON MASTER", 0x1a1020, callbacks.onOpenDM);
 
     this.attackBtn    = HUD.makeButton(scene, PLAYER_PANEL_WIDTH + 130, btnY, "ATTACK",          0x1a4a1e, callbacks.onAttack);
@@ -116,7 +116,21 @@ export class HUD {
   }
 
   refresh(state: HUDState): void {
-    // Enemy info text (prefer selected if alive, else active)
+    this.refreshEnemyInfo(state);
+    this.refreshTurnOrderBar(state);
+    this.updateLogDisplay(state.combatLog, state.logScrollOffset);
+    this.resetActionButtons();
+    this.phaseText.setColor("#e2b96f");
+    switch (state.mode) {
+      case "exploring":    this.refreshExploring(state);   break;
+      case "player_turn":  this.refreshPlayerTurn(state);  break;
+      case "enemy_turn":   this.refreshEnemyTurn(state);   break;
+      case "death_saves":  this.refreshDeathSaves(state);  break;
+      case "defeat":       this.refreshDefeat(state);      break;
+    }
+  }
+
+  private refreshEnemyInfo(state: HUDState): void {
     const displayEnemy =
       state.selectedEnemy && !state.selectedEnemy.isDead()
         ? state.selectedEnemy
@@ -131,94 +145,88 @@ export class HUD {
     } else {
       this.enemyInfoText.setText("");
     }
+  }
 
-    // Turn order bar
+  private refreshTurnOrderBar(state: HUDState): void {
     const inCombat = state.mode !== "exploring" && state.combatEnemies.length > 0;
     this.turnOrderBar.setVisible(inCombat);
-    if (inCombat) {
-      const chips: TurnChip[] = [
-        {
-          label: "",
-          name: state.playerDef.name,
-          color: state.playerDef.color,
-          isActive: state.mode === "player_turn" || state.mode === "death_saves",
-          isDead: state.playerHp <= 0,
-        },
-        ...state.combatEnemies.map((e) => ({
-          label: e.label,
-          name: e.def.name,
-          color: e.def.color,
-          isActive: state.activeEnemy === e,
-          isDead: e.isDead(),
-        })),
-      ];
-      this.turnOrderBar.refresh(chips);
-    }
+    if (!inCombat) return;
+    const chips: TurnChip[] = [
+      {
+        label: "",
+        name: state.playerDef.name,
+        color: state.playerDef.color,
+        isActive: state.mode === "player_turn" || state.mode === "death_saves",
+        isDead: state.playerHp <= 0,
+      },
+      ...state.combatEnemies.map((e) => ({
+        label: e.label,
+        name: e.def.name,
+        color: e.def.color,
+        isActive: state.activeEnemy === e,
+        isDead: e.isDead(),
+      })),
+    ];
+    this.turnOrderBar.refresh(chips);
+  }
 
-    this.updateLogDisplay(state.combatLog, state.logScrollOffset);
-
-    // Reset buttons and phase colour
+  private resetActionButtons(): void {
     this.attackBtn.setVisible(false);
     this.secondWindBtn.setVisible(false);
     this.hideBtn.setVisible(false);
     this.endTurnBtn.setVisible(false);
     this.deathSaveBtn.setVisible(false);
     this.searchBtn.setVisible(false);
-    this.phaseText.setColor("#e2b96f");
+  }
 
-    switch (state.mode) {
-      case "exploring":
-        this.phaseText.setText("Exploring — WASD / arrow keys to move");
-        if (state.encounterTypes.includes("exploration") && state.secretsRemaining > 0)
-          this.searchBtn.setVisible(true);
-        break;
+  private refreshExploring(state: HUDState): void {
+    this.phaseText.setText("Exploring — WASD / arrow keys to move");
+    if (state.encounterTypes.includes("exploration") && state.secretsRemaining > 0)
+      this.searchBtn.setVisible(true);
+  }
 
-      case "player_turn": {
-        const hiddenLabel = state.playerHidden ? "  [HIDDEN]" : "";
-        const actedLabel  = state.actionUsed   ? "  · action used" : "";
-        const bonusLabel  = state.bonusActionUsed ? "  · bonus used" : "";
-        this.phaseText.setText(
-          `Your turn — ${state.movesLeft}/${state.playerDef.speed} moves${hiddenLabel}${actedLabel}${bonusLabel}`,
-        );
-        this.endTurnBtn.setVisible(true);
+  private refreshPlayerTurn(state: HUDState): void {
+    const hiddenLabel = state.playerHidden   ? "  [HIDDEN]"       : "";
+    const actedLabel  = state.actionUsed     ? "  · action used"  : "";
+    const bonusLabel  = state.bonusActionUsed ? "  · bonus used"  : "";
+    this.phaseText.setText(
+      `Your turn — ${state.movesLeft}/${state.playerDef.speed} moves${hiddenLabel}${actedLabel}${bonusLabel}`,
+    );
+    this.endTurnBtn.setVisible(true);
 
-        if (!state.actionUsed) {
-          const hasAdjacentTarget = state.combatEnemies.some(
-            (e) => !e.isDead() && chebyshev(state.playerTileX, state.playerTileY, e.tileX, e.tileY) <= 1,
-          );
-          if (hasAdjacentTarget) this.attackBtn.setVisible(true);
-        }
-
-        if (!state.bonusActionUsed && state.playerDef.secondWindMaxUses > 0 && state.secondWindUses > 0 && state.playerHp < state.playerDef.maxHp)
-          this.secondWindBtn.setVisible(true);
-
-        if (!state.bonusActionUsed && state.playerDef.sneakAttackDice > 0 && !state.playerHidden && state.combatEnemies.some((e) => !e.isDead()))
-          this.hideBtn.setVisible(true);
-        break;
-      }
-
-      case "enemy_turn": {
-        const ae = state.activeEnemy;
-        const labelPart = ae?.label ? `${ae.label} · ` : "";
-        this.phaseText.setText(`${labelPart}${ae?.def.name ?? "Enemy"}'s turn...`);
-        break;
-      }
-
-      case "death_saves":
-        this.phaseText.setColor("#ff7777");
-        this.phaseText.setText(
-          `${state.playerDef.name} is unconscious!  ✓ ${state.deathSaveSuccesses}/3  ✗ ${state.deathSaveFailures}/3`,
-        );
-        this.deathSaveBtn.setVisible(true);
-        break;
-
-      case "defeat":
-        this.phaseText.setColor("#ff4444");
-        this.phaseText.setText(
-          state.deathSaveSuccesses >= 3 ? "💀 Stabilized — combat over." : "☠ You have died.",
-        );
-        break;
+    if (!state.actionUsed) {
+      const hasAdjacentTarget = state.combatEnemies.some(
+        (e) => !e.isDead() && chebyshev(state.playerTileX, state.playerTileY, e.tileX, e.tileY) <= 1,
+      );
+      if (hasAdjacentTarget) this.attackBtn.setVisible(true);
     }
+
+    if (!state.bonusActionUsed && state.playerDef.secondWindMaxUses > 0 && state.secondWindUses > 0 && state.playerHp < state.playerDef.maxHp)
+      this.secondWindBtn.setVisible(true);
+
+    if (!state.bonusActionUsed && state.playerDef.sneakAttackDice > 0 && !state.playerHidden && state.combatEnemies.some((e) => !e.isDead()))
+      this.hideBtn.setVisible(true);
+  }
+
+  private refreshEnemyTurn(state: HUDState): void {
+    const ae = state.activeEnemy;
+    const labelPart = ae?.label ? `${ae.label} · ` : "";
+    this.phaseText.setText(`${labelPart}${ae?.def.name ?? "Enemy"}'s turn...`);
+  }
+
+  private refreshDeathSaves(state: HUDState): void {
+    this.phaseText.setColor("#ff7777");
+    this.phaseText.setText(
+      `${state.playerDef.name} is unconscious!  ✓ ${state.deathSaveSuccesses}/3  ✗ ${state.deathSaveFailures}/3`,
+    );
+    this.deathSaveBtn.setVisible(true);
+  }
+
+  private refreshDefeat(state: HUDState): void {
+    this.phaseText.setColor("#ff4444");
+    this.phaseText.setText(
+      state.deathSaveSuccesses >= 3 ? "💀 Stabilized — combat over." : "☠ You have died.",
+    );
   }
 
   private updateLogDisplay(combatLog: string[], logScrollOffset: number): void {

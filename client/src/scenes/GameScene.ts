@@ -23,7 +23,8 @@ import { NPC } from "../entities/NPC";
 import { SecretDef, EncounterType, EncounterContext } from "../data/encounterContext";
 import { d20 } from "../systems/Dice";
 import { AIDMOverlay, AIDMGameState, AIDMAction, AIDMNpcPersona, ChatMessage, DMPersona } from "../ui/AIDMOverlay";
-import { EquipmentOverlay } from "../ui/EquipmentOverlay";
+import { InventoryOverlay } from "../ui/InventoryOverlay";
+import { AIDMActionHandler } from "../systems/AIDMActionHandler";
 import { applyEquipment } from "../systems/EquipmentSystem";
 import { IntroductionOverlay } from "../ui/IntroductionOverlay";
 import { HUD, HUDState } from "../ui/HUD";
@@ -50,7 +51,8 @@ export class GameScene extends Phaser.Scene {
 
   private introOverlay: IntroductionOverlay | null = null;
   private aidmOverlay: AIDMOverlay | null = null;
-  private equipmentOverlay: EquipmentOverlay | null = null;
+  private inventoryOverlay: InventoryOverlay | null = null;
+  private aidmActionHandler!: AIDMActionHandler;
   private aidmHistory: ChatMessage[] = [];
   private aidmPersona: DMPersona = "regular";
   private aidmLastLogLength = 0;
@@ -164,7 +166,7 @@ export class GameScene extends Phaser.Scene {
     this.passiveNpcs = [];
     this.introOverlay = null;
     this.aidmOverlay = null;
-    this.equipmentOverlay = null;
+    this.inventoryOverlay = null;
     this.aidmHistory = [];
     this.aidmLastLogLength = 0;
     this.npcPersonas = [];
@@ -211,7 +213,7 @@ export class GameScene extends Phaser.Scene {
         _dx: number,
         dy: number,
       ) => {
-        if (this.introOverlay || this.aidmOverlay || this.equipmentOverlay) return;
+        if (this.introOverlay || this.aidmOverlay || this.inventoryOverlay) return;
         if (
           pointer.x < PLAYER_PANEL_WIDTH ||
           pointer.x >= PLAYER_PANEL_WIDTH + GRID_W
@@ -307,6 +309,29 @@ export class GameScene extends Phaser.Scene {
 
     this.initView();
     this.buildHUD();
+    this.aidmActionHandler = new AIDMActionHandler({
+      scene: this,
+      combat: this.combat,
+      quests: this.quests,
+      mapContainer: this.mapContainer,
+      highlightLayer: this.highlightLayer,
+      getPlayer: () => this.player,
+      getGameMap: () => this.gameMap,
+      getEnemies: () => this.enemies,
+      setEnemies: (v) => { this.enemies = v; },
+      getNpc: () => this.npc,
+      setNpc: (v) => { this.npc = v; },
+      getPassiveNpcs: () => this.passiveNpcs,
+      setPassiveNpcs: (v) => { this.passiveNpcs = v; },
+      getSelectedNpc: () => this.selectedNPC,
+      setSelectedNpc: (v) => { this.selectedNPC = v; },
+      setSelectedEnemy: (v) => { this.selectedEnemy = v; },
+      selectEnemy: (enemy) => this.selectEnemy(enemy),
+      hideTargetPanel: () => this.targetPanel.hide(),
+      handleEnemyKilled: (enemy) => this.handleEnemyKilled(enemy),
+      updateHUD: () => this.updateHUD(),
+      findFreeTileNear: (tx, ty, npc) => this.findFreeTileNear(tx, ty, npc),
+    });
     this.updateHUD();
 
     if (this.encounterContext) {
@@ -485,7 +510,7 @@ export class GameScene extends Phaser.Scene {
       onDeathSave:   () => this.onDeathSave(),
       onSearch:      () => this.onSearch(),
       onOpenDM:      () => this.onOpenDM(),
-      onOpenGear:    () => this.onOpenGear(),
+      onOpenInventory:    () => this.onOpenInventory(),
       onResetView:      () => this.resetGridView(),
       onNewEncounter:   () => {
         const saveData = this.buildSaveData();
@@ -875,227 +900,16 @@ export class GameScene extends Phaser.Scene {
   }
 
   private applyAIDMAction(action: AIDMAction): string | void {
-    switch (action.type) {
-      case "adjust_player_hp": {
-        const delta = action["delta"] as number;
-        const reason = action["reason"] as string;
-        this.combat.addLogs([`[DM] ${delta >= 0 ? "+" : ""}${delta} HP — ${reason}`]);
-        this.combat.adjustPlayerHp(delta);
-        break;
-      }
-      case "award_xp": {
-        const amount = action["amount"] as number;
-        const reason = action["reason"] as string;
-        this.combat.addLogs([`[DM] +${amount} XP — ${reason}`]);
-        this.combat.awardXP(amount);
-        break;
-      }
-      case "award_gold": {
-        const amount = action["amount"] as number;
-        const reason = action["reason"] as string;
-        this.combat.addLogs([`[DM] +${amount} GP — ${reason}`]);
-        this.combat.awardGold(amount);
-        break;
-      }
-      case "set_enemy_hp": {
-        const label = action["enemy_label"] as string;
-        const hp = action["hp"] as number;
-        const reason = action["reason"] as string;
-        const enemy = this.enemies.find((e) => e.label === label);
-        if (!enemy) break;
-        const wasAlive = !enemy.isDead();
-        enemy.setHp(hp);
-        this.combat.addLogs([`[DM] ${enemy.def.name} HP → ${enemy.hp}/${enemy.maxHp} — ${reason}`]);
-        if (enemy.isDead() && wasAlive) this.handleEnemyKilled(enemy);
-        break;
-      }
-      case "add_log_entry": {
-        const text = action["text"] as string;
-        this.combat.addLogs([`[DM] ${text}`]);
-        break;
-      }
-      case "move_entity": {
-        const entity = action["entity"] as string;
-        const tx = action["tile_x"] as number;
-        const ty = action["tile_y"] as number;
-        const reason = action["reason"] as string;
-        if (!this.gameMap.passable[ty]?.[tx]) break;
-        if (entity === "player") {
-          this.player.teleport(tx, ty);
-          this.combat.addLogs([`[DM] ${this.combat.playerDef.name} moved — ${reason}`]);
-        } else if (entity.startsWith("enemy_")) {
-          const ref = entity.slice(6);
-          let e = this.enemies.find((en) => en.label !== "" && en.label === ref);
-          if (!e) { const idx = parseInt(ref, 10); if (!isNaN(idx)) e = this.enemies[idx]; }
-          if (e && !e.isDead()) { e.moveTo(tx, ty, () => {}); this.combat.addLogs([`[DM] ${e.def.name} moved — ${reason}`]); }
-        } else if (entity.startsWith("npc_")) {
-          const id = entity.slice(4);
-          let npc: NPC | undefined;
-          if (this.npc?.def.id === id) {
-            npc = this.npc;
-          } else if (id.startsWith("passive_")) {
-            const idx = parseInt(id.slice(8), 10);
-            if (!isNaN(idx)) npc = this.passiveNpcs[idx];
-          } else {
-            npc = this.passiveNpcs.find((n) => n.def.id === id);
-          }
-          if (npc) {
-            const [ftx, fty] = this.findFreeTileNear(tx, ty, npc);
-            npc.teleport(ftx, fty);
-            this.combat.addLogs([`[DM] ${npc.def.name} moved — ${reason}`]);
-          }
-        }
-        break;
-      }
-      case "despawn_npc": {
-        const entity = action["entity"] as string;
-        const reason = action["reason"] as string;
-        if (!entity.startsWith("npc_")) break;
-        const id = entity.slice(4);
-        let npc: NPC | null = null;
-        if (this.npc?.def.id === id) {
-          npc = this.npc;
-          this.npc = null;
-        } else if (id.startsWith("passive_")) {
-          const idx = parseInt(id.slice(8), 10);
-          if (!isNaN(idx) && this.passiveNpcs[idx]) {
-            npc = this.passiveNpcs[idx];
-            this.passiveNpcs.splice(idx, 1);
-          }
-        } else {
-          const found = this.passiveNpcs.find((n) => n.def.id === id);
-          if (found) {
-            npc = found;
-            this.passiveNpcs = this.passiveNpcs.filter((n) => n !== found);
-          }
-        }
-        if (npc) {
-          if (this.selectedNPC === npc) {
-            this.selectedNPC = null;
-            this.targetPanel.hide();
-          }
-          this.combat.addLogs([`[DM] ${npc.def.name} departs — ${reason}`]);
-          npc.destroy();
-        }
-        break;
-      }
-      case "add_item": {
-        const itemId = action["item_id"] as string;
-        const reason = action["reason"] as string;
-        const items = this.registry.get("items") as ItemDef[];
-        const item = items.find((i) => i.id === itemId);
-        if (item) {
-          this.combat.addItem(item);
-          this.combat.addLogs([`[DM] ${item.name} added to inventory — ${reason}`]);
-          this.quests.onItemCollected();
-        }
-        break;
-      }
-      case "remove_item": {
-        const itemId = action["item_id"] as string;
-        const reason = action["reason"] as string;
-        const items = this.registry.get("items") as ItemDef[];
-        const item = items.find((i) => i.id === itemId);
-        if (item && this.combat.removeItem(itemId)) {
-          this.combat.addLogs([`[DM] ${item.name} removed from inventory — ${reason}`]);
-        }
-        break;
-      }
-      case "spawn_enemy": {
-        const monsterId = action["monster_id"] as string;
-        const reason = action["reason"] as string;
-        const monsters = this.registry.get("monsters") as MonsterDef[];
-        const def = monsters.find((m) => m.id === monsterId);
-        if (!def) break;
-        const [sx, sy] = this.findFreeTileNear(this.player.tileX, this.player.tileY);
-        const newEnemy = new Enemy(this, def, sx, sy);
-        const nextLabel = String.fromCharCode(65 + this.enemies.length);
-        newEnemy.setLabel(nextLabel);
-        this.enemies.push(newEnemy);
-        this.mapContainer.add(newEnemy.gameObject);
-        this.combat.addCombatant(newEnemy);
-        this.combat.addLogs([`[DM] ${def.name} (${nextLabel}) appears — ${reason}`]);
-        break;
-      }
-      case "end_combat": {
-        const reason = action["reason"] as string;
-        this.combat.addLogs([`[DM] ${reason}`]);
-        for (const enemy of [...this.enemies]) {
-          enemy.destroy();
-        }
-        this.enemies = [];
-        this.selectedEnemy = null;
-        this.targetPanel.hide();
-        this.highlightLayer.clear();
-        this.combat.endCombat();
-        break;
-      }
-      case "trigger_combat": {
-        const reason = action["reason"] as string;
-        if (this.combat.mode !== "exploring") break;
-        if (this.enemies.length === 0) {
-          const npcsToConvert = [...(this.npc ? [this.npc] : []), ...this.passiveNpcs];
-          if (npcsToConvert.length === 0) break;
-          for (const npc of npcsToConvert) {
-            const enemy = new Enemy(this, npc.def, npc.tileX, npc.tileY);
-            this.enemies.push(enemy);
-            this.mapContainer.add(enemy.gameObject);
-            npc.destroy();
-          }
-          this.npc = null;
-          this.passiveNpcs = [];
-          this.selectedNPC = null;
-        }
-        if (this.enemies.length === 0) break;
-        this.enemies.forEach((e, i) => e.setLabel(String.fromCharCode(65 + i)));
-        this.combat.addLogs([`[DM] ${reason}`]);
-        this.combat.startCombat(this.enemies);
-        const first = this.enemies.find((e) => !e.isDead()) ?? null;
-        if (first) this.selectEnemy(first);
-        break;
-      }
-      case "complete_quest": {
-        const questId = action["quest_id"] as string;
-        const reason = action["reason"] as string;
-        this.combat.addLogs([`[DM] ${reason}`]);
-        this.quests.forceComplete(questId);
-        break;
-      }
-      case "set_player_hidden": {
-        const hidden = action["hidden"] as boolean;
-        const reason = action["reason"] as string;
-        this.combat.addLogs([`[DM] ${this.combat.playerDef.name} is now ${hidden ? "hidden" : "revealed"} — ${reason}`]);
-        this.combat.setPlayerHidden(hidden);
-        break;
-      }
-      case "request_ability_check": {
-        const skill = action["skill"] as string;
-        const dc = action["dc"] as number;
-        const reason = action["reason"] as string;
-        const bonus = this.combat.playerDef.skills[skill] ?? 0;
-        const roll = d20();
-        const total = roll + bonus;
-        const success = total >= dc;
-        const sign = bonus >= 0 ? "+" : "";
-        const label = skill.replace(/([A-Z])/g, " $1").toLowerCase().replace(/^\w/, c => c.toUpperCase());
-        this.combat.addLogs([
-          `[DM] ${label} check (DC ${dc}) — ${reason}`,
-          `d20(${roll})${sign}${bonus} = ${total} vs DC ${dc} — ${success ? "SUCCESS ✓" : "FAILURE ✗"}`,
-        ]);
-        this.updateHUD();
-        return `[Ability Check Result — ${label}, DC ${dc}: d20(${roll})${sign}${bonus} = ${total} — ${success ? "SUCCESS" : "FAILURE"}. ${reason}]`;
-      }
-    }
-    this.updateHUD();
+    return this.aidmActionHandler.apply(action);
   }
 
-  private onOpenGear(): void {
-    if (this.aidmOverlay || this.equipmentOverlay) return;
+  private onOpenInventory(): void {
+    if (this.aidmOverlay || this.inventoryOverlay) return;
     const allItems = this.registry.get("items") as ItemDef[];
     const canUseConsumable =
       this.combat.mode === "exploring" ||
       (this.combat.mode === "player_turn" && !this.combat.bonusActionUsed);
-    this.equipmentOverlay = new EquipmentOverlay(
+    this.inventoryOverlay = new InventoryOverlay(
       this,
       this.combat.playerDef,
       { ...this.combat.equippedSlots },
@@ -1104,27 +918,27 @@ export class GameScene extends Phaser.Scene {
       canUseConsumable,
       (slot, itemId) => {
         this.combat.equip(slot, itemId, allItems);
-        this.equipmentOverlay?.destroy();
-        this.equipmentOverlay = null;
+        this.inventoryOverlay?.destroy();
+        this.inventoryOverlay = null;
         SaveSystem.save(this.buildSaveData());
-        this.onOpenGear();
+        this.onOpenInventory();
       },
       (slot) => {
         this.combat.unequip(slot, allItems);
-        this.equipmentOverlay?.destroy();
-        this.equipmentOverlay = null;
+        this.inventoryOverlay?.destroy();
+        this.inventoryOverlay = null;
         SaveSystem.save(this.buildSaveData());
-        this.onOpenGear();
+        this.onOpenInventory();
       },
       (_itemId) => {
         this.combat.usePotion();
-        this.equipmentOverlay?.destroy();
-        this.equipmentOverlay = null;
+        this.inventoryOverlay?.destroy();
+        this.inventoryOverlay = null;
         SaveSystem.save(this.buildSaveData());
         this.updateHUD();
-        this.onOpenGear();
+        this.onOpenInventory();
       },
-      () => { this.equipmentOverlay = null; },
+      () => { this.inventoryOverlay = null; },
     );
   }
 

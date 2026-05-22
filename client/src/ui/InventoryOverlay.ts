@@ -39,7 +39,7 @@ function slotLabel(item: EquipmentDef, playerDef: PlayerDef): string {
   );
 }
 
-export class EquipmentOverlay extends BaseOverlay {
+export class InventoryOverlay extends BaseOverlay {
   private wheelHandler: ((e: WheelEvent) => void) | null = null;
   private maskGraphics: Phaser.GameObjects.Graphics | null = null;
 
