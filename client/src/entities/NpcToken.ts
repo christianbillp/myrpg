@@ -14,7 +14,7 @@ export class NpcToken {
   readonly maxHp: number;
   readonly id: string;
   readonly def: MonsterDef;
-  readonly disposition: Disposition;
+  disposition: Disposition;
   private container: Phaser.GameObjects.Container;
   private hpBar: Phaser.GameObjects.Graphics;
   private selectionRing: Phaser.GameObjects.Graphics;
@@ -41,25 +41,25 @@ export class NpcToken {
     this.hp = hp;
     this.maxHp = maxHp;
 
+    const radius = (TILE_SIZE - 8) / 2;
     this.selectionRing = scene.add.graphics();
-    const body = scene.add.circle(0, 0, (TILE_SIZE - 8) / 2, def.color);
+    const body = scene.add.circle(0, 0, radius, def.color);
     this.hpBar = scene.add.graphics();
 
-    // Combat tokens show a combat label letter; neutral NPCs show name above
+    const labelY = -(radius + 3);
     if (disposition === 'neutral') {
-      const nameLabel = scene.add
-        .text(0, -(TILE_SIZE / 2 + 4), def.name, {
-          fontSize: '9px',
+      this.labelText = scene.add
+        .text(0, labelY, def.name, {
+          fontSize: '10px',
           color: '#' + def.color.toString(16).padStart(6, '0'),
           fontFamily: 'monospace',
           resolution: DPR,
         })
         .setOrigin(0.5, 1);
-      this.labelText = nameLabel;
     } else {
       this.labelText = scene.add
-        .text(0, -4, '', { fontSize: '13px', color: '#ffffff', fontFamily: 'monospace', resolution: DPR })
-        .setOrigin(0.5);
+        .text(0, labelY, '', { fontSize: '10px', color: '#ffffff', fontFamily: 'monospace', resolution: DPR })
+        .setOrigin(0.5, 1);
     }
 
     this.container = scene.add
@@ -101,9 +101,10 @@ export class NpcToken {
     this.label = label;
   }
 
-  // Show the combat letter (enemy/ally) or hide it (neutral or exploring)
   setLabelVisible(visible: boolean): void {
-    if (this.disposition !== 'neutral') {
+    if (this.disposition === 'neutral') {
+      this.labelText.setText(this.def.name);
+    } else {
       this.labelText.setText(visible ? this.label : '');
     }
   }
@@ -123,17 +124,15 @@ export class NpcToken {
 
   private refreshHpBar(): void {
     this.hpBar.clear();
-    if (this.disposition === 'neutral') return;
     if (this.hp >= this.maxHp) return;
     const pct = this.hp / this.maxHp;
     const radius = (TILE_SIZE - 8) / 2;
     const barW = TILE_SIZE - 10;
     const barX = -(barW / 2);
-    const barY = -(radius + 7);
+    const barY = -radius;
     this.hpBar.fillStyle(0x222233);
     this.hpBar.fillRect(barX, barY, barW, 4);
-    // Allies use green HP bars, enemies use red
-    const barColor = this.disposition === 'ally' ? 0x27ae60 : 0xe74c3c;
+    const barColor = this.disposition === 'ally' ? 0x27ae60 : this.disposition === 'enemy' ? 0xe74c3c : 0x6688aa;
     this.hpBar.fillStyle(barColor);
     this.hpBar.fillRect(barX, barY, Math.floor(barW * pct), 4);
   }

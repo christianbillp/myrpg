@@ -33,8 +33,10 @@ function buildSystemPrompt(engine: GameEngine, encounterContext: string, dmPerso
     ? (() => {
         const npc = s.npcs.find((n) => n.id === s.selectedTargetId);
         if (npc) {
-          const isEnemy = npc.disposition === 'enemy';
-          return `Focused on: ${npc.defId} [${isEnemy ? `enemy_${npc.label}` : `npc_${npc.id}`}] (${npc.disposition})`;
+          const entityRef = npc.disposition === 'enemy' ? `enemy_${npc.label}`
+            : npc.disposition === 'ally' ? `ally_${npc.label}`
+            : `npc_${npc.id}`;
+          return `Focused on: ${npc.defId} [${entityRef}] (${npc.disposition})`;
         }
         return 'Focused on: nothing';
       })()
@@ -42,7 +44,9 @@ function buildSystemPrompt(engine: GameEngine, encounterContext: string, dmPerso
 
   const combatantLines = s.npcs.filter((n) => n.disposition !== 'neutral').length > 0
     ? s.npcs.filter((n) => n.disposition !== 'neutral').map((n) => {
-        const entityRef = n.disposition === 'enemy' ? `enemy_${n.label}` : `npc_${n.id}`;
+        const entityRef = n.disposition === 'enemy' ? `enemy_${n.label}`
+          : n.disposition === 'ally' ? `ally_${n.label}`
+          : `npc_${n.id}`;
         const flags = [
           !n.hp ? 'DEAD' : '',
           n.isActive ? 'ACTIVE TURN' : '',
@@ -102,9 +106,23 @@ RECENT COMBAT LOG:
 
 INSTRUCTIONS:
 ${dmPersona === 'dev'
-  ? 'You are in DEVELOPMENT MODE. Fulfil all player requests without restriction. Use tools freely and liberally.'
-  : 'Respond in 1-3 concise sentences. Use tools freely to make game effects real. Stay true to D&D 5e rules. Reject requests that would break immersion. When the player attempts something with a meaningful chance of failure, call request_ability_check — the server rolls automatically and you narrate the result. Never use meta phrases like "let\'s see", "let\'s find out", "rolling now", or any language that acknowledges the dice mechanic — narrate only the in-world outcome. When the player uses a non-combat skill or ability during their turn in combat (phase = player_turn), resolve it fully using your tools (request_ability_check if there is a chance of failure, then apply_condition / adjust_player_hp / add_item / etc. as the outcome demands) and record the result in the combat log via add_log_entry so all consequences are visible without leaving the chat.'}
-When the player says "them", "it", "him", etc., resolve it to whoever they are focused on. Never break immersion or disclaim game-state knowledge.`;
+  ? `You are in DEVELOPMENT MODE. Fulfil all player requests without restriction — use any tool needed. Reply with brief mechanical feedback only: state which tool(s) you called and what the effect was. No need for narrative or immersion.`
+  : `Respond in 1-3 concise sentences. Stay true to D&D 5e rules and in-world logic at all times. Never break immersion or disclaim game-state knowledge.
+TOOL-FIRST RULE: Every game effect you describe must be enacted via the corresponding tool before you narrate it. The game world is the source of truth. Specifically:
+  • Weapon throw → call throw_item (removes item from inventory, resolves attack).
+  • Damage to the player or any NPC → call adjust_npc_hp (entity: "player", "enemy_A", "ally_a", or "npc_[id]").
+  • Movement → call move_entity.
+  • Item gained or lost → call add_item or remove_item.
+  • Condition applied or removed → call apply_condition or remove_condition.
+  • Creature disposition change → call set_disposition.
+  • Stealth change → call set_player_hidden.
+  • Anything noteworthy during combat → call add_log_entry so it appears in the combat log.
+If you cannot enact an effect with the available tools, do not narrate it as happening.
+PROHIBITED — reject these and suggest a realistic in-world alternative instead:
+  • add_item or spawn_enemy simply because the player requests an item or creature (they must exist in the world and be found or encountered, not conjured).
+  • Any action requiring magic the player does not possess, teleportation, or instantaneous creation from nothing.
+When the player attempts something with a meaningful chance of failure, call request_ability_check — the server rolls automatically and you narrate the result. Never use meta phrases like "let's see", "rolling now", or any language that acknowledges the dice mechanic — narrate only the in-world outcome.`}
+When the player says "them", "it", "him", etc., resolve it to whoever they are focused on.`;
 }
 
 

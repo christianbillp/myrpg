@@ -57,7 +57,7 @@ export function spawnEnemies(
     free.forEach(([c, r], i) => {
       const def = defs[Math.floor(Math.random() * defs.length)];
       out.push({
-        id: `enemy_${i}`, defId: def.id, label: String.fromCharCode(65 + i),
+        id: `enemy_${i}`, defId: def.id, name: def.name, label: String.fromCharCode(65 + i),
         tileX: c, tileY: r,
         disposition: 'enemy',
         hp: def.maxHp, maxHp: def.maxHp,
@@ -77,7 +77,7 @@ export function spawnEnemies(
   picked.forEach(([r, c], i) => {
     const def = defs[Math.floor(Math.random() * defs.length)];
     out.push({
-      id: `enemy_${i}`, defId: def.id, label: String.fromCharCode(65 + i),
+      id: `enemy_${i}`, defId: def.id, name: def.name, label: String.fromCharCode(65 + i),
       tileX: c, tileY: r,
       disposition: 'enemy',
       hp: def.maxHp, maxHp: def.maxHp,
@@ -139,6 +139,7 @@ export function spawnNpc(
   out.push({
     id: `npc_${defId}_${out.length}`,
     defId,
+    name: npcDef.name,
     tileX: nx, tileY: ny,
     disposition,
     label: '',

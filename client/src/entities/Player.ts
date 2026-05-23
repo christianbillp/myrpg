@@ -33,7 +33,7 @@ export class Player {
     const radius = (TILE_SIZE - 6) / 2;
     const barW = TILE_SIZE - 10;
     const barX = -(barW / 2);
-    const barY = -(radius + 7);
+    const barY = -radius;
     const color = pct > 0.5 ? 0x27ae60 : pct > 0.25 ? 0xf39c12 : 0xe74c3c;
     this.hpBar.fillStyle(0x222233);
     this.hpBar.fillRect(barX, barY, barW, 4);

@@ -10,6 +10,7 @@ function rollDice(count: number, sides: number): { total: number; rolls: number[
 export function rollInitiative(
   player: PlayerDef,
   enemy: MonsterDef,
+  enemyDisplayName: string,
 ): { playerFirst: boolean; logs: LogEntry[] } {
   const pRoll = d20(), eRoll = d20();
   const pMod = mod(player.dex), eMod = enemy.initiativeBonus;
@@ -20,8 +21,8 @@ export function rollInitiative(
     logs: [
       { left: '⚔ Combat begins', style: 'header' },
       {
-        left: playerFirst ? `${player.name} acts first` : `${enemy.name} acts first`,
-        right: `${player.name} d20(${pRoll})+${pMod}=${pTotal} · ${enemy.name} d20(${eRoll})+${eMod}=${eTotal}`,
+        left: playerFirst ? `${player.name} acts first` : `${enemyDisplayName} acts first`,
+        right: `${player.name} d20(${pRoll})+${pMod}=${pTotal} · ${enemyDisplayName} d20(${eRoll})+${eMod}=${eTotal}`,
         style: 'normal',
       },
     ],

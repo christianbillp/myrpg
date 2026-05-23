@@ -35,7 +35,7 @@ export interface PlayerState {
 }
 
 export interface NpcState {
-  id: string; defId: string;
+  id: string; defId: string; name: string;
   tileX: number; tileY: number;
   disposition: Disposition;
   label: string;

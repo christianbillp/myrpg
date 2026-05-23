@@ -5,14 +5,21 @@ import { MapItem } from "../entities/MapItem";
 import { PlayerPanel, QuestDisplay, PlayerPanelActionState } from "../ui/PlayerPanel";
 import { TargetPanel } from "../ui/TargetPanel";
 import { HUD, HUDState } from "../ui/HUD";
+import { UIScale } from "../ui/UIScale";
 import { GridView } from "../systems/GridView";
 import { OverlayManager } from "../systems/OverlayManager";
-import { TILE_SIZE } from "../constants";
+import {
+  TILE_SIZE, GRID_COLS, GRID_ROWS, HUD_HEIGHT,
+  PLAYER_PANEL_WIDTH, TARGET_PANEL_WIDTH,
+} from "../constants";
 import { PlayerDef } from "../data/player";
 import { MonsterDef, NPCDef } from "../data/monsters";
 import { ItemDef, WeaponDef } from "../data/items";
 import { gameClient } from "../net/GameClient";
 import type { GameState, GameEvent, GameMap } from "../net/types";
+
+const GAME_W = PLAYER_PANEL_WIDTH + GRID_COLS * TILE_SIZE + TARGET_PANEL_WIDTH;
+const GAME_H = GRID_ROWS * TILE_SIZE + HUD_HEIGHT;
 
 export class GameScene extends Phaser.Scene {
   private playerDef!: PlayerDef;
@@ -28,9 +35,11 @@ export class GameScene extends Phaser.Scene {
 
   private selectedEntityId: string | null = null;
 
+  private uiScale!: UIScale;
   private playerPanel!: PlayerPanel;
   private targetPanel!: TargetPanel;
   private hud!: HUD;
+  private uiDestroyed = false;
   private gridView!: GridView;
   private overlays!: OverlayManager;
   private highlightLayer!: Phaser.GameObjects.Graphics;
@@ -57,22 +66,27 @@ export class GameScene extends Phaser.Scene {
     this.npcTokens = new Map();
     this.itemTokens = new Map();
     this.selectedEntityId = null;
+    this.uiDestroyed = false;
     if (this.overlays) this.overlays.reset();
     this.localLogScrollOffset = 0;
   }
 
   create(): void {
+    this.uiScale = new UIScale(this.sys.game.canvas, GAME_W, GAME_H);
+
     this.gridView = new GridView(this);
     this.highlightLayer = this.add.graphics();
     this.gridView.container.add(this.highlightLayer);
 
-    this.overlays = new OverlayManager(this, this.playerDef, {
+    this.overlays = new OverlayManager(this.uiScale, this.playerDef, {
       onEquip:           (slot, itemId) => gameClient.sendAction({ type: "equip", slot, itemId }),
       onUnequip:         (slot) => gameClient.sendAction({ type: "unequip", slot }),
       onUsePotion:       () => gameClient.sendAction({ type: "usePotion" }),
       onSendAIDM:        (msg, history, persona) => gameClient.sendAIDMMessage(msg, history, persona),
-      onKeyboardCapture: () => this.input.keyboard?.enableGlobalCapture(),
+      onDisableKeyboard: () => this.input.keyboard?.disableGlobalCapture(),
+      onEnableKeyboard:  () => this.input.keyboard?.enableGlobalCapture(),
       onRefresh:         () => { if (this.gameState) this.updateHUD(this.gameState); },
+      getItems:          () => this.registry.get("items") as ItemDef[],
     });
 
     this.setupInput();
@@ -84,6 +98,13 @@ export class GameScene extends Phaser.Scene {
 
   shutdown(): void {
     gameClient.disconnect();
+    if (!this.uiDestroyed) {
+      this.uiDestroyed = true;
+      this.hud.destroy();
+      this.playerPanel.destroy();
+      this.targetPanel.destroy();
+      this.uiScale.destroy();
+    }
   }
 
   // ── State update pipeline ─────────────────────────────────────────────────
@@ -166,12 +187,12 @@ export class GameScene extends Phaser.Scene {
         token = new NpcToken(this, nState.id, def, nState.tileX, nState.tileY, nState.disposition, nState.hp, nState.maxHp);
         this.npcTokens.set(nState.id, token);
         this.gridView.container.add(token.gameObject);
-      } else if (nState.disposition === 'neutral') {
-        // Neutral NPCs don't animate — keep them in sync via teleport
+      } else if (nState.disposition === "neutral") {
         token.teleport(nState.tileX, nState.tileY);
       }
+      token.disposition = nState.disposition;
       token.setLabel(nState.label);
-      token.setLabelVisible(nState.disposition !== 'neutral' && state.phase !== 'exploring');
+      token.setLabelVisible(nState.disposition !== "neutral" && state.phase !== "exploring");
       token.setHp(nState.hp);
     }
   }
@@ -325,7 +346,7 @@ export class GameScene extends Phaser.Scene {
   // ── HUD ──────────────────────────────────────────────────────────────────
 
   private buildHUD(): void {
-    this.playerPanel = new PlayerPanel(this, this.playerDef, {
+    this.playerPanel = new PlayerPanel(this.uiScale, this.playerDef, {
       onOpenInventory: () => { if (this.gameState) this.overlays.openInventory(this.gameState); },
       onSearch:        () => gameClient.sendAction({ type: "search" }),
       onAttack:        () => gameClient.sendAction({ type: "attack" }),
@@ -339,10 +360,15 @@ export class GameScene extends Phaser.Scene {
       onDeathSave:     () => gameClient.sendAction({ type: "rollDeathSave" }),
       onShortRest:     () => gameClient.sendAction({ type: "shortRest" }),
     });
-    this.targetPanel = new TargetPanel(this);
-    this.hud = new HUD(this, {
+    this.targetPanel = new TargetPanel(this.uiScale);
+    this.hud = new HUD(this.uiScale, {
       onOpenDM:       () => this.overlays.openDM(),
       onNewEncounter: () => {
+        this.uiDestroyed = true;
+        this.playerPanel.destroy();
+        this.targetPanel.destroy();
+        this.hud.destroy();
+        this.uiScale.destroy();
         gameClient.disconnect();
         this.scene.start("EncounterSetupScene");
       },
@@ -358,7 +384,7 @@ export class GameScene extends Phaser.Scene {
     const activeNpc = activeNpcState ? (this.npcTokens.get(activeNpcState.id) ?? null) : null;
     const selectedNpc = this.selectedEntityId ? (this.npcTokens.get(this.selectedEntityId) ?? null) : null;
     const combatNpcs = state.npcs
-      .filter(n => n.disposition !== 'neutral' && n.hp > 0)
+      .filter(n => n.disposition !== "neutral" && n.hp > 0)
       .map(n => this.npcTokens.get(n.id))
       .filter((n): n is NpcToken => n !== undefined);
 
@@ -394,7 +420,7 @@ export class GameScene extends Phaser.Scene {
       playerHidden:     state.player.hidden,
       playerDef:        this.playerDef,
       enemies:          state.npcs
-        .filter(n => n.disposition === 'enemy')
+        .filter(n => n.disposition === "enemy")
         .map(n => ({ tileX: n.tileX, tileY: n.tileY, dead: n.hp <= 0 })),
       playerTileX:      this.player?.tileX ?? state.player.tileX,
       playerTileY:      this.player?.tileY ?? state.player.tileY,
@@ -407,11 +433,11 @@ export class GameScene extends Phaser.Scene {
           .map(id => allItems.find(i => i.id === id))
           .filter((i): i is ItemDef => i !== undefined)
           .filter(itemDef => {
-            const longRangeTiles = itemDef.type === 'weapon' && (itemDef as WeaponDef).thrown
+            const longRangeTiles = itemDef.type === "weapon" && (itemDef as WeaponDef).thrown
               ? Math.floor((itemDef as WeaponDef).throwLong / 5)
               : 12;
             return state.npcs.some(n =>
-              n.disposition === 'enemy' && n.hp > 0 &&
+              n.disposition === "enemy" && n.hp > 0 &&
               Math.max(Math.abs(n.tileX - px), Math.abs(n.tileY - py)) <= longRangeTiles,
             );
           })
@@ -499,7 +525,6 @@ export class GameScene extends Phaser.Scene {
 
   // ── Def lookups ───────────────────────────────────────────────────────────
 
-  // Resolves a defId to a MonsterDef — handles both direct monster IDs and NPC def IDs.
   private resolveMonsterDef(defId: string): MonsterDef {
     const monsters = this.registry.get("monsters") as MonsterDef[];
     const monster = monsters.find(m => m.id === defId);

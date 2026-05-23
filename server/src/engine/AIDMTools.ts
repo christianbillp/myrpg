@@ -24,9 +24,9 @@ export const AIDM_TOOLS = [
     input_schema: { type: 'object' as const, properties: { amount: { type: 'integer' }, reason: { type: 'string' } }, required: ['amount', 'reason'] },
   },
   {
-    name: 'set_enemy_hp',
-    description: "Set an enemy's current HP by label (A, B, C…). Set to 0 to kill the enemy.",
-    input_schema: { type: 'object' as const, properties: { enemy_label: { type: 'string' }, hp: { type: 'integer' }, reason: { type: 'string' } }, required: ['enemy_label', 'hp', 'reason'] },
+    name: 'adjust_npc_hp',
+    description: 'Adjust any combatant\'s HP by a delta. Positive heals, negative damages. Entity: "player", "enemy_A" (enemy by label A–Z), "ally_a" (ally by label a–z), or "npc_[id]" (neutral NPC by id). To kill, use a large negative delta.',
+    input_schema: { type: 'object' as const, properties: { entity: { type: 'string' }, delta: { type: 'integer' }, reason: { type: 'string' } }, required: ['entity', 'delta', 'reason'] },
   },
   {
     name: 'add_log_entry',
@@ -100,7 +100,7 @@ export const AIDM_TOOLS = [
   },
   {
     name: 'throw_item',
-    description: 'Throw an item at a target enemy. Proper thrown weapons (javelin, dagger) use their weapon stats and mastery with proficiency. All other items are improvised weapons (1d4 bludgeoning, no proficiency bonus). The item is removed from the player\'s inventory or the map. item_id can be an inventory item or a map item defId. target is the enemy label (A, B, …); omit for nearest enemy in range.',
+    description: 'Throw an item at a target. Proper thrown weapons (javelin, dagger) use their weapon stats and mastery with proficiency. All other items are improvised weapons (1d4 bludgeoning, no proficiency bonus). The item is removed from the player\'s inventory or the map. item_id can be an inventory item id or a map item defId. target uses the same entity ref format as move_entity: "enemy_A" for an enemy by label, "npc_[id]" for a neutral or ally NPC by id; omit to auto-target the nearest enemy in range. Attacking a neutral NPC turns them hostile.',
     input_schema: { type: 'object' as const, properties: { item_id: { type: 'string' }, target: { type: 'string' }, reason: { type: 'string' } }, required: ['item_id', 'reason'] },
   },
 ];
@@ -120,8 +120,8 @@ export function applyAIDMTool(engine: GameEngine, name: string, input: Record<st
     case 'award_gold':
       events = engine.awardGold(input['amount'] as number);
       break;
-    case 'set_enemy_hp':
-      events = engine.setEnemyHp(input['enemy_label'] as string, input['hp'] as number);
+    case 'adjust_npc_hp':
+      events = engine.adjustNpcHp(input['entity'] as string, input['delta'] as number);
       break;
     case 'add_log_entry':
       engine.addLog(input['text'] as string);

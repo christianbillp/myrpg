@@ -16,7 +16,7 @@ import {
 import { applyEquipment, makePlayerAttack } from './EquipmentSystem.js';
 import { runEnemyTurn, runAllyTurn, chebyshev } from './EnemyAI.js';
 import {
-  Zone, ZoneMap, parseStartingZones, findPlayerSpawn,
+  ZoneMap, parseStartingZones, findPlayerSpawn,
   spawnEnemies, spawnItems, spawnNpc, spawnSecrets,
 } from './SpawnHelpers.js';
 
@@ -127,11 +127,13 @@ export class GameEngine {
     return [];
   }
 
-  setEnemyHp(label: string, hp: number): GameEvent[] {
-    const s = this.state;
-    const npc = s.npcs.find((n) => n.label === label && n.disposition === 'enemy');
+  adjustNpcHp(entity: string, delta: number): GameEvent[] {
+    if (entity === 'player') return this.adjustPlayerHp(delta);
+    const npc = this.resolveNpcByEntity(entity);
     if (!npc) return [];
-    npc.hp = Math.max(0, hp);
+    const before = npc.hp;
+    npc.hp = Math.max(0, Math.min(npc.maxHp, npc.hp + delta));
+    this.addLog(`${npc.name}: ${delta >= 0 ? '+' : ''}${delta} HP (${before} → ${npc.hp})`);
     if (npc.hp === 0) this.killNpc(npc.id);
     return [];
   }
@@ -152,17 +154,8 @@ export class GameEngine {
       s.player.tileX = tileX;
       s.player.tileY = tileY;
       events.push({ type: 'entity_move', entityId: 'player', toX: tileX, toY: tileY });
-    } else if (entity.startsWith('enemy_')) {
-      const label = entity.replace('enemy_', '');
-      const npc = s.npcs.find((n) => n.label === label && n.disposition === 'enemy');
-      if (npc) {
-        npc.tileX = tileX;
-        npc.tileY = tileY;
-        events.push({ type: 'entity_move', entityId: npc.id, toX: tileX, toY: tileY });
-      }
-    } else if (entity.startsWith('npc_')) {
-      const npcId = entity.replace('npc_', '');
-      const npc = s.npcs.find((n) => n.id === npcId);
+    } else {
+      const npc = this.resolveNpcByEntity(entity);
       if (npc) {
         npc.tileX = tileX;
         npc.tileY = tileY;
@@ -207,7 +200,7 @@ export class GameEngine {
       if (!usedLabels.has(candidate)) { label = candidate; break; }
     }
     const npc: NpcState = {
-      id: uid(), defId: def.id, label,
+      id: uid(), defId: def.id, name: def.name, label,
       tileX: tx, tileY: ty,
       disposition: 'enemy',
       hp: def.maxHp, maxHp: def.maxHp,
@@ -258,16 +251,11 @@ export class GameEngine {
 
   setDisposition(entity: string, disposition: string): GameEvent[] {
     if (!['ally', 'neutral', 'enemy'].includes(disposition)) return [];
-    const s = this.state;
-    let npc: NpcState | undefined;
-    if (entity.startsWith('enemy_')) {
-      const label = entity.replace('enemy_', '');
-      npc = s.npcs.find((n) => n.label === label);
-    } else if (entity.startsWith('npc_')) {
-      const npcId = entity.replace('npc_', '');
-      npc = s.npcs.find((n) => n.id === npcId);
+    const npc = this.resolveNpcByEntity(entity);
+    if (npc) {
+      npc.disposition = disposition as Disposition;
+      if (disposition === 'ally' && !npc.label) this.assignAllyLabel(npc);
     }
-    if (npc) npc.disposition = disposition as Disposition;
     return [];
   }
 
@@ -275,13 +263,8 @@ export class GameEngine {
     const s = this.state;
     if (entity === 'player') {
       if (!s.player.conditions.includes(condition)) s.player.conditions.push(condition);
-    } else if (entity.startsWith('enemy_')) {
-      const label = entity.replace('enemy_', '');
-      const npc = s.npcs.find((n) => n.label === label && n.disposition === 'enemy');
-      if (npc && !npc.conditions.includes(condition)) npc.conditions.push(condition);
-    } else if (entity.startsWith('npc_')) {
-      const npcId = entity.replace('npc_', '');
-      const npc = s.npcs.find((n) => n.id === npcId);
+    } else {
+      const npc = this.resolveNpcByEntity(entity);
       if (npc && !npc.conditions.includes(condition)) npc.conditions.push(condition);
     }
     return [];
@@ -291,13 +274,8 @@ export class GameEngine {
     const s = this.state;
     if (entity === 'player') {
       s.player.conditions = s.player.conditions.filter((c) => c !== condition);
-    } else if (entity.startsWith('enemy_')) {
-      const label = entity.replace('enemy_', '');
-      const npc = s.npcs.find((n) => n.label === label && n.disposition === 'enemy');
-      if (npc) npc.conditions = npc.conditions.filter((c) => c !== condition);
-    } else if (entity.startsWith('npc_')) {
-      const npcId = entity.replace('npc_', '');
-      const npc = s.npcs.find((n) => n.id === npcId);
+    } else {
+      const npc = this.resolveNpcByEntity(entity);
       if (npc) npc.conditions = npc.conditions.filter((c) => c !== condition);
     }
     return [];
@@ -375,6 +353,31 @@ export class GameEngine {
     }
   }
 
+  private resolveNpcByEntity(entity: string): NpcState | undefined {
+    const s = this.state;
+    if (entity.startsWith('enemy_')) {
+      const label = entity.slice(6);
+      return s.npcs.find((n) => n.label === label && n.disposition === 'enemy');
+    }
+    if (entity.startsWith('ally_')) {
+      const label = entity.slice(5);
+      return s.npcs.find((n) => n.label === label && n.disposition === 'ally');
+    }
+    if (entity.startsWith('npc_')) {
+      const id = entity.slice(4);
+      return s.npcs.find((n) => n.id === id);
+    }
+    return undefined;
+  }
+
+  private assignAllyLabel(npc: NpcState): void {
+    const usedLabels = new Set(this.state.npcs.filter((n) => n.disposition === 'ally').map((n) => n.label));
+    for (let i = 0; i < 26; i++) {
+      const candidate = String.fromCharCode(97 + i); // lowercase a-z
+      if (!usedLabels.has(candidate)) { npc.label = candidate; return; }
+    }
+  }
+
   private doStartCombat(events: GameEvent[]): void {
     const s = this.state;
     const enemies = s.npcs.filter((n) => n.disposition === 'enemy');
@@ -386,9 +389,12 @@ export class GameEngine {
     s.player.deathSaveFailures = 0;
     s.activeNpcIndex = 0;
     const combatNpcs = s.npcs.filter((n) => n.disposition !== 'neutral');
+    for (const npc of combatNpcs.filter((n) => n.disposition === 'ally' && !n.label)) {
+      this.assignAllyLabel(npc);
+    }
     s.turnOrderIds = ['player', ...combatNpcs.map((n) => n.id)];
 
-    const { playerFirst, logs } = rollInitiative(this.playerDef, firstEnemyDef);
+    const { playerFirst, logs } = rollInitiative(this.playerDef, firstEnemyDef, enemies[0].name);
     this.addLogs(logs);
 
     if (playerFirst) {
@@ -435,22 +441,22 @@ export class GameEngine {
     s.player.hidden = false;
     this.addLogs(logs);
 
-    const { finalDamage, log: resistLog } = this.resistMod(damage, this.playerDef.mainAttack.damageType, targetDef);
+    const { finalDamage, log: resistLog } = this.resistMod(damage, this.playerDef.mainAttack.damageType, targetDef, target.name);
     if (resistLog) this.addLog(resistLog);
     target.hp = Math.max(0, target.hp - finalDamage);
-    this.addLog({ left: `${targetDef.name} HP: ${target.hp}/${target.maxHp}`, style: 'status' });
+    this.addLog({ left: `${target.name} HP: ${target.hp}/${target.maxHp}`, style: 'status' });
 
     if (vexApplied) {
       target.vexed = true;
-      this.addLog({ left: `Vex/Sap — ${targetDef.name} attacks with Disadvantage`, style: 'status' });
+      this.addLog({ left: `Vex/Sap — ${target.name} attacks with Disadvantage`, style: 'status' });
     }
     if (slowApplied && !target.conditions.includes('slowed')) {
       target.conditions.push('slowed');
-      this.addLog({ left: `Slow — ${targetDef.name} speed reduced by 10 ft`, style: 'status' });
+      this.addLog({ left: `Slow — ${target.name} speed reduced by 10 ft`, style: 'status' });
     }
 
     if (target.hp <= 0) {
-      this.killWithReward(target, targetDef, `☠ ${targetDef.name} is slain!`);
+      this.killWithReward(target, targetDef, `☠ ${target.name} is slain!`);
     }
 
     s.player.actionUsed = true;
@@ -520,11 +526,26 @@ export class GameEngine {
       n.disposition === 'enemy' && n.hp > 0 &&
       chebyshev(s.player.tileX, s.player.tileY, n.tileX, n.tileY) <= longRange;
 
-    let target = targetId
-      ? (s.npcs.find((n) => (n.id === targetId || n.label === targetId) && n.disposition === 'enemy' && n.hp > 0) ?? null)
-      : null;
+    // Resolve entity ref using the same prefix conventions as moveEntity / setDisposition.
+    // Explicit target accepts any living NPC regardless of disposition (AIDM may target neutrals).
+    // No target: fall back to nearest enemy in range.
+    let target: NpcState | null = null;
+    if (targetId) {
+      if (targetId.startsWith('enemy_')) {
+        const label = targetId.replace('enemy_', '');
+        target = s.npcs.find((n) => n.label === label && n.hp > 0) ?? null;
+      } else if (targetId.startsWith('npc_')) {
+        const npcId = targetId.replace('npc_', '');
+        target = s.npcs.find((n) => n.id === npcId && n.hp > 0) ?? null;
+      } else {
+        target = s.npcs.find((n) => (n.id === targetId || n.label === targetId) && n.hp > 0) ?? null;
+      }
+    }
     if (!target) target = s.npcs.find(inLongRange) ?? null;
     if (!target) return events;
+
+    // Attacking a neutral NPC turns them hostile.
+    if (target.disposition === 'neutral') target.disposition = 'enemy';
 
     const targetDef = this.resolveMonsterDef(target.defId);
     if (!targetDef) return events;
@@ -548,14 +569,14 @@ export class GameEngine {
     return events;
   }
 
-  private resistMod(damage: number, damageType: string, def: MonsterDef): { finalDamage: number; log: LogEntry | null } {
+  private resistMod(damage: number, damageType: string, def: MonsterDef, displayName: string): { finalDamage: number; log: LogEntry | null } {
     if (def.resistances?.includes(damageType)) {
       const fd = Math.floor(damage / 2);
-      return { finalDamage: fd, log: { left: `${def.name} resists ${damageType} — ${damage}→${fd}`, right: '×½', style: 'status' } };
+      return { finalDamage: fd, log: { left: `${displayName} resists ${damageType} — ${damage}→${fd}`, right: '×½', style: 'status' } };
     }
     if (def.vulnerabilities?.includes(damageType)) {
       const fd = damage * 2;
-      return { finalDamage: fd, log: { left: `${def.name} is vulnerable to ${damageType}! ${damage}→${fd}`, right: '×2', style: 'crit' } };
+      return { finalDamage: fd, log: { left: `${displayName} is vulnerable to ${damageType}! ${damage}→${fd}`, right: '×2', style: 'crit' } };
     }
     return { finalDamage: damage, log: null };
   }
@@ -613,20 +634,20 @@ export class GameEngine {
     );
     s.player.hidden = false;
     this.addLogs(logs);
-    const { finalDamage, log: resistLog } = this.resistMod(damage, attack.damageType, targetDef);
+    const { finalDamage, log: resistLog } = this.resistMod(damage, attack.damageType, targetDef, target.name);
     if (resistLog) this.addLog(resistLog);
     target.hp = Math.max(0, target.hp - finalDamage);
-    this.addLog({ left: `${targetDef.name} HP: ${target.hp}/${target.maxHp}`, style: 'status' });
+    this.addLog({ left: `${target.name} HP: ${target.hp}/${target.maxHp}`, style: 'status' });
     if (vexApplied) {
       target.vexed = true;
-      this.addLog({ left: `Vex/Sap — ${targetDef.name} attacks with Disadvantage`, style: 'status' });
+      this.addLog({ left: `Vex/Sap — ${target.name} attacks with Disadvantage`, style: 'status' });
     }
     if (slowApplied && !target.conditions.includes('slowed')) {
       target.conditions.push('slowed');
-      this.addLog({ left: `Slow — ${targetDef.name} speed reduced by 10 ft`, style: 'status' });
+      this.addLog({ left: `Slow — ${target.name} speed reduced by 10 ft`, style: 'status' });
     }
     if (target.hp <= 0) {
-      this.killWithReward(target, targetDef, `☠ ${targetDef.name} is slain!`);
+      this.killWithReward(target, targetDef, `☠ ${target.name} is slain!`);
     }
   }
 
@@ -803,12 +824,12 @@ export class GameEngine {
             const targetDef = this.resolveMonsterDef(target.defId);
             if (targetDef) {
               const meleeAttack = def.attacks.find((a) => a.attackType === 'melee' || a.attackType === 'both');
-              const { finalDamage, log: resistLog } = this.resistMod(result.damage, meleeAttack?.damageType ?? '', targetDef);
+              const { finalDamage, log: resistLog } = this.resistMod(result.damage, meleeAttack?.damageType ?? '', targetDef, target.name);
               if (resistLog) this.addLog(resistLog);
               target.hp = Math.max(0, target.hp - finalDamage);
-              this.addLog({ left: `${targetDef.name} HP: ${target.hp}/${target.maxHp}`, style: 'status' });
+              this.addLog({ left: `${target.name} HP: ${target.hp}/${target.maxHp}`, style: 'status' });
               if (target.hp <= 0) {
-                this.killWithReward(target, targetDef, `☠ ${targetDef.name} is slain!`);
+                this.killWithReward(target, targetDef, `☠ ${target.name} is slain!`);
               }
             }
           }
@@ -978,7 +999,7 @@ export class GameEngine {
     npc.reactionUsed = true;
     const withDisadvantage = s.player.conditions.includes('dodging');
     const { damage, isHit, isCrit, logs } = enemyAttack(def, meleeAttack, this.playerDef.ac, false, withDisadvantage);
-    this.addLogs([{ left: `⚡ ${def.name} makes an Opportunity Attack!`, style: 'header' }, ...logs]);
+    this.addLogs([{ left: `⚡ ${npc.name} makes an Opportunity Attack!`, style: 'header' }, ...logs]);
     if (isHit) {
       this.applyDamageToPlayer(damage, events);
     }
@@ -993,14 +1014,14 @@ export class GameEngine {
     s.player.reactionUsed = true;
     const { damage, logs, vexApplied, slowApplied } = playerMeleeAttack(this.playerDef, targetDef, false);
     this.addLogs([{ left: `⚡ ${this.playerDef.name} makes an Opportunity Attack!`, style: 'header' }, ...logs]);
-    const { finalDamage: oaFinalDamage, log: oaResistLog } = this.resistMod(damage, this.playerDef.mainAttack.damageType, targetDef);
+    const { finalDamage: oaFinalDamage, log: oaResistLog } = this.resistMod(damage, this.playerDef.mainAttack.damageType, targetDef, npc.name);
     if (oaResistLog) this.addLog(oaResistLog);
     npc.hp = Math.max(0, npc.hp - oaFinalDamage);
-    this.addLog({ left: `${targetDef.name} HP: ${npc.hp}/${npc.maxHp}`, style: 'status' });
+    this.addLog({ left: `${npc.name} HP: ${npc.hp}/${npc.maxHp}`, style: 'status' });
     if (vexApplied) npc.vexed = true;
     if (slowApplied && !npc.conditions.includes('slowed')) npc.conditions.push('slowed');
     if (npc.hp <= 0) {
-      this.killWithReward(npc, targetDef, `☠ ${targetDef.name} slain by Opportunity Attack!`, false);
+      this.killWithReward(npc, targetDef, `☠ ${npc.name} slain by Opportunity Attack!`, false);
     }
   }
 

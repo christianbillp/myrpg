@@ -1,9 +1,8 @@
-import Phaser from "phaser";
-import { PLAYER_PANEL_WIDTH, GRID_COLS, GRID_ROWS, TILE_SIZE, TARGET_PANEL_WIDTH } from "../constants";
 import { BaseOverlay } from "./BaseOverlay";
 import { PlayerDef, EquipmentSlots } from "../data/player";
 import { ItemDef, ArmorDef, WeaponDef, ShieldDef, EquipmentDef } from "../data/items";
 import { PlayerAttack } from "../data/player";
+import { UIScale } from "./UIScale";
 
 function mod(score: number): number { return Math.floor((score - 10) / 2); }
 
@@ -16,13 +15,6 @@ function attackSummary(attack: PlayerAttack, statMod: number): string {
   const masteryStr = masteries.length ? ` (${masteries.join(", ")})` : "";
   return `${diceStr}${sign}${statMod}${masteryStr}`;
 }
-
-const DPR = window.devicePixelRatio;
-const W = PLAYER_PANEL_WIDTH + GRID_COLS * TILE_SIZE + TARGET_PANEL_WIDTH;
-const GRID_H = GRID_ROWS * TILE_SIZE;
-const ACCENT = 0x7aadcc;
-const DIM = 0x334455;
-const ROW_H = 28;
 
 function isEquipmentDef(item: ItemDef): item is EquipmentDef {
   return item.type === "armor" || item.type === "weapon" || item.type === "shield";
@@ -41,21 +33,25 @@ function slotLabel(item: EquipmentDef, playerDef: PlayerDef): string {
     return `+${(item as ShieldDef).acBonus} AC`;
   }
   const w = item as WeaponDef;
-  const statMod = w.finesse
+  const attackStatMod = w.finesse
     ? Math.max(mod(playerDef.str), mod(playerDef.dex))
     : mod(playerDef[w.statKey]);
   return attackSummary(
     { name: w.name, statKey: w.statKey, damageDice: w.damageDice, damageSides: w.damageSides, damageType: w.damageType, savageAttacker: playerDef.savageAttacker, graze: w.mastery === "graze", vex: w.mastery === "vex" },
-    statMod,
+    attackStatMod,
   );
 }
 
-export class InventoryOverlay extends BaseOverlay {
-  private wheelHandler: ((e: WheelEvent) => void) | null = null;
-  private maskGraphics: Phaser.GameObjects.Graphics | null = null;
+function escHtml(s: string): string {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
 
+const ACCENT = "#7aadcc";
+const DIM    = "#334455";
+
+export class InventoryOverlay extends BaseOverlay {
   constructor(
-    scene: Phaser.Scene,
+    scale: UIScale,
     playerDef: PlayerDef,
     slots: EquipmentSlots,
     inventory: ItemDef[],
@@ -67,228 +63,146 @@ export class InventoryOverlay extends BaseOverlay {
     onUse: (itemId: string) => void,
     onClose: () => void,
   ) {
-    super(scene, 580, 440, ACCENT, () => {
-      if (this.wheelHandler) {
-        window.removeEventListener("wheel", this.wheelHandler);
-        this.wheelHandler = null;
-      }
-      if (this.maskGraphics?.active) this.maskGraphics.destroy();
-      onClose();
-    });
+    super(scale, 580, 440, ACCENT, onClose);
 
-    const top = this.top;
     const byId = Object.fromEntries(allItems.map((i) => [i.id, i]));
 
-    const title = scene.add
-      .text(0, top + 22, "INVENTORY", { fontSize: "15px", color: "#7aadcc", fontFamily: "monospace", resolution: DPR })
-      .setOrigin(0.5, 0);
-
-    const sep1 = scene.add.rectangle(0, top + 50, this.panelW - 32, 1, DIM);
-
-    // ── Equipped slots ────────────────────────────────────────────
-    const slotsLabel = scene.add
-      .text(-this.panelW / 2 + 20, top + 58, "EQUIPPED", { fontSize: "10px", color: "#556677", fontFamily: "monospace", resolution: DPR });
-
+    // ── Equipped slots ─────────────────────────────────────────────────────────
     const slotDefs: { key: "armor" | "weapon" | "shield"; label: string; itemId: string | null }[] = [
       { key: "armor",  label: "ARMOR",   itemId: slots.armorId },
       { key: "weapon", label: "WEAPON",  itemId: slots.weaponId },
       { key: "shield", label: "OFFHAND", itemId: slots.shieldId },
     ];
 
-    const SLOT_W = 166;
-    const SLOT_H = 108;
-    const SLOT_GAP = 11;
-    const totalSlotsW = 3 * SLOT_W + 2 * SLOT_GAP;
-    const slotStartX = -totalSlotsW / 2 + SLOT_W / 2;
-    const slotCY = top + 58 + 16 + SLOT_H / 2 + 4;
-
-    const elements: Phaser.GameObjects.GameObject[] = [title, sep1, slotsLabel];
-
-    slotDefs.forEach(({ key, label, itemId }, i) => {
-      const cx = slotStartX + i * (SLOT_W + SLOT_GAP);
-      const ty = slotCY;
-
-      const bg = scene.add.rectangle(cx, ty, SLOT_W, SLOT_H, 0x0a0a18).setStrokeStyle(1, itemId ? ACCENT : DIM);
-      const labelTxt = scene.add
-        .text(cx, ty - SLOT_H / 2 + 10, label, { fontSize: "10px", color: "#556677", fontFamily: "monospace", resolution: DPR })
-        .setOrigin(0.5, 0);
-
-      if (itemId && byId[itemId]) {
-        const item = byId[itemId] as EquipmentDef;
-        const nameTxt = scene.add
-          .text(cx, ty - 14, item.name, { fontSize: "11px", color: "#c8dae8", fontFamily: "monospace", resolution: DPR, wordWrap: { width: SLOT_W - 12 } })
-          .setOrigin(0.5, 0.5);
-        const statTxt = scene.add
-          .text(cx, ty + 10, slotLabel(item, playerDef), { fontSize: "10px", color: "#7aadcc", fontFamily: "monospace", resolution: DPR })
-          .setOrigin(0.5, 0.5);
-        const btnBg = scene.add
-          .rectangle(cx, ty + SLOT_H / 2 - 18, 90, 22, 0x1a1a2e)
-          .setStrokeStyle(1, DIM)
-          .setInteractive({ useHandCursor: true });
-        const btnTxt = scene.add
-          .text(cx, ty + SLOT_H / 2 - 18, "UNEQUIP", { fontSize: "10px", color: "#889aaa", fontFamily: "monospace", resolution: DPR })
-          .setOrigin(0.5);
-        btnBg.on("pointerover", () => { btnBg.setStrokeStyle(1, ACCENT); btnTxt.setColor("#c8dae8"); });
-        btnBg.on("pointerout",  () => { btnBg.setStrokeStyle(1, DIM);    btnTxt.setColor("#889aaa"); });
-        btnBg.on("pointerdown", () => onUnequip(key));
-        elements.push(bg, labelTxt, nameTxt, statTxt, btnBg, btnTxt);
+    const slotCards = slotDefs.map(({ key, label, itemId }) => {
+      const item = itemId ? byId[itemId] as EquipmentDef | undefined : undefined;
+      const borderColor = item ? ACCENT : DIM;
+      let inner: string;
+      if (item) {
+        inner = `
+          <div style="font-size:11px;color:#c8dae8;margin-bottom:4px;">${escHtml(item.name)}</div>
+          <div style="font-size:10px;color:${ACCENT};margin-bottom:8px;">${escHtml(slotLabel(item, playerDef))}</div>
+          <button data-unequip="${key}" style="width:90px;height:22px;background:#1a1a2e;
+            border:1px solid ${DIM};color:#889aaa;font-family:monospace;font-size:10px;cursor:pointer;">
+            UNEQUIP
+          </button>`;
       } else {
-        const emptyTxt = scene.add
-          .text(cx, ty, "—", { fontSize: "18px", color: "#334455", fontFamily: "monospace", resolution: DPR })
-          .setOrigin(0.5);
-        elements.push(bg, labelTxt, emptyTxt);
+        inner = `<div style="font-size:18px;color:#334455;">—</div>`;
       }
-    });
+      return `
+        <div style="flex:1;border:1px solid ${borderColor};background:#0a0a18;
+          padding:8px 6px;display:flex;flex-direction:column;align-items:center;text-align:center;">
+          <div style="font-size:10px;color:#556677;margin-bottom:6px;">${label}</div>
+          ${inner}
+        </div>`;
+    }).join('');
 
-    // ── Carried items (scrollable) ────────────────────────────────
-    const sep2Y = slotCY + SLOT_H / 2 + 10;
-    const sep2 = scene.add.rectangle(0, sep2Y, this.panelW - 32, 1, DIM);
-    const carriedLabel = scene.add
-      .text(-this.panelW / 2 + 20, sep2Y + 8, "CARRIED", { fontSize: "10px", color: "#556677", fontFamily: "monospace", resolution: DPR });
-    elements.push(sep2, carriedLabel);
-
-    const statsY = top + this.panelH - 28;
-    const sep3 = scene.add.rectangle(0, statsY - 18, this.panelW - 32, 1, DIM);
-    const statMod = playerDef.mainAttack.statKey === "str" ? mod(playerDef.str) : mod(playerDef.dex);
-    const atkSummary = attackSummary(playerDef.mainAttack, statMod);
-    const statsBar = scene.add
-      .text(0, statsY, `AC ${playerDef.ac}  ·  ${gold} GP  ·  ${playerDef.mainAttack.name} ${atkSummary}`, {
-        fontSize: "11px", color: "#7aadcc", fontFamily: "monospace", resolution: DPR,
-      })
-      .setOrigin(0.5);
-    elements.push(sep3, statsBar);
-
-    const carryTopY  = sep2Y + 26;
-    const carryBotY  = statsY - 22;
-    const visibleH   = carryBotY - carryTopY;
-    const lx = -this.panelW / 2 + 20;
-    const rx = this.panelW / 2 - 20;
-
-    // Group equippable items by id
+    // ── Carried items ──────────────────────────────────────────────────────────
     const equippable = inventory.filter(isEquipmentDef);
     const consumables = inventory.filter((i) => i.type === "consumable");
+
     const eqGroups: { item: EquipmentDef; count: number }[] = [];
     equippable.forEach((item) => {
-      const eq = item as EquipmentDef;
-      const existing = eqGroups.find((g) => g.item.id === eq.id);
+      const existing = eqGroups.find((g) => g.item.id === item.id);
       if (existing) { existing.count++; }
-      else { eqGroups.push({ item: eq, count: 1 }); }
+      else { eqGroups.push({ item, count: 1 }); }
     });
+
     const cGroups: Record<string, { id: string; count: number }> = {};
     consumables.forEach((c) => {
       if (!cGroups[c.name]) cGroups[c.name] = { id: c.id, count: 0 };
       cGroups[c.name].count++;
     });
 
-    // Build scrollable container
-    const carryContainer = scene.add.container(0, carryTopY);
-    let itemY = ROW_H / 2;
-
-    if (eqGroups.length === 0 && Object.keys(cGroups).length === 0) {
-      const emptyTxt = scene.add
-        .text(0, itemY, "No items carried.", { fontSize: "11px", color: "#334455", fontFamily: "monospace", resolution: DPR })
-        .setOrigin(0.5, 0.5);
-      carryContainer.add(emptyTxt);
-      itemY += ROW_H;
-    }
-
-    eqGroups.forEach(({ item, count }) => {
-      const label = count > 1 ? `${item.name} ×${count}  ·  ${slotLabel(item, playerDef)}` : `${item.name}  ·  ${slotLabel(item, playerDef)}`;
-      const itemTxt = scene.add
-        .text(lx, itemY, label, { fontSize: "11px", color: "#b0c8dc", fontFamily: "monospace", resolution: DPR })
-        .setOrigin(0, 0.5);
+    const eqRows = eqGroups.map(({ item, count }) => {
+      const labelText = count > 1
+        ? `${escHtml(item.name)} ×${count}  ·  ${escHtml(slotLabel(item, playerDef))}`
+        : `${escHtml(item.name)}  ·  ${escHtml(slotLabel(item, playerDef))}`;
       const slot: "armor" | "weapon" | "shield" =
         item.type === "armor" ? "armor" : item.type === "weapon" ? "weapon" : "shield";
-      const equipBg = scene.add
-        .rectangle(rx - 36, itemY, 72, 22, 0x0a1520)
-        .setStrokeStyle(1, ACCENT)
-        .setInteractive({ useHandCursor: true });
-      const equipTxt = scene.add
-        .text(rx - 36, itemY, "EQUIP", { fontSize: "10px", color: "#7aadcc", fontFamily: "monospace", resolution: DPR })
-        .setOrigin(0.5);
-      equipBg.on("pointerover", () => equipBg.setFillStyle(0x1a2a3a));
-      equipBg.on("pointerout",  () => equipBg.setFillStyle(0x0a1520));
-      equipBg.on("pointerdown", () => onEquip(slot, item.id));
-      carryContainer.add([itemTxt, equipBg, equipTxt]);
-      itemY += ROW_H;
+      return `
+        <div style="display:flex;align-items:center;justify-content:space-between;
+          height:28px;padding:0 2px;">
+          <span style="font-size:11px;color:#b0c8dc;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;margin-right:8px;">
+            ${labelText}
+          </span>
+          <button data-equip="${slot}|${escHtml(item.id)}" style="width:72px;height:22px;background:#0a1520;
+            border:1px solid ${ACCENT};color:${ACCENT};font-family:monospace;font-size:10px;cursor:pointer;">
+            EQUIP
+          </button>
+        </div>`;
+    }).join('');
+
+    const useColor   = canUseConsumable ? "#66aa66" : "#445544";
+    const useBorder  = canUseConsumable ? "#4a8a4a" : DIM;
+    const useBg      = canUseConsumable ? "#1a3a1a" : "#111111";
+    const cRows = Object.entries(cGroups).map(([name, { id, count }]) => `
+      <div style="display:flex;align-items:center;justify-content:space-between;
+        height:28px;padding:0 2px;">
+        <span style="font-size:11px;color:#668877;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;margin-right:8px;">
+          ${escHtml(name)} ×${count}
+        </span>
+        <button ${canUseConsumable ? `data-use="${escHtml(id)}"` : 'disabled'} style="width:72px;height:22px;
+          background:${useBg};border:1px solid ${useBorder};color:${useColor};
+          font-family:monospace;font-size:10px;cursor:${canUseConsumable ? 'pointer' : 'default'};">
+          USE
+        </button>
+      </div>`).join('');
+
+    const emptyCarried = eqGroups.length === 0 && Object.keys(cGroups).length === 0
+      ? `<div style="font-size:11px;color:#334455;padding:8px 2px;">No items carried.</div>`
+      : '';
+
+    // ── Stats bar ──────────────────────────────────────────────────────────────
+    const mainStatMod = playerDef.mainAttack.statKey === "str" ? mod(playerDef.str) : mod(playerDef.dex);
+    const atkSummaryText = attackSummary(playerDef.mainAttack, mainStatMod);
+
+    this.panelEl.insertAdjacentHTML('beforeend', `
+      <div style="padding:20px 20px 0;display:flex;flex-direction:column;height:calc(100% - 20px);box-sizing:border-box;">
+        <div style="font-size:15px;color:${ACCENT};text-align:center;margin-bottom:12px;">INVENTORY</div>
+        <div style="height:1px;background:${DIM};margin-bottom:8px;"></div>
+
+        <div style="font-size:10px;color:#556677;margin-bottom:6px;">EQUIPPED</div>
+        <div style="display:flex;gap:8px;margin-bottom:8px;" data-slot-area></div>
+
+        <div style="height:1px;background:${DIM};margin:6px 0;"></div>
+        <div style="font-size:10px;color:#556677;margin-bottom:4px;">CARRIED</div>
+        <div style="flex:1;overflow-y:auto;scrollbar-width:thin;scrollbar-color:${ACCENT} transparent;
+          min-height:0;" data-carry-area>
+          ${eqRows}${cRows}${emptyCarried}
+        </div>
+
+        <div style="height:1px;background:${DIM};margin:6px 0;"></div>
+        <div style="font-size:11px;color:${ACCENT};text-align:center;padding-bottom:4px;">
+          AC ${playerDef.ac}  ·  ${gold} GP  ·  ${escHtml(playerDef.mainAttack.name)} ${escHtml(atkSummaryText)}
+        </div>
+      </div>
+    `);
+
+    // Populate slot cards (innerHTML set separately to keep dynamic listeners easier)
+    const slotArea = this.panelEl.querySelector("[data-slot-area]") as HTMLElement;
+    slotArea.innerHTML = slotCards;
+
+    // Wire equip/unequip/use buttons
+    this.panelEl.querySelectorAll<HTMLButtonElement>("[data-unequip]").forEach(btn => {
+      const slot = btn.dataset.unequip as "armor" | "weapon" | "shield";
+      btn.addEventListener("pointerover", () => { btn.style.borderColor = ACCENT; btn.style.color = "#c8dae8"; });
+      btn.addEventListener("pointerout",  () => { btn.style.borderColor = DIM;   btn.style.color = "#889aaa"; });
+      btn.addEventListener("pointerdown", () => onUnequip(slot));
     });
 
-    Object.entries(cGroups).forEach(([name, { id, count }]) => {
-      const cTxt = scene.add
-        .text(lx, itemY, `${name} ×${count}`, { fontSize: "11px", color: "#668877", fontFamily: "monospace", resolution: DPR })
-        .setOrigin(0, 0.5);
-      const btnColor = canUseConsumable ? 0x1a3a1a : 0x111111;
-      const btnTextColor = canUseConsumable ? "#66aa66" : "#445544";
-      const useBg = scene.add
-        .rectangle(rx - 36, itemY, 72, 22, btnColor)
-        .setStrokeStyle(1, canUseConsumable ? 0x4a8a4a : DIM)
-        .setInteractive({ useHandCursor: canUseConsumable });
-      const useTxt = scene.add
-        .text(rx - 36, itemY, "USE", { fontSize: "10px", color: btnTextColor, fontFamily: "monospace", resolution: DPR })
-        .setOrigin(0.5);
-      if (canUseConsumable) {
-        useBg.on("pointerover", () => useBg.setFillStyle(0x2a4a2a));
-        useBg.on("pointerout",  () => useBg.setFillStyle(btnColor));
-        useBg.on("pointerdown", () => onUse(id));
-      }
-      carryContainer.add([cTxt, useBg, useTxt]);
-      itemY += ROW_H;
+    this.panelEl.querySelectorAll<HTMLButtonElement>("[data-equip]").forEach(btn => {
+      const [slot, itemId] = btn.dataset.equip!.split("|") as ["armor" | "weapon" | "shield", string];
+      btn.addEventListener("pointerover", () => { btn.style.background = "#1a2a3a"; });
+      btn.addEventListener("pointerout",  () => { btn.style.background = "#0a1520"; });
+      btn.addEventListener("pointerdown", () => onEquip(slot, itemId));
     });
 
-    const totalContentH = itemY;
-    const maxScroll = Math.max(0, totalContentH - visibleH);
-
-    // Mask for clipping
-    const maskGraphics = scene.add.graphics();
-    maskGraphics.fillStyle(0xffffff);
-    maskGraphics.fillRect(
-      W / 2 - (this.panelW - 32) / 2,
-      GRID_H / 2 + carryTopY,
-      this.panelW - 32,
-      visibleH,
-    );
-    maskGraphics.setVisible(false);
-    carryContainer.setMask(maskGraphics.createGeometryMask());
-    this.maskGraphics = maskGraphics;
-
-    // Scrollbar
-    const sbX = this.panelW / 2 - 14;
-    const scrollTrack = scene.add.rectangle(sbX, (carryTopY + carryBotY) / 2, 4, visibleH, 0x1a1a2e).setAlpha(0.8);
-    const scrollThumb = scene.add
-      .rectangle(sbX, carryTopY + 10, 4, 20, ACCENT)
-      .setAlpha(maxScroll > 0 ? 0.7 : 0)
-      .setVisible(maxScroll > 0);
-    elements.push(scrollTrack, scrollThumb);
-
-    this.container.add([...elements, carryContainer]);
-
-    if (maxScroll > 0) {
-      let scrollOffset = 0;
-
-      const updateThumb = () => {
-        const thumbH = Math.max(20, (visibleH * visibleH) / totalContentH);
-        const thumbRange = visibleH - thumbH;
-        const thumbCY = carryTopY + (scrollOffset / maxScroll) * thumbRange + thumbH / 2;
-        scrollThumb.setSize(4, thumbH).setY(thumbCY);
-      };
-      updateThumb();
-
-      this.wheelHandler = (e: WheelEvent) => {
-        scrollOffset = Phaser.Math.Clamp(scrollOffset + (e.deltaY > 0 ? ROW_H : -ROW_H), 0, maxScroll);
-        carryContainer.setY(carryTopY - scrollOffset);
-        updateThumb();
-        e.preventDefault();
-      };
-      window.addEventListener("wheel", this.wheelHandler, { passive: false });
-    }
-  }
-
-  override destroy(): void {
-    if (this.wheelHandler) {
-      window.removeEventListener("wheel", this.wheelHandler);
-      this.wheelHandler = null;
-    }
-    if (this.maskGraphics?.active) this.maskGraphics.destroy();
-    super.destroy();
+    this.panelEl.querySelectorAll<HTMLButtonElement>("[data-use]").forEach(btn => {
+      const itemId = btn.dataset.use!;
+      btn.addEventListener("pointerover", () => { btn.style.background = "#2a4a2a"; });
+      btn.addEventListener("pointerout",  () => { btn.style.background = useBg; });
+      btn.addEventListener("pointerdown", () => onUse(itemId));
+    });
   }
 }

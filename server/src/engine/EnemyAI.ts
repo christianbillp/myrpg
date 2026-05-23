@@ -58,7 +58,7 @@ export function runEnemyTurn(
   def: MonsterDef,
   config: EnemyTurnConfig,
 ): EnemyTurnResult {
-  const logs: LogEntry[] = [{ left: `${def.name}'s turn`, style: 'header' }];
+  const logs: LogEntry[] = [{ left: `${enemy.name}'s turn`, style: 'header' }];
   const events: GameEvent[] = [];
   let { tileX, tileY } = enemy;
   let enemyHidden = config.enemyCurrentlyHidden;
@@ -87,13 +87,13 @@ export function runEnemyTurn(
 
   const dist = chebyshev(tileX, tileY, config.playerTileX, config.playerTileY);
   if (dist > 1) {
-    logs.push({ left: `${def.name} is out of reach`, style: 'normal' });
+    logs.push({ left: `${enemy.name} is out of reach`, style: 'normal' });
     return { damage: 0, isHit: false, isCrit: false, attacked: false, logs, events, finalTileX: tileX, finalTileY: tileY, hidden: enemyHidden };
   }
 
   const meleeAttack = def.attacks.find((a) => a.attackType === 'melee' || a.attackType === 'both');
   if (!meleeAttack) {
-    logs.push({ left: `${def.name} has no attack`, style: 'normal' });
+    logs.push({ left: `${enemy.name} has no attack`, style: 'normal' });
     return { damage: 0, isHit: false, isCrit: false, attacked: false, logs, events, finalTileX: tileX, finalTileY: tileY, hidden: enemyHidden };
   }
 
@@ -110,12 +110,12 @@ export function runAllyTurn(
   def: MonsterDef,
   config: AllyTurnConfig,
 ): AllyTurnResult {
-  const logs: LogEntry[] = [{ left: `${def.name}'s turn (ally)`, style: 'header' }];
+  const logs: LogEntry[] = [{ left: `${ally.name}'s turn (ally)`, style: 'header' }];
   const events: GameEvent[] = [];
   let { tileX, tileY } = ally;
 
   if (config.enemyTargets.length === 0) {
-    logs.push({ left: `${def.name} stands ready`, style: 'normal' });
+    logs.push({ left: `${ally.name} stands ready`, style: 'normal' });
     return { attackedTargetId: null, damage: 0, isHit: false, isCrit: false, attacked: false, logs, events, finalTileX: tileX, finalTileY: tileY };
   }
 
@@ -145,13 +145,13 @@ export function runAllyTurn(
 
   const dist = chebyshev(tileX, tileY, nearest.tileX, nearest.tileY);
   if (dist > 1) {
-    logs.push({ left: `${def.name} moves but cannot reach the enemy`, style: 'normal' });
+    logs.push({ left: `${ally.name} moves but cannot reach the enemy`, style: 'normal' });
     return { attackedTargetId: null, damage: 0, isHit: false, isCrit: false, attacked: false, logs, events, finalTileX: tileX, finalTileY: tileY };
   }
 
   const meleeAttack = def.attacks.find((a) => a.attackType === 'melee' || a.attackType === 'both');
   if (!meleeAttack) {
-    logs.push({ left: `${def.name} has no melee attack`, style: 'normal' });
+    logs.push({ left: `${ally.name} has no melee attack`, style: 'normal' });
     return { attackedTargetId: null, damage: 0, isHit: false, isCrit: false, attacked: false, logs, events, finalTileX: tileX, finalTileY: tileY };
   }
 

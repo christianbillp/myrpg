@@ -1,22 +1,24 @@
-import Phaser from "phaser";
 import { PlayerDef } from "../data/player";
 import { ItemDef } from "../data/items";
 import { AIDMOverlay, ChatMessage, DMPersona } from "../ui/AIDMOverlay";
 import { InventoryOverlay } from "../ui/InventoryOverlay";
 import { IntroductionOverlay } from "../ui/IntroductionOverlay";
 import { GameState, EquipmentSlots } from "../net/types";
+import { UIScale } from "../ui/UIScale";
 
 export interface OverlayCallbacks {
   onEquip: (slot: "armor" | "weapon" | "shield", itemId: string) => void;
   onUnequip: (slot: "armor" | "weapon" | "shield") => void;
   onUsePotion: () => void;
   onSendAIDM: (message: string, history: ChatMessage[], persona: DMPersona) => Promise<{ reply: string; rollResults: string[] }>;
-  onKeyboardCapture: () => void;
+  onDisableKeyboard: () => void;
+  onEnableKeyboard: () => void;
   onRefresh: () => void;
+  getItems: () => ItemDef[];
 }
 
 export class OverlayManager {
-  private readonly scene: Phaser.Scene;
+  private readonly scale: UIScale;
   private readonly playerDef: PlayerDef;
   private readonly callbacks: OverlayCallbacks;
 
@@ -27,8 +29,8 @@ export class OverlayManager {
   private aidmPersona: DMPersona = "story";
   private introShown = false;
 
-  constructor(scene: Phaser.Scene, playerDef: PlayerDef, callbacks: OverlayCallbacks) {
-    this.scene = scene;
+  constructor(scale: UIScale, playerDef: PlayerDef, callbacks: OverlayCallbacks) {
+    this.scale = scale;
     this.playerDef = playerDef;
     this.callbacks = callbacks;
   }
@@ -51,20 +53,20 @@ export class OverlayManager {
     this.introShown = true;
     const introduction = state.introduction;
     this.introOverlay = new IntroductionOverlay(
-      this.scene,
+      this.scale,
       state.encounterTypes,
       this.playerDef,
       { introduction, context: state.encounterContext, enemyCount: 0, secrets: [], riddle: null, quests: [] },
       () => {
         this.introOverlay = null;
-        this.aidmHistory = [{ role: 'assistant', content: introduction }];
+        this.aidmHistory = [{ role: "assistant", content: introduction }];
       },
     );
   }
 
   openInventory(state: GameState): void {
     if (this.aidmOverlay || this.inventoryOverlay) return;
-    const allItems = this.scene.registry.get("items") as ItemDef[];
+    const allItems = this.callbacks.getItems();
     const byId = Object.fromEntries(allItems.map(i => [i.id, i]));
     const inventory = state.player.inventoryIds.map(id => byId[id]).filter(Boolean) as ItemDef[];
     const slots: EquipmentSlots = { ...state.player.equippedSlots };
@@ -72,7 +74,7 @@ export class OverlayManager {
       || (state.phase === "player_turn" && !state.player.bonusActionUsed);
 
     this.inventoryOverlay = new InventoryOverlay(
-      this.scene,
+      this.scale,
       this.playerDef,
       slots,
       inventory,
@@ -89,7 +91,7 @@ export class OverlayManager {
   openDM(): void {
     if (this.aidmOverlay) return;
     this.aidmOverlay = new AIDMOverlay(
-      this.scene,
+      this.scale,
       this.aidmHistory,
       this.aidmPersona,
       (msg, history, persona) => this.callbacks.onSendAIDM(msg, history, persona),
@@ -97,9 +99,10 @@ export class OverlayManager {
         this.aidmHistory = history;
         this.aidmPersona = persona;
         this.aidmOverlay = null;
-        this.callbacks.onKeyboardCapture();
         this.callbacks.onRefresh();
       },
+      () => this.callbacks.onDisableKeyboard(),
+      () => this.callbacks.onEnableKeyboard(),
     );
   }
 }

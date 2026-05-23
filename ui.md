@@ -24,7 +24,7 @@ Canonical names for all UI regions and components. Use these consistently in cod
 
 ## Player Panel
 
-Defined in `client/src/ui/PlayerPanel.ts`. Hidden by default; toggled open/closed by clicking the player token on the Game Map.
+Defined in `client/src/ui/PlayerPanel.ts`. HTML DOM panel; hidden by default; toggled open/closed by clicking the player token on the Game Map.
 
 | Component          | Description                                                                                              |
 | ------------------ | -------------------------------------------------------------------------------------------------------- |
@@ -62,17 +62,17 @@ Rendered in `client/src/scenes/GameScene.ts`. Each tile = 5 ft. Occupies the are
 
 | Component               | Description                                                                                                                           |
 | ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
-| **Player Token**        | Coloured circle representing the player character; shows an HP bar above the token when damaged                                       |
-| **NPC Token**           | Coloured circle representing a non-player creature. **Neutral** NPCs show their name in the token colour above the circle; no HP bar. **Enemy** NPCs show a red HP bar above the circle when damaged. **Ally** NPCs show a green HP bar. Letter labels (A, B, C…) appear centred on combat tokens (enemy and ally) once combat begins and are hidden during exploration. |
+| **Player Token**        | Coloured circle representing the player character; shows an HP bar overlaid at the top of the circle when damaged                     |
+| **NPC Token**           | Coloured circle representing a non-player creature. All tokens show their label just above the circle; all damaged tokens show an HP bar overlaid at the top of the circle. **Neutral** NPCs show their name in the token colour; HP bar is blue-grey. **Enemy** NPCs show a red HP bar; letter labels A, B, C… appear during combat and are hidden while exploring. **Ally** NPCs show a green HP bar; letter labels a, b, c… (lowercase) appear during combat. |
 | **Item Token**          | Small green diamond on a tile; walking onto it picks up the item                                                                      |
 | **Movement Highlights** | Blue-tinted tiles showing reachable squares during the player's turn                                                                  |
-| **Turn Order Bar**      | Semi-transparent strip pinned to the top of the Game Map; visible during combat. One chip per combatant (player first, then all non-neutral NPCs in initiative order). The active chip is highlighted green; dead chips are dimmed. Enemy and ally chips show the letter label and name. |
+| **Turn Order Bar**      | Semi-transparent HTML strip pinned to the top of the Game Map (rendered by `HUD.ts`); visible during combat. One chip per combatant (player first, then all non-neutral NPCs in initiative order). The active chip is highlighted green; dead chips are dimmed. Enemy chips show "A · Name"; ally chips show "a · Name" (lowercase label). |
 
 ---
 
 ## Target Panel
 
-Defined in `client/src/ui/TargetPanel.ts`. Visible only when a creature is selected. Positioned on the right side of the Game Map, mirroring the Player Panel's width and layout.
+Defined in `client/src/ui/TargetPanel.ts`. HTML DOM panel; visible only when a creature is selected. Positioned on the right side of the Game Map, mirroring the Player Panel's width and layout.
 
 Selection: clicking a creature in the Game Map selects it. The creature is highlighted with a coloured outline (its token colour). Clicking an empty tile or defeating the creature clears the selection and hides the panel.
 
@@ -89,7 +89,7 @@ Selection: clicking a creature in the Game Map selects it. The creature is highl
 
 ## HUD (Heads-Up Display)
 
-Defined in `client/src/ui/HUD.ts`. Spans the full canvas width below the Game Map.
+Defined in `client/src/ui/HUD.ts`. HTML DOM bar spanning the full canvas width below the Game Map. Also renders the Turn Order Bar as a second HTML element pinned to the top of the grid area.
 
 | Component           | Description                                                                                                   |
 | ------------------- | ------------------------------------------------------------------------------------------------------------- |
@@ -104,7 +104,7 @@ Defined in `client/src/ui/HUD.ts`. Spans the full canvas width below the Game Ma
 
 ## Overlays
 
-Full-screen panels that appear on top of the game. Clicking the × closes them.
+HTML DOM modals that appear on top of the game canvas. All overlays extend `BaseOverlay` (`client/src/ui/BaseOverlay.ts`), which provides a semi-transparent backdrop, a centred panel, and a × close button. Clicking outside the panel or clicking × closes them. `UIScale` (`client/src/ui/UIScale.ts`) positions all HTML panels over the canvas and keeps them in sync with window resize events.
 
 ### Introduction Overlay
 
@@ -121,7 +121,7 @@ Appears automatically when the game map loads. Must be dismissed before the play
 
 ### AIDM Overlay
 
-Defined in `client/src/ui/AIDMOverlay.ts`. Full-screen chat interface powered by Claude Sonnet.
+Defined in `client/src/ui/AIDMOverlay.ts`. HTML DOM chat overlay powered by Claude Sonnet. DM responses are rendered as markdown using the `marked` library.
 
 | Component            | Description                                                               |
 | -------------------- | ------------------------------------------------------------------------- |
@@ -137,7 +137,7 @@ Defined in `client/src/ui/AIDMOverlay.ts`. Full-screen chat interface powered by
 
 ### Inventory Overlay
 
-Defined in `client/src/ui/InventoryOverlay.ts`. Opened via the INVENTORY HUD button.
+Defined in `client/src/ui/InventoryOverlay.ts`. HTML DOM overlay; opened via the INVENTORY button in the Player Panel.
 
 | Component            | Description                                                               |
 | -------------------- | ------------------------------------------------------------------------- |

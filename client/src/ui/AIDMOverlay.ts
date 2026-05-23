@@ -1,12 +1,6 @@
-import Phaser from "phaser";
-import {
-  PLAYER_PANEL_WIDTH,
-  GRID_COLS,
-  GRID_ROWS,
-  TILE_SIZE,
-  TARGET_PANEL_WIDTH,
-} from "../constants";
+import { marked } from "marked";
 import { BaseOverlay } from "./BaseOverlay";
+import { UIScale } from "./UIScale";
 
 export interface ChatMessage {
   role: "user" | "assistant";
@@ -15,49 +9,60 @@ export interface ChatMessage {
 
 export type DMPersona = "story" | "dev";
 
-const DPR = window.devicePixelRatio;
-const W = PLAYER_PANEL_WIDTH + GRID_COLS * TILE_SIZE + TARGET_PANEL_WIDTH;
-const GRID_H = GRID_ROWS * TILE_SIZE;
-const LINE_H = 16;
-const ACCENT = 0xe2b96f;
-const MSG_GAP = 8;
-
+const ACCENT   = "#e2b96f";
+const MSG_GAP  = 8;
 const ROLL_PREFIX = "[Roll] ";
 
-function isRollMessage(content: string): boolean {
-  return content.startsWith(ROLL_PREFIX);
+function isRollMessage(content: string): boolean { return content.startsWith(ROLL_PREFIX); }
+function isRollSuccess(content: string): boolean  { return /SUCCESS/.test(content); }
+
+function escHtml(s: string): string {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
-function isRollSuccess(content: string): boolean {
-  return /SUCCESS/.test(content);
+const CHAT_STYLE_ID = "aidm-chat-style";
+
+function injectChatStyle(): void {
+  if (document.getElementById(CHAT_STYLE_ID)) return;
+  const el = document.createElement("style");
+  el.id = CHAT_STYLE_ID;
+  el.textContent = `
+    .aidm-msg p  { margin: 0 0 4px 0; }
+    .aidm-msg strong { color: #f0e0c0; }
+    .aidm-msg em { color: #d0c090; font-style: italic; }
+    .aidm-msg ul, .aidm-msg ol { margin: 4px 0; padding-left: 16px; }
+    .aidm-msg li { margin: 2px 0; }
+    .aidm-msg h1, .aidm-msg h2, .aidm-msg h3 {
+      color: #e2b96f; margin: 6px 0 4px; font-size: 1em;
+      text-transform: uppercase; letter-spacing: 0.05em;
+    }
+    .aidm-msg code { background: #1a1a2e; padding: 0 3px; border-radius: 2px; font-family: monospace; }
+    .aidm-msg pre  { background: #1a1a2e; padding: 6px 8px; border-radius: 3px; overflow-x: auto; margin: 4px 0; }
+    .aidm-msg blockquote { border-left: 2px solid #e2b96f; padding-left: 8px; color: #a0b0c0; margin: 4px 0; }
+    .aidm-msg hr { border: none; border-top: 1px solid #334455; margin: 6px 0; }
+  `;
+  document.head.appendChild(el);
 }
 
 export class AIDMOverlay extends BaseOverlay {
-  private readonly scene: Phaser.Scene;
-  private blocksContainer!: Phaser.GameObjects.Container;
-  private statusText: Phaser.GameObjects.Text;
-  private inputText: Phaser.GameObjects.Text;
-  private scrollThumb: Phaser.GameObjects.Rectangle;
-  private maskShape: Phaser.GameObjects.Graphics;
-  private inputValue = "";
-  private history: ChatMessage[] = [];
+  private readonly chatEl: HTMLDivElement;
+  private readonly inputEl: HTMLInputElement;
+  private readonly statusEl: HTMLDivElement;
+  private readonly storyChip: HTMLButtonElement;
+  private readonly devChip: HTMLButtonElement;
+  private history: ChatMessage[];
   private thinking = false;
-  private scrollPos = 0;
-  private totalContentH = 0;
-  private readonly areaTop: number;
-  private readonly areaBottom: number;
-  private readonly visibleH: number;
-  private keyHandler: (e: KeyboardEvent) => void;
-  private wheelHandler: (e: WheelEvent) => void;
   private dmPersona: DMPersona;
   private readonly onSend: (
     playerMessage: string,
     history: ChatMessage[],
     dmPersona: DMPersona,
   ) => Promise<{ reply: string; rollResults: string[] }>;
+  private readonly disableKeyboard: () => void;
+  private readonly enableKeyboard: () => void;
 
   constructor(
-    scene: Phaser.Scene,
+    scale: UIScale,
     initialHistory: ChatMessage[],
     initialPersona: DMPersona,
     onSend: (
@@ -66,200 +71,107 @@ export class AIDMOverlay extends BaseOverlay {
       dmPersona: DMPersona,
     ) => Promise<{ reply: string; rollResults: string[] }>,
     onClose: (history: ChatMessage[], persona: DMPersona) => void,
+    disableKeyboard: () => void,
+    enableKeyboard: () => void,
   ) {
-    super(scene, 640, 480, ACCENT, () => {
-      scene.input.keyboard?.enableGlobalCapture();
-      window.removeEventListener("keydown", this.keyHandler);
-      window.removeEventListener("wheel", this.wheelHandler);
-      if (this.maskShape.active) this.maskShape.destroy();
+    super(scale, 640, 480, ACCENT, () => {
+      enableKeyboard();
       onClose(this.history, this.dmPersona);
     });
 
+    injectChatStyle();
+
+    this.history = [...initialHistory];
     this.dmPersona = initialPersona;
     this.onSend = onSend;
-    this.scene = scene;
-    this.history = [...initialHistory];
+    this.disableKeyboard = disableKeyboard;
+    this.enableKeyboard = enableKeyboard;
 
-    scene.input.keyboard?.disableGlobalCapture();
+    disableKeyboard();
 
-    const panelW = this.panelW;
-    const top = this.top;
-    const historyAreaH = this.panelH - 160;
+    this.panelEl.insertAdjacentHTML('beforeend', `
+      <div style="display:flex;flex-direction:column;height:100%;padding:12px 16px 12px;box-sizing:border-box;">
 
-    this.areaTop = top + 52;
-    this.areaBottom = top + 48 + historyAreaH;
-    this.visibleH = this.areaBottom - this.areaTop;
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;flex-shrink:0;padding-right:26px;">
+          <div style="font-size:15px;color:${ACCENT};">DUNGEON MASTER</div>
+          <div style="display:flex;gap:6px;">
+            <button data-chip="story" style="width:56px;height:18px;font-family:monospace;font-size:9px;cursor:pointer;border:1px solid #443300;background:#1a1a00;color:#665533;">STORY</button>
+            <button data-chip="dev"   style="width:56px;height:18px;font-family:monospace;font-size:9px;cursor:pointer;border:1px solid #224422;background:#001a00;color:#336633;">DEV</button>
+          </div>
+        </div>
 
-    const titleText = scene.add
-      .text(0, top + 20, "DUNGEON MASTER", {
-        fontSize: "15px", color: "#e2b96f", fontFamily: "monospace", resolution: DPR,
-      })
-      .setOrigin(0.5, 0);
+        <div style="height:1px;background:#334455;flex-shrink:0;margin-bottom:6px;"></div>
 
-    const chipY = top + 27;
-    const chipW = 56;
-    const chipH = 18;
-    const chipGap = 6;
-    const chipRightEdge = panelW / 2 - 56;
-    const chipDevX = chipRightEdge - chipW / 2;
-    const chipStoryX = chipDevX - chipW - chipGap;
+        <div data-chat style="flex:1;min-height:0;overflow-y:auto;overflow-x:hidden;
+          scrollbar-width:thin;scrollbar-color:${ACCENT} transparent;
+          background:#080812;padding:6px 10px;box-sizing:border-box;
+          font-size:11px;line-height:1.55;color:#c8d8e8;"></div>
 
-    const storyBg = scene.add.rectangle(chipStoryX, chipY, chipW, chipH, 0x1a1a00).setInteractive({ useHandCursor: true });
-    const storyTxt = scene.add.text(chipStoryX, chipY, "STORY", { fontSize: "9px", fontFamily: "monospace", resolution: DPR }).setOrigin(0.5);
-    const devBg = scene.add.rectangle(chipDevX, chipY, chipW, chipH, 0x001a00).setInteractive({ useHandCursor: true });
-    const devTxt = scene.add.text(chipDevX, chipY, "DEV", { fontSize: "9px", fontFamily: "monospace", resolution: DPR }).setOrigin(0.5);
+        <div style="height:1px;background:#334455;flex-shrink:0;margin-top:6px;"></div>
+        <div data-status style="font-size:10px;color:#b8960c;min-height:16px;padding:2px 0;flex-shrink:0;"></div>
+        <div style="height:1px;background:#334455;flex-shrink:0;margin-bottom:6px;"></div>
 
-    const refreshChips = () => {
-      storyBg.setStrokeStyle(1, this.dmPersona === "story" ? ACCENT : 0x443300);
-      storyTxt.setColor(this.dmPersona === "story" ? "#e2b96f" : "#665533");
-      devBg.setStrokeStyle(1, this.dmPersona === "dev" ? 0x44cc44 : 0x224422);
-      devTxt.setColor(this.dmPersona === "dev" ? "#66ee66" : "#336633");
-    };
-    refreshChips();
+        <div style="display:flex;gap:8px;flex-shrink:0;">
+          <input data-input type="text" maxlength="300" autocomplete="off"
+            placeholder="Speak to the Dungeon Master…"
+            style="flex:1;height:30px;background:#111122;border:1px solid #554422;
+              color:#e0d0a0;font-family:monospace;font-size:12px;padding:0 8px;
+              outline:none;box-sizing:border-box;caret-color:${ACCENT};" />
+          <button data-send style="width:72px;height:30px;background:#2a1e08;
+            border:1px solid ${ACCENT};color:${ACCENT};font-family:monospace;
+            font-size:12px;cursor:pointer;flex-shrink:0;">SEND</button>
+        </div>
+      </div>
+    `);
 
-    storyBg.on("pointerdown", () => { this.dmPersona = "story"; refreshChips(); });
-    devBg.on("pointerdown",   () => { this.dmPersona = "dev";     refreshChips(); });
+    const ref = (a: string) => this.panelEl.querySelector(`[data-${a}]`) as HTMLElement;
+    this.chatEl   = ref("chat")  as HTMLDivElement;
+    this.inputEl  = ref("input") as HTMLInputElement;
+    this.statusEl = ref("status") as HTMLDivElement;
+    this.storyChip = this.panelEl.querySelector('[data-chip="story"]') as HTMLButtonElement;
+    this.devChip   = this.panelEl.querySelector('[data-chip="dev"]')   as HTMLButtonElement;
 
-    const sep1 = scene.add.rectangle(0, top + 44, panelW - 32, 1, 0x334455);
+    this.refreshChips();
 
-    const historyBg = scene.add.rectangle(0, top + 44 + historyAreaH / 2 + 4, panelW - 32, historyAreaH, 0x080812);
+    this.storyChip.addEventListener("pointerdown", () => { this.dmPersona = "story"; this.refreshChips(); });
+    this.devChip.addEventListener("pointerdown",   () => { this.dmPersona = "dev";   this.refreshChips(); });
 
-    this.maskShape = scene.add.graphics();
-    this.maskShape.fillStyle(0xffffff);
-    this.maskShape.fillRect(
-      W / 2 - (panelW - 32) / 2,
-      GRID_H / 2 + top + 48,
-      panelW - 32,
-      historyAreaH,
-    );
-    this.maskShape.setVisible(false);
+    (ref("send") as HTMLButtonElement).addEventListener("pointerover",  () => { (ref("send") as HTMLElement).style.opacity = "0.75"; });
+    (ref("send") as HTMLButtonElement).addEventListener("pointerout",   () => { (ref("send") as HTMLElement).style.opacity = "1"; });
+    (ref("send") as HTMLButtonElement).addEventListener("pointerdown",  () => this.send());
 
-    this.blocksContainer = scene.add.container(-(panelW / 2 - 24), this.areaTop);
-    this.blocksContainer.setMask(this.maskShape.createGeometryMask());
-
-    const sbX = panelW / 2 - 20;
-    const sbCY = (this.areaTop + this.areaBottom) / 2;
-    scene.add.rectangle(sbX, sbCY, 4, this.visibleH, 0x1a1a2e).setAlpha(0.8);
-    this.scrollThumb = scene.add
-      .rectangle(sbX, this.areaTop + 10, 4, 20, ACCENT)
-      .setAlpha(0.7)
-      .setVisible(false);
-
-    this.statusText = scene.add
-      .text(0, top + this.panelH - 112, "", {
-        fontSize: "10px", color: "#b8960c", fontFamily: "monospace", resolution: DPR,
-      })
-      .setOrigin(0.5, 0);
-
-    const sep2 = scene.add.rectangle(0, top + this.panelH - 98, panelW - 32, 1, 0x334455);
-
-    const inputAreaY = top + this.panelH - 60;
-    const sendBtnX = panelW / 2 - 60;
-    const inputLeft = -(panelW / 2 - 24);
-    const inputRight = sendBtnX - 56;
-    const inputW = inputRight - inputLeft;
-    const inputCX = inputLeft + inputW / 2;
-
-    const inputBg = scene.add.rectangle(inputCX, inputAreaY, inputW, 30, 0x111122).setStrokeStyle(1, 0x554422);
-
-    this.inputText = scene.add
-      .text(inputLeft + 6, inputAreaY, "█", {
-        fontSize: "12px", color: "#e0d0a0", fontFamily: "monospace", resolution: DPR,
-      })
-      .setOrigin(0, 0.5);
-
-    const sendBg = scene.add
-      .rectangle(sendBtnX, inputAreaY, 96, 30, 0x2a1e08)
-      .setStrokeStyle(1, ACCENT)
-      .setInteractive({ useHandCursor: true });
-    const sendLabel = scene.add
-      .text(sendBtnX, inputAreaY, "SEND", {
-        fontSize: "12px", color: "#e2b96f", fontFamily: "monospace", resolution: DPR,
-      })
-      .setOrigin(0.5);
-    sendBg.on("pointerover", () => sendBg.setAlpha(0.75));
-    sendBg.on("pointerout",  () => sendBg.setAlpha(1));
-    sendBg.on("pointerdown", () => this.send());
-
-    this.container.add([
-      titleText, storyBg, storyTxt, devBg, devTxt, sep1,
-      historyBg, this.blocksContainer, this.scrollThumb,
-      this.statusText, sep2,
-      inputBg, this.inputText,
-      sendBg, sendLabel,
-    ]);
+    this.inputEl.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") { e.preventDefault(); this.send(); }
+      else if (e.key === "ArrowUp")   { e.preventDefault(); this.chatEl.scrollTop -= 48; }
+      else if (e.key === "ArrowDown") { e.preventDefault(); this.chatEl.scrollTop += 48; }
+    });
 
     if (this.history.length > 0) this.renderHistory();
-
-    this.keyHandler = (e: KeyboardEvent) => {
-      if (e.key === "Enter") {
-        this.send();
-      } else if (e.key === "Backspace") {
-        this.inputValue = this.inputValue.slice(0, -1);
-        this.renderInput();
-        e.preventDefault();
-      } else if (e.key === "ArrowUp") {
-        this.scroll(-1);
-        e.preventDefault();
-      } else if (e.key === "ArrowDown") {
-        this.scroll(1);
-        e.preventDefault();
-      } else if (e.key.length === 1 && this.inputValue.length < 300) {
-        this.inputValue += e.key;
-        this.renderInput();
-      }
-    };
-    window.addEventListener("keydown", this.keyHandler);
-
-    this.wheelHandler = (e: WheelEvent) => {
-      this.scroll(e.deltaY > 0 ? 3 : -3);
-      e.preventDefault();
-    };
-    window.addEventListener("wheel", this.wheelHandler, { passive: false });
+    this.inputEl.focus();
   }
 
-  override destroy(): void {
-    window.removeEventListener("keydown", this.keyHandler);
-    window.removeEventListener("wheel", this.wheelHandler);
-    if (this.maskShape.active) this.maskShape.destroy();
-    this.scene.input.keyboard?.enableGlobalCapture();
-    super.destroy();
-  }
-
-  private scroll(lines: number): void {
-    const maxScroll = Math.max(0, this.totalContentH - this.visibleH);
-    this.scrollPos = Phaser.Math.Clamp(this.scrollPos + lines * LINE_H, 0, maxScroll);
-    this.blocksContainer.setY(this.areaTop - this.scrollPos);
-    this.updateScrollThumb(this.totalContentH, maxScroll);
-  }
-
-  private updateScrollThumb(textH: number, maxScroll: number): void {
-    if (maxScroll <= 0) { this.scrollThumb.setVisible(false); return; }
-    this.scrollThumb.setVisible(true);
-    const thumbH = Math.max(20, (this.visibleH * this.visibleH) / textH);
-    const thumbRange = this.visibleH - thumbH;
-    const thumbCY = this.areaTop + (this.scrollPos / maxScroll) * thumbRange + thumbH / 2;
-    this.scrollThumb.setSize(4, thumbH).setY(thumbCY);
-  }
-
-  private renderInput(): void {
-    this.inputText.setText(this.inputValue + "█");
+  private refreshChips(): void {
+    const isStory = this.dmPersona === "story";
+    this.storyChip.style.borderColor = isStory ? ACCENT   : "#443300";
+    this.storyChip.style.color       = isStory ? ACCENT   : "#665533";
+    this.devChip.style.borderColor   = !isStory ? "#44cc44" : "#224422";
+    this.devChip.style.color         = !isStory ? "#66ee66" : "#336633";
   }
 
   private async send(): Promise<void> {
-    const text = this.inputValue.trim();
+    const text = this.inputEl.value.trim();
     if (!text || this.thinking) return;
-    this.inputValue = "";
-    this.renderInput();
+    this.inputEl.value = "";
     await this.sendText(text);
   }
 
   private async sendText(text: string): Promise<void> {
     if (this.thinking) return;
     this.thinking = true;
+    this.inputEl.disabled = true;
     this.history.push({ role: "user", content: text });
     this.renderHistory();
-    this.statusText.setText("The Dungeon Master considers…");
+    this.statusEl.textContent = "The Dungeon Master considers…";
 
     try {
       const { reply, rollResults } = await this.onSend(text, this.history.slice(0, -1), this.dmPersona);
@@ -272,50 +184,29 @@ export class AIDMOverlay extends BaseOverlay {
     }
 
     this.thinking = false;
-    this.statusText.setText("");
+    this.inputEl.disabled = false;
+    this.inputEl.focus();
+    this.statusEl.textContent = "";
     this.renderHistory();
-    this.scene.input.keyboard?.disableGlobalCapture();
+    this.disableKeyboard();
   }
 
   private renderHistory(): void {
-    this.blocksContainer.removeAll(true);
-
-    const textW = this.panelW - 64;
-    let y = 0;
-
+    let html = "";
     for (const msg of this.history) {
       const roll = isRollMessage(msg.content);
-      let color: string;
-      let displayText: string;
-
       if (roll) {
-        color = isRollSuccess(msg.content) ? "#66ee88" : "#ee6644";
-        displayText = "🎲 " + msg.content.slice(ROLL_PREFIX.length);
+        const content = escHtml(msg.content.slice(ROLL_PREFIX.length));
+        const color = isRollSuccess(msg.content) ? "#66ee88" : "#ee6644";
+        html += `<div style="color:${color};margin-bottom:${MSG_GAP}px">🎲 ${content}</div>`;
       } else if (msg.role === "user") {
-        color = "#e2b96f";
-        displayText = "▸ " + msg.content;
+        html += `<div style="color:${ACCENT};margin-bottom:${MSG_GAP}px">▸ ${escHtml(msg.content)}</div>`;
       } else {
-        color = "#c8d8e8";
-        displayText = msg.content;
+        const md = String(marked.parse(msg.content));
+        html += `<div class="aidm-msg" style="color:#c8d8e8;margin-bottom:${MSG_GAP}px">${md}</div>`;
       }
-
-      const block = this.scene.add.text(0, y, displayText, {
-        fontSize: "11px",
-        color,
-        fontFamily: "monospace",
-        resolution: DPR,
-        wordWrap: { width: textW },
-        lineSpacing: 5,
-      });
-
-      this.blocksContainer.add(block);
-      y += block.height + MSG_GAP;
     }
-
-    this.totalContentH = y;
-    const maxScroll = Math.max(0, this.totalContentH - this.visibleH);
-    this.scrollPos = maxScroll;
-    this.blocksContainer.setY(this.areaTop - this.scrollPos);
-    this.updateScrollThumb(this.totalContentH, maxScroll);
+    this.chatEl.innerHTML = html;
+    this.chatEl.scrollTop = this.chatEl.scrollHeight;
   }
 }
