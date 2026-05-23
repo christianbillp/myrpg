@@ -1,5 +1,13 @@
 // Mirror of server/src/engine/types.ts — keep in sync manually.
 
+export type LogEntryStyle = 'normal' | 'hit' | 'crit' | 'kill' | 'heal' | 'status' | 'header' | 'miss';
+
+export interface LogEntry {
+  left: string;
+  right?: string;
+  style?: LogEntryStyle;
+}
+
 export type CombatMode = 'exploring' | 'player_turn' | 'enemy_turn' | 'death_saves' | 'defeat';
 export type EncounterType = 'simple_combat' | 'social_interaction' | 'exploration';
 export type QuestGoalType = 'kill' | 'collect' | 'explore' | 'talk';
@@ -21,6 +29,7 @@ export interface PlayerState {
   actionUsed: boolean; bonusActionUsed: boolean; reactionUsed: boolean;
   movesLeft: number;
   deathSaveSuccesses: number; deathSaveFailures: number;
+  hitDiceUsed: number;
   conditions: string[];
 }
 
@@ -70,7 +79,7 @@ export interface GameState {
   npcs: NpcState[];
   mapItems: MapItemState[];
   secrets: SecretState[];
-  combatLog: string[];
+  combatLog: LogEntry[];
   logScrollOffset: number;
   encounterTypes: EncounterType[];
   mapName: string;
@@ -97,6 +106,7 @@ export type PlayerAction =
   | { type: 'disengage' }
   | { type: 'endTurn' }
   | { type: 'rollDeathSave' }
+  | { type: 'shortRest' }
   | { type: 'search' }
   | { type: 'usePotion' }
   | { type: 'equip'; slot: 'armor' | 'weapon' | 'shield'; itemId: string }

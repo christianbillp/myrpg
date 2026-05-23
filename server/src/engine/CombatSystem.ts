@@ -1,10 +1,16 @@
 import { d, d20, mod, rollAdvantage, rollDisadvantage } from './Dice.js';
-import { PlayerDef, MonsterDef, MonsterAttack, ConsumableDef } from './types.js';
+import { PlayerDef, MonsterDef, MonsterAttack, ConsumableDef, LogEntry } from './types.js';
+
+function rollDice(count: number, sides: number): { total: number; rolls: number[] } {
+  const rolls: number[] = [];
+  for (let i = 0; i < count; i++) rolls.push(d(sides));
+  return { total: rolls.reduce((a, b) => a + b, 0), rolls };
+}
 
 export function rollInitiative(
   player: PlayerDef,
   enemy: MonsterDef,
-): { playerFirst: boolean; logs: string[] } {
+): { playerFirst: boolean; logs: LogEntry[] } {
   const pRoll = d20(), eRoll = d20();
   const pMod = mod(player.dex), eMod = enemy.initiativeBonus;
   const pTotal = pRoll + pMod, eTotal = eRoll + eMod;
@@ -12,10 +18,12 @@ export function rollInitiative(
   return {
     playerFirst,
     logs: [
-      '⚔ COMBAT BEGINS',
-      `${player.name}: d20(${pRoll})+${pMod} = ${pTotal}`,
-      `${enemy.name}: d20(${eRoll})+${eMod} = ${eTotal}`,
-      playerFirst ? `${player.name} acts first!` : `${enemy.name} acts first!`,
+      { left: '⚔ Combat begins', style: 'header' },
+      {
+        left: playerFirst ? `${player.name} acts first` : `${enemy.name} acts first`,
+        right: `${player.name} d20(${pRoll})+${pMod}=${pTotal} · ${enemy.name} d20(${eRoll})+${eMod}=${eTotal}`,
+        style: 'normal',
+      },
     ],
   };
 }
@@ -25,86 +33,100 @@ export function playerMeleeAttack(
   enemy: MonsterDef,
   withAdvantage: boolean,
   withDisadvantage = false,
-): { damage: number; logs: string[]; vexApplied: boolean } {
+): { damage: number; logs: LogEntry[]; vexApplied: boolean } {
   const attack = player.mainAttack;
   const statMod = attack.statKey === 'str' ? mod(player.str) : mod(player.dex);
   const attackBonus = statMod + player.proficiencyBonus;
-  const logs: string[] = [];
+  const logs: LogEntry[] = [];
 
   const effAdv = withAdvantage && !withDisadvantage;
   const effDis = withDisadvantage && !withAdvantage;
 
-  let naturalRoll: number, rollDesc: string;
+  let naturalRoll: number, rollPart: string;
   if (effAdv) {
     const { result, rolls } = rollAdvantage();
     naturalRoll = result;
-    rollDesc = `advantage (${rolls[0]}, ${rolls[1]}) → ${naturalRoll}`;
-    logs.push(`${player.name} attacks from the shadows!`);
+    rollPart = `adv(${rolls[0]},${rolls[1]}→${naturalRoll})`;
+    logs.push({ left: `${player.name} strikes from the shadows`, style: 'normal' });
   } else if (effDis) {
     const { result, rolls } = rollDisadvantage();
     naturalRoll = result;
-    rollDesc = `disadvantage (${rolls[0]}, ${rolls[1]}) → ${naturalRoll}`;
+    rollPart = `dis(${rolls[0]},${rolls[1]}→${naturalRoll})`;
   } else {
     naturalRoll = d20();
-    rollDesc = `${naturalRoll}`;
+    rollPart = `d20(${naturalRoll})`;
   }
 
   const total = naturalRoll + attackBonus;
   const isCrit = naturalRoll === 20;
   const isHit = isCrit || total >= enemy.ac;
-  logs.push(`Attack: d20(${rollDesc})+${attackBonus} = ${total} vs AC ${enemy.ac}`);
+  const atkPart = `${rollPart}+${attackBonus}=${total} vs AC ${enemy.ac}`;
 
   let damage = 0, vexApplied = false;
+
   if (isCrit) {
-    let dice = 0;
-    for (let i = 0; i < attack.damageDice * 2; i++) dice += d(attack.damageSides);
-    let sneakDice = 0;
-    if (withAdvantage && player.sneakAttackDice > 0)
-      for (let i = 0; i < player.sneakAttackDice * 2; i++) sneakDice += d(6);
-    damage = dice + statMod + sneakDice;
-    const sneakPart = sneakDice > 0 ? ` + ${sneakDice} Sneak Attack` : '';
-    logs.push(`⚡ CRITICAL HIT! ${dice}+${statMod}${sneakPart} = ${damage}`);
-    vexApplied = attack.vex;
-  } else if (isHit) {
-    let dice = 0;
-    if (attack.savageAttacker) {
-      let r1 = 0, r2 = 0;
-      for (let i = 0; i < attack.damageDice; i++) { r1 += d(attack.damageSides); r2 += d(attack.damageSides); }
-      dice = Math.max(r1, r2);
-      logs.push(`HIT! Savage Attacker: [${r1}] vs [${r2}] → ${dice}+${statMod}`);
-    } else {
-      for (let i = 0; i < attack.damageDice; i++) dice += d(attack.damageSides);
-      logs.push(`HIT! ${dice}+${statMod}`);
-    }
-    let sneakDice = 0;
+    const { total: diceTot, rolls: diceRolls } = rollDice(attack.damageDice * 2, attack.damageSides);
+    let sneakTot = 0, sneakRolls: number[] = [];
     if (withAdvantage && player.sneakAttackDice > 0) {
-      for (let i = 0; i < player.sneakAttackDice; i++) sneakDice += d(6);
-      logs.push(`Sneak Attack: +${sneakDice}`);
+      const s = rollDice(player.sneakAttackDice * 2, 6);
+      sneakTot = s.total; sneakRolls = s.rolls;
     }
-    damage = dice + statMod + sneakDice;
-    logs.push(`Total: ${damage} damage`);
+    damage = diceTot + statMod + sneakTot;
+    const sneakPart = sneakTot > 0 ? ` + sneak[${sneakRolls.join(',')}]=${sneakTot}` : '';
+    const dicePart = `2×${attack.damageDice}d${attack.damageSides}[${diceRolls.join(',')}]+${statMod}${sneakPart}`;
+    logs.push({ left: `⚡ Critical hit — ${damage} ${attack.damageType}`, right: `${atkPart} · ${dicePart}`, style: 'crit' });
     vexApplied = attack.vex;
+
+  } else if (isHit) {
+    let diceTotal: number, diceRolls: number[];
+    if (attack.savageAttacker) {
+      const r1 = rollDice(attack.damageDice, attack.damageSides);
+      const r2 = rollDice(attack.damageDice, attack.damageSides);
+      const kept = r1.total >= r2.total ? r1 : r2;
+      diceTotal = kept.total; diceRolls = kept.rolls;
+    } else {
+      const r = rollDice(attack.damageDice, attack.damageSides);
+      diceTotal = r.total; diceRolls = r.rolls;
+    }
+    let sneakTot = 0, sneakRolls: number[] = [];
+    if (withAdvantage && player.sneakAttackDice > 0) {
+      const s = rollDice(player.sneakAttackDice, 6);
+      sneakTot = s.total; sneakRolls = s.rolls;
+    }
+    damage = diceTotal + statMod + sneakTot;
+    const sneakSuffix = sneakTot > 0 ? ` (+${sneakTot} sneak)` : '';
+    const sneakRightPart = sneakTot > 0 ? ` + sneak[${sneakRolls.join(',')}]=${sneakTot}` : '';
+    const savPart = attack.savageAttacker ? ' Savage' : '';
+    const dicePart = `${attack.damageDice}d${attack.damageSides}[${diceRolls.join(',')}]+${statMod}${savPart}${sneakRightPart}`;
+    logs.push({ left: `Hit — ${damage} ${attack.damageType}${sneakSuffix}`, right: `${atkPart} · ${dicePart}`, style: 'hit' });
+    vexApplied = attack.vex;
+
   } else {
     if (attack.graze) {
       damage = Math.max(0, statMod);
-      logs.push(damage > 0 ? `Miss! Graze: ${damage} damage` : `Miss! (${total} vs AC ${enemy.ac})`);
+      logs.push(damage > 0
+        ? { left: `Graze — ${damage} ${attack.damageType}`, right: atkPart, style: 'miss' }
+        : { left: 'Miss', right: atkPart, style: 'miss' });
     } else {
-      logs.push(`Miss! (${total} vs AC ${enemy.ac})`);
+      logs.push({ left: 'Miss', right: atkPart, style: 'miss' });
     }
   }
+
   return { damage, logs, vexApplied };
 }
 
 export function playerHide(
   player: PlayerDef,
   enemyPassivePerception: number,
-): { hidden: boolean; logs: string[] } {
+): { hidden: boolean; logs: LogEntry[] } {
   const stealthBonus = player.skills['stealth'] ?? 0;
   const stealthRoll = d20() + stealthBonus;
-  if (stealthRoll > enemyPassivePerception) {
-    return { hidden: true, logs: [`${player.name} hides!`, `Stealth: d20+${stealthBonus} = ${stealthRoll} vs Perception ${enemyPassivePerception} ✓`] };
+  const success = stealthRoll > enemyPassivePerception;
+  const right = `Stealth d20+${stealthBonus}=${stealthRoll} vs PP ${enemyPassivePerception}`;
+  if (success) {
+    return { hidden: true, logs: [{ left: `${player.name} slips into the shadows`, right: `${right} ✓`, style: 'status' }] };
   }
-  return { hidden: false, logs: [`${player.name} tries to hide... ${stealthRoll} vs ${enemyPassivePerception} — spotted!`] };
+  return { hidden: false, logs: [{ left: `${player.name} fails to hide`, right: `${right} ✗`, style: 'miss' }] };
 }
 
 export function enemyAttack(
@@ -113,65 +135,67 @@ export function enemyAttack(
   playerAc: number,
   withAdvantage: boolean,
   withDisadvantage = false,
-): { damage: number; isHit: boolean; isCrit: boolean; logs: string[] } {
-  const logs: string[] = [];
+): { damage: number; isHit: boolean; isCrit: boolean; logs: LogEntry[] } {
+  const logs: LogEntry[] = [];
   const effAdv = withAdvantage && !withDisadvantage;
   const effDis = withDisadvantage && !withAdvantage;
 
-  let naturalRoll: number, rollDesc: string;
+  let naturalRoll: number, rollPart: string;
   if (effAdv) {
     const { result, rolls } = rollAdvantage();
-    naturalRoll = result; rollDesc = `advantage (${rolls[0]}, ${rolls[1]}) → ${naturalRoll}`;
+    naturalRoll = result; rollPart = `adv(${rolls[0]},${rolls[1]}→${naturalRoll})`;
   } else if (effDis) {
     const { result, rolls } = rollDisadvantage();
-    naturalRoll = result; rollDesc = `disadvantage (${rolls[0]}, ${rolls[1]}) → ${naturalRoll}`;
+    naturalRoll = result; rollPart = `dis(${rolls[0]},${rolls[1]}→${naturalRoll})`;
   } else {
-    naturalRoll = d20(); rollDesc = `${naturalRoll}`;
+    naturalRoll = d20(); rollPart = `d20(${naturalRoll})`;
   }
 
   const attackTotal = naturalRoll + attack.bonus;
   const isCrit = naturalRoll === 20;
   const isHit = isCrit || attackTotal >= playerAc;
-  logs.push(`${enemy.name} attacks with ${attack.name}!`);
-  logs.push(`d20(${rollDesc})+${attack.bonus} = ${attackTotal} vs AC ${playerAc}`);
+  const atkPart = `${rollPart}+${attack.bonus}=${attackTotal} vs AC ${playerAc}`;
 
   let damage = 0;
   if (isHit) {
-    let dice = 0;
     const diceCount = isCrit ? attack.damageDice * 2 : attack.damageDice;
-    for (let i = 0; i < diceCount; i++) dice += d(attack.damageSides);
-    damage = dice + attack.damageBonus;
+    const { total: diceTot, rolls: diceRolls } = rollDice(diceCount, attack.damageSides);
+    damage = diceTot + attack.damageBonus;
+    const diceLabel = isCrit ? `2×${attack.damageDice}d${attack.damageSides}` : `${attack.damageDice}d${attack.damageSides}`;
+    const dicePart = `${diceLabel}[${diceRolls.join(',')}]+${attack.damageBonus}`;
     logs.push(isCrit
-      ? `⚡ CRITICAL HIT! ${dice}+${attack.damageBonus} = ${damage} ${attack.damageType}`
-      : `Hit! ${dice}+${attack.damageBonus} = ${damage} ${attack.damageType}`);
+      ? { left: `⚡ Critical hit — ${damage} ${attack.damageType}`, right: `${atkPart} · ${dicePart}`, style: 'crit' }
+      : { left: `Hit — ${damage} ${attack.damageType}`, right: `${atkPart} · ${dicePart}`, style: 'hit' });
   } else {
-    logs.push(`Miss! (${attackTotal} vs AC ${playerAc})`);
+    logs.push({ left: 'Miss', right: atkPart, style: 'miss' });
   }
+
   return { damage, isHit, isCrit, logs };
 }
 
 export function tryNimbleEscape(
   enemy: MonsterDef,
   passivePerception: number,
-): { hidden: boolean; logs: string[] } {
+): { hidden: boolean; logs: LogEntry[] } {
   const stealthRoll = d20() + enemy.stealthBonus;
-  if (stealthRoll > passivePerception) {
-    return { hidden: true, logs: [`${enemy.name} uses Nimble Escape → Hide!`, `Stealth: d20+${enemy.stealthBonus} = ${stealthRoll} vs Perception ${passivePerception} ✓`] };
+  const success = stealthRoll > passivePerception;
+  const right = `Stealth d20+${enemy.stealthBonus}=${stealthRoll} vs PP ${passivePerception}`;
+  if (success) {
+    return { hidden: true, logs: [{ left: `${enemy.name} slips into the shadows`, right: `${right} ✓`, style: 'status' }] };
   }
-  return { hidden: false, logs: [`${enemy.name} tries to hide... ${stealthRoll} vs ${passivePerception} — spotted!`] };
+  return { hidden: false, logs: [{ left: `${enemy.name} fails to hide`, right: `${right} ✗`, style: 'miss' }] };
 }
 
-export function playerSecondWind(level: number): { healed: number; logs: string[] } {
-  const healRoll = d(10);
-  const healed = healRoll + level;
-  return { healed, logs: [`Second Wind! 1d10+${level}: ${healRoll}+${level} = ${healed} HP restored`] };
+export function playerSecondWind(level: number): { healed: number; logs: LogEntry[] } {
+  const roll = d(10);
+  const healed = roll + level;
+  return { healed, logs: [{ left: `Second Wind — +${healed} HP restored`, right: `1d10+${level}=[${roll}]+${level}`, style: 'heal' }] };
 }
 
-export function drinkPotion(item: ConsumableDef): { healed: number; logs: string[] } {
-  const rolls: number[] = [];
-  for (let i = 0; i < item.healDice; i++) rolls.push(d(item.healSides));
-  const healed = rolls.reduce((a, b) => a + b, 0) + item.healBonus;
-  return { healed, logs: [`Drinks ${item.name}! ${item.healDice}d${item.healSides}+${item.healBonus}: [${rolls.join(', ')}]+${item.healBonus} = ${healed} HP`] };
+export function drinkPotion(item: ConsumableDef): { healed: number; logs: LogEntry[] } {
+  const { total: healed, rolls } = rollDice(item.healDice, item.healSides);
+  const total = healed + item.healBonus;
+  return { healed: total, logs: [{ left: `Drinks ${item.name} — +${total} HP`, right: `${item.healDice}d${item.healSides}[${rolls.join(',')}]+${item.healBonus}`, style: 'heal' }] };
 }
 
 export function rollDeathSave(): { roll: number; outcome: 'nat20' | 'success' | 'failure' | 'nat1' } {

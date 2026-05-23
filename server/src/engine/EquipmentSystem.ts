@@ -29,6 +29,7 @@ export function makePlayerAttack(playerDef: PlayerDef, weapon: WeaponDef): Playe
     statKey,
     damageDice: weapon.damageDice,
     damageSides: weapon.damageSides,
+    damageType: weapon.damageType,
     savageAttacker: playerDef.savageAttacker,
     graze: weapon.mastery === 'graze',
     vex: weapon.mastery === 'vex',
@@ -44,5 +45,5 @@ export function applyEquipment(playerDef: PlayerDef, slots: EquipmentSlots, allI
   playerDef.ac = computeAC(playerDef, armor, shield);
   playerDef.mainAttack = weapon
     ? makePlayerAttack(playerDef, weapon)
-    : { name: 'Unarmed Strike', statKey: 'str', damageDice: 1, damageSides: 1, savageAttacker: false, graze: false, vex: false };
+    : { name: 'Unarmed Strike', statKey: 'str', damageDice: 1, damageSides: 1, damageType: 'bludgeoning', savageAttacker: false, graze: false, vex: false };
 }

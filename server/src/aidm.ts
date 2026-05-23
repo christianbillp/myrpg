@@ -58,7 +58,7 @@ const AIDM_TOOLS = [
   },
   {
     name: 'spawn_enemy',
-    description: 'Spawn a new enemy on the map. Valid monster_id values: "goblin_minion", "bandit", "commoner".',
+    description: 'Spawn a new enemy on the map. Valid monster_id values: "goblin_minion", "bandit", "commoner", "skeleton".',
     input_schema: { type: 'object' as const, properties: { monster_id: { type: 'string' }, reason: { type: 'string' } }, required: ['monster_id', 'reason'] },
   },
   {
@@ -149,7 +149,7 @@ function buildSystemPrompt(engine: GameEngine, encounterContext: string, dmPerso
     ? def.map((n) => `  ${n.name}: ${n.persona}`).join('\n\n')
     : '  None';
 
-  const recentLog = s.combatLog.slice(-15).join('\n  ') || 'No entries yet.';
+  const recentLog = s.combatLog.slice(-15).map((e) => e.right ? `${e.left}  [${e.right}]` : e.left).join('\n  ') || 'No entries yet.';
 
   return `You are the AI Dungeon Master (DM) for a D&D 5e encounter.
 
@@ -255,7 +255,7 @@ function applyTool(engine: GameEngine, name: string, input: Record<string, unkno
 }
 
 export async function processAIDMChat(
-  sessionId: string,
+  _sessionId: string,
   engine: GameEngine,
   body: AIDMChatRequest,
   anthropic: Anthropic,

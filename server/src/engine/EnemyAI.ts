@@ -1,4 +1,4 @@
-import { EnemyState, MonsterDef, GameEvent } from './types.js';
+import { EnemyState, MonsterDef, GameEvent, LogEntry } from './types.js';
 import { tryNimbleEscape, enemyAttack } from './CombatSystem.js';
 
 export interface EnemyTurnConfig {
@@ -22,7 +22,7 @@ export interface EnemyTurnResult {
   isHit: boolean;
   isCrit: boolean;
   attacked: boolean;
-  logs: string[];
+  logs: LogEntry[];
   events: GameEvent[];
   finalTileX: number;
   finalTileY: number;
@@ -38,7 +38,7 @@ export function runEnemyTurn(
   def: MonsterDef,
   config: EnemyTurnConfig,
 ): EnemyTurnResult {
-  const logs: string[] = [`--- ${def.name}'s turn ---`];
+  const logs: LogEntry[] = [{ left: `${def.name}'s turn`, style: 'header' }];
   const events: GameEvent[] = [];
   let { tileX, tileY } = enemy;
   let enemyHidden = config.enemyCurrentlyHidden;
@@ -68,13 +68,13 @@ export function runEnemyTurn(
 
   const dist = chebyshev(tileX, tileY, config.playerTileX, config.playerTileY);
   if (dist > 1) {
-    logs.push(`${def.name} is too far to attack.`);
+    logs.push({ left: `${def.name} is out of reach`, style: 'normal' });
     return { damage: 0, isHit: false, isCrit: false, attacked: false, logs, events, finalTileX: tileX, finalTileY: tileY, hidden: enemyHidden };
   }
 
   const meleeAttack = def.attacks.find((a) => a.attackType === 'melee' || a.attackType === 'both');
   if (!meleeAttack) {
-    logs.push(`${def.name} has no melee attack.`);
+    logs.push({ left: `${def.name} has no attack`, style: 'normal' });
     return { damage: 0, isHit: false, isCrit: false, attacked: false, logs, events, finalTileX: tileX, finalTileY: tileY, hidden: enemyHidden };
   }
 

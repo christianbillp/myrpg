@@ -403,6 +403,7 @@ export class GameScene extends Phaser.Scene {
       onHide:          () => gameClient.sendAction({ type: "hide" }),
       onEndTurn:       () => gameClient.sendAction({ type: "endTurn" }),
       onDeathSave:     () => gameClient.sendAction({ type: "rollDeathSave" }),
+      onShortRest:     () => gameClient.sendAction({ type: "shortRest" }),
     });
     this.targetPanel = new TargetPanel(this);
     this.hud = new HUD(this, {
@@ -461,6 +462,7 @@ export class GameScene extends Phaser.Scene {
       enemies:          state.enemies.map(e => ({ tileX: e.tileX, tileY: e.tileY, dead: e.hp <= 0 })),
       playerTileX:      this.player?.tileX ?? state.player.tileX,
       playerTileY:      this.player?.tileY ?? state.player.tileY,
+      hitDiceRemaining: this.playerDef.level - state.player.hitDiceUsed,
     };
   }
 

@@ -35,6 +35,7 @@
     "survival": 2
   },
   "secondWindMaxUses": 0,
+  "hitDieType": 8,
   "sneakAttackDice": 1,
   "speed": 7,
   "speedFt": 35,
@@ -53,6 +54,7 @@
     "statKey": "dex",
     "damageDice": 1,
     "damageSides": 6,
+    "damageType": "piercing",
     "savageAttacker": false,
     "graze": false,
     "vex": true

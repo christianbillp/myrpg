@@ -1,0 +1,49 @@
+{
+  "id": "skeleton",
+  "name": "Skeleton",
+  "type": "Medium Undead, Lawful Evil",
+  "maxHp": 13,
+  "hpFormula": "2d8+4",
+  "ac": 14,
+  "str": 10,
+  "dex": 16,
+  "con": 15,
+  "int": 6,
+  "wis": 8,
+  "cha": 5,
+  "proficiencyBonus": 2,
+  "savingThrows": { "str": 0, "dex": 3, "con": 2, "int": -2, "wis": -1, "cha": -3 },
+  "initiativeBonus": 3,
+  "stealthBonus": 3,
+  "passivePerception": 9,
+  "speed": 6,
+  "speedFt": 30,
+  "attacks": [
+    {
+      "name": "Shortsword",
+      "attackType": "melee",
+      "bonus": 5,
+      "reach": 5,
+      "damageDice": 1,
+      "damageSides": 6,
+      "damageBonus": 3,
+      "damageType": "piercing"
+    },
+    {
+      "name": "Shortbow",
+      "attackType": "ranged",
+      "bonus": 5,
+      "reach": 5,
+      "rangeNormal": 80,
+      "rangeLong": 320,
+      "damageDice": 1,
+      "damageSides": 6,
+      "damageBonus": 3,
+      "damageType": "piercing"
+    }
+  ],
+  "vulnerabilities": ["bludgeoning"],
+  "xp": 50,
+  "cr": "1/4",
+  "color": 13421755
+}

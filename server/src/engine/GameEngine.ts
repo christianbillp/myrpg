@@ -2,14 +2,14 @@ import {
   GameState, GameEvent, PlayerAction, CombatMode,
   PlayerDef, MonsterDef, NPCDef, ItemDef, ConsumableDef, WeaponDef,
   EquipmentSlots, EnemyState, NpcState, MapItemState, SecretState, QuestState,
-  QuestGoalType, SecretDef, NpcPersona, GameMap,
+  QuestGoalType, SecretDef, NpcPersona, GameMap, LogEntry,
   CreateSessionRequest,
 } from './types.js';
 import type { EncounterContext } from '../encounterService.js';
 import { generateMap } from './MapGenerator.js';
 import { generateRoomsMap } from './RoomsMapGenerator.js';
 import { shuffle } from './MapUtils.js';
-import { d20 } from './Dice.js';
+import { d, d20, mod } from './Dice.js';
 import {
   rollInitiative, playerMeleeAttack, enemyAttack, playerHide, playerSecondWind,
   drinkPotion, rollDeathSave, rollSkillCheck,
@@ -82,6 +82,7 @@ export class GameEngine {
       case 'disengage':    this.doDisengage(events); break;
       case 'endTurn':      this.doEndTurn(events); break;
       case 'rollDeathSave':this.doRollDeathSave(events); break;
+      case 'shortRest':    this.doShortRest(events); break;
       case 'search':       this.doSearch(events); break;
       case 'usePotion':    this.doUsePotion(events); break;
       case 'equip':        this.doEquip(action.slot, action.itemId); break;
@@ -127,13 +128,13 @@ export class GameEngine {
     return [];
   }
 
-  addLog(text: string): void {
-    this.state.combatLog.push(text);
+  addLog(entry: LogEntry | string): void {
+    this.state.combatLog.push(typeof entry === 'string' ? { left: entry } : entry);
     this.state.logScrollOffset = 0;
   }
 
-  addLogs(lines: string[]): void {
-    lines.forEach((l) => this.addLog(l));
+  addLogs(entries: (LogEntry | string)[]): void {
+    entries.forEach((e) => this.addLog(e));
   }
 
   moveEntity(entity: string, tileX: number, tileY: number): GameEvent[] {
@@ -350,7 +351,6 @@ export class GameEngine {
 
     const { playerFirst, logs } = rollInitiative(this.playerDef, firstEnemy);
     this.addLogs(logs);
-    events.push({ type: 'log', lines: logs });
 
     if (playerFirst) {
       this.enterPlayerTurn();
@@ -375,7 +375,7 @@ export class GameEngine {
     s.player.conditions = s.player.conditions.filter((c) => !TURN_CONDITIONS.includes(c));
   }
 
-  private doAttack(targetId: string | undefined, events: GameEvent[]): void {
+  private doAttack(targetId: string | undefined, _events: GameEvent[]): void {
     const s = this.state;
     if (s.phase !== 'player_turn' || s.player.actionUsed) return;
 
@@ -395,27 +395,59 @@ export class GameEngine {
     const { damage, logs, vexApplied } = playerMeleeAttack(this.playerDef, targetDef, withAdvantage);
     s.player.hidden = false;
     this.addLogs(logs);
-    events.push({ type: 'log', lines: logs });
 
-    target.hp = Math.max(0, target.hp - damage);
-    this.addLog(`${targetDef.name} HP: ${target.hp}/${target.maxHp}`);
+    const { finalDamage, log: resistLog } = this.resistMod(damage, this.playerDef.mainAttack.damageType, targetDef);
+    if (resistLog) this.addLog(resistLog);
+    target.hp = Math.max(0, target.hp - finalDamage);
+    this.addLog({ left: `${targetDef.name} HP: ${target.hp}/${target.maxHp}`, style: 'status' });
 
     if (vexApplied) {
       target.vexed = true;
-      this.addLog(`Vex! ${targetDef.name} has Disadvantage on its next attack.`);
+      this.addLog({ left: `Vex — ${targetDef.name} attacks with Disadvantage`, style: 'status' });
     }
 
     if (target.hp <= 0) {
       const gold = crGoldReward(targetDef.cr);
       s.player.xp += targetDef.xp;
       s.player.gold += gold;
-      this.addLogs([`☠ ${targetDef.name} is slain! +${targetDef.xp} XP  +${gold} GP`, `Total XP: ${s.player.xp}  |  GP: ${s.player.gold}`]);
+      this.addLogs([
+        { left: `☠ ${targetDef.name} is slain! +${targetDef.xp} XP  +${gold} GP`, style: 'kill' },
+        { left: `Total XP: ${s.player.xp}  |  GP: ${s.player.gold}`, style: 'status' },
+      ]);
       this.killEnemy(target.id);
     }
 
     s.player.actionUsed = true;
     if (s.enemies.filter((e) => e.hp > 0).length === 0) {
       s.phase = 'exploring';
+    }
+  }
+
+  private resistMod(damage: number, damageType: string, def: MonsterDef): { finalDamage: number; log: string | null } {
+    if (def.resistances?.includes(damageType)) {
+      const fd = Math.floor(damage / 2);
+      return { finalDamage: fd, log: `${def.name} is resistant to ${damageType} — ${damage}→${fd}` };
+    }
+    if (def.vulnerabilities?.includes(damageType)) {
+      const fd = damage * 2;
+      return { finalDamage: fd, log: `${def.name} is vulnerable to ${damageType} — ${damage}→${fd}` };
+    }
+    return { finalDamage: damage, log: null };
+  }
+
+  private applyDamageToPlayer(damage: number, _events: GameEvent[]): void {
+    const s = this.state;
+    const hpBefore = s.player.hp;
+    s.player.hp = Math.max(0, hpBefore - damage);
+    this.addLog({ left: `${this.playerDef.name} HP: ${s.player.hp}/${this.playerDef.maxHp}`, style: 'status' });
+    if (s.player.hp > 0) return;
+    const leftover = damage - hpBefore;
+    if (leftover >= this.playerDef.maxHp) {
+      this.addLog({ left: `Massive damage — ${this.playerDef.name} dies instantly`, style: 'kill' });
+      s.phase = 'defeat';
+    } else {
+      this.addLog({ left: `${this.playerDef.name} falls unconscious!`, style: 'status' });
+      s.phase = 'death_saves';
     }
   }
 
@@ -427,61 +459,54 @@ export class GameEngine {
     this.advanceQuest('kill');
   }
 
-  private doHide(events: GameEvent[]): void {
+  private doHide(_events: GameEvent[]): void {
     const s = this.state;
     if (s.phase !== 'player_turn' || s.player.bonusActionUsed) return;
-    const target = s.enemies.find((e) => e.hp > 0);
-    if (!target) return;
-    const targetDef = this.defs.monsters.find((m) => m.id === target.defId);
-    if (!targetDef) return;
-    const { hidden, logs } = playerHide(this.playerDef, targetDef.passivePerception);
+    const living = s.enemies.filter((e) => e.hp > 0);
+    if (!living.length) return;
+    const maxPP = Math.max(...living.map((e) => {
+      const def = this.defs.monsters.find((m) => m.id === e.defId);
+      return def?.passivePerception ?? 10;
+    }));
+    const { hidden, logs } = playerHide(this.playerDef, maxPP);
     s.player.hidden = hidden;
     this.addLogs(logs);
-    events.push({ type: 'log', lines: logs });
     s.player.bonusActionUsed = true;
   }
 
-  private doDash(events: GameEvent[]): void {
+  private doDash(_events: GameEvent[]): void {
     const s = this.state;
     if (s.phase !== 'player_turn' || s.player.actionUsed) return;
     s.player.movesLeft += this.playerDef.speed;
     s.player.conditions.push('dashing');
     s.player.actionUsed = true;
-    const log = `${this.playerDef.name} Dashes! +${this.playerDef.speed} movement.`;
-    this.addLog(log);
-    events.push({ type: 'log', lines: [log] });
+    this.addLog({ left: `${this.playerDef.name} Dashes — +${this.playerDef.speed} tiles movement`, style: 'status' });
   }
 
-  private doDodge(events: GameEvent[]): void {
+  private doDodge(_events: GameEvent[]): void {
     const s = this.state;
     if (s.phase !== 'player_turn' || s.player.actionUsed) return;
     s.player.conditions.push('dodging');
     s.player.actionUsed = true;
-    const log = `${this.playerDef.name} Dodges! Enemies attack with Disadvantage until next turn.`;
-    this.addLog(log);
-    events.push({ type: 'log', lines: [log] });
+    this.addLog({ left: `${this.playerDef.name} Dodges — enemies attack with Disadvantage`, style: 'status' });
   }
 
-  private doDisengage(events: GameEvent[]): void {
+  private doDisengage(_events: GameEvent[]): void {
     const s = this.state;
     if (s.phase !== 'player_turn' || s.player.actionUsed) return;
     s.player.conditions.push('disengaged');
     s.player.actionUsed = true;
-    const log = `${this.playerDef.name} Disengages! No Opportunity Attacks this turn.`;
-    this.addLog(log);
-    events.push({ type: 'log', lines: [log] });
+    this.addLog({ left: `${this.playerDef.name} Disengages — no Opportunity Attacks this turn`, style: 'status' });
   }
 
-  private doSecondWind(events: GameEvent[]): void {
+  private doSecondWind(_events: GameEvent[]): void {
     const s = this.state;
     if (s.phase !== 'player_turn' || s.player.bonusActionUsed || s.player.secondWindUses <= 0 || s.player.hp >= this.playerDef.maxHp) return;
     const { healed, logs } = playerSecondWind(this.playerDef.level);
     const before = s.player.hp;
     s.player.hp = Math.min(this.playerDef.maxHp, s.player.hp + healed);
     s.player.secondWindUses--;
-    const fullLogs = [...logs, `HP: ${before} → ${s.player.hp}/${this.playerDef.maxHp} (${s.player.secondWindUses} uses left)`];
-    this.addLogs(fullLogs);
-    events.push({ type: 'log', lines: fullLogs });
+    this.addLogs([...logs, { left: `HP: ${before} → ${s.player.hp}/${this.playerDef.maxHp} (${s.player.secondWindUses} uses left)`, style: 'status' }]);
     s.player.bonusActionUsed = true;
   }
 
@@ -546,36 +571,24 @@ export class GameEngine {
       }
 
       this.addLogs(result.logs);
-      events.push({ type: 'log', lines: result.logs });
 
       // Apply attack result
       if (result.attacked && result.isHit) {
         if (s.player.hp <= 0) {
           const failures = result.isCrit ? 2 : 1;
           s.player.deathSaveFailures = Math.min(3, s.player.deathSaveFailures + failures);
-          const dsLogs = [
-            `Strikes unconscious ${this.playerDef.name}!${result.isCrit ? ' CRITICAL — 2 failures!' : ' 1 failure.'}`,
-            `Death saves: ${s.player.deathSaveSuccesses} ✓  ${s.player.deathSaveFailures} ✗`,
-          ];
-          this.addLogs(dsLogs);
-          events.push({ type: 'log', lines: dsLogs });
+          this.addLogs([
+            { left: `Strikes unconscious ${this.playerDef.name}!${result.isCrit ? ' CRITICAL — 2 failures!' : ' 1 failure.'}`, style: 'status' },
+            { left: `Death saves: ${s.player.deathSaveSuccesses} ✓  ${s.player.deathSaveFailures} ✗`, style: 'status' },
+          ]);
           if (s.player.deathSaveFailures >= 3) {
-            this.addLog(`${this.playerDef.name} has died.`);
+            this.addLog({ left: `${this.playerDef.name} has died.`, style: 'kill' });
             s.phase = 'defeat';
           } else {
             s.phase = 'death_saves';
           }
         } else {
-          s.player.hp = Math.max(0, s.player.hp - result.damage);
-          const dmgLog = `${this.playerDef.name} HP: ${s.player.hp}/${this.playerDef.maxHp}`;
-          this.addLog(dmgLog);
-          events.push({ type: 'log', lines: [dmgLog] });
-          if (s.player.hp <= 0) {
-            const fallLog = `${this.playerDef.name} falls unconscious!`;
-            this.addLog(fallLog);
-            events.push({ type: 'log', lines: [fallLog] });
-            s.phase = 'death_saves';
-          }
+          this.applyDamageToPlayer(result.damage, events);
         }
       }
       s.player.hidden = false;
@@ -590,37 +603,36 @@ export class GameEngine {
     if (s.phase !== 'death_saves') return;
 
     const { roll, outcome } = rollDeathSave();
-    const logs: string[] = [`${this.playerDef.name} death save: d20 = ${roll}`];
+    const logs: LogEntry[] = [{ left: `${this.playerDef.name} death save: d20 = ${roll}`, style: 'normal' }];
     let nextPhase: CombatMode = 'death_saves';
 
     switch (outcome) {
       case 'nat20':
         s.player.hp = 1;
-        logs.push(`Natural 20! ${this.playerDef.name} regains 1 HP!`);
+        logs.push({ left: `Natural 20! ${this.playerDef.name} regains 1 HP!`, style: 'heal' });
         nextPhase = 'player_turn';
         break;
       case 'nat1':
         s.player.deathSaveFailures = Math.min(3, s.player.deathSaveFailures + 2);
-        logs.push(`Natural 1! Two failures. (${s.player.deathSaveFailures}/3)`);
+        logs.push({ left: `Natural 1 — two failures (${s.player.deathSaveFailures}/3)`, style: 'miss' });
         nextPhase = s.player.deathSaveFailures >= 3 ? 'defeat' : 'enemy_turn';
-        if (nextPhase === 'defeat') logs.push(`${this.playerDef.name} has died.`);
+        if (nextPhase === 'defeat') logs.push({ left: `${this.playerDef.name} has died.`, style: 'kill' });
         break;
       case 'success':
         s.player.deathSaveSuccesses++;
-        logs.push(`Success! (${s.player.deathSaveSuccesses}/3)`);
-        if (s.player.deathSaveSuccesses >= 3) { logs.push(`${this.playerDef.name} stabilizes.`); nextPhase = 'defeat'; }
+        logs.push({ left: `Success (${s.player.deathSaveSuccesses}/3)`, style: 'hit' });
+        if (s.player.deathSaveSuccesses >= 3) { logs.push({ left: `${this.playerDef.name} stabilizes.`, style: 'heal' }); nextPhase = 'defeat'; }
         else nextPhase = 'enemy_turn';
         break;
       case 'failure':
         s.player.deathSaveFailures++;
-        logs.push(`Failure! (${s.player.deathSaveFailures}/3)`);
+        logs.push({ left: `Failure (${s.player.deathSaveFailures}/3)`, style: 'miss' });
         nextPhase = s.player.deathSaveFailures >= 3 ? 'defeat' : 'enemy_turn';
-        if (nextPhase === 'defeat') logs.push(`${this.playerDef.name} has died.`);
+        if (nextPhase === 'defeat') logs.push({ left: `${this.playerDef.name} has died.`, style: 'kill' });
         break;
     }
 
     this.addLogs(logs);
-    events.push({ type: 'log', lines: logs });
 
     if (nextPhase === 'player_turn') {
       s.player.movesLeft = this.playerDef.speed;
@@ -632,7 +644,7 @@ export class GameEngine {
     }
   }
 
-  private doSearch(events: GameEvent[]): void {
+  private doSearch(_events: GameEvent[]): void {
     const s = this.state;
     if (s.phase !== 'exploring') return;
 
@@ -642,9 +654,7 @@ export class GameEngine {
     );
 
     if (adj.length === 0) {
-      const log = `Search (${roll}) — Nothing found.`;
-      this.addLog(log);
-      events.push({ type: 'log', lines: [log] });
+      this.addLog({ left: `Search (${roll}) — nothing found`, style: 'miss' });
       return;
     }
 
@@ -652,28 +662,27 @@ export class GameEngine {
     const success = roll >= secret.def.dc;
     s.secrets = s.secrets.filter((sec) => sec !== secret);
 
-    const logs: string[] = [];
+    const logs: LogEntry[] = [];
     if (success) {
       this.advanceQuest('explore');
-      logs.push(`Search (${roll} vs DC ${secret.def.dc}) — ${secret.def.successText}`);
+      logs.push({ left: `Search (${roll} vs DC ${secret.def.dc}) — ${secret.def.successText}`, style: 'hit' });
       const r = secret.def.reward;
       if (r.type === 'gold') {
         s.player.gold += r.amount;
-        logs.push(`+${r.amount} GP`);
+        logs.push({ left: `+${r.amount} GP`, style: 'status' });
       } else if (r.type === 'item') {
         const item = this.defs.items.find((i) => i.id === r.itemId);
-        if (item) { s.player.inventoryIds.push(r.itemId); logs.push(`Found: ${item.name}`); }
+        if (item) { s.player.inventoryIds.push(r.itemId); logs.push({ left: `Found: ${item.name}`, style: 'status' }); }
       } else {
-        logs.push(`Lore: "${r.text}"`);
+        logs.push({ left: `Lore: "${r.text}"`, style: 'normal' });
       }
     } else {
-      logs.push(`Search (${roll} vs DC ${secret.def.dc}) — ${secret.def.failureText}`);
+      logs.push({ left: `Search (${roll} vs DC ${secret.def.dc}) — ${secret.def.failureText}`, style: 'miss' });
     }
     this.addLogs(logs);
-    events.push({ type: 'log', lines: logs });
   }
 
-  private doUsePotion(events: GameEvent[]): void {
+  private doUsePotion(_events: GameEvent[]): void {
     const s = this.state;
     if (s.phase === 'player_turn' && s.player.bonusActionUsed) return;
     if (s.phase !== 'player_turn' && s.phase !== 'exploring') return;
@@ -689,9 +698,7 @@ export class GameEngine {
     const { healed, logs } = drinkPotion(item);
     const before = s.player.hp;
     s.player.hp = Math.min(this.playerDef.maxHp, s.player.hp + healed);
-    const fullLogs = [...logs, `HP: ${before} → ${s.player.hp}/${this.playerDef.maxHp}`];
-    this.addLogs(fullLogs);
-    events.push({ type: 'log', lines: fullLogs });
+    this.addLogs([...logs, { left: `HP: ${before} → ${s.player.hp}/${this.playerDef.maxHp}`, style: 'status' }]);
     if (s.phase === 'player_turn') s.player.bonusActionUsed = true;
   }
 
@@ -742,45 +749,52 @@ export class GameEngine {
     enemy.reactionUsed = true;
     const withDisadvantage = s.player.conditions.includes('dodging');
     const { damage, isHit, isCrit, logs } = enemyAttack(def, meleeAttack, this.playerDef.ac, false, withDisadvantage);
-    const oaLogs = [`⚡ ${def.name} makes an Opportunity Attack!`, ...logs];
-    this.addLogs(oaLogs);
-    events.push({ type: 'log', lines: oaLogs });
+    this.addLogs([{ left: `⚡ ${def.name} makes an Opportunity Attack!`, style: 'header' }, ...logs]);
     if (isHit) {
-      s.player.hp = Math.max(0, s.player.hp - damage);
-      const dmgLog = `${this.playerDef.name} HP: ${s.player.hp}/${this.playerDef.maxHp}`;
-      this.addLog(dmgLog);
-      events.push({ type: 'log', lines: [dmgLog] });
-      if (s.player.hp <= 0) {
-        const fallLog = `${this.playerDef.name} falls unconscious!`;
-        this.addLog(fallLog);
-        events.push({ type: 'log', lines: [fallLog] });
-        s.phase = 'death_saves';
-      }
+      this.applyDamageToPlayer(damage, events);
     }
-    // Suppress unused variable warning for isCrit (consistent with future death-save extension)
     void isCrit;
   }
 
-  private doPlayerOpportunityAttack(enemy: EnemyState, events: GameEvent[]): void {
+  private doPlayerOpportunityAttack(enemy: EnemyState, _events: GameEvent[]): void {
     const s = this.state;
     if (s.player.reactionUsed || s.player.hp <= 0) return;
     const targetDef = this.defs.monsters.find((m) => m.id === enemy.defId);
     if (!targetDef) return;
     s.player.reactionUsed = true;
     const { damage, logs, vexApplied } = playerMeleeAttack(this.playerDef, targetDef, false);
-    const oaLogs = [`⚡ ${this.playerDef.name} makes an Opportunity Attack!`, ...logs];
-    this.addLogs(oaLogs);
-    events.push({ type: 'log', lines: oaLogs });
-    enemy.hp = Math.max(0, enemy.hp - damage);
-    this.addLog(`${targetDef.name} HP: ${enemy.hp}/${enemy.maxHp}`);
+    this.addLogs([{ left: `⚡ ${this.playerDef.name} makes an Opportunity Attack!`, style: 'header' }, ...logs]);
+    const { finalDamage: oaFinalDamage, log: oaResistLog } = this.resistMod(damage, this.playerDef.mainAttack.damageType, targetDef);
+    if (oaResistLog) this.addLog(oaResistLog);
+    enemy.hp = Math.max(0, enemy.hp - oaFinalDamage);
+    this.addLog({ left: `${targetDef.name} HP: ${enemy.hp}/${enemy.maxHp}`, style: 'status' });
     if (vexApplied) enemy.vexed = true;
     if (enemy.hp <= 0) {
       const gold = crGoldReward(targetDef.cr);
       s.player.xp += targetDef.xp;
       s.player.gold += gold;
-      this.addLogs([`☠ ${targetDef.name} slain by Opportunity Attack! +${targetDef.xp} XP  +${gold} GP`]);
+      this.addLog({ left: `☠ ${targetDef.name} slain by Opportunity Attack! +${targetDef.xp} XP  +${gold} GP`, style: 'kill' });
       this.killEnemy(enemy.id);
     }
+  }
+
+  private doShortRest(_events: GameEvent[]): void {
+    const s = this.state;
+    if (s.phase !== 'exploring') return;
+    if (s.player.hp >= this.playerDef.maxHp) return;
+    const hitDiceRemaining = this.playerDef.level - s.player.hitDiceUsed;
+    if (hitDiceRemaining <= 0) return;
+    const conMod = mod(this.playerDef.con);
+    const roll = d(this.playerDef.hitDieType);
+    const healed = Math.max(1, roll + conMod);
+    const before = s.player.hp;
+    s.player.hp = Math.min(this.playerDef.maxHp, s.player.hp + healed);
+    s.player.hitDiceUsed++;
+    const remaining = this.playerDef.level - s.player.hitDiceUsed;
+    this.addLogs([
+      { left: `Short Rest — +${healed} HP restored`, right: `1d${this.playerDef.hitDieType}+CON(${conMod >= 0 ? '+' : ''}${conMod})=[${roll}]+${conMod}=${healed}`, style: 'heal' },
+      { left: `HP: ${before} → ${s.player.hp}/${this.playerDef.maxHp}  (${remaining} Hit ${remaining === 1 ? 'Die' : 'Dice'} left)`, style: 'status' },
+    ]);
   }
 
   private advanceQuest(type: QuestGoalType): void {
@@ -792,7 +806,7 @@ export class GameEngine {
         q.completed = true;
         s.player.xp += q.rewardXp;
         s.player.gold += q.rewardGp;
-        this.addLog(`Quest complete: ${q.title}! +${q.rewardXp} XP  +${q.rewardGp} GP`);
+        this.addLog({ left: `Quest complete: ${q.title}! +${q.rewardXp} XP  +${q.rewardGp} GP`, style: 'status' });
       }
     }
   }
@@ -858,6 +872,7 @@ export class GameEngine {
       movesLeft: 0,
       deathSaveSuccesses: 0,
       deathSaveFailures: 0,
+      hitDiceUsed: 0,
       conditions: [] as string[],
     };
 

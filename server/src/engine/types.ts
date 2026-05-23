@@ -5,6 +5,7 @@ export interface PlayerAttack {
   statKey: 'str' | 'dex';
   damageDice: number;
   damageSides: number;
+  damageType: string;
   savageAttacker: boolean;
   graze: boolean;
   vex: boolean;
@@ -30,6 +31,7 @@ export interface PlayerDef {
   savingThrowProficiencies: string[];
   savingThrows: Record<string, number>;
   secondWindMaxUses: number;
+  hitDieType: number;
   sneakAttackDice: number;
   speed: number;
   speedFt: number;
@@ -69,6 +71,8 @@ export interface MonsterDef {
   xp: number;
   cr: string;
   color: number;
+  resistances?: string[];
+  vulnerabilities?: string[];
 }
 
 export interface NPCDef {
@@ -123,6 +127,16 @@ export interface QuestDef {
   rewardXp: number; rewardGp: number;
 }
 
+// ── Combat log ────────────────────────────────────────────────────────────────
+
+export type LogEntryStyle = 'normal' | 'hit' | 'crit' | 'kill' | 'heal' | 'status' | 'header' | 'miss';
+
+export interface LogEntry {
+  left: string;
+  right?: string;
+  style?: LogEntryStyle;
+}
+
 // ── Game state ─────────────────────────────────────────────────────────────────
 
 export type CombatMode = 'exploring' | 'player_turn' | 'enemy_turn' | 'death_saves' | 'defeat';
@@ -144,6 +158,7 @@ export interface PlayerState {
   movesLeft: number;
   deathSaveSuccesses: number;
   deathSaveFailures: number;
+  hitDiceUsed: number;
   conditions: string[];
 }
 
@@ -210,7 +225,7 @@ export interface GameState {
   npcs: NpcState[];
   mapItems: MapItemState[];
   secrets: SecretState[];
-  combatLog: string[];
+  combatLog: LogEntry[];
   logScrollOffset: number;
   encounterTypes: EncounterType[];
   mapName: string;
@@ -241,6 +256,7 @@ export type PlayerAction =
   | { type: 'disengage' }
   | { type: 'endTurn' }
   | { type: 'rollDeathSave' }
+  | { type: 'shortRest' }
   | { type: 'search' }
   | { type: 'usePotion' }
   | { type: 'equip'; slot: 'armor' | 'weapon' | 'shield'; itemId: string }

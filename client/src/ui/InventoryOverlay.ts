@@ -45,7 +45,7 @@ function slotLabel(item: EquipmentDef, playerDef: PlayerDef): string {
     ? Math.max(mod(playerDef.str), mod(playerDef.dex))
     : mod(playerDef[w.statKey]);
   return attackSummary(
-    { name: w.name, statKey: w.statKey, damageDice: w.damageDice, damageSides: w.damageSides, savageAttacker: playerDef.savageAttacker, graze: w.mastery === "graze", vex: w.mastery === "vex" },
+    { name: w.name, statKey: w.statKey, damageDice: w.damageDice, damageSides: w.damageSides, damageType: w.damageType, savageAttacker: playerDef.savageAttacker, graze: w.mastery === "graze", vex: w.mastery === "vex" },
     statMod,
   );
 }

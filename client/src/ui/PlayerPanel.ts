@@ -22,6 +22,7 @@ export interface PlayerPanelActionState {
   enemies: Array<{ tileX: number; tileY: number; dead: boolean }>;
   playerTileX: number;
   playerTileY: number;
+  hitDiceRemaining: number;
 }
 
 const DPR = window.devicePixelRatio;
@@ -40,6 +41,7 @@ export interface PlayerPanelCallbacks {
   onHide: () => void;
   onEndTurn: () => void;
   onDeathSave: () => void;
+  onShortRest: () => void;
 }
 
 function chebyshev(x1: number, y1: number, x2: number, y2: number): number {
@@ -63,6 +65,7 @@ export class PlayerPanel {
   private readonly hideBtn: Phaser.GameObjects.Container;
   private readonly endTurnBtn: Phaser.GameObjects.Container;
   private readonly deathSaveBtn: Phaser.GameObjects.Container;
+  private readonly restBtn: Phaser.GameObjects.Container;
   private readonly actionButtons: Phaser.GameObjects.Container[];
 
   constructor(scene: Phaser.Scene, def: PlayerDef, callbacks: PlayerPanelCallbacks) {
@@ -249,9 +252,10 @@ export class PlayerPanel {
     this.hideBtn      = makeButton(scene, btnX, 598, "HIDE",            0x1a3a1a, callbacks.onHide,       btnW, 28, "11px");
     this.endTurnBtn   = makeButton(scene, btnX, 632, "END TURN",        0x3a3020, callbacks.onEndTurn,    btnW, 28, "11px");
     this.deathSaveBtn = makeButton(scene, btnX, 632, "ROLL DEATH SAVE", 0x5a1a1a, callbacks.onDeathSave, btnW, 28, "11px");
+    this.restBtn      = makeButton(scene, btnX, 462, "SHORT REST",      0x1a2a3a, callbacks.onShortRest,  btnW, 28, "11px");
     this.actionButtons = [
       this.attackBtn, this.dashBtn, this.dodgeBtn, this.disengageBtn,
-      this.secondWindBtn, this.hideBtn, this.endTurnBtn, this.deathSaveBtn,
+      this.secondWindBtn, this.hideBtn, this.endTurnBtn, this.deathSaveBtn, this.restBtn,
     ];
     this.actionButtons.forEach(btn => btn.setVisible(false));
 
@@ -286,7 +290,11 @@ export class PlayerPanel {
 
     const { mode, actionUsed, bonusActionUsed, playerDef, playerHp, secondWindUses } = state;
 
-    if (mode === 'player_turn') {
+    if (mode === 'exploring') {
+      if (state.playerHp < state.playerDef.maxHp && state.hitDiceRemaining > 0) {
+        this.restBtn.setVisible(true);
+      }
+    } else if (mode === 'player_turn') {
       this.endTurnBtn.setVisible(true);
       if (!actionUsed) {
         const hasAdjacent = state.enemies.some(

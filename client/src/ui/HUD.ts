@@ -7,7 +7,7 @@ import {
   PLAYER_PANEL_WIDTH,
   TARGET_PANEL_WIDTH,
 } from "../constants";
-import { CombatMode } from "../net/types";
+import { CombatMode, LogEntry, LogEntryStyle } from "../net/types";
 import { makeButton } from "./UIButton";
 import { Enemy } from "../entities/Enemy";
 import { PlayerDef } from "../data/player";
@@ -17,6 +17,35 @@ const GRID_H = GRID_ROWS * TILE_SIZE;
 const GRID_W = GRID_COLS * TILE_SIZE;
 const W = PLAYER_PANEL_WIDTH + GRID_W + TARGET_PANEL_WIDTH;
 const DPR = window.devicePixelRatio;
+
+const LOG_ROWS = 6;
+const ROW_H = 14;
+
+function styleColor(style?: LogEntryStyle): string {
+  switch (style) {
+    case 'hit':    return '#7ec8a0';
+    case 'crit':   return '#ffe080';
+    case 'kill':   return '#ff8888';
+    case 'heal':   return '#88dd88';
+    case 'status': return '#88aacc';
+    case 'header': return '#ddeeff';
+    case 'miss':   return '#667788';
+    default:       return '#aabbcc';
+  }
+}
+
+function styleColorDim(style?: LogEntryStyle): string {
+  switch (style) {
+    case 'hit':    return '#5a9070';
+    case 'crit':   return '#b8a050';
+    case 'kill':   return '#b86060';
+    case 'heal':   return '#60a060';
+    case 'status': return '#607890';
+    case 'header': return '#99bbcc';
+    case 'miss':   return '#445566';
+    default:       return '#778899';
+  }
+}
 
 export interface HUDState {
   mode: CombatMode;
@@ -33,7 +62,7 @@ export interface HUDState {
   enemyHidden: boolean;
   deathSaveSuccesses: number;
   deathSaveFailures: number;
-  combatLog: string[];
+  combatLog: LogEntry[];
   logScrollOffset: number;
   selectedEnemy: Enemy | null;
   searchAvailable: boolean;
@@ -48,7 +77,8 @@ export interface HUDCallbacks {
 export class HUD {
   private readonly phaseText: Phaser.GameObjects.Text;
   private readonly enemyInfoText: Phaser.GameObjects.Text;
-  private readonly logText: Phaser.GameObjects.Text;
+  private readonly logLeftTexts: Phaser.GameObjects.Text[];
+  private readonly logRightTexts: Phaser.GameObjects.Text[];
   private readonly logScrollHint: Phaser.GameObjects.Text;
   private readonly turnOrderBar: TurnOrderBar;
 
@@ -56,6 +86,7 @@ export class HUD {
     const y = GRID_H;
     const cx = PLAYER_PANEL_WIDTH + GRID_W / 2;
     const lx = PLAYER_PANEL_WIDTH + 12;
+    const rx = PLAYER_PANEL_WIDTH + GRID_W - 12;
 
     this.turnOrderBar = new TurnOrderBar(scene);
 
@@ -70,9 +101,19 @@ export class HUD {
       .text(cx, y + 10, "", { fontSize: "13px", color: "#e2b96f", fontFamily: "monospace", resolution: DPR })
       .setOrigin(0.5, 0).setDepth(11);
 
-    this.logText = scene.add
-      .text(lx, y + 30, "", { fontSize: "11px", color: "#aabbcc", fontFamily: "monospace", resolution: DPR, wordWrap: { width: GRID_W - 24 }, lineSpacing: 4 })
-      .setDepth(11);
+    this.logLeftTexts = [];
+    this.logRightTexts = [];
+    for (let i = 0; i < LOG_ROWS; i++) {
+      const rowY = y + 30 + i * ROW_H;
+      this.logLeftTexts.push(
+        scene.add.text(lx, rowY, "", { fontSize: "11px", color: "#aabbcc", fontFamily: "monospace", resolution: DPR })
+          .setDepth(11),
+      );
+      this.logRightTexts.push(
+        scene.add.text(rx, rowY, "", { fontSize: "10px", color: "#778899", fontFamily: "monospace", resolution: DPR })
+          .setOrigin(1, 0).setDepth(11),
+      );
+    }
 
     this.logScrollHint = scene.add
       .text(W - 12, y + 114, "", { fontSize: "10px", color: "#445566", fontFamily: "monospace", resolution: DPR })
@@ -83,7 +124,6 @@ export class HUD {
 
     makeButton(scene, PLAYER_PANEL_WIDTH + 80,  y + 10, "NEW ENCOUNTER", 0x2a1a1a, callbacks.onNewEncounter);
     makeButton(scene, W - TARGET_PANEL_WIDTH - 250, y + 10, "DUNGEON MASTER", 0x1a1020, callbacks.onOpenDM);
-
   }
 
   refresh(state: HUDState): void {
@@ -175,20 +215,32 @@ export class HUD {
     );
   }
 
-  private updateLogDisplay(combatLog: string[], logScrollOffset: number): void {
+  private updateLogDisplay(combatLog: LogEntry[], logScrollOffset: number): void {
     const total = combatLog.length;
-    const offset = Math.min(logScrollOffset, Math.max(0, total - 6));
+    const offset = Math.min(logScrollOffset, Math.max(0, total - LOG_ROWS));
     const end = total - offset;
-    const start = Math.max(0, end - 6);
-    this.logText.setText(combatLog.slice(start, end).join("\n"));
+    const start = Math.max(0, end - LOG_ROWS);
+    const visible = combatLog.slice(start, end);
+
+    for (let i = 0; i < LOG_ROWS; i++) {
+      const entry = visible[i];
+      if (!entry) {
+        this.logLeftTexts[i].setText("");
+        this.logRightTexts[i].setText("");
+        continue;
+      }
+      const color = styleColor(entry.style);
+      const dimColor = styleColorDim(entry.style);
+      this.logLeftTexts[i].setText(entry.left).setColor(color);
+      this.logRightTexts[i].setText(entry.right ?? "").setColor(dimColor);
+    }
 
     if (offset > 0) {
       this.logScrollHint.setText(`▼ ${offset} newer`);
-    } else if (total > 6) {
+    } else if (total > LOG_ROWS) {
       this.logScrollHint.setText("↑ scroll for history");
     } else {
       this.logScrollHint.setText("");
     }
   }
-
 }

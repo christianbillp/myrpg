@@ -116,6 +116,7 @@ async function loadWorldState(): Promise<GameState | null> {
     equippedSlots: charSave.equippedSlots ?? { armorId: null, weaponId: null, shieldId: null },
     secondWindUses: charSave.secondWindUses,
     reactionUsed: false,
+    hitDiceUsed: 0,
     conditions: [],
   };
   return { ...worldSave, player: fullPlayer };

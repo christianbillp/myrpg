@@ -3,6 +3,7 @@ export interface PlayerAttack {
   statKey: 'str' | 'dex';
   damageDice: number;
   damageSides: number;
+  damageType: string;
   savageAttacker: boolean;
   graze: boolean;
   vex: boolean;
@@ -33,6 +34,7 @@ export interface PlayerDef {
   savingThrowProficiencies: string[];
   savingThrows: Record<string, number>;
   secondWindMaxUses: number;
+  hitDieType: number;
   sneakAttackDice: number;
   speed: number;
   speedFt: number;

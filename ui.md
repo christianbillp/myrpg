@@ -51,6 +51,7 @@ Defined in `client/src/ui/PlayerPanel.ts`. Hidden by default; toggled open/close
 | **Hide**            | Bonus Action | Player's turn, bonus action not yet spent, Rogue only, not already hidden    | Attempt to hide (Cunning Action) for Sneak Attack advantage             |
 | **End Turn**        | —            | Player's turn                                                                | Explicitly end the player's turn and pass initiative to the enemies     |
 | **Roll Death Save** | —            | Player unconscious                                                           | Roll a d20 death saving throw                                           |
+| **Short Rest**      | —            | Exploring, player below max HP, Hit Dice remaining                           | Spend one Hit Die (d10+CON Fighter / d8+CON Rogue) to heal; resets each new encounter |
 
 ---
 
@@ -61,7 +62,7 @@ Rendered in `client/src/scenes/GameScene.ts`. Each tile = 5 ft. Occupies the are
 | Component               | Description                                                                                                                           |
 | ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
 | **Player Token**        | Coloured circle representing the player character; shows an HP bar above the token when damaged                                       |
-| **Enemy Token**         | Coloured circle with an HP bar above the token when damaged; when multiple enemies are present each token shows its letter label (A, B, C…) centred on it |
+| **Enemy Token**         | Coloured circle with an HP bar above the token when damaged; letter labels (A, B, C…) appear centred on each token once combat begins and are hidden during exploration |
 | **Item Token**          | Small green diamond on a tile; walking onto it picks up the item                                                                      |
 | **Movement Highlights** | Blue-tinted tiles showing reachable squares during the player's turn                                                                  |
 | **Turn Order Bar**      | Semi-transparent strip pinned to the top of the Game Map; visible during combat. One chip per combatant (player first, then enemies in spawn order). The active chip is highlighted green; dead chips are dimmed. Enemy chips show the letter label and name. |
@@ -93,7 +94,7 @@ Defined in `client/src/ui/HUD.ts`. Spans the full canvas width below the Game Ma
 | ------------------- | ------------------------------------------------------------------------------------------------------------- |
 | **Enemy Info**      | Top-right — enemy name, HP, and status tags (`[HIDDEN]`, `[VEXED]`)                                           |
 | **Phase Text**      | Top-centre — current game phase ("Exploring", "Your turn — N moves", enemy name + "…", death save state); appends "· action used" or "· bonus used" when the respective resource has been spent this turn |
-| **Combat Log**      | Scrollable text area showing the history of combat events, newest at the bottom. Scroll with the mouse wheel. |
+| **Combat Log**      | Two-column scrollable log: left column shows the narrative (what happened), right column shows the dice detail (rolls, bonuses, totals). Each row is colour-coded by outcome — grey (normal), green (hit), yellow (crit), red (kill), teal (heal), blue (status), bright (header), dim (miss). Newest entries appear at the bottom; scroll with the mouse wheel. |
 | **Log Scroll Hint** | Small dim text showing scroll direction and how many newer entries are below                                  |
 | **DUNGEON MASTER**  | Button — open the AIDM chat overlay; conversation history is preserved across open/close cycles               |
 | **New Encounter**   | Button — trigger auto-save and return to the Encounter Setup screen                                           |
