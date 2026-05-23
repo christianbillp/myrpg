@@ -11,11 +11,13 @@ import { generateRoomsMap } from './RoomsMapGenerator.js';
 import { shuffle } from './MapUtils.js';
 import { d20 } from './Dice.js';
 import {
-  rollInitiative, playerMeleeAttack, playerHide, playerSecondWind,
+  rollInitiative, playerMeleeAttack, enemyAttack, playerHide, playerSecondWind,
   drinkPotion, rollDeathSave, rollSkillCheck,
 } from './CombatSystem.js';
 import { applyEquipment } from './EquipmentSystem.js';
 import { runEnemyTurn, chebyshev } from './EnemyAI.js';
+
+const TURN_CONDITIONS = ['dodging', 'disengaged', 'dashing'];
 
 export interface GameDefs {
   playerDefs: PlayerDef[];
@@ -75,6 +77,9 @@ export class GameEngine {
       case 'attack':       this.doAttack(action.targetId, events); break;
       case 'hide':         this.doHide(events); break;
       case 'secondWind':   this.doSecondWind(events); break;
+      case 'dash':         this.doDash(events); break;
+      case 'dodge':        this.doDodge(events); break;
+      case 'disengage':    this.doDisengage(events); break;
       case 'endTurn':      this.doEndTurn(events); break;
       case 'rollDeathSave':this.doRollDeathSave(events); break;
       case 'search':       this.doSearch(events); break;
@@ -192,6 +197,7 @@ export class GameEngine {
       tileX: tx, tileY: ty,
       hp: def.maxHp, maxHp: def.maxHp,
       isActive: false, vexed: false, hidden: false,
+      reactionUsed: false, conditions: [],
     };
     s.enemies.push(enemy);
     if (s.phase !== 'exploring') {
@@ -234,6 +240,30 @@ export class GameEngine {
     return [];
   }
 
+  applyCondition(entity: string, condition: string): GameEvent[] {
+    const s = this.state;
+    if (entity === 'player') {
+      if (!s.player.conditions.includes(condition)) s.player.conditions.push(condition);
+    } else if (entity.startsWith('enemy_')) {
+      const label = entity.replace('enemy_', '');
+      const enemy = s.enemies.find((e) => e.label === label);
+      if (enemy && !enemy.conditions.includes(condition)) enemy.conditions.push(condition);
+    }
+    return [];
+  }
+
+  removeCondition(entity: string, condition: string): GameEvent[] {
+    const s = this.state;
+    if (entity === 'player') {
+      s.player.conditions = s.player.conditions.filter((c) => c !== condition);
+    } else if (entity.startsWith('enemy_')) {
+      const label = entity.replace('enemy_', '');
+      const enemy = s.enemies.find((e) => e.label === label);
+      if (enemy) enemy.conditions = enemy.conditions.filter((c) => c !== condition);
+    }
+    return [];
+  }
+
   rollAbilityCheck(skill: string, dc: number): { roll: number; total: number; success: boolean } {
     const skillMod = this.playerDef.skills[skill] ?? 0;
     return rollSkillCheck(skillMod, dc);
@@ -256,12 +286,23 @@ export class GameEngine {
     if (s.npcs.some((n) => n.tileX === nx && n.tileY === ny)) return;
     if (s.phase === 'player_turn' && s.player.movesLeft <= 0) return;
 
+    const oldX = s.player.tileX;
+    const oldY = s.player.tileY;
     s.player.tileX = nx;
     s.player.tileY = ny;
     events.push({ type: 'entity_move', entityId: 'player', toX: nx, toY: ny });
 
     if (s.phase === 'player_turn') {
       s.player.movesLeft--;
+      if (!s.player.conditions.includes('disengaged')) {
+        for (const enemy of s.enemies.filter((e) => e.hp > 0 && !e.reactionUsed)) {
+          if (chebyshev(oldX, oldY, enemy.tileX, enemy.tileY) <= 1 &&
+              chebyshev(nx, ny, enemy.tileX, enemy.tileY) > 1) {
+            this.doEnemyOpportunityAttack(enemy, events);
+            if ((this.state.phase as string) === 'death_saves' || (this.state.phase as string) === 'defeat') return;
+          }
+        }
+      }
     } else {
       this.checkItemPickup();
       this.checkCombatTrigger(events);
@@ -322,10 +363,16 @@ export class GameEngine {
     const s = this.state;
     s.phase = 'player_turn';
     s.activeEnemyIndex = 0;
-    s.enemies.forEach((e) => { e.isActive = false; });
+    s.enemies.forEach((e) => {
+      e.isActive = false;
+      e.reactionUsed = false;
+      e.conditions = e.conditions.filter((c) => !TURN_CONDITIONS.includes(c));
+    });
     s.player.movesLeft = this.playerDef.speed;
     s.player.actionUsed = false;
     s.player.bonusActionUsed = false;
+    s.player.reactionUsed = false;
+    s.player.conditions = s.player.conditions.filter((c) => !TURN_CONDITIONS.includes(c));
   }
 
   private doAttack(targetId: string | undefined, events: GameEvent[]): void {
@@ -344,7 +391,8 @@ export class GameEngine {
     const targetDef = this.defs.monsters.find((m) => m.id === target!.defId);
     if (!targetDef) return;
 
-    const { damage, logs, vexApplied } = playerMeleeAttack(this.playerDef, targetDef, s.player.hidden);
+    const withAdvantage = s.player.hidden;
+    const { damage, logs, vexApplied } = playerMeleeAttack(this.playerDef, targetDef, withAdvantage);
     s.player.hidden = false;
     this.addLogs(logs);
     events.push({ type: 'log', lines: logs });
@@ -393,6 +441,37 @@ export class GameEngine {
     s.player.bonusActionUsed = true;
   }
 
+  private doDash(events: GameEvent[]): void {
+    const s = this.state;
+    if (s.phase !== 'player_turn' || s.player.actionUsed) return;
+    s.player.movesLeft += this.playerDef.speed;
+    s.player.conditions.push('dashing');
+    s.player.actionUsed = true;
+    const log = `${this.playerDef.name} Dashes! +${this.playerDef.speed} movement.`;
+    this.addLog(log);
+    events.push({ type: 'log', lines: [log] });
+  }
+
+  private doDodge(events: GameEvent[]): void {
+    const s = this.state;
+    if (s.phase !== 'player_turn' || s.player.actionUsed) return;
+    s.player.conditions.push('dodging');
+    s.player.actionUsed = true;
+    const log = `${this.playerDef.name} Dodges! Enemies attack with Disadvantage until next turn.`;
+    this.addLog(log);
+    events.push({ type: 'log', lines: [log] });
+  }
+
+  private doDisengage(events: GameEvent[]): void {
+    const s = this.state;
+    if (s.phase !== 'player_turn' || s.player.actionUsed) return;
+    s.player.conditions.push('disengaged');
+    s.player.actionUsed = true;
+    const log = `${this.playerDef.name} Disengages! No Opportunity Attacks this turn.`;
+    this.addLog(log);
+    events.push({ type: 'log', lines: [log] });
+  }
+
   private doSecondWind(events: GameEvent[]): void {
     const s = this.state;
     if (s.phase !== 'player_turn' || s.player.bonusActionUsed || s.player.secondWindUses <= 0 || s.player.hp >= this.playerDef.maxHp) return;
@@ -434,6 +513,8 @@ export class GameEngine {
         ...s.npcs.map((n): [number, number] => [n.tileX, n.tileY]),
       ];
 
+      const startedAdjacentToPlayer = chebyshev(enemy.tileX, enemy.tileY, s.player.tileX, s.player.tileY) <= 1;
+
       const result = runEnemyTurn(enemy, def, {
         playerTileX: s.player.tileX,
         playerTileY: s.player.tileY,
@@ -442,6 +523,7 @@ export class GameEngine {
         playerHidden: s.player.hidden,
         enemyVexed: enemy.vexed,
         enemyCurrentlyHidden: enemy.hidden,
+        playerDodging: s.player.conditions.includes('dodging'),
         passivePerception: 10 + (this.playerDef.skills['perception'] ?? 0),
         passable: s.map.passable,
         mapCols: s.map.cols,
@@ -449,12 +531,19 @@ export class GameEngine {
         occupiedTiles: occupied,
       });
 
+      const endedAdjacentToPlayer = chebyshev(result.finalTileX, result.finalTileY, s.player.tileX, s.player.tileY) <= 1;
+
       // Apply move results
       enemy.tileX = result.finalTileX;
       enemy.tileY = result.finalTileY;
       enemy.hidden = result.hidden;
       enemy.vexed = false;
       events.push(...result.events);
+
+      // Player Opportunity Attack if enemy moved out of player's reach
+      if (startedAdjacentToPlayer && !endedAdjacentToPlayer && !result.attacked) {
+        this.doPlayerOpportunityAttack(enemy, events);
+      }
 
       this.addLogs(result.logs);
       events.push({ type: 'log', lines: result.logs });
@@ -644,6 +733,56 @@ export class GameEngine {
     s.player.equippedSlots = { ...s.player.equippedSlots };
   }
 
+  private doEnemyOpportunityAttack(enemy: EnemyState, events: GameEvent[]): void {
+    const s = this.state;
+    const def = this.defs.monsters.find((m) => m.id === enemy.defId);
+    if (!def) return;
+    const meleeAttack = def.attacks.find((a) => a.attackType === 'melee' || a.attackType === 'both');
+    if (!meleeAttack) return;
+    enemy.reactionUsed = true;
+    const withDisadvantage = s.player.conditions.includes('dodging');
+    const { damage, isHit, isCrit, logs } = enemyAttack(def, meleeAttack, this.playerDef.ac, false, withDisadvantage);
+    const oaLogs = [`⚡ ${def.name} makes an Opportunity Attack!`, ...logs];
+    this.addLogs(oaLogs);
+    events.push({ type: 'log', lines: oaLogs });
+    if (isHit) {
+      s.player.hp = Math.max(0, s.player.hp - damage);
+      const dmgLog = `${this.playerDef.name} HP: ${s.player.hp}/${this.playerDef.maxHp}`;
+      this.addLog(dmgLog);
+      events.push({ type: 'log', lines: [dmgLog] });
+      if (s.player.hp <= 0) {
+        const fallLog = `${this.playerDef.name} falls unconscious!`;
+        this.addLog(fallLog);
+        events.push({ type: 'log', lines: [fallLog] });
+        s.phase = 'death_saves';
+      }
+    }
+    // Suppress unused variable warning for isCrit (consistent with future death-save extension)
+    void isCrit;
+  }
+
+  private doPlayerOpportunityAttack(enemy: EnemyState, events: GameEvent[]): void {
+    const s = this.state;
+    if (s.player.reactionUsed || s.player.hp <= 0) return;
+    const targetDef = this.defs.monsters.find((m) => m.id === enemy.defId);
+    if (!targetDef) return;
+    s.player.reactionUsed = true;
+    const { damage, logs, vexApplied } = playerMeleeAttack(this.playerDef, targetDef, false);
+    const oaLogs = [`⚡ ${this.playerDef.name} makes an Opportunity Attack!`, ...logs];
+    this.addLogs(oaLogs);
+    events.push({ type: 'log', lines: oaLogs });
+    enemy.hp = Math.max(0, enemy.hp - damage);
+    this.addLog(`${targetDef.name} HP: ${enemy.hp}/${enemy.maxHp}`);
+    if (vexApplied) enemy.vexed = true;
+    if (enemy.hp <= 0) {
+      const gold = crGoldReward(targetDef.cr);
+      s.player.xp += targetDef.xp;
+      s.player.gold += gold;
+      this.addLogs([`☠ ${targetDef.name} slain by Opportunity Attack! +${targetDef.xp} XP  +${gold} GP`]);
+      this.killEnemy(enemy.id);
+    }
+  }
+
   private advanceQuest(type: QuestGoalType): void {
     const s = this.state;
     for (const q of s.quests) {
@@ -715,9 +854,11 @@ export class GameEngine {
       hidden: false,
       actionUsed: false,
       bonusActionUsed: false,
+      reactionUsed: false,
       movesLeft: 0,
       deathSaveSuccesses: 0,
       deathSaveFailures: 0,
+      conditions: [] as string[],
     };
 
     const isCombat = req.encounterTypes.includes('simple_combat');
@@ -820,6 +961,7 @@ function spawnEnemies(
       id: `enemy_${i}`, defId: def.id, label: String.fromCharCode(65 + i),
       tileX: c, tileY: r, hp: def.maxHp, maxHp: def.maxHp,
       isActive: false, vexed: false, hidden: false,
+      reactionUsed: false, conditions: [],
     });
   });
 }

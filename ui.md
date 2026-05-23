@@ -18,7 +18,7 @@ Canonical names for all UI regions and components. Use these consistently in cod
 - **Player Panel** — 300 px wide left sidebar, full canvas height; hidden by default, toggled by clicking the player token
 - **Game Map** — tile-based play area between the two panels
 - **Target Panel** — 300 px wide right sidebar, full canvas height; visible only when a creature is selected
-- **HUD** — 200 px tall bar at the bottom, spanning full canvas width
+- **HUD** — 130 px tall bar at the bottom, spanning full canvas width
 
 ---
 
@@ -35,8 +35,22 @@ Defined in `client/src/ui/PlayerPanel.ts`. Hidden by default; toggled open/close
 | **Ability Scores** | All six scores (STR DEX CON INT WIS CHA) with modifiers                                                  |
 | **XP Display**     | Current experience points                                                                                |
 | **Quests**         | Section below XP listing quests assigned at encounter start. Each quest shows "· Title  N/M" while in progress and "✓ Title" when complete. "None" when no quests are active for the current encounter type. |
+| **Action Buttons** | Context-sensitive combat buttons shown above INVENTORY/SEARCH (see below)                                |
 | **INVENTORY**      | Button at the bottom of the panel; always visible when the panel is open. Opens the Inventory Overlay.   |
 | **SEARCH**         | Button at the bottom of the panel; visible only during an Exploration encounter with secrets remaining. Rolls Wisdom (Perception) to detect a secret on an adjacent tile. |
+
+### Action Buttons
+
+| Button              | Economy      | Condition                                                                    | Description                                                             |
+| ------------------- | ------------ | ---------------------------------------------------------------------------- | ----------------------------------------------------------------------- |
+| **Attack**          | Action       | Player's turn, action not yet spent, adjacent to any living enemy            | Make a melee attack; player stays in their turn after attacking         |
+| **Dash**            | Action       | Player's turn, action not yet spent                                          | Double remaining movement for this turn; applies `dashing` condition    |
+| **Dodge**           | Action       | Player's turn, action not yet spent                                          | All incoming enemy attacks have Disadvantage until next turn; applies `dodging` condition |
+| **Disengage**       | Action       | Player's turn, action not yet spent, at least one living enemy               | Prevent Opportunity Attacks when moving away from enemies this turn; applies `disengaged` condition |
+| **Second Wind**     | Bonus Action | Player's turn, bonus action not yet spent, Fighter only, uses remaining, not at full HP | Spend a use to heal 1d10 + level HP                          |
+| **Hide**            | Bonus Action | Player's turn, bonus action not yet spent, Rogue only, not already hidden    | Attempt to hide (Cunning Action) for Sneak Attack advantage             |
+| **End Turn**        | —            | Player's turn                                                                | Explicitly end the player's turn and pass initiative to the enemies     |
+| **Roll Death Save** | —            | Player unconscious                                                           | Roll a d20 death saving throw                                           |
 
 ---
 
@@ -67,6 +81,7 @@ Selection: clicking a creature in the Game Map selects it. The creature is highl
 | **HP Text**        | Numeric HP — "current / max"                                     |
 | **Combat Stats**   | AC, Speed                                                        |
 | **Ability Scores** | All six scores (STR DEX CON INT WIS CHA) with modifiers          |
+| **Conditions**     | Active conditions in amber (e.g. `[DODGING]`, `[POISONED]`); hidden when none |
 
 ---
 
@@ -80,20 +95,8 @@ Defined in `client/src/ui/HUD.ts`. Spans the full canvas width below the Game Ma
 | **Phase Text**      | Top-centre — current game phase ("Exploring", "Your turn — N moves", enemy name + "…", death save state); appends "· action used" or "· bonus used" when the respective resource has been spent this turn |
 | **Combat Log**      | Scrollable text area showing the history of combat events, newest at the bottom. Scroll with the mouse wheel. |
 | **Log Scroll Hint** | Small dim text showing scroll direction and how many newer entries are below                                  |
-| **Action Buttons**  | Context-sensitive buttons shown during combat (see below)                                                     |
-
-### Action Buttons
-
-| Button              | Economy      | Condition                                                                    | Description                                                             |
-| ------------------- | ------------ | ---------------------------------------------------------------------------- | ----------------------------------------------------------------------- |
-| **Attack**          | Action       | Player's turn, action not yet spent, adjacent to any living enemy            | Make a melee attack; player stays in their turn after attacking         |
-| **Second Wind**     | Bonus Action | Player's turn, bonus action not yet spent, Fighter only, uses remaining, not at full HP | Spend a use to heal 1d10 + level HP                          |
-| **Hide**            | Bonus Action | Player's turn, bonus action not yet spent, Rogue only, not already hidden    | Attempt to hide (Cunning Action) for Sneak Attack advantage             |
-| **End Turn**        | —            | Player's turn                                                                | Explicitly end the player's turn and pass initiative to the enemies     |
-| **Roll Death Save** | —            | Player unconscious                                                           | Roll a d20 death saving throw                                           |
-| **Communicate**      | —            | Exploring, Social Interaction encounter active                               | Initiate dialogue with selected NPC; logs "No target selected." if none |
-| **DUNGEON MASTER**   | —            | Always visible                                                               | Open the AIDM chat overlay; conversation history is preserved across open/close cycles |
-| **New Encounter**    | —            | Always visible                                                               | Trigger auto-save and return to the Encounter Setup screen              |
+| **DUNGEON MASTER**  | Button — open the AIDM chat overlay; conversation history is preserved across open/close cycles               |
+| **New Encounter**   | Button — trigger auto-save and return to the Encounter Setup screen                                           |
 
 ---
 

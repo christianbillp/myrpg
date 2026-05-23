@@ -23,19 +23,27 @@ export function rollInitiative(
 export function playerMeleeAttack(
   player: PlayerDef,
   enemy: MonsterDef,
-  isHidden: boolean,
+  withAdvantage: boolean,
+  withDisadvantage = false,
 ): { damage: number; logs: string[]; vexApplied: boolean } {
   const attack = player.mainAttack;
   const statMod = attack.statKey === 'str' ? mod(player.str) : mod(player.dex);
   const attackBonus = statMod + player.proficiencyBonus;
   const logs: string[] = [];
 
+  const effAdv = withAdvantage && !withDisadvantage;
+  const effDis = withDisadvantage && !withAdvantage;
+
   let naturalRoll: number, rollDesc: string;
-  if (isHidden) {
+  if (effAdv) {
     const { result, rolls } = rollAdvantage();
     naturalRoll = result;
     rollDesc = `advantage (${rolls[0]}, ${rolls[1]}) → ${naturalRoll}`;
     logs.push(`${player.name} attacks from the shadows!`);
+  } else if (effDis) {
+    const { result, rolls } = rollDisadvantage();
+    naturalRoll = result;
+    rollDesc = `disadvantage (${rolls[0]}, ${rolls[1]}) → ${naturalRoll}`;
   } else {
     naturalRoll = d20();
     rollDesc = `${naturalRoll}`;
@@ -51,7 +59,7 @@ export function playerMeleeAttack(
     let dice = 0;
     for (let i = 0; i < attack.damageDice * 2; i++) dice += d(attack.damageSides);
     let sneakDice = 0;
-    if (isHidden && player.sneakAttackDice > 0)
+    if (withAdvantage && player.sneakAttackDice > 0)
       for (let i = 0; i < player.sneakAttackDice * 2; i++) sneakDice += d(6);
     damage = dice + statMod + sneakDice;
     const sneakPart = sneakDice > 0 ? ` + ${sneakDice} Sneak Attack` : '';
@@ -69,7 +77,7 @@ export function playerMeleeAttack(
       logs.push(`HIT! ${dice}+${statMod}`);
     }
     let sneakDice = 0;
-    if (isHidden && player.sneakAttackDice > 0) {
+    if (withAdvantage && player.sneakAttackDice > 0) {
       for (let i = 0; i < player.sneakAttackDice; i++) sneakDice += d(6);
       logs.push(`Sneak Attack: +${sneakDice}`);
     }

@@ -84,7 +84,10 @@ export class Enemy {
 
   setLabel(label: string): void {
     this.label = label;
-    this.labelText.setText(label);
+  }
+
+  setLabelVisible(visible: boolean): void {
+    this.labelText.setText(visible ? this.label : "");
   }
 
   setSelected(selected: boolean): void {

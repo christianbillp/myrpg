@@ -13,10 +13,6 @@ import { Enemy } from "../entities/Enemy";
 import { PlayerDef } from "../data/player";
 import { TurnOrderBar, TurnChip } from "./TurnOrderBar";
 
-function chebyshev(x1: number, y1: number, x2: number, y2: number): number {
-  return Math.max(Math.abs(x1 - x2), Math.abs(y1 - y2));
-}
-
 const GRID_H = GRID_ROWS * TILE_SIZE;
 const GRID_W = GRID_COLS * TILE_SIZE;
 const W = PLAYER_PANEL_WIDTH + GRID_W + TARGET_PANEL_WIDTH;
@@ -30,7 +26,7 @@ export interface HUDState {
   actionUsed: boolean;
   bonusActionUsed: boolean;
   playerHidden: boolean;
-  secondWindUses: number;
+  playerConditions: string[];
   activeEnemy: Enemy | null;
   combatEnemies: Enemy[];
   enemyVexed: boolean;
@@ -40,17 +36,10 @@ export interface HUDState {
   combatLog: string[];
   logScrollOffset: number;
   selectedEnemy: Enemy | null;
-  playerTileX: number;
-  playerTileY: number;
   searchAvailable: boolean;
 }
 
 export interface HUDCallbacks {
-  onAttack: () => void;
-  onHide: () => void;
-  onSecondWind: () => void;
-  onEndTurn: () => void;
-  onDeathSave: () => void;
   onOpenDM: () => void;
   onNewEncounter: () => void;
   onScrollLog: (dy: number) => void;
@@ -62,17 +51,11 @@ export class HUD {
   private readonly logText: Phaser.GameObjects.Text;
   private readonly logScrollHint: Phaser.GameObjects.Text;
   private readonly turnOrderBar: TurnOrderBar;
-  private readonly attackBtn: Phaser.GameObjects.Container;
-  private readonly secondWindBtn: Phaser.GameObjects.Container;
-  private readonly hideBtn: Phaser.GameObjects.Container;
-  private readonly endTurnBtn: Phaser.GameObjects.Container;
-  private readonly deathSaveBtn: Phaser.GameObjects.Container;
 
   constructor(scene: Phaser.Scene, callbacks: HUDCallbacks) {
     const y = GRID_H;
     const cx = PLAYER_PANEL_WIDTH + GRID_W / 2;
     const lx = PLAYER_PANEL_WIDTH + 12;
-    const btnY = y + 148;
 
     this.turnOrderBar = new TurnOrderBar(scene);
 
@@ -98,23 +81,15 @@ export class HUD {
     const logZone = scene.add.zone(cx, y + 72, GRID_W, 90).setInteractive().setDepth(13);
     logZone.on("wheel", (_p: unknown, _dx: number, dy: number) => callbacks.onScrollLog(dy));
 
-    scene.add.rectangle(W / 2, y + 122, W, 1, 0x334455).setDepth(11);
-
     makeButton(scene, PLAYER_PANEL_WIDTH + 80,  y + 10, "NEW ENCOUNTER", 0x2a1a1a, callbacks.onNewEncounter);
     makeButton(scene, W - TARGET_PANEL_WIDTH - 250, y + 10, "DUNGEON MASTER", 0x1a1020, callbacks.onOpenDM);
 
-    this.attackBtn    = makeButton(scene, PLAYER_PANEL_WIDTH + 130, btnY, "ATTACK",          0x1a4a1e, callbacks.onAttack);
-    this.secondWindBtn = makeButton(scene, cx,                       btnY, "SECOND WIND",     0x1a3a5a, callbacks.onSecondWind);
-    this.hideBtn      = makeButton(scene, cx,                       btnY, "HIDE",             0x1a3a1a, callbacks.onHide);
-    this.endTurnBtn   = makeButton(scene, W - 130,                  btnY, "END TURN",         0x3a3020, callbacks.onEndTurn);
-    this.deathSaveBtn = makeButton(scene, cx, btnY, "ROLL DEATH SAVE", 0x5a1a1a, callbacks.onDeathSave);
   }
 
   refresh(state: HUDState): void {
     this.refreshEnemyInfo(state);
     this.refreshTurnOrderBar(state);
     this.updateLogDisplay(state.combatLog, state.logScrollOffset);
-    this.resetActionButtons();
     this.phaseText.setColor("#e2b96f");
     switch (state.mode) {
       case "exploring":    this.refreshExploring(state);   break;
@@ -165,40 +140,19 @@ export class HUD {
     this.turnOrderBar.refresh(chips);
   }
 
-  private resetActionButtons(): void {
-    this.attackBtn.setVisible(false);
-    this.secondWindBtn.setVisible(false);
-    this.hideBtn.setVisible(false);
-    this.endTurnBtn.setVisible(false);
-    this.deathSaveBtn.setVisible(false);
-  }
-
   private refreshExploring(state: HUDState): void {
     const hint = state.searchAvailable ? "  ·  search available" : "";
     this.phaseText.setText(`Exploring — WASD / arrow keys to move${hint}`);
   }
 
   private refreshPlayerTurn(state: HUDState): void {
-    const hiddenLabel = state.playerHidden   ? "  [HIDDEN]"       : "";
+    const hiddenLabel = state.playerHidden ? "  [HIDDEN]" : "";
+    const condLabel   = state.playerConditions.filter(c => c !== 'dashing').map(c => `  [${c.toUpperCase()}]`).join("");
     const actedLabel  = state.actionUsed     ? "  · action used"  : "";
     const bonusLabel  = state.bonusActionUsed ? "  · bonus used"  : "";
     this.phaseText.setText(
-      `Your turn — ${state.movesLeft}/${state.playerDef.speed} moves${hiddenLabel}${actedLabel}${bonusLabel}`,
+      `Your turn — ${state.movesLeft}/${state.playerDef.speed} moves${hiddenLabel}${condLabel}${actedLabel}${bonusLabel}`,
     );
-    this.endTurnBtn.setVisible(true);
-
-    if (!state.actionUsed) {
-      const hasAdjacentTarget = state.combatEnemies.some(
-        (e) => !e.isDead() && chebyshev(state.playerTileX, state.playerTileY, e.tileX, e.tileY) <= 1,
-      );
-      if (hasAdjacentTarget) this.attackBtn.setVisible(true);
-    }
-
-    if (!state.bonusActionUsed && state.playerDef.secondWindMaxUses > 0 && state.secondWindUses > 0 && state.playerHp < state.playerDef.maxHp)
-      this.secondWindBtn.setVisible(true);
-
-    if (!state.bonusActionUsed && state.playerDef.sneakAttackDice > 0 && !state.playerHidden && state.combatEnemies.some((e) => !e.isDead()))
-      this.hideBtn.setVisible(true);
   }
 
   private refreshEnemyTurn(state: HUDState): void {
@@ -212,7 +166,6 @@ export class HUD {
     this.phaseText.setText(
       `${state.playerDef.name} is unconscious!  ✓ ${state.deathSaveSuccesses}/3  ✗ ${state.deathSaveFailures}/3`,
     );
-    this.deathSaveBtn.setVisible(true);
   }
 
   private refreshDefeat(state: HUDState): void {

@@ -3,7 +3,7 @@ import { Player } from "../entities/Player";
 import { Enemy } from "../entities/Enemy";
 import { NPC } from "../entities/NPC";
 import { MapItem } from "../entities/MapItem";
-import { PlayerPanel, QuestDisplay } from "../ui/PlayerPanel";
+import { PlayerPanel, QuestDisplay, PlayerPanelActionState } from "../ui/PlayerPanel";
 import { TargetPanel } from "../ui/TargetPanel";
 import { HUD, HUDState } from "../ui/HUD";
 import { GridView } from "../systems/GridView";
@@ -174,6 +174,7 @@ export class GameScene extends Phaser.Scene {
         this.gridView.container.add(token.gameObject);
       }
       token.setLabel(eState.label);
+      token.setLabelVisible(state.phase !== 'exploring');
       token.setHp(eState.hp);
     }
   }
@@ -226,7 +227,7 @@ export class GameScene extends Phaser.Scene {
     if (serverId === this.selectedEnemyId || serverId === this.selectedNPCId) {
       if (this.selectedEnemyId) {
         const eState = state.enemies.find(e => e.id === this.selectedEnemyId);
-        if (eState && eState.hp > 0) this.targetPanel.refresh(eState.hp, eState.maxHp);
+        if (eState && eState.hp > 0) this.targetPanel.refresh(eState.hp, eState.maxHp, eState.conditions);
       }
       return;
     }
@@ -246,7 +247,7 @@ export class GameScene extends Phaser.Scene {
     if (eState && eState.hp > 0) {
       this.selectedEnemyId = serverId;
       this.enemyTokens.get(serverId)?.setSelected(true);
-      this.targetPanel.show(this.findMonsterDef(eState.defId), eState.hp);
+      this.targetPanel.show(this.findMonsterDef(eState.defId), eState.hp, eState.conditions);
       return;
     }
     const nState = state.npcs.find(n => n.id === serverId);
@@ -316,7 +317,7 @@ export class GameScene extends Phaser.Scene {
     this.selectedEnemyId = id;
     this.enemyTokens.get(id)?.setSelected(true);
     const eState = this.gameState.enemies.find(e => e.id === id);
-    if (eState) this.targetPanel.show(this.findMonsterDef(eState.defId), eState.hp);
+    if (eState) this.targetPanel.show(this.findMonsterDef(eState.defId), eState.hp, eState.conditions);
     gameClient.sendAction({ type: "selectTarget", entityId: id });
     if (this.gameState) this.updateHUD(this.gameState);
   }
@@ -394,14 +395,17 @@ export class GameScene extends Phaser.Scene {
     this.playerPanel = new PlayerPanel(this, this.playerDef, {
       onOpenInventory: () => { if (this.gameState) this.overlays.openInventory(this.gameState); },
       onSearch:        () => gameClient.sendAction({ type: "search" }),
+      onAttack:        () => gameClient.sendAction({ type: "attack" }),
+      onDash:          () => gameClient.sendAction({ type: "dash" }),
+      onDodge:         () => gameClient.sendAction({ type: "dodge" }),
+      onDisengage:     () => gameClient.sendAction({ type: "disengage" }),
+      onSecondWind:    () => gameClient.sendAction({ type: "secondWind" }),
+      onHide:          () => gameClient.sendAction({ type: "hide" }),
+      onEndTurn:       () => gameClient.sendAction({ type: "endTurn" }),
+      onDeathSave:     () => gameClient.sendAction({ type: "rollDeathSave" }),
     });
     this.targetPanel = new TargetPanel(this);
     this.hud = new HUD(this, {
-      onAttack:       () => gameClient.sendAction({ type: "attack" }),
-      onHide:         () => gameClient.sendAction({ type: "hide" }),
-      onSecondWind:   () => gameClient.sendAction({ type: "secondWind" }),
-      onEndTurn:      () => gameClient.sendAction({ type: "endTurn" }),
-      onDeathSave:    () => gameClient.sendAction({ type: "rollDeathSave" }),
       onOpenDM:       () => this.overlays.openDM(),
       onNewEncounter: () => {
         gameClient.disconnect();
@@ -431,7 +435,7 @@ export class GameScene extends Phaser.Scene {
       actionUsed:         state.player.actionUsed,
       bonusActionUsed:    state.player.bonusActionUsed,
       playerHidden:       state.player.hidden,
-      secondWindUses:     state.player.secondWindUses,
+      playerConditions:   state.player.conditions,
       activeEnemy,
       combatEnemies,
       enemyVexed:         activeEnemyState?.vexed ?? false,
@@ -441,9 +445,22 @@ export class GameScene extends Phaser.Scene {
       combatLog:          state.combatLog,
       logScrollOffset:    this.localLogScrollOffset,
       selectedEnemy,
-      playerTileX:        this.player?.tileX ?? state.player.tileX,
-      playerTileY:        this.player?.tileY ?? state.player.tileY,
       searchAvailable:    state.encounterTypes.includes("exploration") && state.secrets.length > 0,
+    };
+  }
+
+  private buildActionState(state: GameState): PlayerPanelActionState {
+    return {
+      mode:             state.phase,
+      actionUsed:       state.player.actionUsed,
+      bonusActionUsed:  state.player.bonusActionUsed,
+      playerHp:         state.player.hp,
+      secondWindUses:   state.player.secondWindUses,
+      playerHidden:     state.player.hidden,
+      playerDef:        this.playerDef,
+      enemies:          state.enemies.map(e => ({ tileX: e.tileX, tileY: e.tileY, dead: e.hp <= 0 })),
+      playerTileX:      this.player?.tileX ?? state.player.tileX,
+      playerTileY:      this.player?.tileY ?? state.player.tileY,
     };
   }
 
@@ -469,6 +486,7 @@ export class GameScene extends Phaser.Scene {
       if (eState && eState.hp > 0) this.targetPanel.refresh(eState.hp, eState.maxHp);
     }
 
+    this.playerPanel.refreshActions(this.buildActionState(state));
     this.hud.refresh(this.buildHUDState(state));
     this.drawHighlights(state);
   }

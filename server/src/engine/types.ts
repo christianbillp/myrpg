@@ -140,9 +140,11 @@ export interface PlayerState {
   hidden: boolean;
   actionUsed: boolean;
   bonusActionUsed: boolean;
+  reactionUsed: boolean;
   movesLeft: number;
   deathSaveSuccesses: number;
   deathSaveFailures: number;
+  conditions: string[];
 }
 
 export interface EnemyState {
@@ -156,6 +158,8 @@ export interface EnemyState {
   isActive: boolean;
   vexed: boolean;
   hidden: boolean;
+  reactionUsed: boolean;
+  conditions: string[];
 }
 
 export interface NpcState {
@@ -232,6 +236,9 @@ export type PlayerAction =
   | { type: 'attack'; targetId?: string }
   | { type: 'hide' }
   | { type: 'secondWind' }
+  | { type: 'dash' }
+  | { type: 'dodge' }
+  | { type: 'disengage' }
   | { type: 'endTurn' }
   | { type: 'rollDeathSave' }
   | { type: 'search' }

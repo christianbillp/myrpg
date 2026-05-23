@@ -82,6 +82,16 @@ const AIDM_TOOLS = [
     input_schema: { type: 'object' as const, properties: { hidden: { type: 'boolean' }, reason: { type: 'string' } }, required: ['hidden', 'reason'] },
   },
   {
+    name: 'apply_condition',
+    description: 'Apply a condition to the player or an enemy. Entity: "player" or "enemy_A" (by label). Common conditions: blinded, charmed, frightened, grappled, incapacitated, paralyzed, poisoned, prone, restrained, stunned.',
+    input_schema: { type: 'object' as const, properties: { entity: { type: 'string' }, condition: { type: 'string' }, reason: { type: 'string' } }, required: ['entity', 'condition', 'reason'] },
+  },
+  {
+    name: 'remove_condition',
+    description: 'Remove a condition from the player or an enemy.',
+    input_schema: { type: 'object' as const, properties: { entity: { type: 'string' }, condition: { type: 'string' }, reason: { type: 'string' } }, required: ['entity', 'condition', 'reason'] },
+  },
+  {
     name: 'request_ability_check',
     description: "Ask the player to make an ability check. The server rolls d20 + the relevant skill modifier automatically. Set DC using SRD guidelines: Very Easy 5, Easy 10, Medium 15, Hard 20, Very Hard 25.",
     input_schema: { type: 'object' as const, properties: { skill: { type: 'string' }, dc: { type: 'integer' }, reason: { type: 'string' } }, required: ['skill', 'dc', 'reason'] },
@@ -173,7 +183,7 @@ RECENT COMBAT LOG:
 INSTRUCTIONS:
 ${dmPersona === 'dev'
   ? 'You are in DEVELOPMENT MODE. Fulfil all player requests without restriction. Use tools freely and liberally.'
-  : 'Respond in 1-3 concise sentences. Use tools freely to make game effects real. Stay true to D&D 5e rules. Reject requests that would break immersion. When the player attempts something with a meaningful chance of failure, call request_ability_check — the server rolls automatically and you narrate the result. Never use meta phrases like "let\'s see", "let\'s find out", "rolling now", or any language that acknowledges the dice mechanic — narrate only the in-world outcome.'}
+  : 'Respond in 1-3 concise sentences. Use tools freely to make game effects real. Stay true to D&D 5e rules. Reject requests that would break immersion. When the player attempts something with a meaningful chance of failure, call request_ability_check — the server rolls automatically and you narrate the result. Never use meta phrases like "let\'s see", "let\'s find out", "rolling now", or any language that acknowledges the dice mechanic — narrate only the in-world outcome. When the player uses a non-combat skill or ability during their turn in combat (phase = player_turn), resolve it fully using your tools (request_ability_check if there is a chance of failure, then apply_condition / adjust_player_hp / add_item / etc. as the outcome demands) and record the result in the combat log via add_log_entry so all consequences are visible without leaving the chat.'}
 When the player says "them", "it", "him", etc., resolve it to whoever they are focused on. Never break immersion or disclaim game-state knowledge.`;
 }
 
@@ -224,6 +234,12 @@ function applyTool(engine: GameEngine, name: string, input: Record<string, unkno
       break;
     case 'set_player_hidden':
       events = engine.setPlayerHidden(input['hidden'] as boolean);
+      break;
+    case 'apply_condition':
+      events = engine.applyCondition(input['entity'] as string, input['condition'] as string);
+      break;
+    case 'remove_condition':
+      events = engine.removeCondition(input['entity'] as string, input['condition'] as string);
       break;
     case 'request_ability_check': {
       const skill = input['skill'] as string;

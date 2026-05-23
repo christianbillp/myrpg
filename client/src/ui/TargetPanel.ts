@@ -20,6 +20,7 @@ export class TargetPanel {
   private typeText: Phaser.GameObjects.Text;
   private statsText: Phaser.GameObjects.Text;
   private abilitiesText: Phaser.GameObjects.Text;
+  private conditionsText: Phaser.GameObjects.Text;
 
   constructor(scene: Phaser.Scene) {
     const track = <T extends Visible>(obj: T): T => {
@@ -143,11 +144,28 @@ export class TargetPanel {
         })
         .setDepth(11),
     );
+    track(
+      scene.add
+        .rectangle(PX + TARGET_PANEL_WIDTH / 2, 314, TARGET_PANEL_WIDTH - 16, 1, 0x334455)
+        .setDepth(11),
+    );
+    this.conditionsText = track(
+      scene.add
+        .text(PX + 12, 320, "", {
+          fontSize: "10px",
+          color: "#cc8844",
+          fontFamily: "monospace",
+          resolution: DPR,
+          lineSpacing: 5,
+          wordWrap: { width: TARGET_PANEL_WIDTH - 24 },
+        })
+        .setDepth(11),
+    );
 
     this.hide();
   }
 
-  show(def: MonsterDef, hp: number): void {
+  show(def: MonsterDef, hp: number, conditions: string[] = []): void {
     const colorHex = "#" + def.color.toString(16).padStart(6, "0");
     this.nameText.setText(def.name).setColor(colorHex);
     this.typeText.setText(`${def.type}  CR ${def.cr}`);
@@ -167,7 +185,7 @@ export class TargetPanel {
         })
         .join("\n"),
     );
-    this.refresh(hp, def.maxHp);
+    this.refresh(hp, def.maxHp, conditions);
     this.items.forEach((item) => item.setVisible(true));
   }
 
@@ -175,7 +193,8 @@ export class TargetPanel {
     this.items.forEach((item) => item.setVisible(false));
   }
 
-  refresh(hp: number, maxHp: number): void {
+  refresh(hp: number, maxHp: number, conditions: string[] = []): void {
+    this.conditionsText.setText(conditions.length > 0 ? conditions.map(c => `[${c.toUpperCase()}]`).join("  ") : "");
     const pct = maxHp > 0 ? hp / maxHp : 0;
     const width = TARGET_PANEL_WIDTH - 24;
     this.hpBar.clear();

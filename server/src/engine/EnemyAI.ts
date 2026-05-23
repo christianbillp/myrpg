@@ -7,6 +7,7 @@ export interface EnemyTurnConfig {
   playerAc: number;
   playerHp: number;
   playerHidden: boolean;
+  playerDodging: boolean;
   enemyVexed: boolean;
   enemyCurrentlyHidden: boolean;
   passivePerception: number;
@@ -78,7 +79,7 @@ export function runEnemyTurn(
   }
 
   const withAdvantage = enemyHidden;
-  const withDisadvantage = config.playerHidden || config.enemyVexed;
+  const withDisadvantage = config.playerHidden || config.enemyVexed || config.playerDodging;
   const { damage, isHit, isCrit, logs: attackLogs } = enemyAttack(def, meleeAttack, config.playerAc, withAdvantage, withDisadvantage);
   logs.push(...attackLogs);
 
