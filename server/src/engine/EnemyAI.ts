@@ -1,4 +1,4 @@
-import { EnemyState, MonsterDef, GameEvent, LogEntry } from './types.js';
+import { NpcState, MonsterDef, GameEvent, LogEntry } from './types.js';
 import { tryNimbleEscape, enemyAttack } from './CombatSystem.js';
 
 export interface EnemyTurnConfig {
@@ -29,12 +29,32 @@ export interface EnemyTurnResult {
   hidden: boolean;
 }
 
+export interface AllyTurnConfig {
+  enemyTargets: Array<{ id: string; tileX: number; tileY: number; ac: number }>;
+  passable: boolean[][];
+  mapCols: number;
+  mapRows: number;
+  occupiedTiles: [number, number][];
+}
+
+export interface AllyTurnResult {
+  attackedTargetId: string | null;
+  damage: number;
+  isHit: boolean;
+  isCrit: boolean;
+  attacked: boolean;
+  logs: LogEntry[];
+  events: GameEvent[];
+  finalTileX: number;
+  finalTileY: number;
+}
+
 export function chebyshev(x1: number, y1: number, x2: number, y2: number): number {
   return Math.max(Math.abs(x1 - x2), Math.abs(y1 - y2));
 }
 
 export function runEnemyTurn(
-  enemy: EnemyState,
+  enemy: NpcState,
   def: MonsterDef,
   config: EnemyTurnConfig,
 ): EnemyTurnResult {
@@ -50,7 +70,6 @@ export function runEnemyTurn(
     enemyHidden = hidden;
   }
 
-  // Move step by step, recording each step as an event
   let stepsLeft = def.speed;
   while (stepsLeft > 0 && chebyshev(tileX, tileY, config.playerTileX, config.playerTileY) > 1) {
     const next = nextStepToward(
@@ -86,7 +105,63 @@ export function runEnemyTurn(
   return { damage, isHit, isCrit, attacked: true, logs, events, finalTileX: tileX, finalTileY: tileY, hidden: enemyHidden };
 }
 
-function nextStepToward(
+export function runAllyTurn(
+  ally: NpcState,
+  def: MonsterDef,
+  config: AllyTurnConfig,
+): AllyTurnResult {
+  const logs: LogEntry[] = [{ left: `${def.name}'s turn (ally)`, style: 'header' }];
+  const events: GameEvent[] = [];
+  let { tileX, tileY } = ally;
+
+  if (config.enemyTargets.length === 0) {
+    logs.push({ left: `${def.name} stands ready`, style: 'normal' });
+    return { attackedTargetId: null, damage: 0, isHit: false, isCrit: false, attacked: false, logs, events, finalTileX: tileX, finalTileY: tileY };
+  }
+
+  // Find nearest enemy target by Chebyshev distance
+  let nearest = config.enemyTargets[0];
+  let nearestDist = chebyshev(tileX, tileY, nearest.tileX, nearest.tileY);
+  for (const target of config.enemyTargets.slice(1)) {
+    const d = chebyshev(tileX, tileY, target.tileX, target.tileY);
+    if (d < nearestDist) { nearest = target; nearestDist = d; }
+  }
+
+  // Move toward nearest target
+  let stepsLeft = def.speed;
+  while (stepsLeft > 0 && chebyshev(tileX, tileY, nearest.tileX, nearest.tileY) > 1) {
+    const next = nextStepToward(
+      tileX, tileY,
+      nearest.tileX, nearest.tileY,
+      config.passable, config.mapRows, config.mapCols,
+      config.occupiedTiles,
+    );
+    if (!next || (next[0] === nearest.tileX && next[1] === nearest.tileY)) break;
+    tileX = next[0];
+    tileY = next[1];
+    events.push({ type: 'entity_move', entityId: ally.id, toX: tileX, toY: tileY });
+    stepsLeft--;
+  }
+
+  const dist = chebyshev(tileX, tileY, nearest.tileX, nearest.tileY);
+  if (dist > 1) {
+    logs.push({ left: `${def.name} moves but cannot reach the enemy`, style: 'normal' });
+    return { attackedTargetId: null, damage: 0, isHit: false, isCrit: false, attacked: false, logs, events, finalTileX: tileX, finalTileY: tileY };
+  }
+
+  const meleeAttack = def.attacks.find((a) => a.attackType === 'melee' || a.attackType === 'both');
+  if (!meleeAttack) {
+    logs.push({ left: `${def.name} has no melee attack`, style: 'normal' });
+    return { attackedTargetId: null, damage: 0, isHit: false, isCrit: false, attacked: false, logs, events, finalTileX: tileX, finalTileY: tileY };
+  }
+
+  const { damage, isHit, isCrit, logs: attackLogs } = enemyAttack(def, meleeAttack, nearest.ac, false, false);
+  logs.push(...attackLogs);
+
+  return { attackedTargetId: nearest.id, damage, isHit, isCrit, attacked: true, logs, events, finalTileX: tileX, finalTileY: tileY };
+}
+
+export function nextStepToward(
   fromX: number, fromY: number,
   targetX: number, targetY: number,
   passable: boolean[][], rows: number, cols: number,

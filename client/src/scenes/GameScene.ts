@@ -1,7 +1,6 @@
 import Phaser from "phaser";
 import { Player } from "../entities/Player";
-import { Enemy } from "../entities/Enemy";
-import { NPC } from "../entities/NPC";
+import { NpcToken } from "../entities/NpcToken";
 import { MapItem } from "../entities/MapItem";
 import { PlayerPanel, QuestDisplay, PlayerPanelActionState } from "../ui/PlayerPanel";
 import { TargetPanel } from "../ui/TargetPanel";
@@ -24,12 +23,10 @@ export class GameScene extends Phaser.Scene {
   private mapDrawn = false;
 
   private player: Player | null = null;
-  private enemyTokens = new Map<string, Enemy>();
-  private npcTokens = new Map<string, NPC>();
+  private npcTokens = new Map<string, NpcToken>();
   private itemTokens = new Map<string, MapItem>();
 
-  private selectedEnemyId: string | null = null;
-  private selectedNPCId: string | null = null;
+  private selectedEntityId: string | null = null;
 
   private playerPanel!: PlayerPanel;
   private targetPanel!: TargetPanel;
@@ -57,11 +54,9 @@ export class GameScene extends Phaser.Scene {
     this.eventQueue = [];
     this.animating = false;
     this.mapDrawn = false;
-    this.enemyTokens = new Map();
     this.npcTokens = new Map();
     this.itemTokens = new Map();
-    this.selectedEnemyId = null;
-    this.selectedNPCId = null;
+    this.selectedEntityId = null;
     if (this.overlays) this.overlays.reset();
     this.localLogScrollOffset = 0;
   }
@@ -110,7 +105,7 @@ export class GameScene extends Phaser.Scene {
     const event = this.eventQueue.shift()!;
     this.animating = true;
     if (event.type === "entity_move") {
-      const token = this.enemyTokens.get(event.entityId);
+      const token = this.npcTokens.get(event.entityId);
       if (token) {
         token.moveTo(event.toX, event.toY, () => {
           this.animating = false;
@@ -140,7 +135,6 @@ export class GameScene extends Phaser.Scene {
     }
     this.player.setHp(state.player.hp, this.playerDef.maxHp);
 
-    this.reconcileEnemies(state);
     this.reconcileNpcs(state);
     this.reconcileItems(state);
     this.reconcileSelection(state);
@@ -152,55 +146,33 @@ export class GameScene extends Phaser.Scene {
 
   // ── Entity reconciliation ─────────────────────────────────────────────────
 
-  private reconcileEnemies(state: GameState): void {
-    const liveIds = new Set(state.enemies.filter(e => e.hp > 0).map(e => e.id));
-    for (const [id, token] of this.enemyTokens) {
+  private reconcileNpcs(state: GameState): void {
+    const liveIds = new Set(state.npcs.filter(n => n.hp > 0).map(n => n.id));
+    for (const [id, token] of this.npcTokens) {
       if (!liveIds.has(id)) {
         token.destroy();
-        this.enemyTokens.delete(id);
-        if (this.selectedEnemyId === id) {
-          this.selectedEnemyId = null;
-          this.targetPanel.hide();
-        }
-      }
-    }
-    for (const eState of state.enemies) {
-      if (eState.hp <= 0) continue;
-      let token = this.enemyTokens.get(eState.id);
-      if (!token) {
-        const def = this.findMonsterDef(eState.defId);
-        token = new Enemy(this, def, eState.tileX, eState.tileY);
-        this.enemyTokens.set(eState.id, token);
-        this.gridView.container.add(token.gameObject);
-      }
-      token.setLabel(eState.label);
-      token.setLabelVisible(state.phase !== 'exploring');
-      token.setHp(eState.hp);
-    }
-  }
-
-  private reconcileNpcs(state: GameState): void {
-    const serverIds = new Set(state.npcs.map(n => n.id));
-    for (const [id, token] of this.npcTokens) {
-      if (!serverIds.has(id)) {
-        token.destroy();
         this.npcTokens.delete(id);
-        if (this.selectedNPCId === id) {
-          this.selectedNPCId = null;
+        if (this.selectedEntityId === id) {
+          this.selectedEntityId = null;
           this.targetPanel.hide();
         }
       }
     }
     for (const nState of state.npcs) {
+      if (nState.hp <= 0) continue;
       let token = this.npcTokens.get(nState.id);
       if (!token) {
-        const def = this.findNpcMonsterDef(nState.defId);
-        token = new NPC(this, def, nState.tileX, nState.tileY);
+        const def = this.resolveMonsterDef(nState.defId);
+        token = new NpcToken(this, nState.id, def, nState.tileX, nState.tileY, nState.disposition, nState.hp, nState.maxHp);
         this.npcTokens.set(nState.id, token);
         this.gridView.container.add(token.gameObject);
-      } else {
+      } else if (nState.disposition === 'neutral') {
+        // Neutral NPCs don't animate — keep them in sync via teleport
         token.teleport(nState.tileX, nState.tileY);
       }
+      token.setLabel(nState.label);
+      token.setLabelVisible(nState.disposition !== 'neutral' && state.phase !== 'exploring');
+      token.setHp(nState.hp);
     }
   }
 
@@ -224,38 +196,27 @@ export class GameScene extends Phaser.Scene {
 
   private reconcileSelection(state: GameState): void {
     const serverId = state.selectedTargetId;
-    if (serverId === this.selectedEnemyId || serverId === this.selectedNPCId) {
-      if (this.selectedEnemyId) {
-        const eState = state.enemies.find(e => e.id === this.selectedEnemyId);
-        if (eState && eState.hp > 0) this.targetPanel.refresh(eState.hp, eState.maxHp, eState.conditions);
+    if (serverId === this.selectedEntityId) {
+      if (this.selectedEntityId) {
+        const nState = state.npcs.find(n => n.id === this.selectedEntityId);
+        if (nState && nState.hp > 0) this.targetPanel.refresh(nState.hp, nState.maxHp, nState.conditions);
       }
       return;
     }
 
-    if (this.selectedEnemyId) {
-      this.enemyTokens.get(this.selectedEnemyId)?.setSelected(false);
-      this.selectedEnemyId = null;
-    }
-    if (this.selectedNPCId) {
-      this.npcTokens.get(this.selectedNPCId)?.setSelected(false);
-      this.selectedNPCId = null;
+    if (this.selectedEntityId) {
+      this.npcTokens.get(this.selectedEntityId)?.setSelected(false);
+      this.selectedEntityId = null;
     }
 
     if (!serverId) { this.targetPanel.hide(); return; }
 
-    const eState = state.enemies.find(e => e.id === serverId);
-    if (eState && eState.hp > 0) {
-      this.selectedEnemyId = serverId;
-      this.enemyTokens.get(serverId)?.setSelected(true);
-      this.targetPanel.show(this.findMonsterDef(eState.defId), eState.hp, eState.conditions);
-      return;
-    }
-    const nState = state.npcs.find(n => n.id === serverId);
+    const nState = state.npcs.find(n => n.id === serverId && n.hp > 0);
     if (nState) {
-      this.selectedNPCId = serverId;
+      this.selectedEntityId = serverId;
       this.npcTokens.get(serverId)?.setSelected(true);
-      const def = this.findNpcMonsterDef(nState.defId);
-      this.targetPanel.show(def, def.maxHp);
+      const def = this.resolveMonsterDef(nState.defId);
+      this.targetPanel.show(def, nState.hp, nState.conditions);
     }
   }
 
@@ -289,65 +250,38 @@ export class GameScene extends Phaser.Scene {
     const { cols, rows } = this.gameState.map;
     if (tileX < 0 || tileX >= cols || tileY < 0 || tileY >= rows) return;
 
-    const { player: ps, enemies, npcs } = this.gameState;
+    const { player: ps, npcs } = this.gameState;
     if (tileX === ps.tileX && tileY === ps.tileY) {
       this.playerPanel.toggle();
       return;
     }
 
-    const eState = enemies.find(e => e.hp > 0 && e.tileX === tileX && e.tileY === tileY);
-    const nState = npcs.find(n => n.tileX === tileX && n.tileY === tileY);
-
-    if (eState) {
-      this.selectEnemy(eState.id);
-    } else if (nState) {
-      this.selectNPC(nState.id);
+    const nState = npcs.find(n => n.hp > 0 && n.tileX === tileX && n.tileY === tileY);
+    if (nState) {
+      this.selectEntity(nState.id);
     } else {
       this.clearSelection();
     }
   }
 
-  private selectEnemy(id: string): void {
-    if (this.selectedNPCId) {
-      this.npcTokens.get(this.selectedNPCId)?.setSelected(false);
-      this.selectedNPCId = null;
-    }
-    if (this.selectedEnemyId === id) return;
-    if (this.selectedEnemyId) this.enemyTokens.get(this.selectedEnemyId)?.setSelected(false);
-    this.selectedEnemyId = id;
-    this.enemyTokens.get(id)?.setSelected(true);
-    const eState = this.gameState.enemies.find(e => e.id === id);
-    if (eState) this.targetPanel.show(this.findMonsterDef(eState.defId), eState.hp, eState.conditions);
-    gameClient.sendAction({ type: "selectTarget", entityId: id });
-    if (this.gameState) this.updateHUD(this.gameState);
-  }
-
-  private selectNPC(id: string): void {
-    if (this.selectedEnemyId) {
-      this.enemyTokens.get(this.selectedEnemyId)?.setSelected(false);
-      this.selectedEnemyId = null;
-    }
-    if (this.selectedNPCId === id) return;
-    if (this.selectedNPCId) this.npcTokens.get(this.selectedNPCId)?.setSelected(false);
-    this.selectedNPCId = id;
+  private selectEntity(id: string): void {
+    if (this.selectedEntityId === id) return;
+    if (this.selectedEntityId) this.npcTokens.get(this.selectedEntityId)?.setSelected(false);
+    this.selectedEntityId = id;
     this.npcTokens.get(id)?.setSelected(true);
     const nState = this.gameState.npcs.find(n => n.id === id);
     if (nState) {
-      const def = this.findNpcMonsterDef(nState.defId);
-      this.targetPanel.show(def, def.maxHp);
+      const def = this.resolveMonsterDef(nState.defId);
+      this.targetPanel.show(def, nState.hp, nState.conditions);
     }
     gameClient.sendAction({ type: "selectTarget", entityId: id });
     if (this.gameState) this.updateHUD(this.gameState);
   }
 
   private clearSelection(): void {
-    if (this.selectedEnemyId) {
-      this.enemyTokens.get(this.selectedEnemyId)?.setSelected(false);
-      this.selectedEnemyId = null;
-    }
-    if (this.selectedNPCId) {
-      this.npcTokens.get(this.selectedNPCId)?.setSelected(false);
-      this.selectedNPCId = null;
+    if (this.selectedEntityId) {
+      this.npcTokens.get(this.selectedEntityId)?.setSelected(false);
+      this.selectedEntityId = null;
     }
     this.targetPanel.hide();
     gameClient.sendAction({ type: "selectTarget", entityId: null });
@@ -373,7 +307,7 @@ export class GameScene extends Phaser.Scene {
     else if (downJust  && !upJust)  dy =  1;
     if (dx === 0 && dy === 0) return;
 
-    const { map, player: ps, enemies, npcs } = this.gameState;
+    const { map, player: ps, npcs } = this.gameState;
     const px = this.player.tileX;
     const py = this.player.tileY;
     const nx = px + dx, ny = py + dy;
@@ -381,8 +315,7 @@ export class GameScene extends Phaser.Scene {
     if (nx < 0 || ny < 0 || nx >= map.cols || ny >= map.rows) return;
     if (!map.passable[ny][nx]) return;
     if (dx !== 0 && dy !== 0 && !map.passable[py][nx] && !map.passable[ny][px]) return;
-    if (enemies.some(e => e.hp > 0 && e.tileX === nx && e.tileY === ny)) return;
-    if (npcs.some(n => n.tileX === nx && n.tileY === ny)) return;
+    if (npcs.some(n => n.hp > 0 && n.tileX === nx && n.tileY === ny)) return;
     if (phase === "player_turn" && ps.movesLeft <= 0) return;
 
     this.player.move(dx, dy, map.cols, map.rows);
@@ -420,13 +353,13 @@ export class GameScene extends Phaser.Scene {
   }
 
   private buildHUDState(state: GameState): HUDState {
-    const activeEnemyState = state.enemies.find(e => e.isActive);
-    const activeEnemy = activeEnemyState ? (this.enemyTokens.get(activeEnemyState.id) ?? null) : null;
-    const selectedEnemy = this.selectedEnemyId ? (this.enemyTokens.get(this.selectedEnemyId) ?? null) : null;
-    const combatEnemies = state.enemies
-      .filter(e => e.hp > 0)
-      .map(e => this.enemyTokens.get(e.id))
-      .filter((e): e is Enemy => e !== undefined);
+    const activeNpcState = state.npcs.find(n => n.isActive);
+    const activeNpc = activeNpcState ? (this.npcTokens.get(activeNpcState.id) ?? null) : null;
+    const selectedNpc = this.selectedEntityId ? (this.npcTokens.get(this.selectedEntityId) ?? null) : null;
+    const combatNpcs = state.npcs
+      .filter(n => n.disposition !== 'neutral' && n.hp > 0)
+      .map(n => this.npcTokens.get(n.id))
+      .filter((n): n is NpcToken => n !== undefined);
 
     return {
       mode:               state.phase,
@@ -437,15 +370,15 @@ export class GameScene extends Phaser.Scene {
       bonusActionUsed:    state.player.bonusActionUsed,
       playerHidden:       state.player.hidden,
       playerConditions:   state.player.conditions,
-      activeEnemy,
-      combatEnemies,
-      enemyVexed:         activeEnemyState?.vexed ?? false,
-      enemyHidden:        activeEnemyState?.hidden ?? false,
+      activeNpc,
+      combatNpcs,
+      enemyVexed:         activeNpcState?.vexed ?? false,
+      enemyHidden:        activeNpcState?.hidden ?? false,
       deathSaveSuccesses: state.player.deathSaveSuccesses,
       deathSaveFailures:  state.player.deathSaveFailures,
       combatLog:          state.combatLog,
       logScrollOffset:    this.localLogScrollOffset,
-      selectedEnemy,
+      selectedNpc,
       searchAvailable:    state.encounterTypes.includes("exploration") && state.secrets.length > 0,
     };
   }
@@ -459,7 +392,9 @@ export class GameScene extends Phaser.Scene {
       secondWindUses:   state.player.secondWindUses,
       playerHidden:     state.player.hidden,
       playerDef:        this.playerDef,
-      enemies:          state.enemies.map(e => ({ tileX: e.tileX, tileY: e.tileY, dead: e.hp <= 0 })),
+      enemies:          state.npcs
+        .filter(n => n.disposition === 'enemy')
+        .map(n => ({ tileX: n.tileX, tileY: n.tileY, dead: n.hp <= 0 })),
       playerTileX:      this.player?.tileX ?? state.player.tileX,
       playerTileY:      this.player?.tileY ?? state.player.tileY,
       hitDiceRemaining: this.playerDef.level - state.player.hitDiceUsed,
@@ -483,9 +418,9 @@ export class GameScene extends Phaser.Scene {
       showSearch,
     );
 
-    if (this.selectedEnemyId) {
-      const eState = state.enemies.find(e => e.id === this.selectedEnemyId);
-      if (eState && eState.hp > 0) this.targetPanel.refresh(eState.hp, eState.maxHp);
+    if (this.selectedEntityId) {
+      const nState = state.npcs.find(n => n.id === this.selectedEntityId);
+      if (nState && nState.hp > 0) this.targetPanel.refresh(nState.hp, nState.maxHp);
     }
 
     this.playerPanel.refreshActions(this.buildActionState(state));
@@ -526,8 +461,7 @@ export class GameScene extends Phaser.Scene {
         const nr = cy + dr, nc = cx + dc;
         if (nr < 0 || nr >= rows || nc < 0 || nc >= cols) continue;
         if (!passable[nr][nc]) continue;
-        if (state.enemies.some(e => e.hp > 0 && e.tileX === nc && e.tileY === nr)) continue;
-        if (state.npcs.some(n => n.tileX === nc && n.tileY === nr)) continue;
+        if (state.npcs.some(n => n.hp > 0 && n.tileX === nc && n.tileY === nr)) continue;
         if (dist[nr][nc] !== -1) continue;
         dist[nr][nc] = dist[cy][cx] + 1;
         queue.push([nr, nc]);
@@ -546,20 +480,18 @@ export class GameScene extends Phaser.Scene {
 
   // ── Def lookups ───────────────────────────────────────────────────────────
 
-  private findMonsterDef(defId: string): MonsterDef {
+  // Resolves a defId to a MonsterDef — handles both direct monster IDs and NPC def IDs.
+  private resolveMonsterDef(defId: string): MonsterDef {
     const monsters = this.registry.get("monsters") as MonsterDef[];
-    return monsters.find(m => m.id === defId) ?? monsters[0];
-  }
-
-  private findNpcMonsterDef(npcDefId: string): MonsterDef {
-    const monsters = this.registry.get("monsters") as MonsterDef[];
+    const monster = monsters.find(m => m.id === defId);
+    if (monster) return monster;
     const npcs = this.registry.get("npcs") as NPCDef[];
-    const npcDef = npcs.find(n => n.id === npcDefId);
+    const npcDef = npcs.find(n => n.id === defId);
     if (npcDef) {
       const base = monsters.find(m => m.id === npcDef.monsterClass) ?? monsters[0];
       return { ...base, id: npcDef.id, name: npcDef.name, color: npcDef.color };
     }
-    return monsters.find(m => m.id === npcDefId) ?? monsters[0];
+    return monsters[0];
   }
 
   private findItemDef(defId: string): ItemDef {

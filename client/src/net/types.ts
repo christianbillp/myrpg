@@ -11,6 +11,7 @@ export interface LogEntry {
 export type CombatMode = 'exploring' | 'player_turn' | 'enemy_turn' | 'death_saves' | 'defeat';
 export type EncounterType = 'simple_combat' | 'social_interaction' | 'exploration';
 export type QuestGoalType = 'kill' | 'collect' | 'explore' | 'talk';
+export type Disposition = 'ally' | 'neutral' | 'enemy';
 
 export interface EquipmentSlots {
   armorId: string | null;
@@ -33,17 +34,14 @@ export interface PlayerState {
   conditions: string[];
 }
 
-export interface EnemyState {
-  id: string; defId: string; label: string;
-  tileX: number; tileY: number;
-  hp: number; maxHp: number;
-  isActive: boolean; vexed: boolean; hidden: boolean;
-  reactionUsed: boolean; conditions: string[];
-}
-
 export interface NpcState {
   id: string; defId: string;
   tileX: number; tileY: number;
+  disposition: Disposition;
+  label: string;
+  hp: number; maxHp: number;
+  isActive: boolean; vexed: boolean; hidden: boolean;
+  reactionUsed: boolean; conditions: string[];
 }
 
 export interface MapItemState {
@@ -75,7 +73,6 @@ export interface GameState {
   phase: CombatMode;
   map: GameMap;
   player: PlayerState;
-  enemies: EnemyState[];
   npcs: NpcState[];
   mapItems: MapItemState[];
   secrets: SecretState[];
@@ -85,7 +82,7 @@ export interface GameState {
   mapName: string;
   quests: QuestState[];
   selectedTargetId: string | null;
-  activeEnemyIndex: number;
+  activeNpcIndex: number;
   turnOrderIds: string[];
   introduction: string;
   encounterContext: string;

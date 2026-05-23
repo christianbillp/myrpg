@@ -38,7 +38,7 @@ const AIDM_TOOLS = [
   },
   {
     name: 'move_entity',
-    description: 'Teleport an entity to a tile. Entity: "player", "enemy_A" (by label), or "npc_[id]".',
+    description: 'Teleport an entity to a tile. Entity: "player", "enemy_A" (enemy by label), or "npc_[id]" (NPC or ally by id).',
     input_schema: { type: 'object' as const, properties: { entity: { type: 'string' }, tile_x: { type: 'integer' }, tile_y: { type: 'integer' }, reason: { type: 'string' } }, required: ['entity', 'tile_x', 'tile_y', 'reason'] },
   },
   {
@@ -53,7 +53,7 @@ const AIDM_TOOLS = [
   },
   {
     name: 'despawn_npc',
-    description: 'Remove an NPC from the map.',
+    description: 'Remove an NPC from the map. Entity: "npc_[id]".',
     input_schema: { type: 'object' as const, properties: { entity: { type: 'string' }, reason: { type: 'string' } }, required: ['entity', 'reason'] },
   },
   {
@@ -83,18 +83,23 @@ const AIDM_TOOLS = [
   },
   {
     name: 'apply_condition',
-    description: 'Apply a condition to the player or an enemy. Entity: "player" or "enemy_A" (by label). Common conditions: blinded, charmed, frightened, grappled, incapacitated, paralyzed, poisoned, prone, restrained, stunned.',
+    description: 'Apply a condition to the player or an NPC. Entity: "player", "enemy_A" (by label), or "npc_[id]". Common conditions: blinded, charmed, frightened, grappled, incapacitated, paralyzed, poisoned, prone, restrained, stunned.',
     input_schema: { type: 'object' as const, properties: { entity: { type: 'string' }, condition: { type: 'string' }, reason: { type: 'string' } }, required: ['entity', 'condition', 'reason'] },
   },
   {
     name: 'remove_condition',
-    description: 'Remove a condition from the player or an enemy.',
+    description: 'Remove a condition from the player or an NPC.',
     input_schema: { type: 'object' as const, properties: { entity: { type: 'string' }, condition: { type: 'string' }, reason: { type: 'string' } }, required: ['entity', 'condition', 'reason'] },
   },
   {
     name: 'request_ability_check',
     description: "Ask the player to make an ability check. The server rolls d20 + the relevant skill modifier automatically. Set DC using SRD guidelines: Very Easy 5, Easy 10, Medium 15, Hard 20, Very Hard 25.",
     input_schema: { type: 'object' as const, properties: { skill: { type: 'string' }, dc: { type: 'integer' }, reason: { type: 'string' } }, required: ['skill', 'dc', 'reason'] },
+  },
+  {
+    name: 'set_disposition',
+    description: 'Change an NPC\'s disposition. Entity: "enemy_A" (by label) or "npc_[id]". Disposition: "ally" (fights alongside the player), "neutral" (does not participate in combat), "enemy" (fights the player).',
+    input_schema: { type: 'object' as const, properties: { entity: { type: 'string' }, disposition: { type: 'string' }, reason: { type: 'string' } }, required: ['entity', 'disposition', 'reason'] },
   },
 ];
 
@@ -118,23 +123,30 @@ function buildSystemPrompt(engine: GameEngine, encounterContext: string, dmPerso
 
   const focusLine = s.selectedTargetId
     ? (() => {
-        const enemy = s.enemies.find((e) => e.id === s.selectedTargetId);
         const npc = s.npcs.find((n) => n.id === s.selectedTargetId);
-        if (enemy) return `Focused on: ${enemy.defId} [${enemy.label}] (enemy)`;
-        if (npc) return `Focused on: ${npc.defId} [entity: npc_${npc.id}] (NPC)`;
+        if (npc) {
+          const isEnemy = npc.disposition === 'enemy';
+          return `Focused on: ${npc.defId} [${isEnemy ? `enemy_${npc.label}` : `npc_${npc.id}`}] (${npc.disposition})`;
+        }
         return 'Focused on: nothing';
       })()
     : 'Focused on: nothing';
 
-  const enemyLines = s.enemies.length > 0
-    ? s.enemies.map((e) => {
-        const flags = [!e.hp ? 'DEAD' : '', e.isActive ? 'ACTIVE TURN' : '', e.vexed ? 'VEXED' : '', e.hidden ? 'HIDDEN' : ''].filter(Boolean).join(', ');
-        return `  [${e.label}] ${e.defId}: ${e.hp}/${e.maxHp} HP, tile (${e.tileX},${e.tileY})${flags ? ` [${flags}]` : ''}`;
+  const combatantLines = s.npcs.filter((n) => n.disposition !== 'neutral').length > 0
+    ? s.npcs.filter((n) => n.disposition !== 'neutral').map((n) => {
+        const entityRef = n.disposition === 'enemy' ? `enemy_${n.label}` : `npc_${n.id}`;
+        const flags = [
+          !n.hp ? 'DEAD' : '',
+          n.isActive ? 'ACTIVE TURN' : '',
+          n.vexed ? 'VEXED' : '',
+          n.hidden ? 'HIDDEN' : '',
+        ].filter(Boolean).join(', ');
+        return `  [${entityRef}] ${n.defId} (${n.disposition}): ${n.hp}/${n.maxHp} HP, tile (${n.tileX},${n.tileY})${flags ? ` [${flags}]` : ''}`;
       }).join('\n')
     : '  None';
 
-  const npcLines = s.npcs.length > 0
-    ? s.npcs.map((n) => `  ${n.defId} [entity: npc_${n.id}] at tile (${n.tileX},${n.tileY})`).join('\n')
+  const neutralNpcLines = s.npcs.filter((n) => n.disposition === 'neutral').length > 0
+    ? s.npcs.filter((n) => n.disposition === 'neutral').map((n) => `  ${n.defId} [npc_${n.id}] at tile (${n.tileX},${n.tileY})`).join('\n')
     : '  None';
 
   const questLines = s.quests.length > 0
@@ -161,11 +173,11 @@ PLAYER: tile (${p.tileX},${p.tileY}) · HP ${playerDef.hp} · ${playerDef.flags 
   Equipped: armor=${p.equippedSlots.armorId ?? 'none'} weapon=${p.equippedSlots.weaponId ?? 'none'} shield=${p.equippedSlots.shieldId ?? 'none'}
   ${focusLine}
 
-ENEMIES:
-${enemyLines}
+COMBATANTS (enemies & allies):
+${combatantLines}
 
-NPCs:
-${npcLines}
+NEUTRAL NPCs:
+${neutralNpcLines}
 
 QUESTS:
 ${questLines}
@@ -240,6 +252,9 @@ function applyTool(engine: GameEngine, name: string, input: Record<string, unkno
       break;
     case 'remove_condition':
       events = engine.removeCondition(input['entity'] as string, input['condition'] as string);
+      break;
+    case 'set_disposition':
+      events = engine.setDisposition(input['entity'] as string, input['disposition'] as string);
       break;
     case 'request_ability_check': {
       const skill = input['skill'] as string;

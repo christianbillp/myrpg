@@ -62,10 +62,10 @@ Rendered in `client/src/scenes/GameScene.ts`. Each tile = 5 ft. Occupies the are
 | Component               | Description                                                                                                                           |
 | ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
 | **Player Token**        | Coloured circle representing the player character; shows an HP bar above the token when damaged                                       |
-| **Enemy Token**         | Coloured circle with an HP bar above the token when damaged; letter labels (A, B, C…) appear centred on each token once combat begins and are hidden during exploration |
+| **NPC Token**           | Coloured circle representing a non-player creature. **Neutral** NPCs show their name in the token colour above the circle; no HP bar. **Enemy** NPCs show a red HP bar above the circle when damaged. **Ally** NPCs show a green HP bar. Letter labels (A, B, C…) appear centred on combat tokens (enemy and ally) once combat begins and are hidden during exploration. |
 | **Item Token**          | Small green diamond on a tile; walking onto it picks up the item                                                                      |
 | **Movement Highlights** | Blue-tinted tiles showing reachable squares during the player's turn                                                                  |
-| **Turn Order Bar**      | Semi-transparent strip pinned to the top of the Game Map; visible during combat. One chip per combatant (player first, then enemies in spawn order). The active chip is highlighted green; dead chips are dimmed. Enemy chips show the letter label and name. |
+| **Turn Order Bar**      | Semi-transparent strip pinned to the top of the Game Map; visible during combat. One chip per combatant (player first, then all non-neutral NPCs in initiative order). The active chip is highlighted green; dead chips are dimmed. Enemy and ally chips show the letter label and name. |
 
 ---
 

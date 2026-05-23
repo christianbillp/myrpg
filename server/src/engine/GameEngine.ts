@@ -1,7 +1,7 @@
 import {
   GameState, GameEvent, PlayerAction, CombatMode,
   PlayerDef, MonsterDef, NPCDef, ItemDef, ConsumableDef, WeaponDef,
-  EquipmentSlots, EnemyState, NpcState, MapItemState, SecretState, QuestState,
+  EquipmentSlots, NpcState, Disposition, MapItemState, SecretState, QuestState,
   QuestGoalType, SecretDef, NpcPersona, GameMap, LogEntry,
   CreateSessionRequest,
 } from './types.js';
@@ -15,7 +15,7 @@ import {
   drinkPotion, rollDeathSave, rollSkillCheck,
 } from './CombatSystem.js';
 import { applyEquipment } from './EquipmentSystem.js';
-import { runEnemyTurn, chebyshev } from './EnemyAI.js';
+import { runEnemyTurn, runAllyTurn, chebyshev } from './EnemyAI.js';
 
 const TURN_CONDITIONS = ['dodging', 'disengaged', 'dashing'];
 
@@ -54,10 +54,7 @@ export class GameEngine {
     this.playerDef = defs.playerDefs.find((p) => p.id === state.player.defId)!;
     applyEquipment(this.playerDef, state.player.equippedSlots, defs.items);
 
-    // Advance UID counter past any entity IDs already in state so spawned
-    // entities never clash with restored ones after a server restart.
     for (const id of [
-      ...state.enemies.map((e) => e.id),
       ...state.npcs.map((n) => n.id),
       ...state.mapItems.map((i) => i.id),
     ]) {
@@ -121,10 +118,10 @@ export class GameEngine {
 
   setEnemyHp(label: string, hp: number): GameEvent[] {
     const s = this.state;
-    const enemy = s.enemies.find((e) => e.label === label);
-    if (!enemy) return [];
-    enemy.hp = Math.max(0, hp);
-    if (enemy.hp === 0) this.killEnemy(enemy.id);
+    const npc = s.npcs.find((n) => n.label === label && n.disposition === 'enemy');
+    if (!npc) return [];
+    npc.hp = Math.max(0, hp);
+    if (npc.hp === 0) this.killNpc(npc.id);
     return [];
   }
 
@@ -146,11 +143,11 @@ export class GameEngine {
       events.push({ type: 'entity_move', entityId: 'player', toX: tileX, toY: tileY });
     } else if (entity.startsWith('enemy_')) {
       const label = entity.replace('enemy_', '');
-      const enemy = s.enemies.find((e) => e.label === label);
-      if (enemy) {
-        enemy.tileX = tileX;
-        enemy.tileY = tileY;
-        events.push({ type: 'entity_move', entityId: enemy.id, toX: tileX, toY: tileY });
+      const npc = s.npcs.find((n) => n.label === label && n.disposition === 'enemy');
+      if (npc) {
+        npc.tileX = tileX;
+        npc.tileY = tileY;
+        events.push({ type: 'entity_move', entityId: npc.id, toX: tileX, toY: tileY });
       }
     } else if (entity.startsWith('npc_')) {
       const npcId = entity.replace('npc_', '');
@@ -192,17 +189,19 @@ export class GameEngine {
     const s = this.state;
     const [tx, ty] = this.findFreeTileNear(s.player.tileX, s.player.tileY, 3, 8);
     if (tx === -1) return [];
-    const label = String.fromCharCode(65 + s.enemies.filter((e) => e.hp > 0).length);
-    const enemy: EnemyState = {
+    const livingEnemies = s.npcs.filter((n) => n.disposition === 'enemy' && n.hp > 0);
+    const label = String.fromCharCode(65 + livingEnemies.length);
+    const npc: NpcState = {
       id: uid(), defId: def.id, label,
       tileX: tx, tileY: ty,
+      disposition: 'enemy',
       hp: def.maxHp, maxHp: def.maxHp,
       isActive: false, vexed: false, hidden: false,
       reactionUsed: false, conditions: [],
     };
-    s.enemies.push(enemy);
+    s.npcs.push(npc);
     if (s.phase !== 'exploring') {
-      s.turnOrderIds.push(enemy.id);
+      s.turnOrderIds.push(npc.id);
     }
     return [];
   }
@@ -210,8 +209,9 @@ export class GameEngine {
   endCombat(): GameEvent[] {
     const s = this.state;
     s.phase = 'exploring';
-    s.enemies = [];
-    s.activeEnemyIndex = 0;
+    s.npcs = s.npcs.filter((n) => n.disposition !== 'enemy');
+    s.npcs.forEach((n) => { if (n.disposition === 'ally') n.disposition = 'neutral'; });
+    s.activeNpcIndex = 0;
     s.turnOrderIds = [];
     s.player.hidden = false;
     return [];
@@ -219,7 +219,7 @@ export class GameEngine {
 
   triggerCombat(): GameEvent[] {
     const s = this.state;
-    if (s.phase !== 'exploring' || s.enemies.length === 0) return [];
+    if (s.phase !== 'exploring' || !s.npcs.some((n) => n.disposition === 'enemy')) return [];
     const events: GameEvent[] = [];
     this.doStartCombat(events);
     return events;
@@ -241,14 +241,33 @@ export class GameEngine {
     return [];
   }
 
+  setDisposition(entity: string, disposition: string): GameEvent[] {
+    if (!['ally', 'neutral', 'enemy'].includes(disposition)) return [];
+    const s = this.state;
+    let npc: NpcState | undefined;
+    if (entity.startsWith('enemy_')) {
+      const label = entity.replace('enemy_', '');
+      npc = s.npcs.find((n) => n.label === label);
+    } else if (entity.startsWith('npc_')) {
+      const npcId = entity.replace('npc_', '');
+      npc = s.npcs.find((n) => n.id === npcId);
+    }
+    if (npc) npc.disposition = disposition as Disposition;
+    return [];
+  }
+
   applyCondition(entity: string, condition: string): GameEvent[] {
     const s = this.state;
     if (entity === 'player') {
       if (!s.player.conditions.includes(condition)) s.player.conditions.push(condition);
     } else if (entity.startsWith('enemy_')) {
       const label = entity.replace('enemy_', '');
-      const enemy = s.enemies.find((e) => e.label === label);
-      if (enemy && !enemy.conditions.includes(condition)) enemy.conditions.push(condition);
+      const npc = s.npcs.find((n) => n.label === label && n.disposition === 'enemy');
+      if (npc && !npc.conditions.includes(condition)) npc.conditions.push(condition);
+    } else if (entity.startsWith('npc_')) {
+      const npcId = entity.replace('npc_', '');
+      const npc = s.npcs.find((n) => n.id === npcId);
+      if (npc && !npc.conditions.includes(condition)) npc.conditions.push(condition);
     }
     return [];
   }
@@ -259,8 +278,12 @@ export class GameEngine {
       s.player.conditions = s.player.conditions.filter((c) => c !== condition);
     } else if (entity.startsWith('enemy_')) {
       const label = entity.replace('enemy_', '');
-      const enemy = s.enemies.find((e) => e.label === label);
-      if (enemy) enemy.conditions = enemy.conditions.filter((c) => c !== condition);
+      const npc = s.npcs.find((n) => n.label === label && n.disposition === 'enemy');
+      if (npc) npc.conditions = npc.conditions.filter((c) => c !== condition);
+    } else if (entity.startsWith('npc_')) {
+      const npcId = entity.replace('npc_', '');
+      const npc = s.npcs.find((n) => n.id === npcId);
+      if (npc) npc.conditions = npc.conditions.filter((c) => c !== condition);
     }
     return [];
   }
@@ -283,8 +306,7 @@ export class GameEngine {
     if (dx !== 0 && dy !== 0) {
       if (!s.map.passable[s.player.tileY][nx] && !s.map.passable[ny][s.player.tileX]) return;
     }
-    if (s.enemies.some((e) => e.hp > 0 && e.tileX === nx && e.tileY === ny)) return;
-    if (s.npcs.some((n) => n.tileX === nx && n.tileY === ny)) return;
+    if (s.npcs.some((n) => n.hp > 0 && n.tileX === nx && n.tileY === ny)) return;
     if (s.phase === 'player_turn' && s.player.movesLeft <= 0) return;
 
     const oldX = s.player.tileX;
@@ -296,10 +318,10 @@ export class GameEngine {
     if (s.phase === 'player_turn') {
       s.player.movesLeft--;
       if (!s.player.conditions.includes('disengaged')) {
-        for (const enemy of s.enemies.filter((e) => e.hp > 0 && !e.reactionUsed)) {
-          if (chebyshev(oldX, oldY, enemy.tileX, enemy.tileY) <= 1 &&
-              chebyshev(nx, ny, enemy.tileX, enemy.tileY) > 1) {
-            this.doEnemyOpportunityAttack(enemy, events);
+        for (const npc of s.npcs.filter((n) => n.disposition === 'enemy' && n.hp > 0 && !n.reactionUsed)) {
+          if (chebyshev(oldX, oldY, npc.tileX, npc.tileY) <= 1 &&
+              chebyshev(nx, ny, npc.tileX, npc.tileY) > 1) {
+            this.doEnemyOpportunityAttack(npc, events);
             if ((this.state.phase as string) === 'death_saves' || (this.state.phase as string) === 'defeat') return;
           }
         }
@@ -328,9 +350,10 @@ export class GameEngine {
 
   private checkCombatTrigger(events: GameEvent[]): void {
     const s = this.state;
-    for (const enemy of s.enemies) {
+    const enemies = s.npcs.filter((n) => n.disposition === 'enemy');
+    for (const enemy of enemies) {
       if (chebyshev(s.player.tileX, s.player.tileY, enemy.tileX, enemy.tileY) <= 2) {
-        if (s.enemies.length > 1) s.enemies.forEach((e, i) => { e.label = String.fromCharCode(65 + i); });
+        if (enemies.length > 1) enemies.forEach((e, i) => { e.label = String.fromCharCode(65 + i); });
         this.doStartCombat(events);
         s.selectedTargetId = enemy.id;
         return;
@@ -340,16 +363,18 @@ export class GameEngine {
 
   private doStartCombat(events: GameEvent[]): void {
     const s = this.state;
-    const firstEnemy = this.defs.monsters.find((m) => m.id === s.enemies[0]?.defId);
-    if (!firstEnemy) return;
+    const enemies = s.npcs.filter((n) => n.disposition === 'enemy');
+    const firstEnemyDef = this.defs.monsters.find((m) => m.id === enemies[0]?.defId);
+    if (!firstEnemyDef) return;
 
     s.player.hidden = false;
     s.player.deathSaveSuccesses = 0;
     s.player.deathSaveFailures = 0;
-    s.activeEnemyIndex = 0;
-    s.turnOrderIds = ['player', ...s.enemies.map((e) => e.id)];
+    s.activeNpcIndex = 0;
+    const combatNpcs = s.npcs.filter((n) => n.disposition !== 'neutral');
+    s.turnOrderIds = ['player', ...combatNpcs.map((n) => n.id)];
 
-    const { playerFirst, logs } = rollInitiative(this.playerDef, firstEnemy);
+    const { playerFirst, logs } = rollInitiative(this.playerDef, firstEnemyDef);
     this.addLogs(logs);
 
     if (playerFirst) {
@@ -362,11 +387,11 @@ export class GameEngine {
   private enterPlayerTurn(): void {
     const s = this.state;
     s.phase = 'player_turn';
-    s.activeEnemyIndex = 0;
-    s.enemies.forEach((e) => {
-      e.isActive = false;
-      e.reactionUsed = false;
-      e.conditions = e.conditions.filter((c) => !TURN_CONDITIONS.includes(c));
+    s.activeNpcIndex = 0;
+    s.npcs.filter((n) => n.disposition !== 'neutral').forEach((n) => {
+      n.isActive = false;
+      n.reactionUsed = false;
+      n.conditions = n.conditions.filter((c) => !TURN_CONDITIONS.includes(c));
     });
     s.player.movesLeft = this.playerDef.speed;
     s.player.actionUsed = false;
@@ -379,13 +404,13 @@ export class GameEngine {
     const s = this.state;
     if (s.phase !== 'player_turn' || s.player.actionUsed) return;
 
-    const isAdjacent = (e: EnemyState) =>
-      e.hp > 0 && chebyshev(s.player.tileX, s.player.tileY, e.tileX, e.tileY) <= 1;
+    const isAdjacent = (n: NpcState) =>
+      n.disposition === 'enemy' && n.hp > 0 && chebyshev(s.player.tileX, s.player.tileY, n.tileX, n.tileY) <= 1;
 
     let target = targetId
-      ? (s.enemies.find((e) => e.id === targetId && isAdjacent(e)) ?? null)
+      ? (s.npcs.find((n) => n.id === targetId && isAdjacent(n)) ?? null)
       : null;
-    if (!target) target = s.enemies.find(isAdjacent) ?? null;
+    if (!target) target = s.npcs.find(isAdjacent) ?? null;
     if (!target) return;
 
     const targetDef = this.defs.monsters.find((m) => m.id === target!.defId);
@@ -414,11 +439,11 @@ export class GameEngine {
         { left: `☠ ${targetDef.name} is slain! +${targetDef.xp} XP  +${gold} GP`, style: 'kill' },
         { left: `Total XP: ${s.player.xp}  |  GP: ${s.player.gold}`, style: 'status' },
       ]);
-      this.killEnemy(target.id);
+      this.killNpc(target.id);
     }
 
     s.player.actionUsed = true;
-    if (s.enemies.filter((e) => e.hp > 0).length === 0) {
+    if (s.npcs.filter((n) => n.disposition === 'enemy' && n.hp > 0).length === 0) {
       s.phase = 'exploring';
     }
   }
@@ -451,9 +476,9 @@ export class GameEngine {
     }
   }
 
-  private killEnemy(id: string): void {
+  private killNpc(id: string): void {
     const s = this.state;
-    s.enemies = s.enemies.filter((e) => e.id !== id);
+    s.npcs = s.npcs.filter((n) => n.id !== id);
     s.turnOrderIds = s.turnOrderIds.filter((tid) => tid !== id);
     if (s.selectedTargetId === id) s.selectedTargetId = null;
     this.advanceQuest('kill');
@@ -462,10 +487,10 @@ export class GameEngine {
   private doHide(_events: GameEvent[]): void {
     const s = this.state;
     if (s.phase !== 'player_turn' || s.player.bonusActionUsed) return;
-    const living = s.enemies.filter((e) => e.hp > 0);
+    const living = s.npcs.filter((n) => n.disposition === 'enemy' && n.hp > 0);
     if (!living.length) return;
-    const maxPP = Math.max(...living.map((e) => {
-      const def = this.defs.monsters.find((m) => m.id === e.defId);
+    const maxPP = Math.max(...living.map((n) => {
+      const def = this.defs.monsters.find((m) => m.id === n.defId);
       return def?.passivePerception ?? 10;
     }));
     const { hidden, logs } = playerHide(this.playerDef, maxPP);
@@ -518,36 +543,36 @@ export class GameEngine {
   private enterEnemyPhase(events: GameEvent[]): void {
     const s = this.state;
     s.phase = 'enemy_turn';
-    s.activeEnemyIndex = 0;
-    this.runAllEnemyTurns(events);
+    s.activeNpcIndex = 0;
+    this.runAllNpcCombatTurns(events);
   }
 
-  private runAllEnemyTurns(events: GameEvent[]): void {
+  private runAllNpcCombatTurns(events: GameEvent[]): void {
     const s = this.state;
-    const living = s.enemies.filter((e) => e.hp > 0);
 
-    for (const enemy of living) {
+    // Enemy turns — each enemy attacks the player
+    const livingEnemies = s.npcs.filter((n) => n.disposition === 'enemy' && n.hp > 0);
+    for (const npc of livingEnemies) {
       if (s.phase === 'defeat') break;
-      enemy.isActive = true;
+      npc.isActive = true;
 
-      const def = this.defs.monsters.find((m) => m.id === enemy.defId);
-      if (!def) { enemy.isActive = false; continue; }
+      const def = this.defs.monsters.find((m) => m.id === npc.defId);
+      if (!def) { npc.isActive = false; continue; }
 
-      const occupied: [number, number][] = [
-        ...s.enemies.filter((e) => e !== enemy && e.hp > 0).map((e): [number, number] => [e.tileX, e.tileY]),
-        ...s.npcs.map((n): [number, number] => [n.tileX, n.tileY]),
-      ];
+      const occupied: [number, number][] = s.npcs
+        .filter((n) => n !== npc && n.hp > 0)
+        .map((n): [number, number] => [n.tileX, n.tileY]);
 
-      const startedAdjacentToPlayer = chebyshev(enemy.tileX, enemy.tileY, s.player.tileX, s.player.tileY) <= 1;
+      const startedAdjacentToPlayer = chebyshev(npc.tileX, npc.tileY, s.player.tileX, s.player.tileY) <= 1;
 
-      const result = runEnemyTurn(enemy, def, {
+      const result = runEnemyTurn(npc, def, {
         playerTileX: s.player.tileX,
         playerTileY: s.player.tileY,
         playerAc: this.playerDef.ac,
         playerHp: s.player.hp,
         playerHidden: s.player.hidden,
-        enemyVexed: enemy.vexed,
-        enemyCurrentlyHidden: enemy.hidden,
+        enemyVexed: npc.vexed,
+        enemyCurrentlyHidden: npc.hidden,
         playerDodging: s.player.conditions.includes('dodging'),
         passivePerception: 10 + (this.playerDef.skills['perception'] ?? 0),
         passable: s.map.passable,
@@ -558,21 +583,18 @@ export class GameEngine {
 
       const endedAdjacentToPlayer = chebyshev(result.finalTileX, result.finalTileY, s.player.tileX, s.player.tileY) <= 1;
 
-      // Apply move results
-      enemy.tileX = result.finalTileX;
-      enemy.tileY = result.finalTileY;
-      enemy.hidden = result.hidden;
-      enemy.vexed = false;
+      npc.tileX = result.finalTileX;
+      npc.tileY = result.finalTileY;
+      npc.hidden = result.hidden;
+      npc.vexed = false;
       events.push(...result.events);
 
-      // Player Opportunity Attack if enemy moved out of player's reach
       if (startedAdjacentToPlayer && !endedAdjacentToPlayer && !result.attacked) {
-        this.doPlayerOpportunityAttack(enemy, events);
+        this.doPlayerOpportunityAttack(npc, events);
       }
 
       this.addLogs(result.logs);
 
-      // Apply attack result
       if (result.attacked && result.isHit) {
         if (s.player.hp <= 0) {
           const failures = result.isCrit ? 2 : 1;
@@ -592,10 +614,78 @@ export class GameEngine {
         }
       }
       s.player.hidden = false;
-      enemy.isActive = false;
+      npc.isActive = false;
     }
 
-    if (s.phase !== 'defeat' && s.phase !== 'death_saves') this.enterPlayerTurn();
+    // Ally turns — each ally attacks the nearest living enemy
+    if (s.phase !== 'defeat' && s.phase !== 'death_saves') {
+      const livingAllies = s.npcs.filter((n) => n.disposition === 'ally' && n.hp > 0);
+      for (const ally of livingAllies) {
+        ally.isActive = true;
+
+        const def = this.defs.monsters.find((m) => m.id === ally.defId);
+        if (!def) { ally.isActive = false; continue; }
+
+        const enemyTargets = s.npcs
+          .filter((n) => n.disposition === 'enemy' && n.hp > 0)
+          .map((n) => {
+            const ndef = this.defs.monsters.find((m) => m.id === n.defId);
+            return { id: n.id, tileX: n.tileX, tileY: n.tileY, ac: ndef?.ac ?? 10 };
+          });
+
+        const occupied: [number, number][] = [
+          [s.player.tileX, s.player.tileY],
+          ...s.npcs.filter((n) => n !== ally && n.hp > 0).map((n): [number, number] => [n.tileX, n.tileY]),
+        ];
+
+        const result = runAllyTurn(ally, def, {
+          enemyTargets,
+          passable: s.map.passable,
+          mapCols: s.map.cols,
+          mapRows: s.map.rows,
+          occupiedTiles: occupied,
+        });
+
+        ally.tileX = result.finalTileX;
+        ally.tileY = result.finalTileY;
+        events.push(...result.events);
+        this.addLogs(result.logs);
+
+        if (result.attacked && result.isHit && result.attackedTargetId) {
+          const target = s.npcs.find((n) => n.id === result.attackedTargetId);
+          if (target) {
+            const targetDef = this.defs.monsters.find((m) => m.id === target.defId);
+            if (targetDef) {
+              const meleeAttack = def.attacks.find((a) => a.attackType === 'melee' || a.attackType === 'both');
+              const { finalDamage, log: resistLog } = this.resistMod(result.damage, meleeAttack?.damageType ?? '', targetDef);
+              if (resistLog) this.addLog(resistLog);
+              target.hp = Math.max(0, target.hp - finalDamage);
+              this.addLog({ left: `${targetDef.name} HP: ${target.hp}/${target.maxHp}`, style: 'status' });
+              if (target.hp <= 0) {
+                const gold = crGoldReward(targetDef.cr);
+                s.player.xp += targetDef.xp;
+                s.player.gold += gold;
+                this.addLogs([
+                  { left: `☠ ${targetDef.name} is slain! +${targetDef.xp} XP  +${gold} GP`, style: 'kill' },
+                  { left: `Total XP: ${s.player.xp}  |  GP: ${s.player.gold}`, style: 'status' },
+                ]);
+                this.killNpc(target.id);
+              }
+            }
+          }
+        }
+
+        ally.isActive = false;
+      }
+    }
+
+    if (s.phase !== 'defeat' && s.phase !== 'death_saves') {
+      if (s.npcs.filter((n) => n.disposition === 'enemy' && n.hp > 0).length === 0) {
+        s.phase = 'exploring';
+      } else {
+        this.enterPlayerTurn();
+      }
+    }
   }
 
   private doRollDeathSave(events: GameEvent[]): void {
@@ -740,13 +830,13 @@ export class GameEngine {
     s.player.equippedSlots = { ...s.player.equippedSlots };
   }
 
-  private doEnemyOpportunityAttack(enemy: EnemyState, events: GameEvent[]): void {
+  private doEnemyOpportunityAttack(npc: NpcState, events: GameEvent[]): void {
     const s = this.state;
-    const def = this.defs.monsters.find((m) => m.id === enemy.defId);
+    const def = this.defs.monsters.find((m) => m.id === npc.defId);
     if (!def) return;
     const meleeAttack = def.attacks.find((a) => a.attackType === 'melee' || a.attackType === 'both');
     if (!meleeAttack) return;
-    enemy.reactionUsed = true;
+    npc.reactionUsed = true;
     const withDisadvantage = s.player.conditions.includes('dodging');
     const { damage, isHit, isCrit, logs } = enemyAttack(def, meleeAttack, this.playerDef.ac, false, withDisadvantage);
     this.addLogs([{ left: `⚡ ${def.name} makes an Opportunity Attack!`, style: 'header' }, ...logs]);
@@ -756,25 +846,25 @@ export class GameEngine {
     void isCrit;
   }
 
-  private doPlayerOpportunityAttack(enemy: EnemyState, _events: GameEvent[]): void {
+  private doPlayerOpportunityAttack(npc: NpcState, _events: GameEvent[]): void {
     const s = this.state;
     if (s.player.reactionUsed || s.player.hp <= 0) return;
-    const targetDef = this.defs.monsters.find((m) => m.id === enemy.defId);
+    const targetDef = this.defs.monsters.find((m) => m.id === npc.defId);
     if (!targetDef) return;
     s.player.reactionUsed = true;
     const { damage, logs, vexApplied } = playerMeleeAttack(this.playerDef, targetDef, false);
     this.addLogs([{ left: `⚡ ${this.playerDef.name} makes an Opportunity Attack!`, style: 'header' }, ...logs]);
     const { finalDamage: oaFinalDamage, log: oaResistLog } = this.resistMod(damage, this.playerDef.mainAttack.damageType, targetDef);
     if (oaResistLog) this.addLog(oaResistLog);
-    enemy.hp = Math.max(0, enemy.hp - oaFinalDamage);
-    this.addLog({ left: `${targetDef.name} HP: ${enemy.hp}/${enemy.maxHp}`, style: 'status' });
-    if (vexApplied) enemy.vexed = true;
-    if (enemy.hp <= 0) {
+    npc.hp = Math.max(0, npc.hp - oaFinalDamage);
+    this.addLog({ left: `${targetDef.name} HP: ${npc.hp}/${npc.maxHp}`, style: 'status' });
+    if (vexApplied) npc.vexed = true;
+    if (npc.hp <= 0) {
       const gold = crGoldReward(targetDef.cr);
       s.player.xp += targetDef.xp;
       s.player.gold += gold;
       this.addLog({ left: `☠ ${targetDef.name} slain by Opportunity Attack! +${targetDef.xp} XP  +${gold} GP`, style: 'kill' });
-      this.killEnemy(enemy.id);
+      this.killNpc(npc.id);
     }
   }
 
@@ -816,8 +906,7 @@ export class GameEngine {
     const { cols, rows, passable } = s.map;
     const occupied = new Set<string>([
       `${s.player.tileX},${s.player.tileY}`,
-      ...s.enemies.filter((e) => e.hp > 0).map((e) => `${e.tileX},${e.tileY}`),
-      ...s.npcs.map((n) => `${n.tileX},${n.tileY}`),
+      ...s.npcs.filter((n) => n.hp > 0).map((n) => `${n.tileX},${n.tileY}`),
     ]);
     for (let dist = minDist; dist <= maxDist; dist++) {
       for (let dc = -dist; dc <= dist; dc++) {
@@ -847,13 +936,11 @@ export class GameEngine {
     const map: GameMap = savedMap ?? (req.mapType === 'rooms' ? generateRoomsMap() : generateMap());
 
     const equippedSlots: EquipmentSlots = req.resumeEquippedSlots ?? { ...playerDef.defaultEquipment };
-    // Deep-copy playerDef so we can mutate AC/mainAttack per session
     const ownedDef: PlayerDef = JSON.parse(JSON.stringify(playerDef));
     applyEquipment(ownedDef, equippedSlots, defs.items);
 
     const inventoryIds: string[] = req.resumeInventoryIds ?? [...(playerDef.defaultInventoryIds ?? [])];
 
-    // Find player spawn
     const [pX, pY] = findPlayerSpawn(map);
 
     const player = {
@@ -878,28 +965,29 @@ export class GameEngine {
 
     const isCombat = req.encounterTypes.includes('simple_combat');
 
-    const enemies: EnemyState[] = [];
     const npcs: NpcState[] = [];
     const mapItems: MapItemState[] = [];
     const secrets: SecretState[] = [];
 
     if (isCombat) {
-      spawnEnemies(enemies, map, defs.monsters, player.tileX, player.tileY, req.encounterContext.enemyCount ?? 2);
-      spawnItems(mapItems, map, defs.items, player.tileX, player.tileY, enemies);
+      spawnEnemies(npcs, map, defs.monsters, player.tileX, player.tileY, req.encounterContext.enemyCount ?? 2);
+      spawnItems(mapItems, map, defs.items, player.tileX, player.tileY, npcs);
     }
     if (req.encounterTypes.includes('social_interaction')) {
       for (const defId of (req.npcIds ?? [])) {
-        spawnNpc(npcs, map, defs.npcs, defId, player.tileX, player.tileY, enemies);
+        spawnNpc(npcs, map, defs.npcs, defs.monsters, defId, player.tileX, player.tileY);
       }
     }
     if (req.encounterTypes.includes('exploration')) {
-      spawnSecrets(secrets, map, req.encounterContext.secrets ?? [], player.tileX, player.tileY, enemies);
+      spawnSecrets(secrets, map, req.encounterContext.secrets ?? [], player.tileX, player.tileY, npcs);
     }
 
-    const npcPersonas: NpcPersona[] = npcs.flatMap((ns) => {
-      const def = defs.npcs.find((n) => n.id === ns.defId);
-      return def?.persona ? [{ id: ns.id, name: def.name, persona: def.persona }] : [];
-    });
+    const npcPersonas: NpcPersona[] = npcs
+      .filter((n) => n.disposition === 'neutral')
+      .flatMap((ns) => {
+        const def = defs.npcs.find((n) => n.id === ns.defId);
+        return def?.persona ? [{ id: ns.id, name: def.name, persona: def.persona }] : [];
+      });
 
     const quests: QuestState[] = (req.encounterContext.quests ?? []).map((q) => ({
       id: q.id,
@@ -917,7 +1005,6 @@ export class GameEngine {
       phase: 'exploring',
       map,
       player,
-      enemies,
       npcs,
       mapItems,
       secrets,
@@ -927,14 +1014,13 @@ export class GameEngine {
       mapName: req.encounterContext.mapName ?? 'Unknown',
       quests,
       selectedTargetId: null,
-      activeEnemyIndex: 0,
+      activeNpcIndex: 0,
       turnOrderIds: [],
       introduction: req.encounterContext.introduction,
       encounterContext: req.encounterContext.context,
       npcPersonas,
     };
 
-    // Use a plain object as defs with the owned def substituted
     const sessionDefs: GameDefs = {
       ...defs,
       playerDefs: defs.playerDefs.map((p) => p.id === ownedDef.id ? ownedDef : p),
@@ -960,7 +1046,7 @@ function findPlayerSpawn(map: GameMap): [number, number] {
 }
 
 function spawnEnemies(
-  out: EnemyState[], map: GameMap, monsters: MonsterDef[],
+  out: NpcState[], map: GameMap, monsters: MonsterDef[],
   px: number, py: number, count: number,
 ): void {
   const defs = monsters.filter((m) => m.cr !== '0');
@@ -974,7 +1060,9 @@ function spawnEnemies(
     const def = defs[Math.floor(Math.random() * defs.length)];
     out.push({
       id: `enemy_${i}`, defId: def.id, label: String.fromCharCode(65 + i),
-      tileX: c, tileY: r, hp: def.maxHp, maxHp: def.maxHp,
+      tileX: c, tileY: r,
+      disposition: 'enemy',
+      hp: def.maxHp, maxHp: def.maxHp,
       isActive: false, vexed: false, hidden: false,
       reactionUsed: false, conditions: [],
     });
@@ -983,7 +1071,7 @@ function spawnEnemies(
 
 function spawnItems(
   out: MapItemState[], map: GameMap, items: import('./types.js').ItemDef[],
-  px: number, py: number, enemies: EnemyState[],
+  px: number, py: number, npcs: NpcState[],
 ): void {
   const potion = items.find((i) => i.id === 'health_potion');
   if (!potion) return;
@@ -991,7 +1079,7 @@ function spawnItems(
   const candidates: [number, number][] = [];
   for (let r = 0; r < rows; r++)
     for (let c = 0; c < cols; c++)
-      if (passable[r][c] && chebyshev(c, r, px, py) >= 3 && !enemies.some((e) => e.tileX === c && e.tileY === r))
+      if (passable[r][c] && chebyshev(c, r, px, py) >= 3 && !npcs.some((n) => n.tileX === c && n.tileY === r))
         candidates.push([r, c]);
   shuffle(candidates).slice(0, Math.min(3, candidates.length)).forEach(([r, c], i) => {
     out.push({ id: `item_${i}`, defId: potion.id, tileX: c, tileY: r });
@@ -999,14 +1087,16 @@ function spawnItems(
 }
 
 function spawnNpc(
-  out: NpcState[], map: GameMap, npcDefs: NPCDef[],
-  defId: string, px: number, py: number, enemies: EnemyState[],
+  out: NpcState[], map: GameMap, npcDefs: NPCDef[], monsters: MonsterDef[],
+  defId: string, px: number, py: number,
 ): void {
-  if (!npcDefs.find((n) => n.id === defId)) return;
+  const npcDef = npcDefs.find((n) => n.id === defId);
+  if (!npcDef) return;
+  const monsterDef = monsters.find((m) => m.id === npcDef.monsterClass);
+  const maxHp = monsterDef?.maxHp ?? 8;
   const { cols, rows, passable } = map;
   const occupied = new Set<string>([
     `${px},${py}`,
-    ...enemies.map((e) => `${e.tileX},${e.tileY}`),
     ...out.map((n) => `${n.tileX},${n.tileY}`),
   ]);
   const candidates: [number, number][] = [];
@@ -1016,18 +1106,27 @@ function spawnNpc(
         candidates.push([c, r]);
   if (candidates.length === 0) return;
   const [nx, ny] = candidates[Math.floor(Math.random() * candidates.length)];
-  out.push({ id: uid(), defId, tileX: nx, tileY: ny });
+  out.push({
+    id: `npc_${defId}_${out.length}`,
+    defId,
+    tileX: nx, tileY: ny,
+    disposition: 'neutral',
+    label: '',
+    hp: maxHp, maxHp,
+    isActive: false, vexed: false, hidden: false,
+    reactionUsed: false, conditions: [],
+  });
 }
 
 function spawnSecrets(
   out: SecretState[], map: GameMap, secretDefs: SecretDef[],
-  px: number, py: number, enemies: EnemyState[],
+  px: number, py: number, npcs: NpcState[],
 ): void {
   const { cols, rows, passable } = map;
   const candidates: [number, number][] = [];
   for (let r = 0; r < rows; r++)
     for (let c = 0; c < cols; c++)
-      if (passable[r][c] && chebyshev(c, r, px, py) >= 3 && !enemies.some((e) => e.tileX === c && e.tileY === r))
+      if (passable[r][c] && chebyshev(c, r, px, py) >= 3 && !npcs.some((n) => n.tileX === c && n.tileY === r))
         candidates.push([r, c]);
   shuffle(candidates).slice(0, Math.min(secretDefs.length, candidates.length)).forEach(([r, c], i) => {
     out.push({ tileX: c, tileY: r, def: secretDefs[i] as SecretDef });

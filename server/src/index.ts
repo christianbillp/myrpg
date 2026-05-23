@@ -84,7 +84,9 @@ function saveFilePath(characterId: string): string { return join(SAVES_DIR, `${c
 // Persistent player stats live in the character save; the world save only keeps
 // session-specific player fields (position, turn flags, death saves).
 type SessionPlayerState = Pick<PlayerState, 'defId' | 'tileX' | 'tileY' | 'hidden' | 'actionUsed' | 'bonusActionUsed' | 'movesLeft' | 'deathSaveSuccesses' | 'deathSaveFailures'>;
-type WorldSave = Omit<GameState, 'player'> & { player: SessionPlayerState };
+// WorldSave omits persistent player stats (stored in char save) and keeps session state.
+// The 'enemies' field existed in the pre-disposition format — its presence signals an old save.
+type WorldSave = Omit<GameState, 'player'> & { player: SessionPlayerState; enemies?: unknown };
 
 interface CharSave {
   playerDefId: string;
@@ -105,6 +107,8 @@ async function saveWorldState(state: GameState): Promise<void> {
 async function loadWorldState(): Promise<GameState | null> {
   let worldSave: WorldSave;
   try { worldSave = JSON.parse(await readFile(WORLD_SAVE_PATH, 'utf-8')) as WorldSave; } catch { return null; }
+  // Reject pre-disposition saves that still carry a separate 'enemies' array
+  if ('enemies' in worldSave) return null;
 
   const charSave = await readSave(worldSave.player.defId) as CharSave;
   const fullPlayer: PlayerState = {

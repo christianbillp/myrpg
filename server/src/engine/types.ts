@@ -141,6 +141,8 @@ export interface LogEntry {
 
 export type CombatMode = 'exploring' | 'player_turn' | 'enemy_turn' | 'death_saves' | 'defeat';
 
+export type Disposition = 'ally' | 'neutral' | 'enemy';
+
 export interface PlayerState {
   defId: string;
   tileX: number;
@@ -162,12 +164,15 @@ export interface PlayerState {
   conditions: string[];
 }
 
-export interface EnemyState {
+// Unified NPC state — covers neutral social NPCs, allied combatants, and enemies.
+// disposition drives rendering (token colour, HP bar) and AI (who they attack).
+export interface NpcState {
   id: string;
   defId: string;
-  label: string;
   tileX: number;
   tileY: number;
+  disposition: Disposition;
+  label: string;
   hp: number;
   maxHp: number;
   isActive: boolean;
@@ -175,13 +180,6 @@ export interface EnemyState {
   hidden: boolean;
   reactionUsed: boolean;
   conditions: string[];
-}
-
-export interface NpcState {
-  id: string;
-  defId: string;
-  tileX: number;
-  tileY: number;
 }
 
 export interface MapItemState {
@@ -221,7 +219,6 @@ export interface GameState {
   phase: CombatMode;
   map: GameMap;
   player: PlayerState;
-  enemies: EnemyState[];
   npcs: NpcState[];
   mapItems: MapItemState[];
   secrets: SecretState[];
@@ -231,7 +228,7 @@ export interface GameState {
   mapName: string;
   quests: QuestState[];
   selectedTargetId: string | null;
-  activeEnemyIndex: number;
+  activeNpcIndex: number;
   turnOrderIds: string[];
   introduction: string;
   encounterContext: string;

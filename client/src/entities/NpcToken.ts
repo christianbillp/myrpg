@@ -1,17 +1,20 @@
 import Phaser from 'phaser';
 import { TILE_SIZE } from '../constants';
 import { MonsterDef } from '../data/monsters';
+import { Disposition } from '../net/types';
 
 const MOVE_DURATION = 130;
 const DPR = window.devicePixelRatio;
 
-export class Enemy {
+export class NpcToken {
   tileX: number;
   tileY: number;
   hp: number;
   label = "";
   readonly maxHp: number;
+  readonly id: string;
   readonly def: MonsterDef;
+  readonly disposition: Disposition;
   private container: Phaser.GameObjects.Container;
   private hpBar: Phaser.GameObjects.Graphics;
   private selectionRing: Phaser.GameObjects.Graphics;
@@ -19,31 +22,49 @@ export class Enemy {
   private scene: Phaser.Scene;
   private moving = false;
 
-  constructor(scene: Phaser.Scene, def: MonsterDef, tileX: number, tileY: number) {
+  constructor(
+    scene: Phaser.Scene,
+    id: string,
+    def: MonsterDef,
+    tileX: number,
+    tileY: number,
+    disposition: Disposition,
+    hp: number,
+    maxHp: number,
+  ) {
     this.scene = scene;
+    this.id = id;
     this.def = def;
     this.tileX = tileX;
     this.tileY = tileY;
-    this.hp = def.maxHp;
-    this.maxHp = def.maxHp;
+    this.disposition = disposition;
+    this.hp = hp;
+    this.maxHp = maxHp;
 
+    this.selectionRing = scene.add.graphics();
     const body = scene.add.circle(0, 0, (TILE_SIZE - 8) / 2, def.color);
     this.hpBar = scene.add.graphics();
-    this.selectionRing = scene.add.graphics();
-    this.labelText = scene.add
-      .text(0, -4, "", {
-        fontSize: "13px",
-        color: "#ffffff",
-        fontFamily: "monospace",
-        resolution: DPR,
-      })
-      .setOrigin(0.5);
+
+    // Combat tokens show a combat label letter; neutral NPCs show name above
+    if (disposition === 'neutral') {
+      const nameLabel = scene.add
+        .text(0, -(TILE_SIZE / 2 + 4), def.name, {
+          fontSize: '9px',
+          color: '#' + def.color.toString(16).padStart(6, '0'),
+          fontFamily: 'monospace',
+          resolution: DPR,
+        })
+        .setOrigin(0.5, 1);
+      this.labelText = nameLabel;
+    } else {
+      this.labelText = scene.add
+        .text(0, -4, '', { fontSize: '13px', color: '#ffffff', fontFamily: 'monospace', resolution: DPR })
+        .setOrigin(0.5);
+    }
+
     this.container = scene.add
       .container(tileX * TILE_SIZE + TILE_SIZE / 2, tileY * TILE_SIZE + TILE_SIZE / 2, [
-        this.selectionRing,
-        body,
-        this.hpBar,
-        this.labelText,
+        this.selectionRing, body, this.hpBar, this.labelText,
       ])
       .setDepth(1);
 
@@ -51,30 +72,24 @@ export class Enemy {
   }
 
   moveTo(tx: number, ty: number, onComplete: () => void): void {
-    if (this.moving) {
-      onComplete();
-      return;
-    }
+    if (this.moving) { onComplete(); return; }
     this.tileX = tx;
     this.tileY = ty;
     this.moving = true;
-
     this.scene.tweens.add({
       targets: this.container,
       x: tx * TILE_SIZE + TILE_SIZE / 2,
       y: ty * TILE_SIZE + TILE_SIZE / 2,
       duration: MOVE_DURATION,
       ease: 'Sine.easeInOut',
-      onComplete: () => {
-        this.moving = false;
-        onComplete();
-      },
+      onComplete: () => { this.moving = false; onComplete(); },
     });
   }
 
-  takeDamage(amount: number): void {
-    this.hp = Math.max(0, this.hp - amount);
-    this.refreshHpBar();
+  teleport(tx: number, ty: number): void {
+    this.tileX = tx;
+    this.tileY = ty;
+    this.container.setPosition(tx * TILE_SIZE + TILE_SIZE / 2, ty * TILE_SIZE + TILE_SIZE / 2);
   }
 
   setHp(hp: number): void {
@@ -86,8 +101,11 @@ export class Enemy {
     this.label = label;
   }
 
+  // Show the combat letter (enemy/ally) or hide it (neutral or exploring)
   setLabelVisible(visible: boolean): void {
-    this.labelText.setText(visible ? this.label : "");
+    if (this.disposition !== 'neutral') {
+      this.labelText.setText(visible ? this.label : '');
+    }
   }
 
   setSelected(selected: boolean): void {
@@ -98,18 +116,14 @@ export class Enemy {
     }
   }
 
+  isDead(): boolean { return this.hp <= 0; }
   get gameObject(): Phaser.GameObjects.Container { return this.container; }
 
-  isDead(): boolean {
-    return this.hp <= 0;
-  }
-
-  destroy(): void {
-    this.container.destroy();
-  }
+  destroy(): void { this.container.destroy(); }
 
   private refreshHpBar(): void {
     this.hpBar.clear();
+    if (this.disposition === 'neutral') return;
     if (this.hp >= this.maxHp) return;
     const pct = this.hp / this.maxHp;
     const radius = (TILE_SIZE - 8) / 2;
@@ -118,7 +132,9 @@ export class Enemy {
     const barY = -(radius + 7);
     this.hpBar.fillStyle(0x222233);
     this.hpBar.fillRect(barX, barY, barW, 4);
-    this.hpBar.fillStyle(0xe74c3c);
+    // Allies use green HP bars, enemies use red
+    const barColor = this.disposition === 'ally' ? 0x27ae60 : 0xe74c3c;
+    this.hpBar.fillStyle(barColor);
     this.hpBar.fillRect(barX, barY, Math.floor(barW * pct), 4);
   }
 }

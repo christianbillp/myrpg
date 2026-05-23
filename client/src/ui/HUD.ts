@@ -9,7 +9,7 @@ import {
 } from "../constants";
 import { CombatMode, LogEntry, LogEntryStyle } from "../net/types";
 import { makeButton } from "./UIButton";
-import { Enemy } from "../entities/Enemy";
+import { NpcToken } from "../entities/NpcToken";
 import { PlayerDef } from "../data/player";
 import { TurnOrderBar, TurnChip } from "./TurnOrderBar";
 
@@ -56,15 +56,15 @@ export interface HUDState {
   bonusActionUsed: boolean;
   playerHidden: boolean;
   playerConditions: string[];
-  activeEnemy: Enemy | null;
-  combatEnemies: Enemy[];
+  activeNpc: NpcToken | null;
+  combatNpcs: NpcToken[];
   enemyVexed: boolean;
   enemyHidden: boolean;
   deathSaveSuccesses: number;
   deathSaveFailures: number;
   combatLog: LogEntry[];
   logScrollOffset: number;
-  selectedEnemy: Enemy | null;
+  selectedNpc: NpcToken | null;
   searchAvailable: boolean;
 }
 
@@ -141,16 +141,16 @@ export class HUD {
   }
 
   private refreshEnemyInfo(state: HUDState): void {
-    const displayEnemy =
-      state.selectedEnemy && !state.selectedEnemy.isDead()
-        ? state.selectedEnemy
-        : state.activeEnemy;
-    if (displayEnemy) {
-      const isActive = displayEnemy === state.activeEnemy;
+    const displayNpc =
+      state.selectedNpc && !state.selectedNpc.isDead()
+        ? state.selectedNpc
+        : state.activeNpc;
+    if (displayNpc) {
+      const isActive = displayNpc === state.activeNpc;
       const vexedPart = isActive && state.enemyVexed ? "  [VEXED]" : "";
       const hiddenPart = isActive && state.enemyHidden ? "  [HIDDEN]" : "";
       this.enemyInfoText.setText(
-        `${displayEnemy.def.name}  ${displayEnemy.hp}/${displayEnemy.maxHp} HP${hiddenPart}${vexedPart}`,
+        `${displayNpc.def.name}  ${displayNpc.hp}/${displayNpc.maxHp} HP${hiddenPart}${vexedPart}`,
       );
     } else {
       this.enemyInfoText.setText("");
@@ -158,7 +158,7 @@ export class HUD {
   }
 
   private refreshTurnOrderBar(state: HUDState): void {
-    const inCombat = state.mode !== "exploring" && state.combatEnemies.length > 0;
+    const inCombat = state.mode !== "exploring" && state.combatNpcs.length > 0;
     this.turnOrderBar.setVisible(inCombat);
     if (!inCombat) return;
     const chips: TurnChip[] = [
@@ -169,12 +169,12 @@ export class HUD {
         isActive: state.mode === "player_turn" || state.mode === "death_saves",
         isDead: state.playerHp <= 0,
       },
-      ...state.combatEnemies.map((e) => ({
-        label: e.label,
-        name: e.def.name,
-        color: e.def.color,
-        isActive: state.activeEnemy === e,
-        isDead: e.isDead(),
+      ...state.combatNpcs.map((n) => ({
+        label: n.label,
+        name: n.def.name,
+        color: n.def.color,
+        isActive: state.activeNpc === n,
+        isDead: n.isDead(),
       })),
     ];
     this.turnOrderBar.refresh(chips);
@@ -196,9 +196,9 @@ export class HUD {
   }
 
   private refreshEnemyTurn(state: HUDState): void {
-    const ae = state.activeEnemy;
-    const labelPart = ae?.label ? `${ae.label} · ` : "";
-    this.phaseText.setText(`${labelPart}${ae?.def.name ?? "Enemy"}'s turn...`);
+    const an = state.activeNpc;
+    const labelPart = an?.label ? `${an.label} · ` : "";
+    this.phaseText.setText(`${labelPart}${an?.def.name ?? "Enemy"}'s turn...`);
   }
 
   private refreshDeathSaves(state: HUDState): void {
