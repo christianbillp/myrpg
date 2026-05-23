@@ -1,0 +1,70 @@
+{
+  "id": "elf",
+  "name": "Elf",
+  "creatureType": "humanoid",
+  "size": "medium",
+  "speed": 30,
+  "traits": [
+    {
+      "name": "Darkvision",
+      "description": "You have Darkvision with a range of 60 feet.",
+      "effects": {
+        "darkvision": { "feet": 60 }
+      }
+    },
+    {
+      "name": "Elven Lineage",
+      "description": "Choose a lineage that grants supernatural abilities and spells at levels 1, 3, and 5. Spells are always prepared; each can be cast once without a spell slot (regained on Long Rest) and using any spell slots you have. Spellcasting ability: INT, WIS, or CHA (chosen at lineage selection).",
+      "effects": {
+        "lineageChoice": {
+          "spellcastingAbility": { "choices": ["int", "wis", "cha"] },
+          "options": [
+            {
+              "id": "drow",
+              "name": "Drow",
+              "level1": { "darkvisionOverride": { "feet": 120 }, "cantrip": "dancing-lights" },
+              "level3": { "preparedSpell": "faerie-fire" },
+              "level5": { "preparedSpell": "darkness" }
+            },
+            {
+              "id": "high-elf",
+              "name": "High Elf",
+              "level1": { "cantrip": "prestidigitation", "cantripSwapOnLongRest": { "list": "wizard" } },
+              "level3": { "preparedSpell": "detect-magic" },
+              "level5": { "preparedSpell": "misty-step" }
+            },
+            {
+              "id": "wood-elf",
+              "name": "Wood Elf",
+              "level1": { "speedBonus": 5, "cantrip": "druidcraft" },
+              "level3": { "preparedSpell": "longstrider" },
+              "level5": { "preparedSpell": "pass-without-trace" }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "Fey Ancestry",
+      "description": "You have Advantage on saving throws to avoid or end the Charmed condition.",
+      "effects": {
+        "savingThrowAdvantage": [{ "condition": "charmed" }]
+      }
+    },
+    {
+      "name": "Keen Senses",
+      "description": "You have proficiency in the Insight, Perception, or Survival skill.",
+      "effects": {
+        "skillProficiency": { "choices": ["insight", "perception", "survival"], "count": 1 }
+      }
+    },
+    {
+      "name": "Trance",
+      "description": "You don't need to sleep, and magic can't put you to sleep. You can finish a Long Rest in 4 hours if you spend those hours in trancelike meditation, during which you retain consciousness.",
+      "effects": {
+        "noSleepNeeded": true,
+        "longRestDurationHours": 4
+      }
+    }
+  ]
+}

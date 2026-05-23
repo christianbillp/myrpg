@@ -1,0 +1,15 @@
+{
+  "id": "archery",
+  "name": "Archery",
+  "category": "fighting-style",
+  "prerequisites": {
+    "minLevel": null,
+    "minAbilityScore": null,
+    "requiresFeature": "Fighting Style",
+    "repeatable": false
+  },
+  "description": "You gain a +2 bonus to attack rolls you make with ranged weapons.",
+  "effects": {
+    "rangedAttackBonus": 2
+  }
+}

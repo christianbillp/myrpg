@@ -1,0 +1,16 @@
+{
+  "id": "boon-of-combat-prowess",
+  "name": "Boon of Combat Prowess",
+  "category": "epic-boon",
+  "prerequisites": {
+    "minLevel": 19,
+    "minAbilityScore": null,
+    "requiresFeature": null,
+    "repeatable": false
+  },
+  "description": "Increase one ability score of your choice by 1 (max 30). When you miss with an attack roll, you can choose to hit instead. Once you use this benefit, you can't use it again until the start of your next turn.",
+  "effects": {
+    "abilityScoreIncrease": { "abilities": ["any"], "amount": 1, "maxScore": 30 },
+    "peerlessAim": true
+  }
+}

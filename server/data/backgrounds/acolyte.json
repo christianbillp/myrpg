@@ -1,0 +1,26 @@
+{
+  "id": "acolyte",
+  "name": "Acolyte",
+  "abilityScores": ["int", "wis", "cha"],
+  "feat": { "id": "magic-initiate", "options": { "spellList": "cleric" } },
+  "skillProficiencies": ["insight", "religion"],
+  "toolProficiency": "calligraphers-supplies",
+  "equipmentOptions": [
+    {
+      "label": "A",
+      "items": [
+        { "name": "Calligrapher's Supplies" },
+        { "name": "Book (prayers)" },
+        { "name": "Holy Symbol" },
+        { "name": "Parchment", "count": 10 },
+        { "name": "Robe" }
+      ],
+      "gold": 8
+    },
+    {
+      "label": "B",
+      "items": [],
+      "gold": 50
+    }
+  ]
+}

@@ -1,0 +1,16 @@
+{
+  "id": "ability-score-improvement",
+  "name": "Ability Score Improvement",
+  "category": "general",
+  "prerequisites": {
+    "minLevel": 4,
+    "minAbilityScore": null,
+    "requiresFeature": null,
+    "repeatable": true,
+    "repeatableNote": null
+  },
+  "description": "Increase one ability score of your choice by 2, or increase two ability scores of your choice by 1 each. This feat can't increase an ability score above 20.",
+  "effects": {
+    "abilityScoreIncrease": { "abilities": ["any"], "distribution": "2-or-1+1", "maxScore": 20 }
+  }
+}

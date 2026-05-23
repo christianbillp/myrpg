@@ -1,0 +1,18 @@
+{
+  "id": "magic-initiate",
+  "name": "Magic Initiate",
+  "category": "origin",
+  "prerequisites": {
+    "minLevel": null,
+    "minAbilityScore": null,
+    "requiresFeature": null,
+    "repeatable": true,
+    "repeatableNote": "Must choose a different spell list each time."
+  },
+  "description": "Choose a spell list (Cleric, Druid, or Wizard). You learn two cantrips from that list. Choose one level 1 spell from the same list — it is always prepared. You can cast it once without a spell slot, regaining that ability on a Long Rest. You can also cast it using spell slots. When you gain a level, you can replace one chosen spell with another of the same level from the same list.",
+  "effects": {
+    "learnedCantrips": { "count": 2, "lists": ["cleric", "druid", "wizard"] },
+    "preparedSpell": { "level": 1, "lists": ["cleric", "druid", "wizard"], "freeCastsPerLongRest": 1 },
+    "spellcastingAbility": { "choices": ["int", "wis", "cha"] }
+  }
+}

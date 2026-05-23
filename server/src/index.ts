@@ -14,7 +14,7 @@ import { randomUUID } from "crypto";
 import { buildEncounter, EncounterStartRequest } from "./encounterService.js";
 import { processAIDMChat, AIDMChatRequest } from "./aidm.js";
 import { GameEngine, GameDefs } from "./engine/GameEngine.js";
-import { applyEquipment } from "./engine/EquipmentSystem.js";
+import { applyEquipment, applyFeats, applySpecies } from "./engine/EquipmentSystem.js";
 import { CreateSessionRequest } from "./engine/types.js";
 import {
   createSession,
@@ -52,25 +52,36 @@ const defs: GameDefs = {
   playerDefs: [],
   monsters: [],
   npcs: [],
-  items: [],
+  equipment: [],
   maps: [],
+  feats: [],
+  backgrounds: [],
+  species: [],
 };
 
 async function loadDefs(): Promise<void> {
-  const [playerDefs, monsters, npcs, items, rawMaps] = await Promise.all([
+  const [playerDefs, monsters, npcs, equipment, rawMaps, feats, backgrounds, species] = await Promise.all([
     readDir<GameDefs["playerDefs"][0]>(join(DATA_DIR, "characters")),
     readDir<GameDefs["monsters"][0]>(join(DATA_DIR, "monsters")),
     readDir<GameDefs["npcs"][0]>(join(DATA_DIR, "npcs")),
-    readDir<GameDefs["items"][0]>(join(DATA_DIR, "items")),
-    readDir<{ id: string; name: string; mapdescription: string; rows: string[] }>(
-      join(DATA_DIR, "maps"),
-    ),
+    readDir<GameDefs["equipment"][0]>(join(DATA_DIR, "equipment")),
+    readDir<{ id: string; name: string; mapdescription: string; rows: string[] }>(join(DATA_DIR, "maps")),
+    readDir<GameDefs["feats"][0]>(join(DATA_DIR, "feats")),
+    readDir<GameDefs["backgrounds"][0]>(join(DATA_DIR, "backgrounds")),
+    readDir<GameDefs["species"][0]>(join(DATA_DIR, "species")),
   ]);
   defs.playerDefs = playerDefs;
   defs.monsters = monsters;
   defs.npcs = npcs;
-  defs.items = items;
-  for (const p of defs.playerDefs) applyEquipment(p, p.defaultEquipment, defs.items);
+  defs.equipment = equipment;
+  defs.feats = feats;
+  defs.backgrounds = backgrounds;
+  defs.species = species;
+  for (const p of defs.playerDefs) {
+    applySpecies(p, defs.species);
+    applyFeats(p, defs.feats);
+    applyEquipment(p, p.defaultEquipment, defs.equipment);
+  }
   defs.maps = rawMaps.map(({ id, name, mapdescription, rows }) => ({
     id,
     name,
@@ -92,9 +103,12 @@ await server.register(websocket);
 server.get("/characters", async () => defs.playerDefs);
 server.get("/monsters", async () => defs.monsters);
 server.get("/npcs", async () => defs.npcs);
-server.get("/items", async () => defs.items);
-server.get("/premade-encounters", async () =>
-  readDir(join(DATA_DIR, "premade-encounters")),
+server.get("/equipment", async () => defs.equipment);
+server.get("/feats", async () => defs.feats);
+server.get("/backgrounds", async () => defs.backgrounds);
+server.get("/species", async () => defs.species);
+server.get("/encounters", async () =>
+  readDir(join(DATA_DIR, "encounters")),
 );
 server.get("/maps", async () => defs.maps);
 

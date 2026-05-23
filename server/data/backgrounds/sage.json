@@ -1,0 +1,26 @@
+{
+  "id": "sage",
+  "name": "Sage",
+  "abilityScores": ["con", "int", "wis"],
+  "feat": { "id": "magic-initiate", "options": { "spellList": "wizard" } },
+  "skillProficiencies": ["arcana", "history"],
+  "toolProficiency": "calligraphers-supplies",
+  "equipmentOptions": [
+    {
+      "label": "A",
+      "items": [
+        { "name": "Quarterstaff" },
+        { "name": "Calligrapher's Supplies" },
+        { "name": "Book (history)" },
+        { "name": "Parchment", "count": 8 },
+        { "name": "Robe" }
+      ],
+      "gold": 8
+    },
+    {
+      "label": "B",
+      "items": [],
+      "gold": 50
+    }
+  ]
+}

@@ -14,7 +14,7 @@ import {
 } from "../constants";
 import { PlayerDef } from "../data/player";
 import { MonsterDef, NPCDef } from "../data/monsters";
-import { ItemDef, WeaponDef } from "../data/items";
+import { ItemDef, WeaponDef } from "../data/equipment";
 import { gameClient } from "../net/GameClient";
 import type { GameState, GameEvent, GameMap } from "../net/types";
 
@@ -86,7 +86,7 @@ export class GameScene extends Phaser.Scene {
       onDisableKeyboard: () => this.input.keyboard?.disableGlobalCapture(),
       onEnableKeyboard:  () => this.input.keyboard?.enableGlobalCapture(),
       onRefresh:         () => { if (this.gameState) this.updateHUD(this.gameState); },
-      getItems:          () => this.registry.get("items") as ItemDef[],
+      getItems:          () => this.registry.get("equipment") as ItemDef[],
     });
 
     this.setupInput();
@@ -423,7 +423,7 @@ export class GameScene extends Phaser.Scene {
       playerTileY:      this.player?.tileY ?? state.player.tileY,
       hitDiceRemaining: this.playerDef.level - state.player.hitDiceUsed,
       throwableItems:   (() => {
-        const allItems = this.registry.get("items") as ItemDef[];
+        const allItems = this.registry.get("equipment") as ItemDef[];
         const px = this.player?.tileX ?? state.player.tileX;
         const py = this.player?.tileY ?? state.player.tileY;
         return [...new Set(state.player.inventoryIds)]
@@ -540,7 +540,7 @@ export class GameScene extends Phaser.Scene {
   }
 
   private findItemDef(defId: string): ItemDef {
-    const items = this.registry.get("items") as ItemDef[];
+    const items = this.registry.get("equipment") as ItemDef[];
     return items.find(i => i.id === defId) ?? items[0];
   }
 }

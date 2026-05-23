@@ -1,0 +1,16 @@
+{
+  "id": "boon-of-dimensional-travel",
+  "name": "Boon of Dimensional Travel",
+  "category": "epic-boon",
+  "prerequisites": {
+    "minLevel": 19,
+    "minAbilityScore": null,
+    "requiresFeature": null,
+    "repeatable": false
+  },
+  "description": "Increase one ability score of your choice by 1 (max 30). Immediately after you take the Attack action or the Magic action, you can teleport up to 30 feet to an unoccupied space you can see.",
+  "effects": {
+    "abilityScoreIncrease": { "abilities": ["any"], "amount": 1, "maxScore": 30 },
+    "blinkSteps": { "feet": 30, "trigger": "attack-or-magic-action" }
+  }
+}

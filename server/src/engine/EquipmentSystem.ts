@@ -1,5 +1,5 @@
 import { mod } from './Dice.js';
-import { PlayerDef, PlayerAttack, EquipmentSlots, ItemDef, ArmorDef, ShieldDef, WeaponDef } from './types.js';
+import { PlayerDef, PlayerAttack, EquipmentSlots, ItemDef, ArmorDef, ShieldDef, WeaponDef, FeatDef, SpeciesDef } from './types.js';
 
 export function computeAC(
   playerDef: PlayerDef,
@@ -73,6 +73,33 @@ export function computeEquippedSlotLabels(
   }
 
   return { armor: armorLabel, weapon: weaponLabel, shield: shieldLabel };
+}
+
+export function applySpecies(playerDef: PlayerDef, allSpecies: SpeciesDef[]): void {
+  const species = allSpecies.find((s) => s.id === playerDef.speciesId);
+  if (!species) return;
+  let speed = species.speed;
+  if (playerDef.speciesLineage) {
+    for (const trait of species.traits) {
+      const lineage = trait.effects.lineageChoice;
+      if (!lineage) continue;
+      const match = lineage.options.find((o) => o.id === playerDef.speciesLineage);
+      if (match?.level1?.speedBonus) speed += match.level1.speedBonus as number;
+    }
+  }
+  playerDef.speed = speed;
+}
+
+export function applyFeats(playerDef: PlayerDef, allFeats: FeatDef[]): void {
+  const byId = Object.fromEntries(allFeats.map((f) => [f.id, f]));
+  playerDef.savageAttacker = false;
+  playerDef.fightingStyleDefense = false;
+  for (const id of playerDef.featIds) {
+    const feat = byId[id];
+    if (!feat) continue;
+    if (feat.effects.savageAttacker) playerDef.savageAttacker = true;
+    if (feat.effects.armorAcBonus) playerDef.fightingStyleDefense = true;
+  }
 }
 
 export function applyEquipment(playerDef: PlayerDef, slots: EquipmentSlots, allItems: ItemDef[]): void {

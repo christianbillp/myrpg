@@ -1,0 +1,65 @@
+{
+  "id": "goliath",
+  "name": "Goliath",
+  "creatureType": "humanoid",
+  "size": "medium",
+  "speed": 35,
+  "traits": [
+    {
+      "name": "Giant Ancestry",
+      "description": "Choose one supernatural boon from your giant ancestry. Uses equal to Proficiency Bonus; all regained on Long Rest.",
+      "effects": {
+        "ancestryChoice": {
+          "usesPerLongRest": "proficiencyBonus",
+          "options": [
+            {
+              "id": "clouds-jaunt",
+              "name": "Cloud's Jaunt (Cloud Giant)",
+              "effect": { "teleport": { "feet": 30, "action": "bonus-action" } }
+            },
+            {
+              "id": "fires-burn",
+              "name": "Fire's Burn (Fire Giant)",
+              "effect": { "bonusDamageOnHit": { "dice": "1d10", "damageType": "fire" } }
+            },
+            {
+              "id": "frosts-chill",
+              "name": "Frost's Chill (Frost Giant)",
+              "effect": { "bonusDamageOnHit": { "dice": "1d6", "damageType": "cold" }, "speedReduction": { "feet": 10, "duration": "until-start-of-next-turn" } }
+            },
+            {
+              "id": "hills-tumble",
+              "name": "Hill's Tumble (Hill Giant)",
+              "effect": { "conditionOnHit": { "condition": "prone", "targetSizeMax": "large" } }
+            },
+            {
+              "id": "stones-endurance",
+              "name": "Stone's Endurance (Stone Giant)",
+              "effect": { "damageReduction": { "trigger": "take-damage", "action": "reaction", "roll": "1d12+con" } }
+            },
+            {
+              "id": "storms-thunder",
+              "name": "Storm's Thunder (Storm Giant)",
+              "effect": { "retaliationDamage": { "trigger": "take-damage-from-creature-within-60ft", "action": "reaction", "dice": "1d8", "damageType": "thunder" } }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "Large Form",
+      "description": "Starting at level 5, you can become Large as a Bonus Action for 10 minutes (if space allows). You gain Advantage on Strength checks and +10 feet Speed. Once used, not again until Long Rest.",
+      "effects": {
+        "largeForm": { "minLevel": 5, "durationMinutes": 10, "speedBonus": 10, "advantageOn": ["str-checks"], "usesPerLongRest": 1 }
+      }
+    },
+    {
+      "name": "Powerful Build",
+      "description": "You have Advantage on ability checks to end the Grappled condition. You count as one size larger for carrying capacity.",
+      "effects": {
+        "advantageToEndCondition": ["grappled"],
+        "carryingCapacitySizeBonus": 1
+      }
+    }
+  ]
+}

@@ -1,0 +1,15 @@
+{
+  "id": "defense",
+  "name": "Defense",
+  "category": "fighting-style",
+  "prerequisites": {
+    "minLevel": null,
+    "minAbilityScore": null,
+    "requiresFeature": "Fighting Style",
+    "repeatable": false
+  },
+  "description": "While you're wearing Light, Medium, or Heavy armor, you gain a +1 bonus to Armor Class.",
+  "effects": {
+    "armorAcBonus": 1
+  }
+}

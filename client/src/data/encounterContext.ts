@@ -29,7 +29,7 @@ export interface Riddle {
   correctIndex: 0 | 1 | 2;
 }
 
-export interface PremadeEncounterDef {
+export interface EncounterDef {
   id: string;
   title: string;
   description: string;

@@ -1,0 +1,38 @@
+{
+  "id": "dwarf",
+  "name": "Dwarf",
+  "creatureType": "humanoid",
+  "size": "medium",
+  "speed": 30,
+  "traits": [
+    {
+      "name": "Darkvision",
+      "description": "You have Darkvision with a range of 120 feet.",
+      "effects": {
+        "darkvision": { "feet": 120 }
+      }
+    },
+    {
+      "name": "Dwarven Resilience",
+      "description": "You have Resistance to Poison damage and Advantage on saving throws to avoid or end the Poisoned condition.",
+      "effects": {
+        "damageResistance": ["poison"],
+        "savingThrowAdvantage": [{ "condition": "poisoned" }]
+      }
+    },
+    {
+      "name": "Dwarven Toughness",
+      "description": "Your Hit Point maximum increases by 1, and it increases by 1 again whenever you gain a level.",
+      "effects": {
+        "hpMaxBonus": { "atLevel1": 1, "perLevel": 1 }
+      }
+    },
+    {
+      "name": "Stonecunning",
+      "description": "As a Bonus Action, you gain Tremorsense with a range of 60 feet for 10 minutes. You must be on or touching a stone surface. Uses equal to Proficiency Bonus; all regained on Long Rest.",
+      "effects": {
+        "tremorsense": { "feet": 60, "durationMinutes": 10, "requires": "stone-surface", "usesPerLongRest": "proficiencyBonus" }
+      }
+    }
+  ]
+}

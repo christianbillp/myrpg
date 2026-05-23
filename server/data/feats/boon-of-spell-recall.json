@@ -1,0 +1,16 @@
+{
+  "id": "boon-of-spell-recall",
+  "name": "Boon of Spell Recall",
+  "category": "epic-boon",
+  "prerequisites": {
+    "minLevel": 19,
+    "minAbilityScore": null,
+    "requiresFeature": "Spellcasting",
+    "repeatable": false
+  },
+  "description": "Increase your Intelligence, Wisdom, or Charisma by 1 (max 30). Whenever you cast a spell using a level 1–4 spell slot, roll 1d4. If the number rolled equals the slot's level, the slot isn't expended.",
+  "effects": {
+    "abilityScoreIncrease": { "abilities": ["int", "wis", "cha"], "amount": 1, "maxScore": 30 },
+    "freeCasting": { "maxSlotLevel": 4 }
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "id": "great-weapon-fighting",
+  "name": "Great Weapon Fighting",
+  "category": "fighting-style",
+  "prerequisites": {
+    "minLevel": null,
+    "minAbilityScore": null,
+    "requiresFeature": "Fighting Style",
+    "repeatable": false
+  },
+  "description": "When you roll damage for an attack with a melee weapon held in two hands, you can treat any 1 or 2 on a damage die as a 3. The weapon must have the Two-Handed or Versatile property.",
+  "effects": {
+    "greatWeaponFighting": true
+  }
+}

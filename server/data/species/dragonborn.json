@@ -1,0 +1,68 @@
+{
+  "id": "dragonborn",
+  "name": "Dragonborn",
+  "creatureType": "humanoid",
+  "size": "medium",
+  "speed": 30,
+  "traits": [
+    {
+      "name": "Draconic Ancestry",
+      "description": "Choose a dragon type. Your choice determines the damage type for your Breath Weapon and Damage Resistance traits.",
+      "effects": {
+        "ancestryChoice": {
+          "options": [
+            { "dragon": "black",  "damageType": "acid" },
+            { "dragon": "blue",   "damageType": "lightning" },
+            { "dragon": "brass",  "damageType": "fire" },
+            { "dragon": "bronze", "damageType": "lightning" },
+            { "dragon": "copper", "damageType": "acid" },
+            { "dragon": "gold",   "damageType": "fire" },
+            { "dragon": "green",  "damageType": "poison" },
+            { "dragon": "red",    "damageType": "fire" },
+            { "dragon": "silver", "damageType": "cold" },
+            { "dragon": "white",  "damageType": "cold" }
+          ]
+        }
+      }
+    },
+    {
+      "name": "Breath Weapon",
+      "description": "When you take the Attack action, you can replace one attack with a 15-foot Cone or 30-foot Line (5 ft wide) exhalation. Each creature in the area makes a DEX save (DC 8 + CON modifier + Proficiency Bonus). On a fail, the creature takes damage of your ancestral type; on a success, half damage. Damage: 1d10 at level 1, 2d10 at level 5, 3d10 at level 11, 4d10 at level 17. Uses equal to Proficiency Bonus; all regained on Long Rest.",
+      "effects": {
+        "breathWeapon": {
+          "shapes": ["15-foot-cone", "30-foot-line"],
+          "savingThrow": { "ability": "dex", "dcFormula": "8+con+proficiencyBonus" },
+          "damageDice": [
+            { "minLevel": 1,  "dice": "1d10" },
+            { "minLevel": 5,  "dice": "2d10" },
+            { "minLevel": 11, "dice": "3d10" },
+            { "minLevel": 17, "dice": "4d10" }
+          ],
+          "damageType": "ancestry",
+          "usesPerLongRest": "proficiencyBonus"
+        }
+      }
+    },
+    {
+      "name": "Damage Resistance",
+      "description": "You have Resistance to the damage type determined by your Draconic Ancestry.",
+      "effects": {
+        "damageResistance": ["ancestry"]
+      }
+    },
+    {
+      "name": "Darkvision",
+      "description": "You have Darkvision with a range of 60 feet.",
+      "effects": {
+        "darkvision": { "feet": 60 }
+      }
+    },
+    {
+      "name": "Draconic Flight",
+      "description": "Starting at level 5, you can sprout spectral wings as a Bonus Action, granting a Fly Speed equal to your Speed for 10 minutes or until you retract them or gain the Incapacitated condition. Once used, not again until Long Rest.",
+      "effects": {
+        "flySpeed": { "minLevel": 5, "speedEqualsWalkSpeed": true, "durationMinutes": 10, "usesPerLongRest": 1 }
+      }
+    }
+  ]
+}

@@ -6,7 +6,7 @@
   "damageDice": 1,
   "damageSides": 6,
   "damageType": "piercing",
-  "mastery": null,
+  "mastery": "vex",
   "finesse": false,
   "twoHanded": true,
   "thrown": false,

@@ -1,0 +1,16 @@
+{
+  "id": "boon-of-truesight",
+  "name": "Boon of Truesight",
+  "category": "epic-boon",
+  "prerequisites": {
+    "minLevel": 19,
+    "minAbilityScore": null,
+    "requiresFeature": null,
+    "repeatable": false
+  },
+  "description": "Increase one ability score of your choice by 1 (max 30). You have Truesight with a range of 60 feet.",
+  "effects": {
+    "abilityScoreIncrease": { "abilities": ["any"], "amount": 1, "maxScore": 30 },
+    "truesight": { "feet": 60 }
+  }
+}

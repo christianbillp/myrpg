@@ -1,0 +1,15 @@
+{
+  "id": "savage-attacker",
+  "name": "Savage Attacker",
+  "category": "origin",
+  "prerequisites": {
+    "minLevel": null,
+    "minAbilityScore": null,
+    "requiresFeature": null,
+    "repeatable": false
+  },
+  "description": "Once per turn when you hit a target with a weapon, you can roll the weapon's damage dice twice and use either roll against the target.",
+  "effects": {
+    "savageAttacker": true
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "id": "boon-of-the-night-spirit",
+  "name": "Boon of the Night Spirit",
+  "category": "epic-boon",
+  "prerequisites": {
+    "minLevel": 19,
+    "minAbilityScore": null,
+    "requiresFeature": null,
+    "repeatable": false
+  },
+  "description": "Increase one ability score of your choice by 1 (max 30). While within Dim Light or Darkness, you can give yourself the Invisible condition as a Bonus Action (ends immediately after you take an action, bonus action, or reaction). While within Dim Light or Darkness, you have Resistance to all damage except Psychic and Radiant.",
+  "effects": {
+    "abilityScoreIncrease": { "abilities": ["any"], "amount": 1, "maxScore": 30 },
+    "mergeWithShadows": { "lightLevels": ["dim", "darkness"], "condition": "invisible", "endsOn": ["action", "bonus-action", "reaction"] },
+    "shadowyForm": { "lightLevels": ["dim", "darkness"], "resistAll": true, "resistExcept": ["psychic", "radiant"] }
+  }
+}

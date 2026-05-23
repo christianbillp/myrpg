@@ -1,0 +1,28 @@
+{
+  "id": "soldier",
+  "name": "Soldier",
+  "abilityScores": ["str", "dex", "con"],
+  "feat": { "id": "savage-attacker", "options": null },
+  "skillProficiencies": ["athletics", "intimidation"],
+  "toolProficiency": { "choices": ["gaming-set"], "count": 1 },
+  "equipmentOptions": [
+    {
+      "label": "A",
+      "items": [
+        { "name": "Spear" },
+        { "itemId": "shortbow" },
+        { "name": "Arrows", "count": 20 },
+        { "name": "Gaming Set" },
+        { "name": "Healer's Kit" },
+        { "name": "Quiver" },
+        { "name": "Traveler's Clothes" }
+      ],
+      "gold": 14
+    },
+    {
+      "label": "B",
+      "items": [],
+      "gold": 50
+    }
+  ]
+}

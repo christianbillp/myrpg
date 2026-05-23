@@ -20,9 +20,12 @@ export class BootScene extends Phaser.Scene {
     this.load.json("characters",         `${API_URL}/characters`);
     this.load.json("monsters",           `${API_URL}/monsters`);
     this.load.json("npcs",               `${API_URL}/npcs`);
-    this.load.json("items",              `${API_URL}/items`);
+    this.load.json("equipment",          `${API_URL}/equipment`);
+    this.load.json("feats",              `${API_URL}/feats`);
+    this.load.json("backgrounds",        `${API_URL}/backgrounds`);
+    this.load.json("species",            `${API_URL}/species`);
     this.load.json("maps",               `${API_URL}/maps`);
-    this.load.json("premade-encounters", `${API_URL}/premade-encounters`);
+    this.load.json("encounters",          `${API_URL}/encounters`);
   }
 
   async create(): Promise<void> {
@@ -41,9 +44,12 @@ export class BootScene extends Phaser.Scene {
       this.registry.set("characters",         characters);
       this.registry.set("monsters",           this.cache.json.get("monsters"));
       this.registry.set("npcs",               this.cache.json.get("npcs"));
-      this.registry.set("items",              this.cache.json.get("items"));
+      this.registry.set("equipment",          this.cache.json.get("equipment"));
+      this.registry.set("feats",              this.cache.json.get("feats"));
+      this.registry.set("backgrounds",        this.cache.json.get("backgrounds"));
+      this.registry.set("species",            this.cache.json.get("species"));
       this.registry.set("maps",               this.cache.json.get("maps"));
-      this.registry.set("premade-encounters", this.cache.json.get("premade-encounters"));
+      this.registry.set("encounters",          this.cache.json.get("encounters"));
 
       const world = await gameClient.loadWorld();
       if (world) {

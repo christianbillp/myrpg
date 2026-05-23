@@ -1,0 +1,30 @@
+{
+  "id": "human",
+  "name": "Human",
+  "creatureType": "humanoid",
+  "size": { "choices": ["medium", "small"] },
+  "speed": 30,
+  "traits": [
+    {
+      "name": "Resourceful",
+      "description": "You gain Heroic Inspiration whenever you finish a Long Rest.",
+      "effects": {
+        "heroicInspirationOnLongRest": true
+      }
+    },
+    {
+      "name": "Skillful",
+      "description": "You gain proficiency in one skill of your choice.",
+      "effects": {
+        "skillProficiency": { "choices": ["any"], "count": 1 }
+      }
+    },
+    {
+      "name": "Versatile",
+      "description": "You gain an Origin feat of your choice. Skilled is recommended.",
+      "effects": {
+        "originFeat": { "choices": "origin", "count": 1 }
+      }
+    }
+  ]
+}

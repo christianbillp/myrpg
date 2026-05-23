@@ -1,7 +1,7 @@
 import Phaser from "phaser";
 import { PlayerDef } from "../data/player";
-import { ItemDef } from "../data/items";
-import { EncounterType, PremadeEncounterDef } from "../data/encounterContext";
+import { ItemDef } from "../data/equipment";
+import { EncounterType, EncounterDef } from "../data/encounterContext";
 import { SavedMapDef } from "../data/maps";
 import { gameClient } from "../net/GameClient";
 import type { GameState, EquipmentSlots } from "../net/types";
@@ -59,7 +59,7 @@ interface SaveDisplay {
 
 export class EncounterSetupScene extends Phaser.Scene {
   private selectedPlayer: PlayerDef | null = null;
-  private selectedEncounter: PremadeEncounterDef | null = null;
+  private selectedEncounter: EncounterDef | null = null;
 
   private charCardBgs: Map<string, Phaser.GameObjects.Rectangle> = new Map();
   private encounterCardBgs: Map<string, Phaser.GameObjects.Rectangle> = new Map();
@@ -68,7 +68,7 @@ export class EncounterSetupScene extends Phaser.Scene {
   private beginLabel!: Phaser.GameObjects.Text;
 
   private characters: PlayerDef[] = [];
-  private premadeEncounters: PremadeEncounterDef[] = [];
+  private encounters: EncounterDef[] = [];
   private allSaves: Map<string, LocalSave> = new Map();
   private selectedSave: LocalSave | null = null;
 
@@ -88,7 +88,7 @@ export class EncounterSetupScene extends Phaser.Scene {
 
   create(): void {
     this.characters = this.registry.get("characters") as PlayerDef[];
-    this.premadeEncounters = this.registry.get("premade-encounters") as PremadeEncounterDef[];
+    this.encounters = this.registry.get("encounters") as EncounterDef[];
 
     for (const char of this.characters) {
       const raw = localStorage.getItem(saveKey(char.id));
@@ -108,7 +108,7 @@ export class EncounterSetupScene extends Phaser.Scene {
     this.add.text(CHAR_DIVIDER_X / 2, 78, "CHARACTER", {
       fontSize: "11px", color: "#556677", fontFamily: "monospace", resolution: DPR, letterSpacing: 2,
     }).setOrigin(0.5, 0);
-    this.add.text(CHAR_DIVIDER_X + (W - CHAR_DIVIDER_X) / 2, 78, "PREMADE ENCOUNTER", {
+    this.add.text(CHAR_DIVIDER_X + (W - CHAR_DIVIDER_X) / 2, 78, "ENCOUNTER", {
       fontSize: "11px", color: "#556677", fontFamily: "monospace", resolution: DPR, letterSpacing: 2,
     }).setOrigin(0.5, 0);
 
@@ -122,9 +122,9 @@ export class EncounterSetupScene extends Phaser.Scene {
       [ENC_COL1_CX, 549], [ENC_COL2_CX, 549],
       [ENC_COL1_CX, 718], [ENC_COL2_CX, 718],
     ];
-    this.premadeEncounters.forEach((enc, i) => {
+    this.encounters.forEach((enc, i) => {
       const [cx, cy] = encPositions[i] ?? [ENC_COL1_CX, 216 + i * 161];
-      this.buildPremadeCard(enc, cx, cy);
+      this.buildEncounterCard(enc, cx, cy);
     });
 
     this.add.rectangle(W / 2, H - 58, W - 64, 1, 0x334455);
@@ -155,7 +155,7 @@ export class EncounterSetupScene extends Phaser.Scene {
   private updateSaveDisplay(def: PlayerDef, save: LocalSave): void {
     const display = this.saveDisplays.get(def.id);
     if (!display) return;
-    const items = this.registry.get("items") as ItemDef[];
+    const items = this.registry.get("equipment") as ItemDef[];
     display.infoText.setText(this.saveInfoLine(save, def));
     display.equippedText.setText(this.equippedLine(save, items));
     display.deleteBg.setInteractive({ useHandCursor: true });
@@ -180,7 +180,7 @@ export class EncounterSetupScene extends Phaser.Scene {
     const cardH = 550;
     const colorHex = "#" + def.color.toString(16).padStart(6, "0");
     const statMod = (v: number) => Math.floor((v - 10) / 2);
-    const items = this.registry.get("items") as ItemDef[];
+    const items = this.registry.get("equipment") as ItemDef[];
     const save = this.allSaves.get(def.id) ?? null;
 
     const bg = this.add.rectangle(cx, cy, cardW, cardH, 0x111122).setStrokeStyle(2, 0x334455).setInteractive({ useHandCursor: true });
@@ -250,7 +250,7 @@ export class EncounterSetupScene extends Phaser.Scene {
     this.refreshBeginButton();
   }
 
-  private buildPremadeCard(def: PremadeEncounterDef, cx: number, cy: number): void {
+  private buildEncounterCard(def: EncounterDef, cx: number, cy: number): void {
     const top = cy - ENC_CARD_H / 2;
     const left = cx - ENC_CARD_W / 2;
 
@@ -276,7 +276,7 @@ export class EncounterSetupScene extends Phaser.Scene {
     this.add.text(cx, top + 78, def.description, { fontSize: "10px", color: "#8899aa", fontFamily: "monospace", resolution: DPR, wordWrap: { width: ENC_CARD_W - 28 }, lineSpacing: 4, align: "left" }).setOrigin(0.5, 0);
   }
 
-  private selectEncounter(def: PremadeEncounterDef): void {
+  private selectEncounter(def: EncounterDef): void {
     for (const [id, b] of this.encounterCardBgs)
       b.setStrokeStyle(1, id === def.id ? 0xe2b96f : 0x334455);
     this.selectedEncounter = def;

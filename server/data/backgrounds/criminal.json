@@ -1,0 +1,26 @@
+{
+  "id": "criminal",
+  "name": "Criminal",
+  "abilityScores": ["dex", "con", "int"],
+  "feat": { "id": "alert", "options": null },
+  "skillProficiencies": ["sleightOfHand", "stealth"],
+  "toolProficiency": "thieves-tools",
+  "equipmentOptions": [
+    {
+      "label": "A",
+      "items": [
+        { "itemId": "dagger", "count": 2 },
+        { "name": "Thieves' Tools" },
+        { "name": "Crowbar" },
+        { "name": "Pouch", "count": 2 },
+        { "name": "Traveler's Clothes" }
+      ],
+      "gold": 16
+    },
+    {
+      "label": "B",
+      "items": [],
+      "gold": 50
+    }
+  ]
+}

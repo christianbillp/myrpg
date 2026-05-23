@@ -1,0 +1,55 @@
+{
+  "id": "tiefling",
+  "name": "Tiefling",
+  "creatureType": "humanoid",
+  "size": { "choices": ["medium", "small"] },
+  "speed": 30,
+  "traits": [
+    {
+      "name": "Darkvision",
+      "description": "You have Darkvision with a range of 60 feet.",
+      "effects": {
+        "darkvision": { "feet": 60 }
+      }
+    },
+    {
+      "name": "Fiendish Legacy",
+      "description": "Choose a legacy that grants supernatural abilities and spells at levels 1, 3, and 5. Spells are always prepared; each can be cast once without a spell slot (regained on Long Rest) and using any spell slots you have. Spellcasting ability: INT, WIS, or CHA (chosen at legacy selection).",
+      "effects": {
+        "legacyChoice": {
+          "spellcastingAbility": { "choices": ["int", "wis", "cha"] },
+          "options": [
+            {
+              "id": "abyssal",
+              "name": "Abyssal",
+              "level1": { "damageResistance": ["poison"], "cantrip": "poison-spray" },
+              "level3": { "preparedSpell": "ray-of-sickness" },
+              "level5": { "preparedSpell": "hold-person" }
+            },
+            {
+              "id": "chthonic",
+              "name": "Chthonic",
+              "level1": { "damageResistance": ["necrotic"], "cantrip": "chill-touch" },
+              "level3": { "preparedSpell": "false-life" },
+              "level5": { "preparedSpell": "ray-of-enfeeblement" }
+            },
+            {
+              "id": "infernal",
+              "name": "Infernal",
+              "level1": { "damageResistance": ["fire"], "cantrip": "fire-bolt" },
+              "level3": { "preparedSpell": "hellish-rebuke" },
+              "level5": { "preparedSpell": "darkness" }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "Otherworldly Presence",
+      "description": "You know the Thaumaturgy cantrip. When you cast it with this trait, it uses the same spellcasting ability as your Fiendish Legacy.",
+      "effects": {
+        "cantrip": "thaumaturgy"
+      }
+    }
+  ]
+}

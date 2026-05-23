@@ -1,6 +1,6 @@
 import { BaseOverlay } from "./BaseOverlay";
 import { PlayerDef, EquipmentSlots } from "../data/player";
-import { ItemDef, ArmorDef, WeaponDef, ShieldDef, EquipmentDef } from "../data/items";
+import { ItemDef, ArmorDef, WeaponDef, ShieldDef, EquipmentDef } from "../data/equipment";
 import { PlayerAttack } from "../data/player";
 import { UIScale } from "./UIScale";
 

@@ -1,0 +1,16 @@
+{
+  "id": "skilled",
+  "name": "Skilled",
+  "category": "origin",
+  "prerequisites": {
+    "minLevel": null,
+    "minAbilityScore": null,
+    "requiresFeature": null,
+    "repeatable": true,
+    "repeatableNote": null
+  },
+  "description": "You gain proficiency in any combination of three skills or tools of your choice.",
+  "effects": {
+    "skillOrToolProficiencies": { "count": 3, "choices": "any" }
+  }
+}

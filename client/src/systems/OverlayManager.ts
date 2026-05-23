@@ -1,5 +1,5 @@
 import { PlayerDef } from "../data/player";
-import { ItemDef } from "../data/items";
+import { ItemDef } from "../data/equipment";
 import { AIDMOverlay, ChatMessage, DMPersona } from "../ui/AIDMOverlay";
 import { InventoryOverlay } from "../ui/InventoryOverlay";
 import { IntroductionOverlay } from "../ui/IntroductionOverlay";

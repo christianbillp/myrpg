@@ -3,7 +3,7 @@ import {
   PlayerDef, MonsterDef, NPCDef, ItemDef, ConsumableDef, WeaponDef,
   EquipmentSlots, NpcState, Disposition, MapItemState, SecretState, QuestState,
   QuestGoalType, NpcPersona, GameMap, LogEntry,
-  CreateSessionRequest,
+  CreateSessionRequest, FeatDef, BackgroundDef, SpeciesDef,
 } from './types.js';
 import type { EncounterContext } from '../encounterService.js';
 import { generateMap } from './MapGenerator.js';
@@ -30,8 +30,11 @@ export interface GameDefs {
   playerDefs: PlayerDef[];
   monsters: MonsterDef[];
   npcs: NPCDef[];
-  items: ItemDef[];
+  equipment: ItemDef[];
   maps: { id: string; passable: boolean[][]; cols: number; rows: number; name: string; mapdescription: string }[];
+  feats: FeatDef[];
+  backgrounds: BackgroundDef[];
+  species: SpeciesDef[];
 }
 
 export interface ActionResult {
@@ -59,8 +62,8 @@ export class GameEngine {
     this.state = state;
     this.defs = defs;
     this.playerDef = defs.playerDefs.find((p) => p.id === state.player.defId)!;
-    applyEquipment(this.playerDef, state.player.equippedSlots, defs.items);
-    state.player.equippedSlotLabels = computeEquippedSlotLabels(this.playerDef, state.player.equippedSlots, defs.items);
+    applyEquipment(this.playerDef, state.player.equippedSlots, defs.equipment);
+    state.player.equippedSlotLabels = computeEquippedSlotLabels(this.playerDef, state.player.equippedSlots, defs.equipment);
 
     for (const id of [
       ...state.npcs.map((n) => n.id),
@@ -171,7 +174,7 @@ export class GameEngine {
   }
 
   addItem(itemId: string): GameEvent[] {
-    const item = this.defs.items.find((i) => i.id === itemId);
+    const item = this.defs.equipment.find((i) => i.id === itemId);
     if (item) {
       this.state.player.inventoryIds.push(itemId);
       this.addLog(`Received: ${item.name}`);
@@ -339,7 +342,7 @@ export class GameEngine {
     );
     if (idx === -1) return;
     const item = s.mapItems[idx];
-    const def = this.defs.items.find((i) => i.id === item.defId);
+    const def = this.defs.equipment.find((i) => i.id === item.defId);
     if (def) {
       s.player.inventoryIds.push(item.defId);
       this.addLog(`Picked up ${def.name}!`);
@@ -519,7 +522,7 @@ export class GameEngine {
     const itemIdx = s.player.inventoryIds.indexOf(itemId);
     if (itemIdx === -1) return;
 
-    const itemDef = this.defs.items.find((i) => i.id === itemId);
+    const itemDef = this.defs.equipment.find((i) => i.id === itemId);
     if (!itemDef) return;
 
     const isProperThrown = itemDef.type === 'weapon' && (itemDef as WeaponDef).thrown;
@@ -563,7 +566,7 @@ export class GameEngine {
     if (inventoryIdx === -1 && mapItemIdx === -1) return events;
 
     const defId = inventoryIdx !== -1 ? itemId : s.mapItems[mapItemIdx].defId;
-    const itemDef = this.defs.items.find((i) => i.id === defId);
+    const itemDef = this.defs.equipment.find((i) => i.id === defId);
     if (!itemDef) return events;
 
     const fromMap = mapItemIdx !== -1;
@@ -994,7 +997,7 @@ export class GameEngine {
         s.player.gold += r.amount;
         logs.push({ left: `+${r.amount} GP`, style: 'status' });
       } else if (r.type === 'item') {
-        const item = this.defs.items.find((i) => i.id === r.itemId);
+        const item = this.defs.equipment.find((i) => i.id === r.itemId);
         if (item) { s.player.inventoryIds.push(r.itemId); logs.push({ left: `Found: ${item.name}`, style: 'status' }); }
       } else {
         logs.push({ left: `Lore: "${r.text}"`, style: 'normal' });
@@ -1011,13 +1014,13 @@ export class GameEngine {
     if (s.phase !== 'player_turn' && s.phase !== 'exploring') return;
 
     const idx = s.player.inventoryIds.findIndex((id) => {
-      const item = this.defs.items.find((i) => i.id === id);
+      const item = this.defs.equipment.find((i) => i.id === id);
       return item?.type === 'consumable';
     });
     if (idx === -1) return;
 
     const itemId = s.player.inventoryIds.splice(idx, 1)[0];
-    const item = this.defs.items.find((i) => i.id === itemId) as ConsumableDef;
+    const item = this.defs.equipment.find((i) => i.id === itemId) as ConsumableDef;
     const { healed, logs } = drinkPotion(item);
     const before = s.player.hp;
     s.player.hp = Math.min(this.playerDef.maxHp, s.player.hp + healed);
@@ -1031,11 +1034,11 @@ export class GameEngine {
     if (!s.player.inventoryIds.includes(itemId)) return;
 
     if (slot === 'shield') {
-      const weapon = this.defs.items.find((i) => i.id === s.player.equippedSlots.weaponId) as WeaponDef | undefined;
+      const weapon = this.defs.equipment.find((i) => i.id === s.player.equippedSlots.weaponId) as WeaponDef | undefined;
       if (weapon?.twoHanded) return;
     }
     if (slot === 'weapon') {
-      const incoming = this.defs.items.find((i) => i.id === itemId) as WeaponDef | undefined;
+      const incoming = this.defs.equipment.find((i) => i.id === itemId) as WeaponDef | undefined;
       if (incoming?.twoHanded && s.player.equippedSlots.shieldId) {
         s.player.inventoryIds.push(s.player.equippedSlots.shieldId);
         s.player.equippedSlots.shieldId = null;
@@ -1048,9 +1051,9 @@ export class GameEngine {
     const removeIdx = s.player.inventoryIds.indexOf(itemId);
     if (removeIdx !== -1) s.player.inventoryIds.splice(removeIdx, 1);
     s.player.equippedSlots[slotKey] = itemId;
-    applyEquipment(this.playerDef, s.player.equippedSlots, this.defs.items);
+    applyEquipment(this.playerDef, s.player.equippedSlots, this.defs.equipment);
     s.player.equippedSlots = { ...s.player.equippedSlots };
-    s.player.equippedSlotLabels = computeEquippedSlotLabels(this.playerDef, s.player.equippedSlots, this.defs.items);
+    s.player.equippedSlotLabels = computeEquippedSlotLabels(this.playerDef, s.player.equippedSlots, this.defs.equipment);
   }
 
   private doUnequip(slot: 'armor' | 'weapon' | 'shield'): void {
@@ -1060,9 +1063,9 @@ export class GameEngine {
     if (!currentId) return;
     s.player.inventoryIds.push(currentId);
     s.player.equippedSlots[slotKey] = null;
-    applyEquipment(this.playerDef, s.player.equippedSlots, this.defs.items);
+    applyEquipment(this.playerDef, s.player.equippedSlots, this.defs.equipment);
     s.player.equippedSlots = { ...s.player.equippedSlots };
-    s.player.equippedSlotLabels = computeEquippedSlotLabels(this.playerDef, s.player.equippedSlots, this.defs.items);
+    s.player.equippedSlotLabels = computeEquippedSlotLabels(this.playerDef, s.player.equippedSlots, this.defs.equipment);
   }
 
   private doEnemyOpportunityAttack(npc: NpcState, events: GameEvent[]): void {
@@ -1173,7 +1176,7 @@ export class GameEngine {
 
     const equippedSlots: EquipmentSlots = req.resumeEquippedSlots ?? { ...playerDef.defaultEquipment };
     const ownedDef: PlayerDef = JSON.parse(JSON.stringify(playerDef));
-    applyEquipment(ownedDef, equippedSlots, defs.items);
+    applyEquipment(ownedDef, equippedSlots, defs.equipment);
 
     const inventoryIds: string[] = req.resumeInventoryIds ?? [...(playerDef.defaultInventoryIds ?? [])];
 
@@ -1218,7 +1221,7 @@ export class GameEngine {
     }
     if (isCombat) {
       spawnEnemies(npcs, map, defs.monsters, player.tileX, player.tileY, req.encounterContext.enemyCount ?? 2, enemyZone);
-      spawnItems(mapItems, map, defs.items, player.tileX, player.tileY, npcs);
+      spawnItems(mapItems, map, defs.equipment, player.tileX, player.tileY, npcs);
     }
     if (req.encounterTypes.includes('social_interaction')) {
       for (const defId of (req.npcIds ?? req.encounterContext.npcIds ?? [])) {

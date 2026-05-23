@@ -1,0 +1,18 @@
+{
+  "id": "grappler",
+  "name": "Grappler",
+  "category": "general",
+  "prerequisites": {
+    "minLevel": 4,
+    "minAbilityScore": { "abilities": ["str", "dex"], "minValue": 13 },
+    "requiresFeature": null,
+    "repeatable": false
+  },
+  "description": "Increase your Strength or Dexterity by 1 (max 20). When you hit a creature with an Unarmed Strike as part of the Attack action, you can use both the Damage and the Grapple option (once per turn). You have Advantage on attack rolls against a creature you have Grappled. You don't spend extra movement to move a Grappled creature that is your size or smaller.",
+  "effects": {
+    "abilityScoreIncrease": { "abilities": ["str", "dex"], "amount": 1, "maxScore": 20 },
+    "grappleFromStrike": true,
+    "advantageVsGrappled": true,
+    "fastWrestler": true
+  }
+}
