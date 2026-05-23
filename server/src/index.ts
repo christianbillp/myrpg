@@ -203,6 +203,9 @@ server.post('/game/session', async (req, reply) => {
     savedMapName: body.savedMapName,
     savedMapDescription: body.savedMapDescription,
     npcIds: body.npcIds,
+    allyIds: body.allyIds,
+    customIntroduction: body.customIntroduction,
+    customContext: body.customContext,
   });
 
   const savedMap = body.savedMapId

@@ -168,7 +168,7 @@ function buildSystemPrompt(engine: GameEngine, encounterContext: string, dmPerso
 SETTING: ${s.mapName} | PHASE: ${s.phase} | ENCOUNTER: ${s.encounterTypes.join(', ')}
 CONTEXT: ${encounterContext}
 
-PLAYER: tile (${p.tileX},${p.tileY}) · HP ${playerDef.hp} · ${playerDef.flags || 'no flags'}
+PLAYER: tile (${p.tileX},${p.tileY}) · HP ${playerDef.hp} · ${p.gold} GP · ${playerDef.flags || 'no flags'}
   Inventory: ${p.inventoryIds.join(', ') || 'empty'}
   Equipped: armor=${p.equippedSlots.armorId ?? 'none'} weapon=${p.equippedSlots.weaponId ?? 'none'} shield=${p.equippedSlots.shieldId ?? 'none'}
   ${focusLine}

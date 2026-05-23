@@ -10,6 +10,7 @@ export interface EncounterContext {
   riddle: Riddle | null;
   quests: QuestDef[];
   npcIds?: string[];
+  allyIds?: string[];
 }
 
 export type SecretReward =
@@ -40,6 +41,9 @@ export interface EncounterStartRequest {
   savedMapName?: string;
   savedMapDescription?: string;
   npcIds?: string[];
+  allyIds?: string[];
+  customIntroduction?: string;
+  customContext?: string;
 }
 
 const SECRET_POOL: SecretDef[] = [
@@ -103,12 +107,14 @@ export function buildEncounter(req: EncounterStartRequest): EncounterContext {
     ? `${req.playerName} the ${req.playerClassName} enters ${mapDescription}, senses sharp and weapon ready.`
     : `${req.playerName} the ${req.playerClassName} steps into ${mapDescription}.`;
 
-  const introduction = [charOpener, ...req.encounterTypes.map((t) => TYPE_NARRATIVE[t])].join(' ');
-  const context = [
-    `Player: ${req.playerName}, ${req.playerSpeciesName} ${req.playerClassName} (Level ${req.playerLevel}, ${req.playerMaxHp} HP, AC ${req.playerAc}).`,
-    `Setting: ${mapLabel} — ${mapDescription}.`,
-    `Active encounter objectives: ${req.encounterTypes.map((t) => TYPE_CONTEXT[t]).join(' ')}.`,
-  ].join(' ');
+  const introduction = req.customIntroduction
+    ?? [charOpener, ...req.encounterTypes.map((t) => TYPE_NARRATIVE[t])].join(' ');
+  const context = req.customContext
+    ?? [
+      `Player: ${req.playerName}, ${req.playerSpeciesName} ${req.playerClassName} (Level ${req.playerLevel}, ${req.playerMaxHp} HP, AC ${req.playerAc}).`,
+      `Setting: ${mapLabel} — ${mapDescription}.`,
+      `Active encounter objectives: ${req.encounterTypes.map((t) => TYPE_CONTEXT[t]).join(' ')}.`,
+    ].join(' ');
 
   const enemyCount = req.encounterTypes.includes('simple_combat')
     ? 2 + Math.floor(Math.random() * 3)
@@ -123,5 +129,6 @@ export function buildEncounter(req: EncounterStartRequest): EncounterContext {
     riddle:   req.encounterTypes.includes('social_interaction') ? pickRandom(RIDDLES) : null,
     quests:   buildQuests(req.encounterTypes, enemyCount),
     npcIds:   req.npcIds,
+    allyIds:  req.allyIds,
   };
 }

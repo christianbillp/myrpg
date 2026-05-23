@@ -1,0 +1,11 @@
+{
+  "id": "bridge_standoff",
+  "title": "Bridge Toll",
+  "description": "A pair of bandits blocks a narrow stone bridge, demanding 10 gold to pass. A frightened traveller stands at your side.",
+  "encounterTypes": ["social_interaction"],
+  "mapId": "bridge",
+  "npcIds": ["bandit_npc", "bandit_npc"],
+  "allyIds": ["commoner"],
+  "customIntroduction": "You and a nervous traveller stand at the near end of a narrow stone bridge spanning a dark gorge. Two cloaked figures block the far end — armed, still, and watching. One steps forward and raises a hand. \"Ten gold,\" he growls, \"or you don't cross.\" The traveller edges close beside you and whispers: \"I'm with you — whatever you decide.\"",
+  "customContext": "Encounter: Bridge Toll Standoff. Two bandits are blocking a narrow stone bridge, demanding 10 gold to pass. A frightened traveller stands alongside the player as an ally and will fight with them if combat breaks out. MECHANICS — Before combat: if the player refuses to pay, call set_disposition on both bandit npcs (to \"enemy\"), then trigger_combat. If the player agrees to pay 10 gold, call award_gold with amount -10, keep bandits neutral, and narrate them stepping aside — no combat. During combat: if the player surrenders and offers 20 gold, call award_gold with amount -20, call set_disposition on both bandits to \"neutral\", then call end_combat — the bandits take the money and let everyone pass. Roleplay the bandits as gruff, opportunistic brigands — firm but not fanatical. They want money, not a fight."
+}

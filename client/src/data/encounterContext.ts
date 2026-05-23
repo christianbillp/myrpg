@@ -36,6 +36,9 @@ export interface PremadeEncounterDef {
   encounterTypes: EncounterType[];
   mapId: string;
   npcIds?: string[];
+  allyIds?: string[];
+  customIntroduction?: string;
+  customContext?: string;
 }
 
 export interface EncounterContext {

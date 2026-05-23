@@ -276,6 +276,9 @@ export interface CreateSessionRequest {
   playerDefId: string;
   savedMapId?: string;
   npcIds?: string[];
+  allyIds?: string[];
+  customIntroduction?: string;
+  customContext?: string;
   resumeHp?: number;
   resumeXp?: number;
   resumeGold?: number;

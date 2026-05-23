@@ -124,6 +124,9 @@ export interface CreateSessionRequest {
   savedMapName?: string;
   savedMapDescription?: string;
   npcIds?: string[];
+  allyIds?: string[];
+  customIntroduction?: string;
+  customContext?: string;
   resumeHp?: number;
   resumeXp?: number;
   resumeGold?: number;

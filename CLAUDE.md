@@ -99,5 +99,5 @@ A review checks whether the codebase needs refactoring. It considers three thing
 - When adding a new system (combat, inventory, etc.), discuss the design in a few sentences before implementing.
 - Prefer editing existing files over creating new ones.
 - Do not add error handling for scenarios that cannot happen.
-- Do not push to remote or commit unless explicitly asked.
+- Never commit changes automatically. Always wait for an explicit instruction to commit, even when documentation is up to date and the work appears complete.
 - Commit messages follow Conventional Commits: one line, e.g. `feat: add rooms map generator.` — brief, lowercase after the colon, ending with a full stop.

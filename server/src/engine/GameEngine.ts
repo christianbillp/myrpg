@@ -65,6 +65,13 @@ export class GameEngine {
 
   getState(): GameState { return this.state; }
 
+  private resolveMonsterDef(defId: string): MonsterDef | undefined {
+    const direct = this.defs.monsters.find((m) => m.id === defId);
+    if (direct) return direct;
+    const npcDef = this.defs.npcs.find((n) => n.id === defId);
+    return npcDef ? this.defs.monsters.find((m) => m.id === npcDef.monsterClass) : undefined;
+  }
+
   processAction(action: PlayerAction): ActionResult {
     const events: GameEvent[] = [];
     const s = this.state;
@@ -364,7 +371,7 @@ export class GameEngine {
   private doStartCombat(events: GameEvent[]): void {
     const s = this.state;
     const enemies = s.npcs.filter((n) => n.disposition === 'enemy');
-    const firstEnemyDef = this.defs.monsters.find((m) => m.id === enemies[0]?.defId);
+    const firstEnemyDef = enemies[0] ? this.resolveMonsterDef(enemies[0].defId) : undefined;
     if (!firstEnemyDef) return;
 
     s.player.hidden = false;
@@ -413,7 +420,7 @@ export class GameEngine {
     if (!target) target = s.npcs.find(isAdjacent) ?? null;
     if (!target) return;
 
-    const targetDef = this.defs.monsters.find((m) => m.id === target!.defId);
+    const targetDef = this.resolveMonsterDef(target!.defId);
     if (!targetDef) return;
 
     const withAdvantage = s.player.hidden;
@@ -490,7 +497,7 @@ export class GameEngine {
     const living = s.npcs.filter((n) => n.disposition === 'enemy' && n.hp > 0);
     if (!living.length) return;
     const maxPP = Math.max(...living.map((n) => {
-      const def = this.defs.monsters.find((m) => m.id === n.defId);
+      const def = this.resolveMonsterDef(n.defId);
       return def?.passivePerception ?? 10;
     }));
     const { hidden, logs } = playerHide(this.playerDef, maxPP);
@@ -556,7 +563,7 @@ export class GameEngine {
       if (s.phase === 'defeat') break;
       npc.isActive = true;
 
-      const def = this.defs.monsters.find((m) => m.id === npc.defId);
+      const def = this.resolveMonsterDef(npc.defId);
       if (!def) { npc.isActive = false; continue; }
 
       const occupied: [number, number][] = s.npcs
@@ -623,13 +630,13 @@ export class GameEngine {
       for (const ally of livingAllies) {
         ally.isActive = true;
 
-        const def = this.defs.monsters.find((m) => m.id === ally.defId);
+        const def = this.resolveMonsterDef(ally.defId);
         if (!def) { ally.isActive = false; continue; }
 
         const enemyTargets = s.npcs
           .filter((n) => n.disposition === 'enemy' && n.hp > 0)
           .map((n) => {
-            const ndef = this.defs.monsters.find((m) => m.id === n.defId);
+            const ndef = this.resolveMonsterDef(n.defId);
             return { id: n.id, tileX: n.tileX, tileY: n.tileY, ac: ndef?.ac ?? 10 };
           });
 
@@ -654,7 +661,7 @@ export class GameEngine {
         if (result.attacked && result.isHit && result.attackedTargetId) {
           const target = s.npcs.find((n) => n.id === result.attackedTargetId);
           if (target) {
-            const targetDef = this.defs.monsters.find((m) => m.id === target.defId);
+            const targetDef = this.resolveMonsterDef(target.defId);
             if (targetDef) {
               const meleeAttack = def.attacks.find((a) => a.attackType === 'melee' || a.attackType === 'both');
               const { finalDamage, log: resistLog } = this.resistMod(result.damage, meleeAttack?.damageType ?? '', targetDef);
@@ -832,7 +839,7 @@ export class GameEngine {
 
   private doEnemyOpportunityAttack(npc: NpcState, events: GameEvent[]): void {
     const s = this.state;
-    const def = this.defs.monsters.find((m) => m.id === npc.defId);
+    const def = this.resolveMonsterDef(npc.defId);
     if (!def) return;
     const meleeAttack = def.attacks.find((a) => a.attackType === 'melee' || a.attackType === 'both');
     if (!meleeAttack) return;
@@ -849,7 +856,7 @@ export class GameEngine {
   private doPlayerOpportunityAttack(npc: NpcState, _events: GameEvent[]): void {
     const s = this.state;
     if (s.player.reactionUsed || s.player.hp <= 0) return;
-    const targetDef = this.defs.monsters.find((m) => m.id === npc.defId);
+    const targetDef = this.resolveMonsterDef(npc.defId);
     if (!targetDef) return;
     s.player.reactionUsed = true;
     const { damage, logs, vexApplied } = playerMeleeAttack(this.playerDef, targetDef, false);
@@ -969,12 +976,15 @@ export class GameEngine {
     const mapItems: MapItemState[] = [];
     const secrets: SecretState[] = [];
 
+    for (const defId of (req.allyIds ?? req.encounterContext.allyIds ?? [])) {
+      spawnNpc(npcs, map, defs.npcs, defs.monsters, defId, player.tileX, player.tileY, 'ally');
+    }
     if (isCombat) {
       spawnEnemies(npcs, map, defs.monsters, player.tileX, player.tileY, req.encounterContext.enemyCount ?? 2);
       spawnItems(mapItems, map, defs.items, player.tileX, player.tileY, npcs);
     }
     if (req.encounterTypes.includes('social_interaction')) {
-      for (const defId of (req.npcIds ?? [])) {
+      for (const defId of (req.npcIds ?? req.encounterContext.npcIds ?? [])) {
         spawnNpc(npcs, map, defs.npcs, defs.monsters, defId, player.tileX, player.tileY);
       }
     }
@@ -1089,6 +1099,7 @@ function spawnItems(
 function spawnNpc(
   out: NpcState[], map: GameMap, npcDefs: NPCDef[], monsters: MonsterDef[],
   defId: string, px: number, py: number,
+  disposition: 'neutral' | 'ally' = 'neutral',
 ): void {
   const npcDef = npcDefs.find((n) => n.id === defId);
   if (!npcDef) return;
@@ -1101,16 +1112,19 @@ function spawnNpc(
   ]);
   const candidates: [number, number][] = [];
   for (let r = 0; r < rows; r++)
-    for (let c = 0; c < cols; c++)
-      if (passable[r][c] && chebyshev(c, r, px, py) >= 5 && !occupied.has(`${c},${r}`))
+    for (let c = 0; c < cols; c++) {
+      const dist = chebyshev(c, r, px, py);
+      const inRange = disposition === 'ally' ? dist >= 1 && dist <= 3 : dist >= 5;
+      if (passable[r][c] && inRange && !occupied.has(`${c},${r}`))
         candidates.push([c, r]);
+    }
   if (candidates.length === 0) return;
   const [nx, ny] = candidates[Math.floor(Math.random() * candidates.length)];
   out.push({
     id: `npc_${defId}_${out.length}`,
     defId,
     tileX: nx, tileY: ny,
-    disposition: 'neutral',
+    disposition,
     label: '',
     hp: maxHp, maxHp,
     isActive: false, vexed: false, hidden: false,
