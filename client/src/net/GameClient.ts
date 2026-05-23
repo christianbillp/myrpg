@@ -79,7 +79,7 @@ export class GameClient {
   async sendAIDMMessage(
     playerMessage: string,
     history: ChatMessage[],
-    dmPersona: 'regular' | 'dev',
+    dmPersona: 'story' | 'dev',
   ): Promise<{ reply: string; rollResults: string[] }> {
     if (!this.sessionId) return { reply: '', rollResults: [] };
     const res = await fetch(`${API_URL}/game/session/${this.sessionId}/aidm`, {

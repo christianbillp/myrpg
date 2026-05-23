@@ -13,7 +13,7 @@ export interface ChatMessage {
   content: string;
 }
 
-export type DMPersona = "regular" | "dev";
+export type DMPersona = "story" | "dev";
 
 const DPR = window.devicePixelRatio;
 const W = PLAYER_PANEL_WIDTH + GRID_COLS * TILE_SIZE + TARGET_PANEL_WIDTH;
@@ -110,14 +110,14 @@ export class AIDMOverlay extends BaseOverlay {
     const devTxt = scene.add.text(chipDevX, chipY, "DEV", { fontSize: "9px", fontFamily: "monospace", resolution: DPR }).setOrigin(0.5);
 
     const refreshChips = () => {
-      storyBg.setStrokeStyle(1, this.dmPersona === "regular" ? ACCENT : 0x443300);
-      storyTxt.setColor(this.dmPersona === "regular" ? "#e2b96f" : "#665533");
+      storyBg.setStrokeStyle(1, this.dmPersona === "story" ? ACCENT : 0x443300);
+      storyTxt.setColor(this.dmPersona === "story" ? "#e2b96f" : "#665533");
       devBg.setStrokeStyle(1, this.dmPersona === "dev" ? 0x44cc44 : 0x224422);
       devTxt.setColor(this.dmPersona === "dev" ? "#66ee66" : "#336633");
     };
     refreshChips();
 
-    storyBg.on("pointerdown", () => { this.dmPersona = "regular"; refreshChips(); });
+    storyBg.on("pointerdown", () => { this.dmPersona = "story"; refreshChips(); });
     devBg.on("pointerdown",   () => { this.dmPersona = "dev";     refreshChips(); });
 
     const sep1 = scene.add.rectangle(0, top + 44, panelW - 32, 1, 0x334455);

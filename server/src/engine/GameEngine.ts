@@ -1,23 +1,26 @@
 import {
-  GameState, GameEvent, PlayerAction, CombatMode,
+  GameState, GameEvent, PlayerAction, PlayerAttack, CombatMode,
   PlayerDef, MonsterDef, NPCDef, ItemDef, ConsumableDef, WeaponDef,
   EquipmentSlots, NpcState, Disposition, MapItemState, SecretState, QuestState,
-  QuestGoalType, SecretDef, NpcPersona, GameMap, LogEntry,
+  QuestGoalType, NpcPersona, GameMap, LogEntry,
   CreateSessionRequest,
 } from './types.js';
 import type { EncounterContext } from '../encounterService.js';
 import { generateMap } from './MapGenerator.js';
 import { generateRoomsMap } from './RoomsMapGenerator.js';
-import { shuffle } from './MapUtils.js';
 import { d, d20, mod } from './Dice.js';
 import {
-  rollInitiative, playerMeleeAttack, enemyAttack, playerHide, playerSecondWind,
+  rollInitiative, playerMeleeAttack, playerThrowAttack, enemyAttack, playerHide, playerSecondWind,
   drinkPotion, rollDeathSave, rollSkillCheck,
 } from './CombatSystem.js';
-import { applyEquipment } from './EquipmentSystem.js';
+import { applyEquipment, makePlayerAttack } from './EquipmentSystem.js';
 import { runEnemyTurn, runAllyTurn, chebyshev } from './EnemyAI.js';
+import {
+  Zone, ZoneMap, parseStartingZones, findPlayerSpawn,
+  spawnEnemies, spawnItems, spawnNpc, spawnSecrets,
+} from './SpawnHelpers.js';
 
-const TURN_CONDITIONS = ['dodging', 'disengaged', 'dashing'];
+const TURN_CONDITIONS = ['dodging', 'disengaged', 'dashing', 'slowed'];
 
 export interface GameDefs {
   playerDefs: PlayerDef[];
@@ -79,6 +82,7 @@ export class GameEngine {
     switch (action.type) {
       case 'move':         this.doMove(action.dx, action.dy, events); break;
       case 'attack':       this.doAttack(action.targetId, events); break;
+      case 'throw':       this.doThrow(action.itemId, action.targetId, events); break;
       case 'hide':         this.doHide(events); break;
       case 'secondWind':   this.doSecondWind(events); break;
       case 'dash':         this.doDash(events); break;
@@ -196,8 +200,12 @@ export class GameEngine {
     const s = this.state;
     const [tx, ty] = this.findFreeTileNear(s.player.tileX, s.player.tileY, 3, 8);
     if (tx === -1) return [];
-    const livingEnemies = s.npcs.filter((n) => n.disposition === 'enemy' && n.hp > 0);
-    const label = String.fromCharCode(65 + livingEnemies.length);
+    const usedLabels = new Set(s.npcs.filter((n) => n.disposition === 'enemy').map((n) => n.label));
+    let label = 'A';
+    for (let i = 0; i < 26; i++) {
+      const candidate = String.fromCharCode(65 + i);
+      if (!usedLabels.has(candidate)) { label = candidate; break; }
+    }
     const npc: NpcState = {
       id: uid(), defId: def.id, label,
       tileX: tx, tileY: ty,
@@ -360,7 +368,6 @@ export class GameEngine {
     const enemies = s.npcs.filter((n) => n.disposition === 'enemy');
     for (const enemy of enemies) {
       if (chebyshev(s.player.tileX, s.player.tileY, enemy.tileX, enemy.tileY) <= 2) {
-        if (enemies.length > 1) enemies.forEach((e, i) => { e.label = String.fromCharCode(65 + i); });
         this.doStartCombat(events);
         s.selectedTargetId = enemy.id;
         return;
@@ -424,7 +431,7 @@ export class GameEngine {
     if (!targetDef) return;
 
     const withAdvantage = s.player.hidden;
-    const { damage, logs, vexApplied } = playerMeleeAttack(this.playerDef, targetDef, withAdvantage);
+    const { damage, logs, vexApplied, slowApplied } = playerMeleeAttack(this.playerDef, targetDef, withAdvantage);
     s.player.hidden = false;
     this.addLogs(logs);
 
@@ -435,7 +442,11 @@ export class GameEngine {
 
     if (vexApplied) {
       target.vexed = true;
-      this.addLog({ left: `Vex — ${targetDef.name} attacks with Disadvantage`, style: 'status' });
+      this.addLog({ left: `Vex/Sap — ${targetDef.name} attacks with Disadvantage`, style: 'status' });
+    }
+    if (slowApplied && !target.conditions.includes('slowed')) {
+      target.conditions.push('slowed');
+      this.addLog({ left: `Slow — ${targetDef.name} speed reduced by 10 ft`, style: 'status' });
     }
 
     if (target.hp <= 0) {
@@ -453,6 +464,184 @@ export class GameEngine {
     if (s.npcs.filter((n) => n.disposition === 'enemy' && n.hp > 0).length === 0) {
       s.phase = 'exploring';
     }
+  }
+
+  private doThrow(itemId: string, targetId: string | undefined, _events: GameEvent[]): void {
+    const s = this.state;
+    if (s.phase !== 'player_turn' || s.player.actionUsed) return;
+
+    const itemIdx = s.player.inventoryIds.indexOf(itemId);
+    if (itemIdx === -1) return;
+
+    const itemDef = this.defs.items.find((i) => i.id === itemId);
+    if (!itemDef) return;
+
+    const isProperThrown = itemDef.type === 'weapon' && (itemDef as WeaponDef).thrown;
+    const normalRange = isProperThrown ? Math.floor((itemDef as WeaponDef).throwNormal / 5) : 4;
+    const longRange = isProperThrown ? Math.floor((itemDef as WeaponDef).throwLong / 5) : 12;
+
+    const inLongRange = (n: NpcState) =>
+      n.disposition === 'enemy' && n.hp > 0 &&
+      chebyshev(s.player.tileX, s.player.tileY, n.tileX, n.tileY) <= longRange;
+
+    let target = targetId ? (s.npcs.find((n) => n.id === targetId && inLongRange(n)) ?? null) : null;
+    if (!target) target = s.npcs.find(inLongRange) ?? null;
+    if (!target) return;
+
+    const targetDef = this.resolveMonsterDef(target.defId);
+    if (!targetDef) return;
+
+    const dist = chebyshev(s.player.tileX, s.player.tileY, target.tileX, target.tileY);
+
+    let attack: PlayerAttack;
+    let profBonus: number;
+    if (isProperThrown) {
+      attack = makePlayerAttack(this.playerDef, itemDef as WeaponDef);
+      profBonus = this.playerDef.proficiencyBonus;
+    } else {
+      attack = {
+        name: itemDef.name, statKey: 'str',
+        damageDice: 1, damageSides: 4, damageType: 'bludgeoning',
+        savageAttacker: false, graze: false, vex: false, sap: false, slow: false,
+      };
+      profBonus = 0;
+    }
+
+    const withAdvantage = s.player.hidden;
+    const withDisadvantage = dist > normalRange;
+    this.addLog({ left: `${this.playerDef.name} throws ${itemDef.name}`, style: 'normal' });
+    const { damage, logs, vexApplied, slowApplied } = playerThrowAttack(
+      this.playerDef, attack, targetDef, withAdvantage, withDisadvantage, profBonus,
+    );
+    s.player.hidden = false;
+    s.player.inventoryIds.splice(itemIdx, 1);
+    this.addLogs(logs);
+
+    const { finalDamage, log: resistLog } = this.resistMod(damage, attack.damageType, targetDef);
+    if (resistLog) this.addLog(resistLog);
+    target.hp = Math.max(0, target.hp - finalDamage);
+    this.addLog({ left: `${targetDef.name} HP: ${target.hp}/${target.maxHp}`, style: 'status' });
+
+    if (vexApplied) {
+      target.vexed = true;
+      this.addLog({ left: `Vex/Sap — ${targetDef.name} attacks with Disadvantage`, style: 'status' });
+    }
+    if (slowApplied && !target.conditions.includes('slowed')) {
+      target.conditions.push('slowed');
+      this.addLog({ left: `Slow — ${targetDef.name} speed reduced by 10 ft`, style: 'status' });
+    }
+
+    if (target.hp <= 0) {
+      const gold = crGoldReward(targetDef.cr);
+      s.player.xp += targetDef.xp;
+      s.player.gold += gold;
+      this.addLogs([
+        { left: `☠ ${targetDef.name} is slain! +${targetDef.xp} XP  +${gold} GP`, style: 'kill' },
+        { left: `Total XP: ${s.player.xp}  |  GP: ${s.player.gold}`, style: 'status' },
+      ]);
+      this.killNpc(target.id);
+    }
+
+    s.player.actionUsed = true;
+    if (s.npcs.filter((n) => n.disposition === 'enemy' && n.hp > 0).length === 0) {
+      s.phase = 'exploring';
+    }
+  }
+
+  throwItem(itemId: string, targetId?: string): GameEvent[] {
+    const s = this.state;
+    const events: GameEvent[] = [];
+
+    const inventoryIdx = s.player.inventoryIds.indexOf(itemId);
+    const mapItemIdx = inventoryIdx === -1
+      ? s.mapItems.findIndex((mi) => mi.id === itemId || mi.defId === itemId)
+      : -1;
+    if (inventoryIdx === -1 && mapItemIdx === -1) return events;
+
+    const defId = inventoryIdx !== -1 ? itemId : s.mapItems[mapItemIdx].defId;
+    const itemDef = this.defs.items.find((i) => i.id === defId);
+    if (!itemDef) return events;
+
+    const fromMap = mapItemIdx !== -1;
+    const isProperThrown = !fromMap && itemDef.type === 'weapon' && (itemDef as WeaponDef).thrown;
+    const normalRange = isProperThrown ? Math.floor((itemDef as WeaponDef).throwNormal / 5) : 4;
+    const longRange = isProperThrown ? Math.floor((itemDef as WeaponDef).throwLong / 5) : 12;
+
+    const inLongRange = (n: NpcState) =>
+      n.disposition === 'enemy' && n.hp > 0 &&
+      chebyshev(s.player.tileX, s.player.tileY, n.tileX, n.tileY) <= longRange;
+
+    let target = targetId
+      ? (s.npcs.find((n) => (n.id === targetId || n.label === targetId) && n.disposition === 'enemy' && n.hp > 0) ?? null)
+      : null;
+    if (!target) target = s.npcs.find(inLongRange) ?? null;
+    if (!target) return events;
+
+    const targetDef = this.resolveMonsterDef(target.defId);
+    if (!targetDef) return events;
+
+    const dist = chebyshev(s.player.tileX, s.player.tileY, target.tileX, target.tileY);
+
+    let attack: PlayerAttack;
+    let profBonus: number;
+    if (isProperThrown) {
+      attack = makePlayerAttack(this.playerDef, itemDef as WeaponDef);
+      profBonus = this.playerDef.proficiencyBonus;
+    } else {
+      attack = {
+        name: itemDef.name, statKey: 'str',
+        damageDice: 1, damageSides: 4, damageType: 'bludgeoning',
+        savageAttacker: false, graze: false, vex: false, sap: false, slow: false,
+      };
+      profBonus = 0;
+    }
+
+    const withAdvantage = s.player.hidden;
+    const withDisadvantage = dist > normalRange;
+    this.addLog({ left: `${this.playerDef.name} throws ${itemDef.name}`, style: 'normal' });
+    const { damage, logs, vexApplied, slowApplied } = playerThrowAttack(
+      this.playerDef, attack, targetDef, withAdvantage, withDisadvantage, profBonus,
+    );
+    s.player.hidden = false;
+
+    if (fromMap) s.mapItems.splice(mapItemIdx, 1);
+    else s.player.inventoryIds.splice(inventoryIdx, 1);
+
+    this.addLogs(logs);
+
+    const { finalDamage, log: resistLog } = this.resistMod(damage, attack.damageType, targetDef);
+    if (resistLog) this.addLog(resistLog);
+    target.hp = Math.max(0, target.hp - finalDamage);
+    this.addLog({ left: `${targetDef.name} HP: ${target.hp}/${target.maxHp}`, style: 'status' });
+
+    if (vexApplied) {
+      target.vexed = true;
+      this.addLog({ left: `Vex/Sap — ${targetDef.name} attacks with Disadvantage`, style: 'status' });
+    }
+    if (slowApplied && !target.conditions.includes('slowed')) {
+      target.conditions.push('slowed');
+      this.addLog({ left: `Slow — ${targetDef.name} speed reduced by 10 ft`, style: 'status' });
+    }
+
+    if (target.hp <= 0) {
+      const gold = crGoldReward(targetDef.cr);
+      s.player.xp += targetDef.xp;
+      s.player.gold += gold;
+      this.addLogs([
+        { left: `☠ ${targetDef.name} is slain! +${targetDef.xp} XP  +${gold} GP`, style: 'kill' },
+        { left: `Total XP: ${s.player.xp}  |  GP: ${s.player.gold}`, style: 'status' },
+      ]);
+      this.killNpc(target.id);
+    }
+
+    if (s.phase === 'player_turn') {
+      s.player.actionUsed = true;
+      if (s.npcs.filter((n) => n.disposition === 'enemy' && n.hp > 0).length === 0) {
+        s.phase = 'exploring';
+      }
+    }
+
+    return events;
   }
 
   private resistMod(damage: number, damageType: string, def: MonsterDef): { finalDamage: number; log: LogEntry | null } {
@@ -859,13 +1048,14 @@ export class GameEngine {
     const targetDef = this.resolveMonsterDef(npc.defId);
     if (!targetDef) return;
     s.player.reactionUsed = true;
-    const { damage, logs, vexApplied } = playerMeleeAttack(this.playerDef, targetDef, false);
+    const { damage, logs, vexApplied, slowApplied } = playerMeleeAttack(this.playerDef, targetDef, false);
     this.addLogs([{ left: `⚡ ${this.playerDef.name} makes an Opportunity Attack!`, style: 'header' }, ...logs]);
     const { finalDamage: oaFinalDamage, log: oaResistLog } = this.resistMod(damage, this.playerDef.mainAttack.damageType, targetDef);
     if (oaResistLog) this.addLog(oaResistLog);
     npc.hp = Math.max(0, npc.hp - oaFinalDamage);
     this.addLog({ left: `${targetDef.name} HP: ${npc.hp}/${npc.maxHp}`, style: 'status' });
     if (vexApplied) npc.vexed = true;
+    if (slowApplied && !npc.conditions.includes('slowed')) npc.conditions.push('slowed');
     if (npc.hp <= 0) {
       const gold = crGoldReward(targetDef.cr);
       s.player.xp += targetDef.xp;
@@ -1047,163 +1237,3 @@ export class GameEngine {
   }
 }
 
-// ── Spawn helpers ──────────────────────────────────────────────────────────────
-
-type Zone = [number, number][]; // [tileX, tileY] pairs, already filtered to passable tiles
-type ZoneMap = Map<string, Zone>;
-
-function parseStartingZones(rows: string[], map: GameMap): ZoneMap {
-  const result: ZoneMap = new Map();
-  for (let r = 0; r < rows.length; r++) {
-    for (let c = 0; c < rows[r].length; c++) {
-      const ch = rows[r][c];
-      if (ch === '.' || ch === '#' || ch === ' ') continue;
-      if (!map.passable[r]?.[c]) continue;
-      if (!result.has(ch)) result.set(ch, []);
-      result.get(ch)!.push([c, r]);
-    }
-  }
-  return result;
-}
-
-function pickFromZone(zone: Zone, occupied: Set<string>): [number, number] | null {
-  const free = zone.filter(([c, r]) => !occupied.has(`${c},${r}`));
-  if (!free.length) return null;
-  return free[Math.floor(Math.random() * free.length)];
-}
-
-function findPlayerSpawn(map: GameMap, zone?: Zone): [number, number] {
-  if (zone) {
-    const pick = zone[Math.floor(Math.random() * zone.length)];
-    if (pick) return pick;
-  }
-  const { cols, rows, passable } = map;
-  const candidates: [number, number][] = [];
-  for (let r = 0; r < rows; r++)
-    for (let c = 0; c < Math.floor(cols / 3); c++)
-      if (passable[r][c]) candidates.push([c, r]);
-  if (candidates.length > 0) return candidates[Math.floor(Math.random() * candidates.length)];
-  for (let r = 0; r < rows; r++)
-    for (let c = 0; c < cols; c++)
-      if (passable[r][c]) return [c, r];
-  return [0, 0];
-}
-
-function spawnEnemies(
-  out: NpcState[], map: GameMap, monsters: MonsterDef[],
-  px: number, py: number, count: number,
-  zone?: Zone,
-): void {
-  const defs = monsters.filter((m) => m.cr !== '0');
-  const occupied = new Set<string>([`${px},${py}`, ...out.map((n) => `${n.tileX},${n.tileY}`)]);
-
-  if (zone) {
-    const free = shuffle(zone.filter(([c, r]) => !occupied.has(`${c},${r}`))).slice(0, Math.min(count, zone.length));
-    free.forEach(([c, r], i) => {
-      const def = defs[Math.floor(Math.random() * defs.length)];
-      out.push({
-        id: `enemy_${i}`, defId: def.id, label: String.fromCharCode(65 + i),
-        tileX: c, tileY: r,
-        disposition: 'enemy',
-        hp: def.maxHp, maxHp: def.maxHp,
-        isActive: false, vexed: false, hidden: false,
-        reactionUsed: false, conditions: [],
-      });
-    });
-    return;
-  }
-
-  const { cols, rows, passable } = map;
-  const candidates: [number, number][] = [];
-  for (let r = 0; r < rows; r++)
-    for (let c = 0; c < cols; c++)
-      if (passable[r][c] && chebyshev(c, r, px, py) >= 5) candidates.push([r, c]);
-  const picked = shuffle(candidates).slice(0, Math.min(count, candidates.length));
-  picked.forEach(([r, c], i) => {
-    const def = defs[Math.floor(Math.random() * defs.length)];
-    out.push({
-      id: `enemy_${i}`, defId: def.id, label: String.fromCharCode(65 + i),
-      tileX: c, tileY: r,
-      disposition: 'enemy',
-      hp: def.maxHp, maxHp: def.maxHp,
-      isActive: false, vexed: false, hidden: false,
-      reactionUsed: false, conditions: [],
-    });
-  });
-}
-
-function spawnItems(
-  out: MapItemState[], map: GameMap, items: import('./types.js').ItemDef[],
-  px: number, py: number, npcs: NpcState[],
-): void {
-  const potion = items.find((i) => i.id === 'health_potion');
-  if (!potion) return;
-  const { cols, rows, passable } = map;
-  const candidates: [number, number][] = [];
-  for (let r = 0; r < rows; r++)
-    for (let c = 0; c < cols; c++)
-      if (passable[r][c] && chebyshev(c, r, px, py) >= 3 && !npcs.some((n) => n.tileX === c && n.tileY === r))
-        candidates.push([r, c]);
-  shuffle(candidates).slice(0, Math.min(3, candidates.length)).forEach(([r, c], i) => {
-    out.push({ id: `item_${i}`, defId: potion.id, tileX: c, tileY: r });
-  });
-}
-
-function spawnNpc(
-  out: NpcState[], map: GameMap, npcDefs: NPCDef[], monsters: MonsterDef[],
-  defId: string, px: number, py: number,
-  disposition: 'neutral' | 'ally' = 'neutral',
-  zone?: Zone,
-): void {
-  const npcDef = npcDefs.find((n) => n.id === defId);
-  if (!npcDef) return;
-  const monsterDef = monsters.find((m) => m.id === npcDef.monsterClass);
-  const maxHp = monsterDef?.maxHp ?? 8;
-  const occupied = new Set<string>([
-    `${px},${py}`,
-    ...out.map((n) => `${n.tileX},${n.tileY}`),
-  ]);
-
-  let candidates: [number, number][];
-  if (zone) {
-    candidates = zone.filter(([c, r]) => !occupied.has(`${c},${r}`));
-  } else {
-    const { cols, rows, passable } = map;
-    candidates = [];
-    for (let r = 0; r < rows; r++)
-      for (let c = 0; c < cols; c++) {
-        const dist = chebyshev(c, r, px, py);
-        const inRange = disposition === 'ally' ? dist >= 1 && dist <= 3 : dist >= 5;
-        if (passable[r][c] && inRange && !occupied.has(`${c},${r}`))
-          candidates.push([c, r]);
-      }
-  }
-
-  if (candidates.length === 0) return;
-  const [nx, ny] = candidates[Math.floor(Math.random() * candidates.length)];
-  out.push({
-    id: `npc_${defId}_${out.length}`,
-    defId,
-    tileX: nx, tileY: ny,
-    disposition,
-    label: '',
-    hp: maxHp, maxHp,
-    isActive: false, vexed: false, hidden: false,
-    reactionUsed: false, conditions: [],
-  });
-}
-
-function spawnSecrets(
-  out: SecretState[], map: GameMap, secretDefs: SecretDef[],
-  px: number, py: number, npcs: NpcState[],
-): void {
-  const { cols, rows, passable } = map;
-  const candidates: [number, number][] = [];
-  for (let r = 0; r < rows; r++)
-    for (let c = 0; c < cols; c++)
-      if (passable[r][c] && chebyshev(c, r, px, py) >= 3 && !npcs.some((n) => n.tileX === c && n.tileY === r))
-        candidates.push([r, c]);
-  shuffle(candidates).slice(0, Math.min(secretDefs.length, candidates.length)).forEach(([r, c], i) => {
-    out.push({ tileX: c, tileY: r, def: secretDefs[i] as SecretDef });
-  });
-}

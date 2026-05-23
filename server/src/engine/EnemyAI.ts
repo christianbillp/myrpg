@@ -70,7 +70,7 @@ export function runEnemyTurn(
     enemyHidden = hidden;
   }
 
-  let stepsLeft = def.speed;
+  let stepsLeft = Math.max(0, def.speed - (enemy.conditions.includes('slowed') ? 2 : 0));
   while (stepsLeft > 0 && chebyshev(tileX, tileY, config.playerTileX, config.playerTileY) > 1) {
     const next = nextStepToward(
       tileX, tileY,

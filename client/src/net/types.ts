@@ -49,9 +49,18 @@ export interface MapItemState {
   tileX: number; tileY: number;
 }
 
+export type SecretReward =
+  | { type: 'gold'; amount: number }
+  | { type: 'item'; itemId: string }
+  | { type: 'lore'; text: string };
+
+export interface SecretDef {
+  id: string; dc: number; reward: SecretReward; successText: string; failureText: string;
+}
+
 export interface SecretState {
   tileX: number; tileY: number;
-  def: { id: string; dc: number };
+  def: SecretDef;
 }
 
 export interface QuestState {
@@ -96,6 +105,7 @@ export type GameEvent =
 export type PlayerAction =
   | { type: 'move'; dx: number; dy: number }
   | { type: 'attack'; targetId?: string }
+  | { type: 'throw'; itemId: string; targetId?: string }
   | { type: 'hide' }
   | { type: 'secondWind' }
   | { type: 'dash' }

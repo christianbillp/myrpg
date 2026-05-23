@@ -43,6 +43,9 @@ export interface WeaponDef {
   mastery: WeaponMastery | null;
   finesse: boolean;
   twoHanded: boolean;
+  thrown: boolean;
+  throwNormal: number;
+  throwLong: number;
   cost: number;
 }
 

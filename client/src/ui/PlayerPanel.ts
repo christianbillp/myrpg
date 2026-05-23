@@ -23,10 +23,12 @@ export interface PlayerPanelActionState {
   playerTileX: number;
   playerTileY: number;
   hitDiceRemaining: number;
+  throwableItems: Array<{ id: string; name: string }>;
 }
 
 const DPR = window.devicePixelRatio;
 const GRID_H = GRID_ROWS * TILE_SIZE;
+const MAX_PICKER_SLOTS = 6;
 
 type Visible = { setVisible(v: boolean): unknown };
 
@@ -34,6 +36,7 @@ export interface PlayerPanelCallbacks {
   onOpenInventory: () => void;
   onSearch: () => void;
   onAttack: () => void;
+  onThrow: (itemId: string) => void;
   onDash: () => void;
   onDodge: () => void;
   onDisengage: () => void;
@@ -58,6 +61,9 @@ export class PlayerPanel {
   private searchBtn: Phaser.GameObjects.Container;
   private readonly playerDef: PlayerDef;
   private readonly attackBtn: Phaser.GameObjects.Container;
+  private readonly throwMenuBtn: Phaser.GameObjects.Container;
+  private readonly throwPickerSlots: Phaser.GameObjects.Container[];
+  private readonly throwPickerCancel: Phaser.GameObjects.Container;
   private readonly dashBtn: Phaser.GameObjects.Container;
   private readonly dodgeBtn: Phaser.GameObjects.Container;
   private readonly disengageBtn: Phaser.GameObjects.Container;
@@ -67,6 +73,10 @@ export class PlayerPanel {
   private readonly deathSaveBtn: Phaser.GameObjects.Container;
   private readonly restBtn: Phaser.GameObjects.Container;
   private readonly actionButtons: Phaser.GameObjects.Container[];
+
+  private lastActionState: PlayerPanelActionState | null = null;
+  private pickerOpen = false;
+  private currentPickerItems: Array<{ id: string; name: string }> = [];
 
   constructor(scene: Phaser.Scene, def: PlayerDef, callbacks: PlayerPanelCallbacks) {
     this.playerDef = def;
@@ -239,25 +249,35 @@ export class PlayerPanel {
       })
       .setDepth(11));
 
-    // ── Action buttons (context-sensitive; managed by refreshActions) ──────────
+    // ── Action buttons ────────────────────────────────────────────────────────
     track(scene.add.rectangle(PLAYER_PANEL_WIDTH / 2, 448, PLAYER_PANEL_WIDTH - 16, 1, 0x334455).setDepth(11));
 
     const btnW = PLAYER_PANEL_WIDTH - 24;
     const btnX = PLAYER_PANEL_WIDTH / 2;
-    this.attackBtn    = makeButton(scene, btnX, 462, "ATTACK",         0x1a4a1e, callbacks.onAttack,     btnW, 28, "11px");
-    this.dashBtn      = makeButton(scene, btnX, 496, "DASH",            0x1a3a4a, callbacks.onDash,       btnW, 28, "11px");
-    this.dodgeBtn     = makeButton(scene, btnX, 530, "DODGE",           0x1a3a4a, callbacks.onDodge,      btnW, 28, "11px");
-    this.disengageBtn = makeButton(scene, btnX, 564, "DISENGAGE",       0x1a3a4a, callbacks.onDisengage,  btnW, 28, "11px");
-    this.secondWindBtn= makeButton(scene, btnX, 598, "SECOND WIND",     0x1a3a5a, callbacks.onSecondWind, btnW, 28, "11px");
-    this.hideBtn      = makeButton(scene, btnX, 598, "HIDE",            0x1a3a1a, callbacks.onHide,       btnW, 28, "11px");
-    this.endTurnBtn   = makeButton(scene, btnX, 632, "END TURN",        0x3a3020, callbacks.onEndTurn,    btnW, 28, "11px");
-    this.deathSaveBtn = makeButton(scene, btnX, 632, "ROLL DEATH SAVE", 0x5a1a1a, callbacks.onDeathSave, btnW, 28, "11px");
-    this.restBtn      = makeButton(scene, btnX, 462, "SHORT REST",      0x1a2a3a, callbacks.onShortRest,  btnW, 28, "11px");
+    this.attackBtn    = makeButton(scene, btnX, 462, "ATTACK",        0x1a4a1e, callbacks.onAttack,     btnW, 28, "11px");
+    this.throwMenuBtn = makeButton(scene, btnX, 462, "THROW…",        0x2a3a1e, () => this.openPicker(), btnW, 28, "11px");
+    this.dashBtn      = makeButton(scene, btnX, 496, "DASH",          0x1a3a4a, callbacks.onDash,        btnW, 28, "11px");
+    this.dodgeBtn     = makeButton(scene, btnX, 530, "DODGE",         0x1a3a4a, callbacks.onDodge,       btnW, 28, "11px");
+    this.disengageBtn = makeButton(scene, btnX, 564, "DISENGAGE",     0x1a3a4a, callbacks.onDisengage,   btnW, 28, "11px");
+    this.secondWindBtn= makeButton(scene, btnX, 598, "SECOND WIND",   0x1a3a5a, callbacks.onSecondWind,  btnW, 28, "11px");
+    this.hideBtn      = makeButton(scene, btnX, 598, "HIDE",          0x1a3a1a, callbacks.onHide,        btnW, 28, "11px");
+    this.endTurnBtn   = makeButton(scene, btnX, 632, "END TURN",      0x3a3020, callbacks.onEndTurn,     btnW, 28, "11px");
+    this.deathSaveBtn = makeButton(scene, btnX, 632, "ROLL DEATH SAVE",0x5a1a1a, callbacks.onDeathSave,  btnW, 28, "11px");
+    this.restBtn      = makeButton(scene, btnX, 462, "SHORT REST",    0x1a2a3a, callbacks.onShortRest,   btnW, 28, "11px");
+
     this.actionButtons = [
-      this.attackBtn, this.dashBtn, this.dodgeBtn, this.disengageBtn,
+      this.attackBtn, this.throwMenuBtn, this.dashBtn, this.dodgeBtn, this.disengageBtn,
       this.secondWindBtn, this.hideBtn, this.endTurnBtn, this.deathSaveBtn, this.restBtn,
     ];
     this.actionButtons.forEach(btn => btn.setVisible(false));
+
+    // ── Throw picker slots (pre-created, shown when picker is open) ───────────
+    this.throwPickerSlots = Array.from({ length: MAX_PICKER_SLOTS }, (_, i) =>
+      makeButton(scene, btnX, 462 + i * 34, "", 0x1e2e1e, () => this.pickerSlotClicked(i, callbacks.onThrow), btnW, 28, "10px"),
+    );
+    this.throwPickerCancel = makeButton(scene, btnX, 666, "↩ CANCEL", 0x2a1a1a, () => this.closePicker(), btnW, 28, "11px");
+    this.throwPickerSlots.forEach(s => s.setVisible(false));
+    this.throwPickerCancel.setVisible(false);
 
     track(scene.add
       .rectangle(PLAYER_PANEL_WIDTH / 2, GRID_H - 88, PLAYER_PANEL_WIDTH - 16, 1, 0x334455)
@@ -266,6 +286,25 @@ export class PlayerPanel {
     this.searchBtn = makeButton(scene, PLAYER_PANEL_WIDTH / 2, GRID_H - 24, "SEARCH", 0x1a2a3a, callbacks.onSearch, PLAYER_PANEL_WIDTH - 24, 28, "11px");
 
     this.hide();
+  }
+
+  private openPicker(): void {
+    if (!this.lastActionState) return;
+    this.currentPickerItems = [...this.lastActionState.throwableItems];
+    this.pickerOpen = true;
+    this.refreshActions(this.lastActionState);
+  }
+
+  private closePicker(): void {
+    this.pickerOpen = false;
+    if (this.lastActionState) this.refreshActions(this.lastActionState);
+  }
+
+  private pickerSlotClicked(index: number, onThrow: (itemId: string) => void): void {
+    if (index >= this.currentPickerItems.length) return;
+    this.pickerOpen = false;
+    onThrow(this.currentPickerItems[index].id);
+    if (this.lastActionState) this.refreshActions(this.lastActionState);
   }
 
   private visible = false;
@@ -281,17 +320,35 @@ export class PlayerPanel {
     this.items.forEach(item => item.setVisible(false));
     this.searchBtn.setVisible(false);
     this.actionButtons.forEach(btn => btn.setVisible(false));
+    this.throwPickerSlots.forEach(s => s.setVisible(false));
+    this.throwPickerCancel.setVisible(false);
+    this.pickerOpen = false;
   }
   toggle(): void { this.visible ? this.hide() : this.show(); }
 
   refreshActions(state: PlayerPanelActionState): void {
+    this.lastActionState = state;
     this.actionButtons.forEach(btn => btn.setVisible(false));
+    this.throwPickerSlots.forEach(s => s.setVisible(false));
+    this.throwPickerCancel.setVisible(false);
     if (!this.visible) return;
+
+    if (this.pickerOpen) {
+      const count = Math.min(this.currentPickerItems.length, MAX_PICKER_SLOTS);
+      for (let i = 0; i < count; i++) {
+        const slot = this.throwPickerSlots[i];
+        (slot.list[1] as Phaser.GameObjects.Text).setText(this.currentPickerItems[i].name);
+        slot.setVisible(true);
+      }
+      this.throwPickerCancel.setY(462 + count * 34);
+      this.throwPickerCancel.setVisible(true);
+      return;
+    }
 
     const { mode, actionUsed, bonusActionUsed, playerDef, playerHp, secondWindUses } = state;
 
     if (mode === 'exploring') {
-      if (state.playerHp < state.playerDef.maxHp && state.hitDiceRemaining > 0) {
+      if (playerHp < playerDef.maxHp && state.hitDiceRemaining > 0) {
         this.restBtn.setVisible(true);
       }
     } else if (mode === 'player_turn') {
@@ -300,8 +357,14 @@ export class PlayerPanel {
         const hasAdjacent = state.enemies.some(
           (e) => !e.dead && chebyshev(state.playerTileX, state.playerTileY, e.tileX, e.tileY) <= 1,
         );
+        const hasRangedTarget = state.enemies.some(
+          (e) => !e.dead && chebyshev(state.playerTileX, state.playerTileY, e.tileX, e.tileY) <= 12,
+        );
         const hasAnyLiving = state.enemies.some((e) => !e.dead);
         if (hasAdjacent) this.attackBtn.setVisible(true);
+        if (!hasAdjacent && state.throwableItems.length > 0 && hasRangedTarget) {
+          this.throwMenuBtn.setVisible(true);
+        }
         this.dashBtn.setVisible(true);
         this.dodgeBtn.setVisible(true);
         if (hasAdjacent || hasAnyLiving) this.disengageBtn.setVisible(true);
@@ -321,7 +384,6 @@ export class PlayerPanel {
     this.searchEnabled = enabled;
     this.searchBtn.setVisible(this.visible && enabled);
   }
-
 
   private buildCombatStatsLines(initBonus: number): string {
     const sign = initBonus >= 0 ? "+" : "";

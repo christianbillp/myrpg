@@ -24,7 +24,7 @@ export class OverlayManager {
   private aidmOverlay: AIDMOverlay | null = null;
   private inventoryOverlay: InventoryOverlay | null = null;
   private aidmHistory: ChatMessage[] = [];
-  private aidmPersona: DMPersona = "regular";
+  private aidmPersona: DMPersona = "story";
   private introShown = false;
 
   constructor(scene: Phaser.Scene, playerDef: PlayerDef, callbacks: OverlayCallbacks) {
@@ -42,7 +42,7 @@ export class OverlayManager {
     this.aidmOverlay = null;
     this.inventoryOverlay = null;
     this.aidmHistory = [];
-    this.aidmPersona = "regular";
+    this.aidmPersona = "story";
     this.introShown = false;
   }
 

@@ -1,5 +1,5 @@
 import { d, d20, mod, rollAdvantage, rollDisadvantage } from './Dice.js';
-import { PlayerDef, MonsterDef, MonsterAttack, ConsumableDef, LogEntry } from './types.js';
+import { PlayerDef, PlayerAttack, MonsterDef, MonsterAttack, ConsumableDef, LogEntry } from './types.js';
 
 function rollDice(count: number, sides: number): { total: number; rolls: number[] } {
   const rolls: number[] = [];
@@ -28,15 +28,16 @@ export function rollInitiative(
   };
 }
 
-export function playerMeleeAttack(
+function resolvePlayerAttack(
   player: PlayerDef,
+  attack: PlayerAttack,
   enemy: MonsterDef,
   withAdvantage: boolean,
-  withDisadvantage = false,
-): { damage: number; logs: LogEntry[]; vexApplied: boolean } {
-  const attack = player.mainAttack;
+  withDisadvantage: boolean,
+  profBonus = player.proficiencyBonus,
+): { damage: number; logs: LogEntry[]; vexApplied: boolean; slowApplied: boolean } {
   const statMod = attack.statKey === 'str' ? mod(player.str) : mod(player.dex);
-  const attackBonus = statMod + player.proficiencyBonus;
+  const attackBonus = statMod + profBonus;
   const logs: LogEntry[] = [];
 
   const effAdv = withAdvantage && !withDisadvantage;
@@ -62,7 +63,7 @@ export function playerMeleeAttack(
   const isHit = isCrit || total >= enemy.ac;
   const atkPart = `${rollPart}+${attackBonus}=${total} vs AC ${enemy.ac}`;
 
-  let damage = 0, vexApplied = false;
+  let damage = 0, vexApplied = false, slowApplied = false;
 
   if (isCrit) {
     const { total: diceTot, rolls: diceRolls } = rollDice(attack.damageDice * 2, attack.damageSides);
@@ -75,7 +76,8 @@ export function playerMeleeAttack(
     const sneakPart = sneakTot > 0 ? ` + sneak[${sneakRolls.join(',')}]=${sneakTot}` : '';
     const dicePart = `2×${attack.damageDice}d${attack.damageSides}[${diceRolls.join(',')}]+${statMod}${sneakPart}`;
     logs.push({ left: `⚡ Critical hit — ${damage} ${attack.damageType}`, right: `${atkPart} · ${dicePart}`, style: 'crit' });
-    vexApplied = attack.vex;
+    vexApplied = attack.vex || attack.sap;
+    slowApplied = attack.slow;
 
   } else if (isHit) {
     let diceTotal: number, diceRolls: number[];
@@ -99,7 +101,8 @@ export function playerMeleeAttack(
     const savPart = attack.savageAttacker ? ' Savage' : '';
     const dicePart = `${attack.damageDice}d${attack.damageSides}[${diceRolls.join(',')}]+${statMod}${savPart}${sneakRightPart}`;
     logs.push({ left: `Hit — ${damage} ${attack.damageType}${sneakSuffix}`, right: `${atkPart} · ${dicePart}`, style: 'hit' });
-    vexApplied = attack.vex;
+    vexApplied = attack.vex || attack.sap;
+    slowApplied = attack.slow;
 
   } else {
     if (attack.graze) {
@@ -112,7 +115,27 @@ export function playerMeleeAttack(
     }
   }
 
-  return { damage, logs, vexApplied };
+  return { damage, logs, vexApplied, slowApplied };
+}
+
+export function playerMeleeAttack(
+  player: PlayerDef,
+  enemy: MonsterDef,
+  withAdvantage: boolean,
+  withDisadvantage = false,
+): { damage: number; logs: LogEntry[]; vexApplied: boolean; slowApplied: boolean } {
+  return resolvePlayerAttack(player, player.mainAttack, enemy, withAdvantage, withDisadvantage);
+}
+
+export function playerThrowAttack(
+  player: PlayerDef,
+  attack: PlayerAttack,
+  enemy: MonsterDef,
+  withAdvantage: boolean,
+  withDisadvantage = false,
+  profBonus?: number,
+): { damage: number; logs: LogEntry[]; vexApplied: boolean; slowApplied: boolean } {
+  return resolvePlayerAttack(player, attack, enemy, withAdvantage, withDisadvantage, profBonus ?? player.proficiencyBonus);
 }
 
 export function playerHide(

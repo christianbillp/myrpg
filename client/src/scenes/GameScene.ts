@@ -329,6 +329,7 @@ export class GameScene extends Phaser.Scene {
       onOpenInventory: () => { if (this.gameState) this.overlays.openInventory(this.gameState); },
       onSearch:        () => gameClient.sendAction({ type: "search" }),
       onAttack:        () => gameClient.sendAction({ type: "attack" }),
+      onThrow:         (itemId) => gameClient.sendAction({ type: "throw", itemId }),
       onDash:          () => gameClient.sendAction({ type: "dash" }),
       onDodge:         () => gameClient.sendAction({ type: "dodge" }),
       onDisengage:     () => gameClient.sendAction({ type: "disengage" }),
@@ -398,6 +399,10 @@ export class GameScene extends Phaser.Scene {
       playerTileX:      this.player?.tileX ?? state.player.tileX,
       playerTileY:      this.player?.tileY ?? state.player.tileY,
       hitDiceRemaining: this.playerDef.level - state.player.hitDiceUsed,
+      throwableItems:   [...new Set(state.player.inventoryIds)]
+        .map(id => (this.registry.get("items") as ItemDef[]).find(i => i.id === id))
+        .filter((i): i is ItemDef => i !== undefined)
+        .map(i => ({ id: i.id, name: i.name })),
     };
   }
 

@@ -9,5 +9,8 @@
   "mastery": "nick",
   "finesse": true,
   "twoHanded": false,
+  "thrown": true,
+  "throwNormal": 20,
+  "throwLong": 60,
   "cost": 2
 }

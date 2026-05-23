@@ -9,5 +9,8 @@
   "mastery": null,
   "finesse": false,
   "twoHanded": true,
+  "thrown": false,
+  "throwNormal": 0,
+  "throwLong": 0,
   "cost": 25
 }

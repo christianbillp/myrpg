@@ -9,6 +9,8 @@ export interface PlayerAttack {
   savageAttacker: boolean;
   graze: boolean;
   vex: boolean;
+  sap: boolean;
+  slow: boolean;
 }
 
 export interface EquipmentSlots {
@@ -103,6 +105,7 @@ export interface WeaponDef {
   statKey: 'str' | 'dex';
   damageDice: number; damageSides: number; damageType: string;
   mastery: string | null; finesse: boolean; twoHanded: boolean;
+  thrown: boolean; throwNormal: number; throwLong: number;
 }
 
 export type ItemDef = ConsumableDef | ArmorDef | ShieldDef | WeaponDef;
@@ -246,6 +249,7 @@ export type GameEvent =
 export type PlayerAction =
   | { type: 'move'; dx: number; dy: number }
   | { type: 'attack'; targetId?: string }
+  | { type: 'throw'; itemId: string; targetId?: string }
   | { type: 'hide' }
   | { type: 'secondWind' }
   | { type: 'dash' }

@@ -9,5 +9,8 @@
   "mastery": "sap",
   "finesse": false,
   "twoHanded": false,
+  "thrown": false,
+  "throwNormal": 0,
+  "throwLong": 0,
   "cost": 15
 }

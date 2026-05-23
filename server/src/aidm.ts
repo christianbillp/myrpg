@@ -7,7 +7,7 @@ interface ChatMessage { role: 'user' | 'assistant'; content: string; }
 export interface AIDMChatRequest {
   history: ChatMessage[];
   playerMessage: string;
-  dmPersona?: 'regular' | 'dev';
+  dmPersona?: 'story' | 'dev';
 }
 
 const AIDM_TOOLS = [
@@ -100,6 +100,11 @@ const AIDM_TOOLS = [
     name: 'set_disposition',
     description: 'Change an NPC\'s disposition. Entity: "enemy_A" (by label) or "npc_[id]". Disposition: "ally" (fights alongside the player), "neutral" (does not participate in combat), "enemy" (fights the player).',
     input_schema: { type: 'object' as const, properties: { entity: { type: 'string' }, disposition: { type: 'string' }, reason: { type: 'string' } }, required: ['entity', 'disposition', 'reason'] },
+  },
+  {
+    name: 'throw_item',
+    description: 'Throw an item at a target enemy. Proper thrown weapons (javelin, dagger) use their weapon stats and mastery with proficiency. All other items are improvised weapons (1d4 bludgeoning, no proficiency bonus). The item is removed from the player\'s inventory or the map. item_id can be an inventory item or a map item defId. target is the enemy label (A, B, …); omit for nearest enemy in range.',
+    input_schema: { type: 'object' as const, properties: { item_id: { type: 'string' }, target: { type: 'string' }, reason: { type: 'string' } }, required: ['item_id', 'reason'] },
   },
 ];
 
@@ -256,6 +261,9 @@ function applyTool(engine: GameEngine, name: string, input: Record<string, unkno
     case 'set_disposition':
       events = engine.setDisposition(input['entity'] as string, input['disposition'] as string);
       break;
+    case 'throw_item':
+      events = engine.throwItem(input['item_id'] as string, input['target'] as string | undefined);
+      break;
     case 'request_ability_check': {
       const skill = input['skill'] as string;
       const dc = input['dc'] as number;
@@ -276,7 +284,7 @@ export async function processAIDMChat(
   anthropic: Anthropic,
 ): Promise<{ reply: string; events: GameEvent[]; rollResults: string[] }> {
   const s = engine.getState();
-  const system = buildSystemPrompt(engine, s.encounterContext, body.dmPersona ?? 'regular');
+  const system = buildSystemPrompt(engine, s.encounterContext, body.dmPersona ?? 'story');
   const messages: { role: 'user' | 'assistant'; content: unknown }[] = [
     ...body.history.map((m) => ({ role: m.role, content: m.content })),
     { role: 'user' as const, content: body.playerMessage },
