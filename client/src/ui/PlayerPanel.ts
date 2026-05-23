@@ -357,14 +357,9 @@ export class PlayerPanel {
         const hasAdjacent = state.enemies.some(
           (e) => !e.dead && chebyshev(state.playerTileX, state.playerTileY, e.tileX, e.tileY) <= 1,
         );
-        const hasRangedTarget = state.enemies.some(
-          (e) => !e.dead && chebyshev(state.playerTileX, state.playerTileY, e.tileX, e.tileY) <= 12,
-        );
         const hasAnyLiving = state.enemies.some((e) => !e.dead);
         if (hasAdjacent) this.attackBtn.setVisible(true);
-        if (!hasAdjacent && state.throwableItems.length > 0 && hasRangedTarget) {
-          this.throwMenuBtn.setVisible(true);
-        }
+        if (!hasAdjacent && state.throwableItems.length > 0) this.throwMenuBtn.setVisible(true);
         this.dashBtn.setVisible(true);
         this.dodgeBtn.setVisible(true);
         if (hasAdjacent || hasAnyLiving) this.disengageBtn.setVisible(true);

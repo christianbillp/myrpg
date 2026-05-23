@@ -10,7 +10,7 @@ import { OverlayManager } from "../systems/OverlayManager";
 import { TILE_SIZE } from "../constants";
 import { PlayerDef } from "../data/player";
 import { MonsterDef, NPCDef } from "../data/monsters";
-import { ItemDef } from "../data/items";
+import { ItemDef, WeaponDef } from "../data/items";
 import { gameClient } from "../net/GameClient";
 import type { GameState, GameEvent, GameMap } from "../net/types";
 
@@ -399,10 +399,24 @@ export class GameScene extends Phaser.Scene {
       playerTileX:      this.player?.tileX ?? state.player.tileX,
       playerTileY:      this.player?.tileY ?? state.player.tileY,
       hitDiceRemaining: this.playerDef.level - state.player.hitDiceUsed,
-      throwableItems:   [...new Set(state.player.inventoryIds)]
-        .map(id => (this.registry.get("items") as ItemDef[]).find(i => i.id === id))
-        .filter((i): i is ItemDef => i !== undefined)
-        .map(i => ({ id: i.id, name: i.name })),
+      throwableItems:   (() => {
+        const allItems = this.registry.get("items") as ItemDef[];
+        const px = this.player?.tileX ?? state.player.tileX;
+        const py = this.player?.tileY ?? state.player.tileY;
+        return [...new Set(state.player.inventoryIds)]
+          .map(id => allItems.find(i => i.id === id))
+          .filter((i): i is ItemDef => i !== undefined)
+          .filter(itemDef => {
+            const longRangeTiles = itemDef.type === 'weapon' && (itemDef as WeaponDef).thrown
+              ? Math.floor((itemDef as WeaponDef).throwLong / 5)
+              : 12;
+            return state.npcs.some(n =>
+              n.disposition === 'enemy' && n.hp > 0 &&
+              Math.max(Math.abs(n.tileX - px), Math.abs(n.tileY - py)) <= longRangeTiles,
+            );
+          })
+          .map(i => ({ id: i.id, name: i.name }));
+      })(),
     };
   }
 

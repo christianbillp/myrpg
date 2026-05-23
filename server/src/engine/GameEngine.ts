@@ -450,14 +450,7 @@ export class GameEngine {
     }
 
     if (target.hp <= 0) {
-      const gold = crGoldReward(targetDef.cr);
-      s.player.xp += targetDef.xp;
-      s.player.gold += gold;
-      this.addLogs([
-        { left: `☠ ${targetDef.name} is slain! +${targetDef.xp} XP  +${gold} GP`, style: 'kill' },
-        { left: `Total XP: ${s.player.xp}  |  GP: ${s.player.gold}`, style: 'status' },
-      ]);
-      this.killNpc(target.id);
+      this.killWithReward(target, targetDef, `☠ ${targetDef.name} is slain!`);
     }
 
     s.player.actionUsed = true;
@@ -491,57 +484,13 @@ export class GameEngine {
     const targetDef = this.resolveMonsterDef(target.defId);
     if (!targetDef) return;
 
-    const dist = chebyshev(s.player.tileX, s.player.tileY, target.tileX, target.tileY);
+    const attack: PlayerAttack = isProperThrown
+      ? makePlayerAttack(this.playerDef, itemDef as WeaponDef)
+      : { name: itemDef.name, statKey: 'str', damageDice: 1, damageSides: 4, damageType: 'bludgeoning', savageAttacker: false, graze: false, vex: false, sap: false, slow: false };
+    const profBonus = isProperThrown ? this.playerDef.proficiencyBonus : 0;
 
-    let attack: PlayerAttack;
-    let profBonus: number;
-    if (isProperThrown) {
-      attack = makePlayerAttack(this.playerDef, itemDef as WeaponDef);
-      profBonus = this.playerDef.proficiencyBonus;
-    } else {
-      attack = {
-        name: itemDef.name, statKey: 'str',
-        damageDice: 1, damageSides: 4, damageType: 'bludgeoning',
-        savageAttacker: false, graze: false, vex: false, sap: false, slow: false,
-      };
-      profBonus = 0;
-    }
-
-    const withAdvantage = s.player.hidden;
-    const withDisadvantage = dist > normalRange;
-    this.addLog({ left: `${this.playerDef.name} throws ${itemDef.name}`, style: 'normal' });
-    const { damage, logs, vexApplied, slowApplied } = playerThrowAttack(
-      this.playerDef, attack, targetDef, withAdvantage, withDisadvantage, profBonus,
-    );
-    s.player.hidden = false;
     s.player.inventoryIds.splice(itemIdx, 1);
-    this.addLogs(logs);
-
-    const { finalDamage, log: resistLog } = this.resistMod(damage, attack.damageType, targetDef);
-    if (resistLog) this.addLog(resistLog);
-    target.hp = Math.max(0, target.hp - finalDamage);
-    this.addLog({ left: `${targetDef.name} HP: ${target.hp}/${target.maxHp}`, style: 'status' });
-
-    if (vexApplied) {
-      target.vexed = true;
-      this.addLog({ left: `Vex/Sap — ${targetDef.name} attacks with Disadvantage`, style: 'status' });
-    }
-    if (slowApplied && !target.conditions.includes('slowed')) {
-      target.conditions.push('slowed');
-      this.addLog({ left: `Slow — ${targetDef.name} speed reduced by 10 ft`, style: 'status' });
-    }
-
-    if (target.hp <= 0) {
-      const gold = crGoldReward(targetDef.cr);
-      s.player.xp += targetDef.xp;
-      s.player.gold += gold;
-      this.addLogs([
-        { left: `☠ ${targetDef.name} is slain! +${targetDef.xp} XP  +${gold} GP`, style: 'kill' },
-        { left: `Total XP: ${s.player.xp}  |  GP: ${s.player.gold}`, style: 'status' },
-      ]);
-      this.killNpc(target.id);
-    }
-
+    this.executeThrowOnTarget(attack, profBonus, normalRange, itemDef, target, targetDef);
     s.player.actionUsed = true;
     if (s.npcs.filter((n) => n.disposition === 'enemy' && n.hp > 0).length === 0) {
       s.phase = 'exploring';
@@ -580,59 +529,14 @@ export class GameEngine {
     const targetDef = this.resolveMonsterDef(target.defId);
     if (!targetDef) return events;
 
-    const dist = chebyshev(s.player.tileX, s.player.tileY, target.tileX, target.tileY);
-
-    let attack: PlayerAttack;
-    let profBonus: number;
-    if (isProperThrown) {
-      attack = makePlayerAttack(this.playerDef, itemDef as WeaponDef);
-      profBonus = this.playerDef.proficiencyBonus;
-    } else {
-      attack = {
-        name: itemDef.name, statKey: 'str',
-        damageDice: 1, damageSides: 4, damageType: 'bludgeoning',
-        savageAttacker: false, graze: false, vex: false, sap: false, slow: false,
-      };
-      profBonus = 0;
-    }
-
-    const withAdvantage = s.player.hidden;
-    const withDisadvantage = dist > normalRange;
-    this.addLog({ left: `${this.playerDef.name} throws ${itemDef.name}`, style: 'normal' });
-    const { damage, logs, vexApplied, slowApplied } = playerThrowAttack(
-      this.playerDef, attack, targetDef, withAdvantage, withDisadvantage, profBonus,
-    );
-    s.player.hidden = false;
+    const attack: PlayerAttack = isProperThrown
+      ? makePlayerAttack(this.playerDef, itemDef as WeaponDef)
+      : { name: itemDef.name, statKey: 'str', damageDice: 1, damageSides: 4, damageType: 'bludgeoning', savageAttacker: false, graze: false, vex: false, sap: false, slow: false };
+    const profBonus = isProperThrown ? this.playerDef.proficiencyBonus : 0;
 
     if (fromMap) s.mapItems.splice(mapItemIdx, 1);
     else s.player.inventoryIds.splice(inventoryIdx, 1);
-
-    this.addLogs(logs);
-
-    const { finalDamage, log: resistLog } = this.resistMod(damage, attack.damageType, targetDef);
-    if (resistLog) this.addLog(resistLog);
-    target.hp = Math.max(0, target.hp - finalDamage);
-    this.addLog({ left: `${targetDef.name} HP: ${target.hp}/${target.maxHp}`, style: 'status' });
-
-    if (vexApplied) {
-      target.vexed = true;
-      this.addLog({ left: `Vex/Sap — ${targetDef.name} attacks with Disadvantage`, style: 'status' });
-    }
-    if (slowApplied && !target.conditions.includes('slowed')) {
-      target.conditions.push('slowed');
-      this.addLog({ left: `Slow — ${targetDef.name} speed reduced by 10 ft`, style: 'status' });
-    }
-
-    if (target.hp <= 0) {
-      const gold = crGoldReward(targetDef.cr);
-      s.player.xp += targetDef.xp;
-      s.player.gold += gold;
-      this.addLogs([
-        { left: `☠ ${targetDef.name} is slain! +${targetDef.xp} XP  +${gold} GP`, style: 'kill' },
-        { left: `Total XP: ${s.player.xp}  |  GP: ${s.player.gold}`, style: 'status' },
-      ]);
-      this.killNpc(target.id);
-    }
+    this.executeThrowOnTarget(attack, profBonus, normalRange, itemDef, target, targetDef);
 
     if (s.phase === 'player_turn') {
       s.player.actionUsed = true;
@@ -678,6 +582,52 @@ export class GameEngine {
     s.turnOrderIds = s.turnOrderIds.filter((tid) => tid !== id);
     if (s.selectedTargetId === id) s.selectedTargetId = null;
     this.advanceQuest('kill');
+  }
+
+  private killWithReward(npc: NpcState, def: MonsterDef, killMessage: string, includeTotal = true): void {
+    const s = this.state;
+    const gold = crGoldReward(def.cr);
+    s.player.xp += def.xp;
+    s.player.gold += gold;
+    const logs: LogEntry[] = [{ left: `${killMessage} +${def.xp} XP  +${gold} GP`, style: 'kill' }];
+    if (includeTotal) logs.push({ left: `Total XP: ${s.player.xp}  |  GP: ${s.player.gold}`, style: 'status' });
+    this.addLogs(logs);
+    this.killNpc(npc.id);
+  }
+
+  private executeThrowOnTarget(
+    attack: PlayerAttack,
+    profBonus: number,
+    normalRange: number,
+    itemDef: ItemDef,
+    target: NpcState,
+    targetDef: MonsterDef,
+  ): void {
+    const s = this.state;
+    const dist = chebyshev(s.player.tileX, s.player.tileY, target.tileX, target.tileY);
+    const withAdvantage = s.player.hidden;
+    const withDisadvantage = dist > normalRange;
+    this.addLog({ left: `${this.playerDef.name} throws ${itemDef.name}`, style: 'normal' });
+    const { damage, logs, vexApplied, slowApplied } = playerThrowAttack(
+      this.playerDef, attack, targetDef, withAdvantage, withDisadvantage, profBonus,
+    );
+    s.player.hidden = false;
+    this.addLogs(logs);
+    const { finalDamage, log: resistLog } = this.resistMod(damage, attack.damageType, targetDef);
+    if (resistLog) this.addLog(resistLog);
+    target.hp = Math.max(0, target.hp - finalDamage);
+    this.addLog({ left: `${targetDef.name} HP: ${target.hp}/${target.maxHp}`, style: 'status' });
+    if (vexApplied) {
+      target.vexed = true;
+      this.addLog({ left: `Vex/Sap — ${targetDef.name} attacks with Disadvantage`, style: 'status' });
+    }
+    if (slowApplied && !target.conditions.includes('slowed')) {
+      target.conditions.push('slowed');
+      this.addLog({ left: `Slow — ${targetDef.name} speed reduced by 10 ft`, style: 'status' });
+    }
+    if (target.hp <= 0) {
+      this.killWithReward(target, targetDef, `☠ ${targetDef.name} is slain!`);
+    }
   }
 
   private doHide(_events: GameEvent[]): void {
@@ -858,14 +808,7 @@ export class GameEngine {
               target.hp = Math.max(0, target.hp - finalDamage);
               this.addLog({ left: `${targetDef.name} HP: ${target.hp}/${target.maxHp}`, style: 'status' });
               if (target.hp <= 0) {
-                const gold = crGoldReward(targetDef.cr);
-                s.player.xp += targetDef.xp;
-                s.player.gold += gold;
-                this.addLogs([
-                  { left: `☠ ${targetDef.name} is slain! +${targetDef.xp} XP  +${gold} GP`, style: 'kill' },
-                  { left: `Total XP: ${s.player.xp}  |  GP: ${s.player.gold}`, style: 'status' },
-                ]);
-                this.killNpc(target.id);
+                this.killWithReward(target, targetDef, `☠ ${targetDef.name} is slain!`);
               }
             }
           }
@@ -1057,11 +1000,7 @@ export class GameEngine {
     if (vexApplied) npc.vexed = true;
     if (slowApplied && !npc.conditions.includes('slowed')) npc.conditions.push('slowed');
     if (npc.hp <= 0) {
-      const gold = crGoldReward(targetDef.cr);
-      s.player.xp += targetDef.xp;
-      s.player.gold += gold;
-      this.addLog({ left: `☠ ${targetDef.name} slain by Opportunity Attack! +${targetDef.xp} XP  +${gold} GP`, style: 'kill' });
-      this.killNpc(npc.id);
+      this.killWithReward(npc, targetDef, `☠ ${targetDef.name} slain by Opportunity Attack!`, false);
     }
   }
 
