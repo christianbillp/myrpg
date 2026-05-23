@@ -5,7 +5,7 @@
   "statKey": "str",
   "damageDice": 1,
   "damageSides": 6,
-  "damageType": "Piercing",
+  "damageType": "piercing",
   "mastery": "slow",
   "finesse": false,
   "twoHanded": false,

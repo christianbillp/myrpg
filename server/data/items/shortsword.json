@@ -5,7 +5,7 @@
   "statKey": "dex",
   "damageDice": 1,
   "damageSides": 6,
-  "damageType": "Piercing",
+  "damageType": "piercing",
   "mastery": "vex",
   "finesse": true,
   "twoHanded": false,

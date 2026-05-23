@@ -5,7 +5,7 @@
   "statKey": "str",
   "damageDice": 2,
   "damageSides": 6,
-  "damageType": "Slashing",
+  "damageType": "slashing",
   "mastery": "graze",
   "finesse": false,
   "twoHanded": true,

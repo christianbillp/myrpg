@@ -423,14 +423,14 @@ export class GameEngine {
     }
   }
 
-  private resistMod(damage: number, damageType: string, def: MonsterDef): { finalDamage: number; log: string | null } {
+  private resistMod(damage: number, damageType: string, def: MonsterDef): { finalDamage: number; log: LogEntry | null } {
     if (def.resistances?.includes(damageType)) {
       const fd = Math.floor(damage / 2);
-      return { finalDamage: fd, log: `${def.name} is resistant to ${damageType} — ${damage}→${fd}` };
+      return { finalDamage: fd, log: { left: `${def.name} resists ${damageType} — ${damage}→${fd}`, right: '×½', style: 'status' } };
     }
     if (def.vulnerabilities?.includes(damageType)) {
       const fd = damage * 2;
-      return { finalDamage: fd, log: `${def.name} is vulnerable to ${damageType} — ${damage}→${fd}` };
+      return { finalDamage: fd, log: { left: `${def.name} is vulnerable to ${damageType}! ${damage}→${fd}`, right: '×2', style: 'crit' } };
     }
     return { finalDamage: damage, log: null };
   }

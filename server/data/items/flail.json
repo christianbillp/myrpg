@@ -5,7 +5,7 @@
   "statKey": "str",
   "damageDice": 1,
   "damageSides": 8,
-  "damageType": "Bludgeoning",
+  "damageType": "bludgeoning",
   "mastery": "sap",
   "finesse": false,
   "twoHanded": false,
