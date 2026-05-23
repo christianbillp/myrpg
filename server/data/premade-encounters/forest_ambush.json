@@ -1,7 +1,0 @@
-{
-  "id": "forest_ambush",
-  "title": "Forest Ambush",
-  "description": "You are travelling a forest trail when armed bandits step out from the trees. There is no time to run.",
-  "encounterTypes": ["simple_combat"],
-  "mapId": "forest_trail"
-}

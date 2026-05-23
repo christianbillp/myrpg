@@ -49,12 +49,16 @@ export class OverlayManager {
   showIntroIfNeeded(state: GameState): void {
     if (this.introShown || !state.introduction) return;
     this.introShown = true;
+    const introduction = state.introduction;
     this.introOverlay = new IntroductionOverlay(
       this.scene,
       state.encounterTypes,
       this.playerDef,
-      { introduction: state.introduction, context: state.encounterContext, enemyCount: 0, secrets: [], riddle: null, quests: [] },
-      () => { this.introOverlay = null; },
+      { introduction, context: state.encounterContext, enemyCount: 0, secrets: [], riddle: null, quests: [] },
+      () => {
+        this.introOverlay = null;
+        this.aidmHistory = [{ role: 'assistant', content: introduction }];
+      },
     );
   }
 

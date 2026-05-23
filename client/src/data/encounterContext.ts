@@ -39,6 +39,7 @@ export interface PremadeEncounterDef {
   allyIds?: string[];
   customIntroduction?: string;
   customContext?: string;
+  startingZones?: string[];
 }
 
 export interface EncounterContext {

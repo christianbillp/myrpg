@@ -127,6 +127,7 @@ export interface CreateSessionRequest {
   allyIds?: string[];
   customIntroduction?: string;
   customContext?: string;
+  startingZones?: string[];
   resumeHp?: number;
   resumeXp?: number;
   resumeGold?: number;

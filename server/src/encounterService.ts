@@ -11,6 +11,7 @@ export interface EncounterContext {
   quests: QuestDef[];
   npcIds?: string[];
   allyIds?: string[];
+  startingZones?: string[];
 }
 
 export type SecretReward =
@@ -44,6 +45,7 @@ export interface EncounterStartRequest {
   allyIds?: string[];
   customIntroduction?: string;
   customContext?: string;
+  startingZones?: string[];
 }
 
 const SECRET_POOL: SecretDef[] = [
@@ -128,7 +130,8 @@ export function buildEncounter(req: EncounterStartRequest): EncounterContext {
     secrets:  req.encounterTypes.includes('exploration') ? pickSecrets(4) : [],
     riddle:   req.encounterTypes.includes('social_interaction') ? pickRandom(RIDDLES) : null,
     quests:   buildQuests(req.encounterTypes, enemyCount),
-    npcIds:   req.npcIds,
-    allyIds:  req.allyIds,
+    npcIds:        req.npcIds,
+    allyIds:       req.allyIds,
+    startingZones: req.startingZones,
   };
 }

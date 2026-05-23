@@ -1,7 +1,7 @@
 {
   "id": "bridge",
   "name": "Narrow Bridge",
-  "description": "A weathered stone bridge spans a dark gorge. Two cramped lanes of rock are all that separate the two banks.",
+  "mapdescription": "A weathered stone bridge spans a dark gorge. Two cramped lanes of rock are all that separate the two banks.",
   "rows": [
     "##########################",
     "#.......##########.......#",

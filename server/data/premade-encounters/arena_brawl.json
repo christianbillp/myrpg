@@ -1,7 +1,0 @@
-{
-  "id": "arena_brawl",
-  "title": "Arena Brawl",
-  "description": "The ancient arena echoes with the clash of steel. Step into the pit and defeat all who stand before you.",
-  "encounterTypes": ["simple_combat"],
-  "mapId": "arena"
-}

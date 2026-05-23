@@ -22,9 +22,13 @@ export class GameClient {
   resumeSession(sessionId: string): void { this.sessionId = sessionId; }
 
   async loadWorld(): Promise<{ sessionId: string; state: GameState } | null> {
-    const res = await fetch(`${API_URL}/world`);
-    if (!res.ok) return null;
-    return res.json() as Promise<{ sessionId: string; state: GameState }>;
+    try {
+      const res = await fetch(`${API_URL}/world`, { signal: AbortSignal.timeout(5000) });
+      if (!res.ok) return null;
+      return res.json() as Promise<{ sessionId: string; state: GameState }>;
+    } catch {
+      return null;
+    }
   }
 
   async createSession(req: CreateSessionRequest): Promise<GameState> {
@@ -40,7 +44,7 @@ export class GameClient {
   }
 
   connectWebSocket(): void {
-    if (!this.sessionId) throw new Error('No session — call createSession first');
+    if (!this.sessionId) { console.error('connectWebSocket: no sessionId'); return; }
     this.ws = new WebSocket(`${WS_URL}/game/session/${this.sessionId}/ws`);
     this.ws.onmessage = (event) => {
       const msg = JSON.parse(event.data as string) as ServerWSMessage;
@@ -50,6 +54,7 @@ export class GameClient {
         this.onAIDMReply?.(msg.reply);
       }
     };
+    this.ws.onerror = (e) => console.error('WebSocket error:', e);
   }
 
   disconnect(): void {

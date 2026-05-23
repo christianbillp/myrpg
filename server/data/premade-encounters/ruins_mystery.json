@@ -1,7 +1,0 @@
-{
-  "id": "ruins_mystery",
-  "title": "Ruins Mystery",
-  "description": "A lone villager shelters among crumbling stones. Answer their riddle — and search the rubble for what time has forgotten.",
-  "encounterTypes": ["social_interaction", "exploration"],
-  "mapId": "ruins"
-}

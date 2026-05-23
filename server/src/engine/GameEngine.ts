@@ -24,7 +24,7 @@ export interface GameDefs {
   monsters: MonsterDef[];
   npcs: NPCDef[];
   items: ItemDef[];
-  maps: { id: string; passable: boolean[][]; cols: number; rows: number; name: string; description: string }[];
+  maps: { id: string; passable: boolean[][]; cols: number; rows: number; name: string; mapdescription: string }[];
 }
 
 export interface ActionResult {
@@ -948,7 +948,14 @@ export class GameEngine {
 
     const inventoryIds: string[] = req.resumeInventoryIds ?? [...(playerDef.defaultInventoryIds ?? [])];
 
-    const [pX, pY] = findPlayerSpawn(map);
+    const rawZones = req.startingZones ?? req.encounterContext.startingZones;
+    const zoneMap: ZoneMap = rawZones ? parseStartingZones(rawZones, map) : new Map();
+    const playerZone = zoneMap.get('P');
+    const allyZone   = zoneMap.get('A') ?? playerZone;
+    const npcZone    = zoneMap.get('N');
+    const enemyZone  = zoneMap.get('E');
+
+    const [pX, pY] = findPlayerSpawn(map, playerZone);
 
     const player = {
       defId: playerDef.id,
@@ -977,15 +984,15 @@ export class GameEngine {
     const secrets: SecretState[] = [];
 
     for (const defId of (req.allyIds ?? req.encounterContext.allyIds ?? [])) {
-      spawnNpc(npcs, map, defs.npcs, defs.monsters, defId, player.tileX, player.tileY, 'ally');
+      spawnNpc(npcs, map, defs.npcs, defs.monsters, defId, player.tileX, player.tileY, 'ally', allyZone);
     }
     if (isCombat) {
-      spawnEnemies(npcs, map, defs.monsters, player.tileX, player.tileY, req.encounterContext.enemyCount ?? 2);
+      spawnEnemies(npcs, map, defs.monsters, player.tileX, player.tileY, req.encounterContext.enemyCount ?? 2, enemyZone);
       spawnItems(mapItems, map, defs.items, player.tileX, player.tileY, npcs);
     }
     if (req.encounterTypes.includes('social_interaction')) {
       for (const defId of (req.npcIds ?? req.encounterContext.npcIds ?? [])) {
-        spawnNpc(npcs, map, defs.npcs, defs.monsters, defId, player.tileX, player.tileY);
+        spawnNpc(npcs, map, defs.npcs, defs.monsters, defId, player.tileX, player.tileY, 'neutral', npcZone);
       }
     }
     if (req.encounterTypes.includes('exploration')) {
@@ -1042,7 +1049,34 @@ export class GameEngine {
 
 // ── Spawn helpers ──────────────────────────────────────────────────────────────
 
-function findPlayerSpawn(map: GameMap): [number, number] {
+type Zone = [number, number][]; // [tileX, tileY] pairs, already filtered to passable tiles
+type ZoneMap = Map<string, Zone>;
+
+function parseStartingZones(rows: string[], map: GameMap): ZoneMap {
+  const result: ZoneMap = new Map();
+  for (let r = 0; r < rows.length; r++) {
+    for (let c = 0; c < rows[r].length; c++) {
+      const ch = rows[r][c];
+      if (ch === '.' || ch === '#' || ch === ' ') continue;
+      if (!map.passable[r]?.[c]) continue;
+      if (!result.has(ch)) result.set(ch, []);
+      result.get(ch)!.push([c, r]);
+    }
+  }
+  return result;
+}
+
+function pickFromZone(zone: Zone, occupied: Set<string>): [number, number] | null {
+  const free = zone.filter(([c, r]) => !occupied.has(`${c},${r}`));
+  if (!free.length) return null;
+  return free[Math.floor(Math.random() * free.length)];
+}
+
+function findPlayerSpawn(map: GameMap, zone?: Zone): [number, number] {
+  if (zone) {
+    const pick = zone[Math.floor(Math.random() * zone.length)];
+    if (pick) return pick;
+  }
   const { cols, rows, passable } = map;
   const candidates: [number, number][] = [];
   for (let r = 0; r < rows; r++)
@@ -1058,8 +1092,27 @@ function findPlayerSpawn(map: GameMap): [number, number] {
 function spawnEnemies(
   out: NpcState[], map: GameMap, monsters: MonsterDef[],
   px: number, py: number, count: number,
+  zone?: Zone,
 ): void {
   const defs = monsters.filter((m) => m.cr !== '0');
+  const occupied = new Set<string>([`${px},${py}`, ...out.map((n) => `${n.tileX},${n.tileY}`)]);
+
+  if (zone) {
+    const free = shuffle(zone.filter(([c, r]) => !occupied.has(`${c},${r}`))).slice(0, Math.min(count, zone.length));
+    free.forEach(([c, r], i) => {
+      const def = defs[Math.floor(Math.random() * defs.length)];
+      out.push({
+        id: `enemy_${i}`, defId: def.id, label: String.fromCharCode(65 + i),
+        tileX: c, tileY: r,
+        disposition: 'enemy',
+        hp: def.maxHp, maxHp: def.maxHp,
+        isActive: false, vexed: false, hidden: false,
+        reactionUsed: false, conditions: [],
+      });
+    });
+    return;
+  }
+
   const { cols, rows, passable } = map;
   const candidates: [number, number][] = [];
   for (let r = 0; r < rows; r++)
@@ -1100,24 +1153,32 @@ function spawnNpc(
   out: NpcState[], map: GameMap, npcDefs: NPCDef[], monsters: MonsterDef[],
   defId: string, px: number, py: number,
   disposition: 'neutral' | 'ally' = 'neutral',
+  zone?: Zone,
 ): void {
   const npcDef = npcDefs.find((n) => n.id === defId);
   if (!npcDef) return;
   const monsterDef = monsters.find((m) => m.id === npcDef.monsterClass);
   const maxHp = monsterDef?.maxHp ?? 8;
-  const { cols, rows, passable } = map;
   const occupied = new Set<string>([
     `${px},${py}`,
     ...out.map((n) => `${n.tileX},${n.tileY}`),
   ]);
-  const candidates: [number, number][] = [];
-  for (let r = 0; r < rows; r++)
-    for (let c = 0; c < cols; c++) {
-      const dist = chebyshev(c, r, px, py);
-      const inRange = disposition === 'ally' ? dist >= 1 && dist <= 3 : dist >= 5;
-      if (passable[r][c] && inRange && !occupied.has(`${c},${r}`))
-        candidates.push([c, r]);
-    }
+
+  let candidates: [number, number][];
+  if (zone) {
+    candidates = zone.filter(([c, r]) => !occupied.has(`${c},${r}`));
+  } else {
+    const { cols, rows, passable } = map;
+    candidates = [];
+    for (let r = 0; r < rows; r++)
+      for (let c = 0; c < cols; c++) {
+        const dist = chebyshev(c, r, px, py);
+        const inRange = disposition === 'ally' ? dist >= 1 && dist <= 3 : dist >= 5;
+        if (passable[r][c] && inRange && !occupied.has(`${c},${r}`))
+          candidates.push([c, r]);
+      }
+  }
+
   if (candidates.length === 0) return;
   const [nx, ny] = candidates[Math.floor(Math.random() * candidates.length)];
   out.push({

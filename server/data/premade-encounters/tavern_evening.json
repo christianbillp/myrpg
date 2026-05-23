@@ -1,8 +1,32 @@
 {
   "id": "tavern_evening",
   "title": "A Night at the Flagon",
-  "description": "The Rusty Flagon is busy tonight. Locals fill the tables and the keeper, Bram Holdfast, watches from behind the bar. He knows things — if you can get him talking.",
+  "description": "The Rusty Flagon is busy tonight. Locals fill the tables and Bram Holdfast watches from behind the bar. He knows things — if you can get him talking.",
   "encounterTypes": ["social_interaction"],
   "mapId": "tavern",
-  "npcIds": ["tavern_keeper", "villager", "villager", "villager"]
+  "npcIds": ["tavern_keeper", "villager", "villager", "villager"],
+  "customIntroduction": "Warm light and the smell of ale spill out as you push through the door of the Rusty Flagon. The common room is busy — locals hunched over their drinks at scattered tables, low conversation filling the smoky air. Behind the long bar counter to the north, Bram Holdfast wipes down a tankard without looking up. He always knows who's walked in.",
+  "customContext": "Social encounter inside a tavern common room. The player enters from the south door. Bram Holdfast (the tavern keeper) works behind the bar counter along the north wall — he is the primary information source and should speak in a wary, knowing manner. Three villager patrons are seated at tables throughout the room. All NPCs are neutral; no combat is expected. The AIDM should make the tavern feel lived-in and atmospheric, with Bram as the most interesting conversationalist and the villagers offering local colour and rumour.",
+  "startingZones": [
+    "..........................",
+    ".NNNNNNNNNNNNNNNNNNNNNNNN.",
+    "..........................",
+    ".NNNNNNNNNNNNNNNNNNNNNNNN.",
+    ".NN..NNNNNNNNN..NNNNN..NN.",
+    ".NN..NNNNNNNNN..NNNNN..NN.",
+    ".NNNNNNNNNNNNNNNNNNNNNNNN.",
+    ".NNNNNNNNNNNNNNNNNNNNNNNN.",
+    ".NNNNNNNNNNNNNNNNNNNNNNNN.",
+    ".NNNNNNN..NNNNNNN..NNNNNN.",
+    ".NNNNNNN..NNNNNNN..NNNNNN.",
+    ".NNNNNNNNNNNNNNNNNNNNNNNN.",
+    ".NNNNNNNNNNNNNNNNNNNNNNNN.",
+    ".NN..NNNNNN..NNNNNNN..NNN.",
+    ".NN..NNNNNN..NNNNNNN..NNN.",
+    ".NNNNNNNNNNNNNNNNNNNNNNNN.",
+    "..........................",
+    "..........................",
+    "..........................",
+    "...........PPPP............"
+  ]
 }

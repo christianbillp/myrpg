@@ -1,0 +1,33 @@
+{
+  "id": "dungeon_delve",
+  "title": "Dungeon Delve",
+  "description": "Something valuable was left behind in this forsaken dungeon. Search its five chambers — antechamber, guard room, flanking side chambers, and the sealed vault — before someone else finds it first.",
+  "encounterTypes": ["exploration"],
+  "mapId": "dungeon",
+  "customIntroduction": "Torchlight flickers across damp stone as you step through the narrow entrance. You are inside the antechamber of an old dungeon — the air is cold and still. Somewhere deeper in, past the guard room and the flanking side chambers, lies a sealed vault. Whatever was hidden here has been waiting a long time.",
+  "customContext": "Exploration encounter inside a five-chamber dungeon. The player enters from the 2-tile gap in the southern wall and starts in the antechamber. Moving north leads through a guard room with side passages to a west chamber and an east chamber. A narrow corridor continues north to the vault — the most intact and most likely rewarding room. No enemies are present at the start, but the AIDM should make the dungeon feel dangerous and atmospheric. Secrets should be distributed across the rooms to reward thorough exploration.",
+  "startingZones": [
+    "..............................",
+    "..............................",
+    "..............................",
+    "..............................",
+    "..............................",
+    "..............................",
+    "..............................",
+    "..............................",
+    "..............................",
+    "..............................",
+    "..............................",
+    "..............................",
+    "..............................",
+    "..............................",
+    "..............................",
+    "..............................",
+    "..............................",
+    "..............................",
+    "..............................",
+    "..............................",
+    "..............................",
+    "....PPP......................."
+  ]
+}

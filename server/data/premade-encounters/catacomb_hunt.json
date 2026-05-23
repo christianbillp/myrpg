@@ -1,7 +1,0 @@
-{
-  "id": "catacomb_hunt",
-  "title": "Catacomb Hunt",
-  "description": "Winding passages hide both enemies and treasures. Fight through the dark corridors and claim what lurks within.",
-  "encounterTypes": ["simple_combat", "exploration"],
-  "mapId": "catacombs"
-}
