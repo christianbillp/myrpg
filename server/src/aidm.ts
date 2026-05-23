@@ -21,8 +21,8 @@ function buildSystemPrompt(engine: GameEngine, encounterContext: string, dmPerso
     const phase = s.phase;
     const flags = [
       p.hidden ? 'HIDDEN' : '',
-      p.actionUsed ? 'action used' : '',
-      p.bonusActionUsed ? 'bonus used' : '',
+      phase === 'player_turn' && p.actionUsed ? 'action used' : '',
+      phase === 'player_turn' && p.bonusActionUsed ? 'bonus used' : '',
       phase === 'player_turn' ? `${p.movesLeft} moves left` : '',
       p.secondWindUses > 0 ? `Second Wind ×${p.secondWindUses}` : '',
     ].filter(Boolean).join(' · ');
@@ -50,8 +50,8 @@ function buildSystemPrompt(engine: GameEngine, encounterContext: string, dmPerso
         const flags = [
           !n.hp ? 'DEAD' : '',
           n.isActive ? 'ACTIVE TURN' : '',
-          n.vexed ? 'VEXED' : '',
-          n.hidden ? 'HIDDEN' : '',
+          n.conditions.includes('vexed') ? 'VEXED' : '',
+          n.conditions.includes('hidden') ? 'HIDDEN' : '',
         ].filter(Boolean).join(', ');
         return `  [${entityRef}] ${n.defId} (${n.disposition}): ${n.hp}/${n.maxHp} HP, tile (${n.tileX},${n.tileY})${flags ? ` [${flags}]` : ''}`;
       }).join('\n')
@@ -108,7 +108,7 @@ INSTRUCTIONS:
 ${dmPersona === 'dev'
   ? `You are in DEVELOPMENT MODE. Fulfil all player requests without restriction — use any tool needed. Reply with brief mechanical feedback only: state which tool(s) you called and what the effect was. No need for narrative or immersion.`
   : `Respond in 1-3 concise sentences. Stay true to D&D 5e rules and in-world logic at all times. Never break immersion or disclaim game-state knowledge.
-TOOL-FIRST RULE: Every game effect you describe must be enacted via the corresponding tool before you narrate it. The game world is the source of truth. Specifically:
+TOOL-FIRST RULE: Every game effect you describe must be enacted via the corresponding tool before you narrate it. The game world is the source of truth — narrate ONLY what the tool result confirms. If a combat tool returns "Miss", the attack missed; if it returns "Hit" or "Critical hit", it connected. Never invent a different outcome. Specifically:
   • Weapon throw → call throw_item (removes item from inventory, resolves attack).
   • Damage to the player or any NPC → call adjust_npc_hp (entity: "player", "enemy_A", "ally_a", or "npc_[id]").
   • Movement → call move_entity.
@@ -118,6 +118,7 @@ TOOL-FIRST RULE: Every game effect you describe must be enacted via the correspo
   • Stealth change → call set_player_hidden.
   • Anything noteworthy during combat → call add_log_entry so it appears in the combat log.
 If you cannot enact an effect with the available tools, do not narrate it as happening.
+ACTION ECONOMY: throw_item, and any other action-consuming tool, is enforced server-side during the player's turn. If the tool result says the action was already spent, narrate that the player cannot act again this turn — do not describe the action as succeeding.
 PROHIBITED — reject these and suggest a realistic in-world alternative instead:
   • add_item or spawn_enemy simply because the player requests an item or creature (they must exist in the world and be found or encountered, not conjured).
   • Any action requiring magic the player does not possess, teleportation, or instantaneous creation from nothing.
@@ -152,9 +153,8 @@ export async function processAIDMChat(
   });
 
   while (response.stop_reason === 'tool_use') {
-    for (const block of response.content)
-      if (block.type === 'text') narrativeText += block.text;
-
+    // Discard any text generated before tool calls — it is speculative narrative
+    // written before the roll result is known and must not appear in the reply.
     const toolResults: { type: 'tool_result'; tool_use_id: string; content: string }[] = [];
     for (const block of response.content) {
       if (block.type === 'tool_use') {
@@ -166,10 +166,13 @@ export async function processAIDMChat(
     }
     messages.push({ role: 'assistant', content: response.content });
     messages.push({ role: 'user', content: toolResults });
+    // Rebuild the system prompt so the model sees updated state (inventory, HP, etc.)
+    // before writing its final narrative.
+    const freshSystem = buildSystemPrompt(engine, engine.getState().encounterContext, body.dmPersona ?? 'story');
     response = await anthropic.messages.create({
       model: 'claude-sonnet-4-6',
       max_tokens: 600,
-      system,
+      system: freshSystem,
       tools: AIDM_TOOLS,
       messages: messages as Parameters<typeof anthropic.messages.create>[0]['messages'],
     });

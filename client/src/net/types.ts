@@ -32,6 +32,7 @@ export interface PlayerState {
   deathSaveSuccesses: number; deathSaveFailures: number;
   hitDiceUsed: number;
   conditions: string[];
+  equippedSlotLabels: { armor: string | null; weapon: string | null; shield: string | null };
 }
 
 export interface NpcState {
@@ -40,7 +41,7 @@ export interface NpcState {
   disposition: Disposition;
   label: string;
   hp: number; maxHp: number;
-  isActive: boolean; vexed: boolean; hidden: boolean;
+  isActive: boolean;
   reactionUsed: boolean; conditions: string[];
 }
 

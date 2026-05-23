@@ -232,7 +232,7 @@ export class HUD {
         const conds  = playerConditions.filter(c => c !== 'dashing').map(c => `  [${c.toUpperCase()}]`).join('');
         const acted  = actionUsed     ? '  · action used' : '';
         const bonus  = bonusActionUsed ? '  · bonus used'  : '';
-        text = `Your turn — ${movesLeft}/${playerDef.speed} moves${hidden}${conds}${acted}${bonus}`;
+        text = `Your turn — ${movesLeft}/${playerDef.speed / 5} moves${hidden}${conds}${acted}${bonus}`;
         break;
       }
       case 'enemy_turn': {

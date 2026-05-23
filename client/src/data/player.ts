@@ -37,7 +37,6 @@ export interface PlayerDef {
   hitDieType: number;
   sneakAttackDice: number;
   speed: number;
-  speedFt: number;
   color: number;
   xp: number;
   savageAttacker: boolean;
@@ -45,4 +44,5 @@ export interface PlayerDef {
   defaultEquipment: EquipmentSlots;
   defaultInventoryIds: string[];
   mainAttack: PlayerAttack;
+  description?: string;
 }

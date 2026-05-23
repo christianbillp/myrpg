@@ -38,6 +38,43 @@ export function makePlayerAttack(playerDef: PlayerDef, weapon: WeaponDef): Playe
   };
 }
 
+export function computeEquippedSlotLabels(
+  playerDef: PlayerDef,
+  slots: EquipmentSlots,
+  allItems: ItemDef[],
+): { armor: string | null; weapon: string | null; shield: string | null } {
+  const byId = Object.fromEntries(allItems.map((i) => [i.id, i]));
+  const armor  = slots.armorId  ? (byId[slots.armorId]  as ArmorDef  | undefined) ?? null : null;
+  const shield = slots.shieldId ? (byId[slots.shieldId] as ShieldDef | undefined) ?? null : null;
+  const weapon = slots.weaponId ? (byId[slots.weaponId] as WeaponDef | undefined) ?? null : null;
+
+  let armorLabel: string | null = null;
+  if (armor) {
+    const dexMod = mod(playerDef.dex);
+    const dexBonus = armor.addDex ? (armor.maxDex !== null ? Math.min(dexMod, armor.maxDex) : dexMod) : 0;
+    const ac = armor.baseAc + dexBonus + (playerDef.fightingStyleDefense ? 1 : 0);
+    const catLabel = armor.category.charAt(0).toUpperCase() + armor.category.slice(1);
+    armorLabel = `${catLabel} · AC ${ac}`;
+  }
+
+  const shieldLabel: string | null = shield ? `+${shield.acBonus} AC` : null;
+
+  let weaponLabel: string | null = null;
+  if (weapon) {
+    const attack = makePlayerAttack(playerDef, weapon);
+    const statMod = mod(playerDef[attack.statKey]);
+    const diceStr = `${attack.damageDice}d${attack.damageSides}`;
+    const sign = statMod >= 0 ? '+' : '';
+    const masteries: string[] = [];
+    if (attack.graze) masteries.push('Graze');
+    if (attack.vex) masteries.push('Vex');
+    const masteryStr = masteries.length ? ` (${masteries.join(', ')})` : '';
+    weaponLabel = `${diceStr}${sign}${statMod}${masteryStr}`;
+  }
+
+  return { armor: armorLabel, weapon: weaponLabel, shield: shieldLabel };
+}
+
 export function applyEquipment(playerDef: PlayerDef, slots: EquipmentSlots, allItems: ItemDef[]): void {
   const byId = Object.fromEntries(allItems.map((i) => [i.id, i]));
   const armor = slots.armorId ? (byId[slots.armorId] as ArmorDef | undefined) ?? null : null;

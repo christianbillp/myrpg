@@ -177,7 +177,7 @@ export class EncounterSetupScene extends Phaser.Scene {
 
   private buildCharCard(def: PlayerDef, cx: number, cy: number): void {
     const cardW = 270;
-    const cardH = 490;
+    const cardH = 550;
     const colorHex = "#" + def.color.toString(16).padStart(6, "0");
     const statMod = (v: number) => Math.floor((v - 10) / 2);
     const items = this.registry.get("items") as ItemDef[];
@@ -199,24 +199,24 @@ export class EncounterSetupScene extends Phaser.Scene {
     const atkMod = def.mainAttack.statKey === "str" ? statMod(def.str) : statMod(def.dex);
     const atkBonus = atkMod + def.proficiencyBonus;
     this.add.text(cx, top + 152, [
-      `HP ${def.maxHp}   AC ${def.ac}   Speed ${def.speedFt} ft`,
+      `HP ${def.maxHp}   AC ${def.ac}   Speed ${def.speed} ft`,
       `Attack +${atkBonus}   Initiative ${statMod(def.dex) >= 0 ? "+" : ""}${statMod(def.dex)}`,
     ].join("\n"), { fontSize: "11px", color: "#aabbcc", fontFamily: "monospace", resolution: DPR, align: "center", lineSpacing: 6 }).setOrigin(0.5, 0);
 
     this.add.rectangle(cx, top + 200, cardW - 32, 1, 0x334455);
-    this.add.text(cx, top + 212, this.charFeatures(def).join("\n"), { fontSize: "11px", color: "#99bbcc", fontFamily: "monospace", resolution: DPR, align: "center", lineSpacing: 8 }).setOrigin(0.5, 0);
+    this.add.text(cx, top + 212, def.description ?? '', { fontSize: "11px", color: "#99bbcc", fontFamily: "monospace", resolution: DPR, align: "center", lineSpacing: 8, wordWrap: { width: cardW - 48 } }).setOrigin(0.5, 0);
 
-    this.add.rectangle(cx, top + 308, cardW - 32, 1, 0x223344);
+    this.add.rectangle(cx, top + 368, cardW - 32, 1, 0x223344);
 
-    const infoText = this.add.text(cx, top + 320, save ? this.saveInfoLine(save, def) : "No save data", {
+    const infoText = this.add.text(cx, top + 380, save ? this.saveInfoLine(save, def) : "No save data", {
       fontSize: "10px", color: save ? "#aabbcc" : "#445566", fontFamily: "monospace", resolution: DPR,
     }).setOrigin(0.5, 0);
-    const equippedText = this.add.text(cx, top + 338, save ? this.equippedLine(save, items) : "", {
+    const equippedText = this.add.text(cx, top + 398, save ? this.equippedLine(save, items) : "", {
       fontSize: "10px", color: "#667788", fontFamily: "monospace", resolution: DPR,
     }).setOrigin(0.5, 0);
 
-    const deleteBg = this.add.rectangle(cx, top + 366, 110, 22, 0x1a0808).setStrokeStyle(1, save ? 0x663333 : 0x222222).setAlpha(save ? 1 : 0.3);
-    const deleteLabel = this.add.text(cx, top + 366, "DELETE SAVE", {
+    const deleteBg = this.add.rectangle(cx, top + 426, 110, 22, 0x1a0808).setStrokeStyle(1, save ? 0x663333 : 0x222222).setAlpha(save ? 1 : 0.3);
+    const deleteLabel = this.add.text(cx, top + 426, "DELETE SAVE", {
       fontSize: "10px", color: save ? "#995555" : "#445566", fontFamily: "monospace", resolution: DPR,
     }).setOrigin(0.5).setAlpha(save ? 1 : 0.3);
 
@@ -248,13 +248,6 @@ export class EncounterSetupScene extends Phaser.Scene {
     this.selectedSave = this.allSaves.get(def.id) ?? null;
     localStorage.setItem(LAST_CHAR_KEY, def.id);
     this.refreshBeginButton();
-  }
-
-  private charFeatures(def: PlayerDef): string[] {
-    if (def.id === "aldric") {
-      return ["Greatsword  2d6+3 slashing", "Savage Attacker (roll dmg twice)", "Graze (STR mod on miss)", "Second Wind ×2"];
-    }
-    return ["Shortsword  1d6+3 piercing", "Sneak Attack +1d6 (from hide)", "Vex (Disadvantage on hit)", "Hide action (Stealth +7)"];
   }
 
   private buildPremadeCard(def: PremadeEncounterDef, cx: number, cy: number): void {

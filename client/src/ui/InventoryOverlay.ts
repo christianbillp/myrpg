@@ -54,6 +54,7 @@ export class InventoryOverlay extends BaseOverlay {
     scale: UIScale,
     playerDef: PlayerDef,
     slots: EquipmentSlots,
+    equippedSlotLabels: { armor: string | null; weapon: string | null; shield: string | null },
     inventory: ItemDef[],
     allItems: ItemDef[],
     gold: number,
@@ -79,9 +80,10 @@ export class InventoryOverlay extends BaseOverlay {
       const borderColor = item ? ACCENT : DIM;
       let inner: string;
       if (item) {
+        const serverLabel = equippedSlotLabels[key] ?? '';
         inner = `
           <div style="font-size:11px;color:#c8dae8;margin-bottom:4px;">${escHtml(item.name)}</div>
-          <div style="font-size:10px;color:${ACCENT};margin-bottom:8px;">${escHtml(slotLabel(item, playerDef))}</div>
+          <div style="font-size:10px;color:${ACCENT};margin-bottom:8px;">${escHtml(serverLabel)}</div>
           <button data-unequip="${key}" style="width:90px;height:22px;background:#1a1a2e;
             border:1px solid ${DIM};color:#889aaa;font-family:monospace;font-size:10px;cursor:pointer;">
             UNEQUIP

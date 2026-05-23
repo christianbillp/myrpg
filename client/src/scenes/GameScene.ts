@@ -328,16 +328,14 @@ export class GameScene extends Phaser.Scene {
     else if (downJust  && !upJust)  dy =  1;
     if (dx === 0 && dy === 0) return;
 
-    const { map, player: ps, npcs } = this.gameState;
+    const { map, npcs } = this.gameState;
     const px = this.player.tileX;
     const py = this.player.tileY;
     const nx = px + dx, ny = py + dy;
 
     if (nx < 0 || ny < 0 || nx >= map.cols || ny >= map.rows) return;
     if (!map.passable[ny][nx]) return;
-    if (dx !== 0 && dy !== 0 && !map.passable[py][nx] && !map.passable[ny][px]) return;
     if (npcs.some(n => n.hp > 0 && n.tileX === nx && n.tileY === ny)) return;
-    if (phase === "player_turn" && ps.movesLeft <= 0) return;
 
     this.player.move(dx, dy, map.cols, map.rows);
     gameClient.sendAction({ type: "move", dx, dy });
@@ -350,7 +348,7 @@ export class GameScene extends Phaser.Scene {
       onOpenInventory: () => { if (this.gameState) this.overlays.openInventory(this.gameState); },
       onSearch:        () => gameClient.sendAction({ type: "search" }),
       onAttack:        () => gameClient.sendAction({ type: "attack" }),
-      onThrow:         (itemId) => gameClient.sendAction({ type: "throw", itemId }),
+      onThrow:         (itemId) => gameClient.sendAction({ type: "throw", itemId, targetId: this.gameState?.selectedTargetId ?? undefined }),
       onDash:          () => gameClient.sendAction({ type: "dash" }),
       onDodge:         () => gameClient.sendAction({ type: "dodge" }),
       onDisengage:     () => gameClient.sendAction({ type: "disengage" }),
@@ -399,8 +397,8 @@ export class GameScene extends Phaser.Scene {
       playerConditions:   state.player.conditions,
       activeNpc,
       combatNpcs,
-      enemyVexed:         activeNpcState?.vexed ?? false,
-      enemyHidden:        activeNpcState?.hidden ?? false,
+      enemyVexed:         activeNpcState?.conditions.includes('vexed') ?? false,
+      enemyHidden:        activeNpcState?.conditions.includes('hidden') ?? false,
       deathSaveSuccesses: state.player.deathSaveSuccesses,
       deathSaveFailures:  state.player.deathSaveFailures,
       combatLog:          state.combatLog,
@@ -465,7 +463,7 @@ export class GameScene extends Phaser.Scene {
 
     if (this.selectedEntityId) {
       const nState = state.npcs.find(n => n.id === this.selectedEntityId);
-      if (nState && nState.hp > 0) this.targetPanel.refresh(nState.hp, nState.maxHp);
+      if (nState && nState.hp > 0) this.targetPanel.refresh(nState.hp, nState.maxHp, nState.conditions);
     }
 
     this.playerPanel.refreshActions(this.buildActionState(state));
@@ -502,10 +500,14 @@ export class GameScene extends Phaser.Scene {
     while (queue.length > 0) {
       const [cy, cx] = queue.shift()!;
       if (dist[cy][cx] >= state.player.movesLeft) continue;
-      for (const [dr, dc] of [[0, 1], [0, -1], [1, 0], [-1, 0]] as [number, number][]) {
+      for (const [dr, dc] of [
+        [0, 1], [0, -1], [1, 0], [-1, 0],
+        [1, 1], [1, -1], [-1, 1], [-1, -1],
+      ] as [number, number][]) {
         const nr = cy + dr, nc = cx + dc;
         if (nr < 0 || nr >= rows || nc < 0 || nc >= cols) continue;
         if (!passable[nr][nc]) continue;
+        if (dr !== 0 && dc !== 0 && !passable[cy][nc] && !passable[nr][cx]) continue;
         if (state.npcs.some(n => n.hp > 0 && n.tileX === nc && n.tileY === nr)) continue;
         if (dist[nr][nc] !== -1) continue;
         dist[nr][nc] = dist[cy][cx] + 1;

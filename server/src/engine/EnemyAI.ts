@@ -1,5 +1,6 @@
 import { NpcState, MonsterDef, GameEvent, LogEntry } from './types.js';
 import { tryNimbleEscape, enemyAttack } from './CombatSystem.js';
+import { isIncapacitated, hasAttackDisadvantage, hasSpeedZero, proneStandCost } from './ConditionSystem.js';
 
 export interface EnemyTurnConfig {
   playerTileX: number;
@@ -8,8 +9,6 @@ export interface EnemyTurnConfig {
   playerHp: number;
   playerHidden: boolean;
   playerDodging: boolean;
-  enemyVexed: boolean;
-  enemyCurrentlyHidden: boolean;
   passivePerception: number;
   passable: boolean[][];
   mapCols: number;
@@ -61,7 +60,12 @@ export function runEnemyTurn(
   const logs: LogEntry[] = [{ left: `${enemy.name}'s turn`, style: 'header' }];
   const events: GameEvent[] = [];
   let { tileX, tileY } = enemy;
-  let enemyHidden = config.enemyCurrentlyHidden;
+  let enemyHidden = enemy.conditions.includes('hidden');
+
+  if (isIncapacitated(enemy.conditions)) {
+    logs.push({ left: `${enemy.name} is incapacitated`, style: 'status' });
+    return { damage: 0, isHit: false, isCrit: false, attacked: false, logs, events, finalTileX: tileX, finalTileY: tileY, hidden: enemyHidden };
+  }
 
   const belowHalf = enemy.hp <= enemy.maxHp / 2;
   if (!enemyHidden && (belowHalf || Math.random() < 0.3)) {
@@ -70,7 +74,12 @@ export function runEnemyTurn(
     enemyHidden = hidden;
   }
 
-  let stepsLeft = Math.max(0, def.speed - (enemy.conditions.includes('slowed') ? 2 : 0));
+  const tileSpeed = def.speed / 5;
+  const standCost = proneStandCost(enemy.conditions, tileSpeed);
+  let stepsLeft = hasSpeedZero(enemy.conditions)
+    ? 0
+    : Math.max(0, tileSpeed - (enemy.conditions.includes('slowed') ? 2 : 0) - standCost);
+
   while (stepsLeft > 0 && chebyshev(tileX, tileY, config.playerTileX, config.playerTileY) > 1) {
     const next = nextStepToward(
       tileX, tileY,
@@ -97,8 +106,9 @@ export function runEnemyTurn(
     return { damage: 0, isHit: false, isCrit: false, attacked: false, logs, events, finalTileX: tileX, finalTileY: tileY, hidden: enemyHidden };
   }
 
-  const withAdvantage = enemyHidden;
-  const withDisadvantage = config.playerHidden || config.enemyVexed || config.playerDodging;
+  const playerUnconscious = config.playerHp <= 0;
+  const withAdvantage = enemyHidden || playerUnconscious;
+  const withDisadvantage = config.playerHidden || hasAttackDisadvantage(enemy.conditions) || config.playerDodging;
   const { damage, isHit, isCrit, logs: attackLogs } = enemyAttack(def, meleeAttack, config.playerAc, withAdvantage, withDisadvantage);
   logs.push(...attackLogs);
 
@@ -128,7 +138,7 @@ export function runAllyTurn(
   }
 
   // Move toward nearest target
-  let stepsLeft = def.speed;
+  let stepsLeft = def.speed / 5;
   while (stepsLeft > 0 && chebyshev(tileX, tileY, nearest.tileX, nearest.tileY) > 1) {
     const next = nextStepToward(
       tileX, tileY,

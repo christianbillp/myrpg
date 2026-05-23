@@ -14,6 +14,7 @@ import { randomUUID } from "crypto";
 import { buildEncounter, EncounterStartRequest } from "./encounterService.js";
 import { processAIDMChat, AIDMChatRequest } from "./aidm.js";
 import { GameEngine, GameDefs } from "./engine/GameEngine.js";
+import { applyEquipment } from "./engine/EquipmentSystem.js";
 import { CreateSessionRequest } from "./engine/types.js";
 import {
   createSession,
@@ -68,6 +69,7 @@ async function loadDefs(): Promise<void> {
   defs.monsters = monsters;
   defs.npcs = npcs;
   defs.items = items;
+  for (const p of defs.playerDefs) applyEquipment(p, p.defaultEquipment, defs.items);
   defs.maps = rawMaps.map(({ id, name, mapdescription, rows }) => ({
     id,
     name,
@@ -180,6 +182,7 @@ async function loadWorldState(): Promise<GameState | null> {
     reactionUsed: false,
     hitDiceUsed: 0,
     conditions: [],
+    equippedSlotLabels: { armor: null, weapon: null, shield: null },
   };
   return { ...worldSave, player: fullPlayer };
 }

@@ -77,6 +77,7 @@ export class OverlayManager {
       this.scale,
       this.playerDef,
       slots,
+      state.player.equippedSlotLabels,
       inventory,
       allItems,
       state.player.gold,

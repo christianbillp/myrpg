@@ -38,7 +38,6 @@ export interface MonsterDef {
   stealthBonus: number;
   passivePerception: number;
   speed: number;
-  speedFt: number;
   attacks: MonsterAttack[];
   xp: number;
   cr: string;

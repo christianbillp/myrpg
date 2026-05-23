@@ -80,7 +80,7 @@ export class TargetPanel {
     this.nameEl.textContent = def.name;
     this.nameEl.style.color = colorHex;
     this.typeEl.textContent = `${def.type}  CR ${def.cr}`;
-    this.statsEl.textContent = `AC     ${def.ac}\nSpeed  ${def.speedFt} ft`;
+    this.statsEl.textContent = `AC     ${def.ac}\nSpeed  ${def.speed} ft`;
 
     const abilities: [string, number][] = [
       ['STR', def.str], ['DEX', def.dex], ['CON', def.con],

@@ -18,6 +18,7 @@ export class NpcToken {
   private container: Phaser.GameObjects.Container;
   private hpBar: Phaser.GameObjects.Graphics;
   private selectionRing: Phaser.GameObjects.Graphics;
+  private nameText: Phaser.GameObjects.Text;
   private labelText: Phaser.GameObjects.Text;
   private scene: Phaser.Scene;
   private moving = false;
@@ -42,29 +43,32 @@ export class NpcToken {
     this.maxHp = maxHp;
 
     const radius = (TILE_SIZE - 8) / 2;
+    const nameY = -(radius + 3);
+    const tokenColorHex = '#' + def.color.toString(16).padStart(6, '0');
+
     this.selectionRing = scene.add.graphics();
     const body = scene.add.circle(0, 0, radius, def.color);
     this.hpBar = scene.add.graphics();
 
-    const labelY = -(radius + 3);
-    if (disposition === 'neutral') {
-      this.labelText = scene.add
-        .text(0, labelY, def.name, {
-          fontSize: '10px',
-          color: '#' + def.color.toString(16).padStart(6, '0'),
-          fontFamily: 'monospace',
-          resolution: DPR,
-        })
-        .setOrigin(0.5, 1);
-    } else {
-      this.labelText = scene.add
-        .text(0, labelY, '', { fontSize: '10px', color: '#ffffff', fontFamily: 'monospace', resolution: DPR })
-        .setOrigin(0.5, 1);
-    }
+    // Name always rendered above the circle, in the token's colour.
+    this.nameText = scene.add
+      .text(0, nameY, def.name, {
+        fontSize: '10px',
+        color: tokenColorHex,
+        fontFamily: 'monospace',
+        resolution: DPR,
+      })
+      .setOrigin(0.5, 1);
+
+    // Combat label always centered inside the circle, in white.
+    // Shown only during combat for enemy/ally tokens (see setLabelVisible).
+    this.labelText = scene.add
+      .text(0, 0, '', { fontSize: '11px', color: '#ffffff', fontFamily: 'monospace', resolution: DPR })
+      .setOrigin(0.5, 0.5);
 
     this.container = scene.add
       .container(tileX * TILE_SIZE + TILE_SIZE / 2, tileY * TILE_SIZE + TILE_SIZE / 2, [
-        this.selectionRing, body, this.hpBar, this.labelText,
+        this.selectionRing, body, this.hpBar, this.nameText, this.labelText,
       ])
       .setDepth(1);
 
@@ -102,11 +106,7 @@ export class NpcToken {
   }
 
   setLabelVisible(visible: boolean): void {
-    if (this.disposition === 'neutral') {
-      this.labelText.setText(this.def.name);
-    } else {
-      this.labelText.setText(visible ? this.label : '');
-    }
+    this.labelText.setText(this.disposition !== 'neutral' && visible ? this.label : '');
   }
 
   setSelected(selected: boolean): void {

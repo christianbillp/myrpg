@@ -36,7 +36,6 @@ export interface PlayerDef {
   hitDieType: number;
   sneakAttackDice: number;
   speed: number;
-  speedFt: number;
   color: number;
   xp: number;
   savageAttacker: boolean;
@@ -44,6 +43,7 @@ export interface PlayerDef {
   defaultEquipment: EquipmentSlots;
   defaultInventoryIds: string[];
   mainAttack: PlayerAttack;
+  description?: string;
 }
 
 export interface MonsterAttack {
@@ -92,6 +92,7 @@ export interface ConsumableDef {
 
 export interface ArmorDef {
   id: string; name: string; type: 'armor';
+  category: string;
   baseAc: number; addDex: boolean; maxDex: number | null;
 }
 
@@ -165,6 +166,7 @@ export interface PlayerState {
   deathSaveFailures: number;
   hitDiceUsed: number;
   conditions: string[];
+  equippedSlotLabels: { armor: string | null; weapon: string | null; shield: string | null };
 }
 
 // Unified NPC state — covers neutral social NPCs, allied combatants, and enemies.
@@ -180,8 +182,6 @@ export interface NpcState {
   hp: number;
   maxHp: number;
   isActive: boolean;
-  vexed: boolean;
-  hidden: boolean;
   reactionUsed: boolean;
   conditions: string[];
 }

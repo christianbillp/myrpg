@@ -16,8 +16,7 @@
   "initiativeBonus": 2,
   "stealthBonus": 6,
   "passivePerception": 9,
-  "speed": 6,
-  "speedFt": 30,
+  "speed": 30,
   "attacks": [
     {
       "name": "Dagger",

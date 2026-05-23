@@ -37,8 +37,7 @@
   "secondWindMaxUses": 0,
   "hitDieType": 8,
   "sneakAttackDice": 1,
-  "speed": 7,
-  "speedFt": 35,
+  "speed": 35,
   "color": 10181046,
   "xp": 0,
   "savageAttacker": false,
@@ -49,14 +48,5 @@
     "shieldId": null
   },
   "defaultInventoryIds": ["dagger", "dagger", "dagger", "dagger", "shortbow"],
-  "mainAttack": {
-    "name": "Shortsword",
-    "statKey": "dex",
-    "damageDice": 1,
-    "damageSides": 6,
-    "damageType": "piercing",
-    "savageAttacker": false,
-    "graze": false,
-    "vex": true
-  }
+  "description": "Raised in a border woodland traded between two lords who never bothered to ask the elves their opinion. She learned early that information and silence are worth more than swords. Wry, observant, and privately principled — she'll pick a pocket but won't break a promise."
 }

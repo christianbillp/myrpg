@@ -120,9 +120,13 @@ export function applyAIDMTool(engine: GameEngine, name: string, input: Record<st
     case 'award_gold':
       events = engine.awardGold(input['amount'] as number);
       break;
-    case 'adjust_npc_hp':
+    case 'adjust_npc_hp': {
+      const logBefore = engine.getState().combatLog.length;
       events = engine.adjustNpcHp(input['entity'] as string, input['delta'] as number);
+      const newEntries = engine.getState().combatLog.slice(logBefore);
+      toolResultContent = newEntries.map((e) => e.right ? `${e.left} [${e.right}]` : e.left).join(' | ') || 'Applied.';
       break;
+    }
     case 'add_log_entry':
       engine.addLog(input['text'] as string);
       break;
@@ -162,9 +166,18 @@ export function applyAIDMTool(engine: GameEngine, name: string, input: Record<st
     case 'set_disposition':
       events = engine.setDisposition(input['entity'] as string, input['disposition'] as string);
       break;
-    case 'throw_item':
+    case 'throw_item': {
+      const stateBeforeThrow = engine.getState();
+      if (stateBeforeThrow.phase === 'player_turn' && stateBeforeThrow.player.actionUsed) {
+        toolResultContent = 'Action already spent this turn — throw not performed. Inform the player their action is used and they must end their turn or use a bonus action instead.';
+        break;
+      }
+      const logBefore = stateBeforeThrow.combatLog.length;
       events = engine.throwItem(input['item_id'] as string, input['target'] as string | undefined);
+      const newEntries = engine.getState().combatLog.slice(logBefore);
+      toolResultContent = newEntries.map((e) => e.right ? `${e.left} [${e.right}]` : e.left).join(' | ') || 'Applied.';
       break;
+    }
     case 'request_ability_check': {
       const skill = input['skill'] as string;
       const dc = input['dc'] as number;

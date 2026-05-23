@@ -36,6 +36,7 @@ function resolvePlayerAttack(
   withAdvantage: boolean,
   withDisadvantage: boolean,
   profBonus = player.proficiencyBonus,
+  autoCrit = false,
 ): { damage: number; logs: LogEntry[]; vexApplied: boolean; slowApplied: boolean } {
   const statMod = attack.statKey === 'str' ? mod(player.str) : mod(player.dex);
   const attackBonus = statMod + profBonus;
@@ -60,8 +61,11 @@ function resolvePlayerAttack(
   }
 
   const total = naturalRoll + attackBonus;
-  const isCrit = naturalRoll === 20;
-  const isHit = isCrit || total >= enemy.ac;
+  const natural20 = naturalRoll === 20;
+  const natural1 = naturalRoll === 1;
+  const wouldHit = natural20 || total >= enemy.ac;
+  const isHit = wouldHit && !natural1;
+  const isCrit = natural20 || (autoCrit && isHit);
   const atkPart = `${rollPart}+${attackBonus}=${total} vs AC ${enemy.ac}`;
 
   let damage = 0, vexApplied = false, slowApplied = false;
@@ -124,8 +128,9 @@ export function playerMeleeAttack(
   enemy: MonsterDef,
   withAdvantage: boolean,
   withDisadvantage = false,
+  autoCrit = false,
 ): { damage: number; logs: LogEntry[]; vexApplied: boolean; slowApplied: boolean } {
-  return resolvePlayerAttack(player, player.mainAttack, enemy, withAdvantage, withDisadvantage);
+  return resolvePlayerAttack(player, player.mainAttack, enemy, withAdvantage, withDisadvantage, player.proficiencyBonus, autoCrit);
 }
 
 export function playerThrowAttack(
@@ -135,8 +140,9 @@ export function playerThrowAttack(
   withAdvantage: boolean,
   withDisadvantage = false,
   profBonus?: number,
+  autoCrit = false,
 ): { damage: number; logs: LogEntry[]; vexApplied: boolean; slowApplied: boolean } {
-  return resolvePlayerAttack(player, attack, enemy, withAdvantage, withDisadvantage, profBonus ?? player.proficiencyBonus);
+  return resolvePlayerAttack(player, attack, enemy, withAdvantage, withDisadvantage, profBonus ?? player.proficiencyBonus, autoCrit);
 }
 
 export function playerHide(
@@ -177,7 +183,7 @@ export function enemyAttack(
 
   const attackTotal = naturalRoll + attack.bonus;
   const isCrit = naturalRoll === 20;
-  const isHit = isCrit || attackTotal >= playerAc;
+  const isHit = (isCrit || attackTotal >= playerAc) && naturalRoll !== 1;
   const atkPart = `${rollPart}+${attack.bonus}=${attackTotal} vs AC ${playerAc}`;
 
   let damage = 0;

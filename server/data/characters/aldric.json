@@ -37,8 +37,7 @@
   "secondWindMaxUses": 2,
   "hitDieType": 10,
   "sneakAttackDice": 0,
-  "speed": 6,
-  "speedFt": 30,
+  "speed": 30,
   "color": 5227511,
   "xp": 0,
   "savageAttacker": true,
@@ -49,14 +48,5 @@
     "shieldId": null
   },
   "defaultInventoryIds": ["flail", "javelin", "javelin", "javelin", "javelin", "javelin", "javelin", "javelin", "javelin"],
-  "mainAttack": {
-    "name": "Greatsword",
-    "statKey": "str",
-    "damageDice": 2,
-    "damageSides": 6,
-    "damageType": "slashing",
-    "savageAttacker": true,
-    "graze": true,
-    "vex": false
-  }
+  "description": "A former city watchman who left after witnessing corruption he couldn't abide. Blunt, dependable, and slow to trust — but fiercely loyal once earned. He leads from the front and speaks plainly. Rarely the first to talk, always the last to leave."
 }

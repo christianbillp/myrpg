@@ -16,8 +16,7 @@
   "initiativeBonus": 3,
   "stealthBonus": 3,
   "passivePerception": 9,
-  "speed": 6,
-  "speedFt": 30,
+  "speed": 30,
   "attacks": [
     {
       "name": "Shortsword",

@@ -16,8 +16,7 @@
   "initiativeBonus": 0,
   "stealthBonus": 0,
   "passivePerception": 10,
-  "speed": 6,
-  "speedFt": 30,
+  "speed": 30,
   "attacks": [
     {
       "name": "Unarmed Strike",

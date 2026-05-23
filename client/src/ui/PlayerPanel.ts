@@ -155,7 +155,7 @@ export class PlayerPanel {
     const sign = initBonus >= 0 ? '+' : '';
     this.statsEl.textContent = [
       `AC     ${def.ac}`,
-      `Speed  ${def.speedFt} ft`,
+      `Speed  ${def.speed} ft`,
       `Prof   +${def.proficiencyBonus}`,
       `Init   ${sign}${initBonus}`,
     ].join('\n');

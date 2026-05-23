@@ -61,7 +61,7 @@ export function spawnEnemies(
         tileX: c, tileY: r,
         disposition: 'enemy',
         hp: def.maxHp, maxHp: def.maxHp,
-        isActive: false, vexed: false, hidden: false,
+        isActive: false,
         reactionUsed: false, conditions: [],
       });
     });
@@ -81,7 +81,7 @@ export function spawnEnemies(
       tileX: c, tileY: r,
       disposition: 'enemy',
       hp: def.maxHp, maxHp: def.maxHp,
-      isActive: false, vexed: false, hidden: false,
+      isActive: false,
       reactionUsed: false, conditions: [],
     });
   });
@@ -144,7 +144,7 @@ export function spawnNpc(
     disposition,
     label: '',
     hp: maxHp, maxHp,
-    isActive: false, vexed: false, hidden: false,
+    isActive: false,
     reactionUsed: false, conditions: [],
   });
 }
