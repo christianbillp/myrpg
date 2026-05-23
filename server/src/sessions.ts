@@ -2,15 +2,22 @@ import type { WebSocket } from '@fastify/websocket';
 import { GameEngine } from './engine/GameEngine.js';
 import type { ServerWSMessage, GameEvent, GameState } from './engine/types.js';
 
+export interface AidmMessage { role: 'user' | 'assistant'; content: string; }
+
 interface Session {
   engine: GameEngine;
   ws: WebSocket | null;
+  aidmHistory: AidmMessage[];
 }
 
 const sessions = new Map<string, Session>();
 
 export function createSession(sessionId: string, engine: GameEngine): void {
-  sessions.set(sessionId, { engine, ws: null });
+  sessions.set(sessionId, { engine, ws: null, aidmHistory: [] });
+}
+
+export function getAidmHistory(sessionId: string): AidmMessage[] | undefined {
+  return sessions.get(sessionId)?.aidmHistory;
 }
 
 export function getSession(sessionId: string): Session | undefined {

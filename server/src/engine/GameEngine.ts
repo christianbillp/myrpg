@@ -207,7 +207,7 @@ export class GameEngine {
     const npc: NpcState = {
       id: uid(), defId: def.id, name: def.name, label,
       tileX: tx, tileY: ty,
-      disposition: 'enemy',
+      disposition: 'enemy', factionId: def.id,
       hp: def.maxHp, maxHp: def.maxHp,
       isActive: false,
       reactionUsed: false, conditions: [],
@@ -260,6 +260,7 @@ export class GameEngine {
     if (npc) {
       npc.disposition = disposition as Disposition;
       if ((disposition === 'ally' || disposition === 'enemy') && !npc.label) this.assignCombatLabel(npc);
+      if (disposition === 'enemy') this.aggroFaction(npc);
     }
     return [];
   }
@@ -384,6 +385,19 @@ export class GameEngine {
     }
   }
 
+  // Flip all neutral faction-mates of the given NPC to enemy. Uses factionId (falls back to
+  // defId for NPCs created before this field existed, e.g. from old saves).
+  private aggroFaction(instigator: NpcState): void {
+    const factionId = instigator.factionId ?? instigator.defId;
+    for (const npc of this.state.npcs) {
+      if (npc === instigator) continue;
+      if (npc.disposition !== 'neutral') continue;
+      if ((npc.factionId ?? npc.defId) !== factionId) continue;
+      npc.disposition = 'enemy';
+      if (!npc.label) this.assignCombatLabel(npc);
+    }
+  }
+
   private doStartCombat(events: GameEvent[]): void {
     const s = this.state;
     const enemies = s.npcs.filter((n) => n.disposition === 'enemy');
@@ -433,8 +447,23 @@ export class GameEngine {
     }
   }
 
-  private doAttack(targetId: string | undefined, _events: GameEvent[]): void {
+  private doAttack(targetId: string | undefined, events: GameEvent[]): void {
     const s = this.state;
+
+    if (s.phase === 'exploring') {
+      if (!targetId) return;
+      const target = s.npcs.find(n => n.id === targetId && n.hp > 0 && n.disposition !== 'ally');
+      if (!target) return;
+      if (chebyshev(s.player.tileX, s.player.tileY, target.tileX, target.tileY) > 1) return;
+      if (target.disposition === 'neutral') {
+        target.disposition = 'enemy';
+        if (!target.label) this.assignCombatLabel(target);
+      }
+      this.aggroFaction(target);
+      this.doStartCombat(events);
+      // Fall through: if player won initiative, phase is now player_turn with actionUsed=false
+    }
+
     if (s.phase !== 'player_turn' || s.player.actionUsed) return;
     if (isIncapacitated(s.player.conditions)) return;
 

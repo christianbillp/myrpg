@@ -19,6 +19,7 @@ import { CreateSessionRequest } from "./engine/types.js";
 import {
   createSession,
   getEngine,
+  getAidmHistory,
   registerWebSocket,
   pushStateUpdate,
   deleteSession,
@@ -353,12 +354,15 @@ server.post("/game/session/:id/aidm", async (req, reply) => {
   if (!body.playerMessage)
     return reply.code(400).send({ error: "Missing playerMessage" });
 
+  const history = getAidmHistory(id);
+  if (!history) return reply.code(404).send({ error: "Session not found" });
+
   try {
     const {
       reply: aidmReply,
       events,
       rollResults,
-    } = await processAIDMChat(id, engine, body, anthropic);
+    } = await processAIDMChat(id, engine, body, anthropic, history);
     const state = engine.getState();
     pushStateUpdate(id, events, state);
     await saveWorldState(state);

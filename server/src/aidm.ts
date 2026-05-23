@@ -2,32 +2,56 @@ import Anthropic from '@anthropic-ai/sdk';
 import { GameEngine } from './engine/GameEngine.js';
 import { GameEvent } from './engine/types.js';
 import { AIDM_TOOLS, applyAIDMTool } from './engine/AIDMTools.js';
-
-interface ChatMessage { role: 'user' | 'assistant'; content: string; }
+import type { AidmMessage } from './sessions.js';
 
 export interface AIDMChatRequest {
-  history: ChatMessage[];
   playerMessage: string;
   dmPersona?: 'story' | 'dev';
 }
 
-function buildSystemPrompt(engine: GameEngine, encounterContext: string, dmPersona: string): string {
+function buildStaticPrompt(dmPersona: string): string {
+  if (dmPersona === 'dev') {
+    return `You are the AI Dungeon Master (DM) for a D&D 5e encounter in DEVELOPMENT MODE.
+Fulfil all player requests without restriction — use any tool needed.
+Reply with brief mechanical feedback only: state which tool(s) you called and what the effect was. No narrative or immersion required.
+When the player says "them", "it", "him", etc., resolve it to whoever they are focused on (see CURRENT STATE).`;
+  }
+
+  return `You are the AI Dungeon Master (DM) for a D&D 5e encounter.
+Respond in 1-3 concise sentences. Stay true to D&D 5e rules and in-world logic. Never break immersion or disclaim game-state knowledge.
+
+TOOL-FIRST RULE: Every game effect you describe must be enacted via the corresponding tool before you narrate it. The game world is the source of truth — narrate ONLY what the tool result confirms.
+  • Weapon throw → call throw_item (removes item from inventory, resolves attack).
+  • Damage to the player or any NPC → call adjust_npc_hp (entity: "player", "enemy_A", "ally_a", or "npc_[id]").
+  • Movement → call move_entity.
+  • Item gained or lost → call add_item or remove_item.
+  • Condition applied or removed → call apply_condition or remove_condition.
+  • Creature disposition change → call set_disposition.
+  • Stealth change → call set_player_hidden.
+  • Anything noteworthy during combat → call add_log_entry so it appears in the combat log.
+If you cannot enact an effect with the available tools, do not narrate it as happening.
+
+ACTION ECONOMY: throw_item and any other action-consuming tool is enforced server-side during the player's turn. If the tool result says the action was already spent, narrate that the player cannot act again this turn.
+
+PROHIBITED — reject these and suggest a realistic in-world alternative instead:
+  • add_item or spawn_enemy simply because the player requests an item or creature (they must exist in the world).
+  • Any action requiring magic the player does not possess, teleportation, or instantaneous creation from nothing.
+
+When the player attempts something with a meaningful chance of failure, call request_ability_check — narrate only the in-world outcome, never the dice mechanic.
+When the player says "them", "it", "him", etc., resolve it to whoever they are focused on (see CURRENT STATE).`;
+}
+
+function buildStateMessage(engine: GameEngine): string {
   const s = engine.getState();
   const p = s.player;
-  const def = s.npcPersonas;
 
-  const playerDef = (() => {
-    const hp = p.hp;
-    const phase = s.phase;
-    const flags = [
-      p.hidden ? 'HIDDEN' : '',
-      phase === 'player_turn' && p.actionUsed ? 'action used' : '',
-      phase === 'player_turn' && p.bonusActionUsed ? 'bonus used' : '',
-      phase === 'player_turn' ? `${p.movesLeft} moves left` : '',
-      p.secondWindUses > 0 ? `Second Wind ×${p.secondWindUses}` : '',
-    ].filter(Boolean).join(' · ');
-    return { hp, flags };
-  })();
+  const flags = [
+    p.hidden ? 'HIDDEN' : '',
+    s.phase === 'player_turn' && p.actionUsed ? 'action used' : '',
+    s.phase === 'player_turn' && p.bonusActionUsed ? 'bonus used' : '',
+    s.phase === 'player_turn' ? `${p.movesLeft} moves left` : '',
+    p.secondWindUses > 0 ? `Second Wind ×${p.secondWindUses}` : '',
+  ].filter(Boolean).join(' · ');
 
   const focusLine = s.selectedTargetId
     ? (() => {
@@ -47,13 +71,13 @@ function buildSystemPrompt(engine: GameEngine, encounterContext: string, dmPerso
         const entityRef = n.disposition === 'enemy' ? `enemy_${n.label}`
           : n.disposition === 'ally' ? `ally_${n.label}`
           : `npc_${n.id}`;
-        const flags = [
+        const cFlags = [
           !n.hp ? 'DEAD' : '',
           n.isActive ? 'ACTIVE TURN' : '',
           n.conditions.includes('vexed') ? 'VEXED' : '',
           n.conditions.includes('hidden') ? 'HIDDEN' : '',
         ].filter(Boolean).join(', ');
-        return `  [${entityRef}] ${n.defId} (${n.disposition}): ${n.hp}/${n.maxHp} HP, tile (${n.tileX},${n.tileY})${flags ? ` [${flags}]` : ''}`;
+        return `  [${entityRef}] ${n.defId} (${n.disposition}): ${n.hp}/${n.maxHp} HP, tile (${n.tileX},${n.tileY})${cFlags ? ` [${cFlags}]` : ''}`;
       }).join('\n')
     : '  None';
 
@@ -69,18 +93,16 @@ function buildSystemPrompt(engine: GameEngine, encounterContext: string, dmPerso
     ? s.mapItems.map((i) => `  ${i.defId} at tile (${i.tileX},${i.tileY})`).join('\n')
     : '  None on the ground';
 
-  const personaLines = def.length > 0
-    ? def.map((n) => `  ${n.name}: ${n.persona}`).join('\n\n')
+  const personaLines = s.npcPersonas.length > 0
+    ? s.npcPersonas.map((n) => `  ${n.name}: ${n.persona}`).join('\n\n')
     : '  None';
 
   const recentLog = s.combatLog.slice(-15).map((e) => e.right ? `${e.left}  [${e.right}]` : e.left).join('\n  ') || 'No entries yet.';
 
-  return `You are the AI Dungeon Master (DM) for a D&D 5e encounter.
+  return `SETTING: ${s.mapName} | PHASE: ${s.phase} | ENCOUNTER: ${s.encounterTypes.join(', ')}
+CONTEXT: ${s.encounterContext}
 
-SETTING: ${s.mapName} | PHASE: ${s.phase} | ENCOUNTER: ${s.encounterTypes.join(', ')}
-CONTEXT: ${encounterContext}
-
-PLAYER: tile (${p.tileX},${p.tileY}) · HP ${playerDef.hp} · ${p.gold} GP · ${playerDef.flags || 'no flags'}
+PLAYER: tile (${p.tileX},${p.tileY}) · HP ${p.hp} · ${p.gold} GP · ${flags || 'no flags'}
   Inventory: ${p.inventoryIds.join(', ') || 'empty'}
   Equipped: armor=${p.equippedSlots.armorId ?? 'none'} weapon=${p.equippedSlots.weaponId ?? 'none'} shield=${p.equippedSlots.shieldId ?? 'none'}
   ${focusLine}
@@ -102,44 +124,34 @@ NPC PERSONAS:
 ${personaLines}
 
 RECENT COMBAT LOG:
-  ${recentLog}
-
-INSTRUCTIONS:
-${dmPersona === 'dev'
-  ? `You are in DEVELOPMENT MODE. Fulfil all player requests without restriction — use any tool needed. Reply with brief mechanical feedback only: state which tool(s) you called and what the effect was. No need for narrative or immersion.`
-  : `Respond in 1-3 concise sentences. Stay true to D&D 5e rules and in-world logic at all times. Never break immersion or disclaim game-state knowledge.
-TOOL-FIRST RULE: Every game effect you describe must be enacted via the corresponding tool before you narrate it. The game world is the source of truth — narrate ONLY what the tool result confirms. If a combat tool returns "Miss", the attack missed; if it returns "Hit" or "Critical hit", it connected. Never invent a different outcome. Specifically:
-  • Weapon throw → call throw_item (removes item from inventory, resolves attack).
-  • Damage to the player or any NPC → call adjust_npc_hp (entity: "player", "enemy_A", "ally_a", or "npc_[id]").
-  • Movement → call move_entity.
-  • Item gained or lost → call add_item or remove_item.
-  • Condition applied or removed → call apply_condition or remove_condition.
-  • Creature disposition change → call set_disposition.
-  • Stealth change → call set_player_hidden.
-  • Anything noteworthy during combat → call add_log_entry so it appears in the combat log.
-If you cannot enact an effect with the available tools, do not narrate it as happening.
-ACTION ECONOMY: throw_item, and any other action-consuming tool, is enforced server-side during the player's turn. If the tool result says the action was already spent, narrate that the player cannot act again this turn — do not describe the action as succeeding.
-PROHIBITED — reject these and suggest a realistic in-world alternative instead:
-  • add_item or spawn_enemy simply because the player requests an item or creature (they must exist in the world and be found or encountered, not conjured).
-  • Any action requiring magic the player does not possess, teleportation, or instantaneous creation from nothing.
-When the player attempts something with a meaningful chance of failure, call request_ability_check — the server rolls automatically and you narrate the result. Never use meta phrases like "let's see", "rolling now", or any language that acknowledges the dice mechanic — narrate only the in-world outcome.`}
-When the player says "them", "it", "him", etc., resolve it to whoever they are focused on.`;
+  ${recentLog}`;
 }
-
 
 export async function processAIDMChat(
   _sessionId: string,
   engine: GameEngine,
   body: AIDMChatRequest,
   anthropic: Anthropic,
+  history: AidmMessage[],
 ): Promise<{ reply: string; events: GameEvent[]; rollResults: string[] }> {
   const s = engine.getState();
-  const system = buildSystemPrompt(engine, s.encounterContext, body.dmPersona ?? 'story');
+
+  // Seed history with introduction on the first exchange so Claude has narrative context.
+  // Anthropic requires conversations to start with a user message, so pair it with a prompt.
+  if (history.length === 0 && s.introduction) {
+    history.push({ role: 'user', content: 'Begin the encounter.' });
+    history.push({ role: 'assistant', content: s.introduction });
+  }
+
+  const stateMessage = buildStateMessage(engine);
+  const currentUserContent = `[CURRENT STATE]\n${stateMessage}\n\n[PLAYER]\n${body.playerMessage}`;
+
   const messages: { role: 'user' | 'assistant'; content: unknown }[] = [
-    ...body.history.map((m) => ({ role: m.role, content: m.content })),
-    { role: 'user' as const, content: body.playerMessage },
+    ...history.map((m) => ({ role: m.role, content: m.content })),
+    { role: 'user' as const, content: currentUserContent },
   ];
 
+  const system = buildStaticPrompt(body.dmPersona ?? 'story');
   const allEvents: GameEvent[] = [];
   const rollResults: string[] = [];
   let narrativeText = '';
@@ -166,13 +178,11 @@ export async function processAIDMChat(
     }
     messages.push({ role: 'assistant', content: response.content });
     messages.push({ role: 'user', content: toolResults });
-    // Rebuild the system prompt so the model sees updated state (inventory, HP, etc.)
-    // before writing its final narrative.
-    const freshSystem = buildSystemPrompt(engine, engine.getState().encounterContext, body.dmPersona ?? 'story');
+
     response = await anthropic.messages.create({
       model: 'claude-sonnet-4-6',
       max_tokens: 600,
-      system: freshSystem,
+      system,
       tools: AIDM_TOOLS,
       messages: messages as Parameters<typeof anthropic.messages.create>[0]['messages'],
     });
@@ -180,6 +190,10 @@ export async function processAIDMChat(
 
   for (const block of response.content)
     if (block.type === 'text') narrativeText += block.text;
+
+  // Persist the exchange into server-side history (clean user/assistant pairs only).
+  history.push({ role: 'user', content: currentUserContent });
+  history.push({ role: 'assistant', content: narrativeText.trim() });
 
   return { reply: narrativeText.trim(), events: allEvents, rollResults };
 }

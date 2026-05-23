@@ -55,7 +55,6 @@ export class AIDMOverlay extends BaseOverlay {
   private dmPersona: DMPersona;
   private readonly onSend: (
     playerMessage: string,
-    history: ChatMessage[],
     dmPersona: DMPersona,
   ) => Promise<{ reply: string; rollResults: string[] }>;
   private readonly disableKeyboard: () => void;
@@ -67,7 +66,6 @@ export class AIDMOverlay extends BaseOverlay {
     initialPersona: DMPersona,
     onSend: (
       playerMessage: string,
-      history: ChatMessage[],
       dmPersona: DMPersona,
     ) => Promise<{ reply: string; rollResults: string[] }>,
     onClose: (history: ChatMessage[], persona: DMPersona) => void,
@@ -174,7 +172,7 @@ export class AIDMOverlay extends BaseOverlay {
     this.statusEl.textContent = "The Dungeon Master considers…";
 
     try {
-      const { reply, rollResults } = await this.onSend(text, this.history.slice(0, -1), this.dmPersona);
+      const { reply, rollResults } = await this.onSend(text, this.dmPersona);
       for (const r of rollResults) {
         this.history.push({ role: "user", content: ROLL_PREFIX + r });
       }

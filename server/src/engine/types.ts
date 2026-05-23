@@ -178,6 +178,7 @@ export interface NpcState {
   tileX: number;
   tileY: number;
   disposition: Disposition;
+  factionId: string;
   label: string;
   hp: number;
   maxHp: number;

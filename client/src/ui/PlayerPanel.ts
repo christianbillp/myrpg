@@ -21,7 +21,8 @@ export interface PlayerPanelActionState {
   secondWindUses: number;
   playerHidden: boolean;
   playerDef: PlayerDef;
-  enemies: Array<{ tileX: number; tileY: number; dead: boolean }>;
+  npcs: Array<{ id: string; tileX: number; tileY: number; disposition: string; dead: boolean }>;
+  selectedTargetId: string | null;
   playerTileX: number;
   playerTileY: number;
   hitDiceRemaining: number;
@@ -208,8 +209,14 @@ export class PlayerPanel {
 
     const { mode, actionUsed, bonusActionUsed, playerDef, playerHp, secondWindUses } = state;
     const btn = (label: string, bg: string, onClick: () => void) => this.makeBtn(label, bg, onClick);
+    const enemies = state.npcs.filter(n => n.disposition === 'enemy');
 
     if (mode === 'exploring') {
+      const attackEnabled = this.isValidAttackTarget(state);
+      const atkEl = this.makeBtn('ATTACK', '#1a4a1e', attackEnabled ? this.callbacks.onAttack : () => {});
+      atkEl.disabled = !attackEnabled;
+      this.actionArea.prepend(atkEl);
+
       if (playerHp < playerDef.maxHp && state.hitDiceRemaining > 0) {
         this.actionArea.prepend(btn('SHORT REST', '#1a2a3a', this.callbacks.onShortRest));
       }
@@ -217,12 +224,16 @@ export class PlayerPanel {
     } else if (mode === 'player_turn') {
       this.actionArea.prepend(btn('END TURN', '#3a3020', this.callbacks.onEndTurn));
 
+      const attackEnabled = !actionUsed && this.isValidAttackTarget(state);
+      const atkEl = this.makeBtn('ATTACK', '#1a4a1e', attackEnabled ? this.callbacks.onAttack : () => {});
+      atkEl.disabled = !attackEnabled;
+      this.actionArea.prepend(atkEl);
+
       if (!actionUsed) {
-        const hasAdjacent = state.enemies.some(
+        const hasAdjacent = enemies.some(
           e => !e.dead && chebyshev(state.playerTileX, state.playerTileY, e.tileX, e.tileY) <= 1,
         );
-        const hasAnyLiving = state.enemies.some(e => !e.dead);
-        if (hasAdjacent) this.actionArea.prepend(btn('ATTACK', '#1a4a1e', this.callbacks.onAttack));
+        const hasAnyLiving = enemies.some(e => !e.dead);
         if (!hasAdjacent && state.throwableItems.length > 0)
           this.actionArea.prepend(btn('THROW…', '#2a3a1e', () => { this.pickerOpen = true; this.refreshActions(state); }));
         this.actionArea.prepend(btn('DISENGAGE', '#1a3a4a', this.callbacks.onDisengage));
@@ -234,13 +245,20 @@ export class PlayerPanel {
       if (!bonusActionUsed) {
         if (playerDef.secondWindMaxUses > 0 && secondWindUses > 0 && playerHp < playerDef.maxHp)
           this.actionArea.prepend(btn('SECOND WIND', '#1a3a5a', this.callbacks.onSecondWind));
-        if (playerDef.sneakAttackDice > 0 && !state.playerHidden && state.enemies.some(e => !e.dead))
+        if (playerDef.sneakAttackDice > 0 && !state.playerHidden && enemies.some(e => !e.dead))
           this.actionArea.prepend(btn('HIDE', '#1a3a1a', this.callbacks.onHide));
       }
 
     } else if (mode === 'death_saves') {
       this.actionArea.prepend(btn('ROLL DEATH SAVE', '#5a1a1a', this.callbacks.onDeathSave));
     }
+  }
+
+  private isValidAttackTarget(state: PlayerPanelActionState): boolean {
+    if (!state.selectedTargetId) return false;
+    const target = state.npcs.find(n => n.id === state.selectedTargetId);
+    if (!target || target.dead || target.disposition === 'ally') return false;
+    return chebyshev(state.playerTileX, state.playerTileY, target.tileX, target.tileY) <= 1;
   }
 
   private renderPicker(): void {

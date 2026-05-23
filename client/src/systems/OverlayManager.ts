@@ -10,7 +10,7 @@ export interface OverlayCallbacks {
   onEquip: (slot: "armor" | "weapon" | "shield", itemId: string) => void;
   onUnequip: (slot: "armor" | "weapon" | "shield") => void;
   onUsePotion: () => void;
-  onSendAIDM: (message: string, history: ChatMessage[], persona: DMPersona) => Promise<{ reply: string; rollResults: string[] }>;
+  onSendAIDM: (message: string, persona: DMPersona) => Promise<{ reply: string; rollResults: string[] }>;
   onDisableKeyboard: () => void;
   onEnableKeyboard: () => void;
   onRefresh: () => void;
@@ -95,7 +95,7 @@ export class OverlayManager {
       this.scale,
       this.aidmHistory,
       this.aidmPersona,
-      (msg, history, persona) => this.callbacks.onSendAIDM(msg, history, persona),
+      (msg, persona) => this.callbacks.onSendAIDM(msg, persona),
       (history, persona) => {
         this.aidmHistory = history;
         this.aidmPersona = persona;

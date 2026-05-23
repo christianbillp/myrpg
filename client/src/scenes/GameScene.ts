@@ -82,7 +82,7 @@ export class GameScene extends Phaser.Scene {
       onEquip:           (slot, itemId) => gameClient.sendAction({ type: "equip", slot, itemId }),
       onUnequip:         (slot) => gameClient.sendAction({ type: "unequip", slot }),
       onUsePotion:       () => gameClient.sendAction({ type: "usePotion" }),
-      onSendAIDM:        (msg, history, persona) => gameClient.sendAIDMMessage(msg, history, persona),
+      onSendAIDM:        (msg, persona) => gameClient.sendAIDMMessage(msg, persona),
       onDisableKeyboard: () => this.input.keyboard?.disableGlobalCapture(),
       onEnableKeyboard:  () => this.input.keyboard?.enableGlobalCapture(),
       onRefresh:         () => { if (this.gameState) this.updateHUD(this.gameState); },
@@ -347,7 +347,7 @@ export class GameScene extends Phaser.Scene {
     this.playerPanel = new PlayerPanel(this.uiScale, this.playerDef, {
       onOpenInventory: () => { if (this.gameState) this.overlays.openInventory(this.gameState); },
       onSearch:        () => gameClient.sendAction({ type: "search" }),
-      onAttack:        () => gameClient.sendAction({ type: "attack" }),
+      onAttack:        () => gameClient.sendAction({ type: "attack", targetId: this.gameState?.selectedTargetId ?? undefined }),
       onThrow:         (itemId) => gameClient.sendAction({ type: "throw", itemId, targetId: this.gameState?.selectedTargetId ?? undefined }),
       onDash:          () => gameClient.sendAction({ type: "dash" }),
       onDodge:         () => gameClient.sendAction({ type: "dodge" }),
@@ -417,9 +417,8 @@ export class GameScene extends Phaser.Scene {
       secondWindUses:   state.player.secondWindUses,
       playerHidden:     state.player.hidden,
       playerDef:        this.playerDef,
-      enemies:          state.npcs
-        .filter(n => n.disposition === "enemy")
-        .map(n => ({ tileX: n.tileX, tileY: n.tileY, dead: n.hp <= 0 })),
+      npcs:             state.npcs.map(n => ({ id: n.id, tileX: n.tileX, tileY: n.tileY, disposition: n.disposition, dead: n.hp <= 0 })),
+      selectedTargetId: state.selectedTargetId,
       playerTileX:      this.player?.tileX ?? state.player.tileX,
       playerTileY:      this.player?.tileY ?? state.player.tileY,
       hitDiceRemaining: this.playerDef.level - state.player.hitDiceUsed,

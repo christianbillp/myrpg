@@ -8,7 +8,6 @@ const WS_URL  = 'ws://localhost:3000';
 export type StateUpdateHandler = (state: GameState, events: GameEvent[]) => void;
 export type AIDMReplyHandler   = (reply: string) => void;
 
-interface ChatMessage { role: 'user' | 'assistant'; content: string; }
 
 export class GameClient {
   private sessionId: string | null = null;
@@ -78,14 +77,13 @@ export class GameClient {
 
   async sendAIDMMessage(
     playerMessage: string,
-    history: ChatMessage[],
     dmPersona: 'story' | 'dev',
   ): Promise<{ reply: string; rollResults: string[] }> {
     if (!this.sessionId) return { reply: '', rollResults: [] };
     const res = await fetch(`${API_URL}/game/session/${this.sessionId}/aidm`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ playerMessage, history, dmPersona }),
+      body: JSON.stringify({ playerMessage, dmPersona }),
     });
     if (!res.ok) throw new Error(`AIDM request failed: ${res.status}`);
     const { reply, rollResults } = await res.json() as { reply: string; rollResults: string[] };

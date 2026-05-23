@@ -59,7 +59,7 @@ export function spawnEnemies(
       out.push({
         id: `enemy_${i}`, defId: def.id, name: def.name, label: String.fromCharCode(65 + i),
         tileX: c, tileY: r,
-        disposition: 'enemy',
+        disposition: 'enemy', factionId: def.id,
         hp: def.maxHp, maxHp: def.maxHp,
         isActive: false,
         reactionUsed: false, conditions: [],
@@ -79,7 +79,7 @@ export function spawnEnemies(
     out.push({
       id: `enemy_${i}`, defId: def.id, name: def.name, label: String.fromCharCode(65 + i),
       tileX: c, tileY: r,
-      disposition: 'enemy',
+      disposition: 'enemy', factionId: def.id,
       hp: def.maxHp, maxHp: def.maxHp,
       isActive: false,
       reactionUsed: false, conditions: [],
@@ -141,7 +141,7 @@ export function spawnNpc(
     defId,
     name: npcDef.name,
     tileX: nx, tileY: ny,
-    disposition,
+    disposition, factionId: defId,
     label: '',
     hp: maxHp, maxHp,
     isActive: false,
