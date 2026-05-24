@@ -1,0 +1,37 @@
+{
+  "id": "guard",
+  "name": "Guard",
+  "type": "Medium or Small Humanoid, Neutral",
+  "maxHp": 11,
+  "hpFormula": "2d8+2",
+  "ac": 16,
+  "str": 13,
+  "dex": 12,
+  "con": 12,
+  "int": 10,
+  "wis": 11,
+  "cha": 10,
+  "proficiencyBonus": 2,
+  "savingThrows": { "str": 1, "dex": 1, "con": 1, "int": 0, "wis": 0, "cha": 0 },
+  "initiativeBonus": 1,
+  "stealthBonus": 1,
+  "passivePerception": 12,
+  "speed": 30,
+  "attacks": [
+    {
+      "name": "Spear",
+      "attackType": "both",
+      "bonus": 3,
+      "reach": 5,
+      "rangeNormal": 20,
+      "rangeLong": 60,
+      "damageDice": 1,
+      "damageSides": 6,
+      "damageBonus": 1,
+      "damageType": "piercing"
+    }
+  ],
+  "xp": 25,
+  "cr": "1/8",
+  "color": 7833753
+}

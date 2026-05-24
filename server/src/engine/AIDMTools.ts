@@ -55,7 +55,7 @@ export const AIDM_TOOLS = [
   },
   {
     name: 'spawn_enemy',
-    description: 'Spawn a new enemy on the map. Valid monster_id values: "goblin_minion", "bandit", "commoner", "skeleton".',
+    description: 'Spawn a new enemy on the map. Valid monster_id values: "goblin_minion", "bandit", "commoner", "skeleton", "guard".',
     input_schema: { type: 'object' as const, properties: { monster_id: { type: 'string' }, reason: { type: 'string' } }, required: ['monster_id', 'reason'] },
   },
   {

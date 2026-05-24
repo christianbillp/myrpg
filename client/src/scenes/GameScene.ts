@@ -175,9 +175,9 @@ export class GameScene extends Phaser.Scene {
   // ── Entity reconciliation ─────────────────────────────────────────────────
 
   private reconcileNpcs(state: GameState): void {
-    const liveIds = new Set(state.npcs.filter(n => n.hp > 0).map(n => n.id));
+    const allIds = new Set(state.npcs.map(n => n.id));
     for (const [id, token] of this.npcTokens) {
-      if (!liveIds.has(id)) {
+      if (!allIds.has(id)) {
         token.destroy();
         this.npcTokens.delete(id);
         if (this.selectedEntityId === id) {
@@ -187,20 +187,23 @@ export class GameScene extends Phaser.Scene {
       }
     }
     for (const nState of state.npcs) {
-      if (nState.hp <= 0) continue;
       let token = this.npcTokens.get(nState.id);
       if (!token) {
         const def = this.resolveMonsterDef(nState.defId);
         token = new NpcToken(this, nState.id, def, nState.tileX, nState.tileY, nState.disposition, nState.hp, nState.maxHp);
         this.npcTokens.set(nState.id, token);
         this.gridView.container.add(token.gameObject);
-      } else if (nState.disposition === "neutral") {
+      } else if (nState.disposition === "neutral" && nState.hp > 0) {
         token.teleport(nState.tileX, nState.tileY);
       }
       token.disposition = nState.disposition;
-      token.setLabel(nState.label);
-      token.setLabelVisible(nState.disposition !== "neutral" && state.phase !== "exploring");
       token.setHp(nState.hp);
+      if (nState.hp <= 0) {
+        token.setDead();
+      } else {
+        token.setLabel(nState.label);
+        token.setLabelVisible(nState.disposition !== "neutral" && state.phase !== "exploring");
+      }
     }
   }
 
@@ -227,7 +230,7 @@ export class GameScene extends Phaser.Scene {
     if (serverId === this.selectedEntityId) {
       if (this.selectedEntityId) {
         const nState = state.npcs.find(n => n.id === this.selectedEntityId);
-        if (nState && nState.hp > 0) this.targetPanel.refresh(nState, nState.maxHp);
+        if (nState) this.targetPanel.refresh(nState, nState.maxHp);
       }
       return;
     }
@@ -239,7 +242,7 @@ export class GameScene extends Phaser.Scene {
 
     if (!serverId) { this.targetPanel.hide(); return; }
 
-    const nState = state.npcs.find(n => n.id === serverId && n.hp > 0);
+    const nState = state.npcs.find(n => n.id === serverId);
     if (nState) {
       this.selectedEntityId = serverId;
       this.npcTokens.get(serverId)?.setSelected(true);
@@ -284,7 +287,8 @@ export class GameScene extends Phaser.Scene {
       return;
     }
 
-    const nState = npcs.find(n => n.hp > 0 && n.tileX === tileX && n.tileY === tileY);
+    const nState = npcs.find(n => n.hp > 0 && n.tileX === tileX && n.tileY === tileY)
+      ?? npcs.find(n => n.tileX === tileX && n.tileY === tileY);
     if (nState) {
       this.selectEntity(nState.id);
     } else {

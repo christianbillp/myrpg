@@ -261,7 +261,7 @@ export class GameEngine {
   endCombat(): GameEvent[] {
     const s = this.state;
     s.phase = 'exploring';
-    s.npcs = s.npcs.filter((n) => n.disposition !== 'enemy');
+    s.npcs = s.npcs.filter((n) => n.disposition !== 'enemy' || n.hp === 0);
     s.npcs.forEach((n) => { if (n.disposition === 'ally') n.disposition = 'neutral'; });
     s.activeNpcIndex = 0;
     s.turnOrderIds = [];
@@ -278,7 +278,7 @@ export class GameEngine {
 
   triggerCombat(): GameEvent[] {
     const s = this.state;
-    if (s.phase !== 'exploring' || !s.npcs.some((n) => n.disposition === 'enemy')) return [];
+    if (s.phase !== 'exploring' || !s.npcs.some((n) => n.disposition === 'enemy' && n.hp > 0)) return [];
     const events: GameEvent[] = [];
     this.doStartCombat(events);
     return events;
@@ -461,7 +461,7 @@ export class GameEngine {
 
   private checkCombatTrigger(events: GameEvent[]): void {
     const s = this.state;
-    const enemies = s.npcs.filter((n) => n.disposition === 'enemy');
+    const enemies = s.npcs.filter((n) => n.disposition === 'enemy' && n.hp > 0);
     for (const enemy of enemies) {
       if (chebyshev(s.player.tileX, s.player.tileY, enemy.tileX, enemy.tileY) <= 2) {
         this.doStartCombat(events);
@@ -511,7 +511,7 @@ export class GameEngine {
 
   private doStartCombat(events: GameEvent[]): void {
     const s = this.state;
-    const enemies = s.npcs.filter((n) => n.disposition === 'enemy');
+    const enemies = s.npcs.filter((n) => n.disposition === 'enemy' && n.hp > 0);
     const firstEnemyDef = enemies[0] ? this.resolveMonsterDef(enemies[0].defId) : undefined;
     if (!firstEnemyDef) return;
 
@@ -519,7 +519,7 @@ export class GameEngine {
     s.player.deathSaveSuccesses = 0;
     s.player.deathSaveFailures = 0;
     s.activeNpcIndex = 0;
-    const combatNpcs = s.npcs.filter((n) => n.disposition !== 'neutral');
+    const combatNpcs = s.npcs.filter((n) => n.disposition !== 'neutral' && n.hp > 0);
     for (const npc of combatNpcs.filter((n) => !n.label)) {
       this.assignCombatLabel(npc);
     }
@@ -704,7 +704,7 @@ export class GameEngine {
       // Reject if out of range.
       if (target && !inRange(target)) return events;
     }
-    if (!target) target = s.npcs.filter(n => n.disposition === 'enemy').find(inRange) ?? null;
+    if (!target) target = s.npcs.filter(n => n.disposition === 'enemy' && n.hp > 0).find(inRange) ?? null;
     if (!target) return events;
 
     // Attacking a neutral NPC turns them and their faction hostile.
@@ -750,6 +750,7 @@ export class GameEngine {
     s.player.hp = Math.max(0, hpBefore - damage);
     this.addLog({ left: `${this.playerDef.name} HP: ${s.player.hp}/${this.playerDef.maxHp}`, style: 'status' });
     if (s.player.hp > 0) return;
+    s.player.hidden = false;
     const leftover = damage - hpBefore;
     if (leftover >= this.playerDef.maxHp) {
       this.addLog({ left: `Massive damage — ${this.playerDef.name} dies instantly`, style: 'kill' });
@@ -763,14 +764,14 @@ export class GameEngine {
   private killNpc(id: string): void {
     const s = this.state;
     const dying = s.npcs.find((n) => n.id === id);
-    if (dying) {
-      for (const defId of dying.inventoryIds) {
-        s.mapItems.push({ id: uid(), defId, tileX: dying.tileX, tileY: dying.tileY });
-      }
+    if (!dying) return;
+    for (const defId of dying.inventoryIds) {
+      s.mapItems.push({ id: uid(), defId, tileX: dying.tileX, tileY: dying.tileY });
     }
-    s.npcs = s.npcs.filter((n) => n.id !== id);
+    dying.inventoryIds = [];
+    dying.isActive = false;
+    dying.conditions = dying.conditions.filter((c) => c !== 'hidden');
     s.turnOrderIds = s.turnOrderIds.filter((tid) => tid !== id);
-    if (s.selectedTargetId === id) s.selectedTargetId = null;
     this.advanceQuest('kill');
     if (s.phase === 'player_turn' || s.phase === 'enemy_turn') {
       if (s.npcs.filter((n) => n.disposition === 'enemy' && n.hp > 0).length === 0) {

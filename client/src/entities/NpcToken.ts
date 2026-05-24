@@ -120,10 +120,17 @@ export class NpcToken {
   isDead(): boolean { return this.hp <= 0; }
   get gameObject(): Phaser.GameObjects.Container { return this.container; }
 
+  setDead(): void {
+    this.container.setAlpha(0.4);
+    this.hpBar.clear();
+    this.labelText.setText('');
+  }
+
   destroy(): void { this.container.destroy(); }
 
   private refreshHpBar(): void {
     this.hpBar.clear();
+    if (this.hp <= 0) return;
     if (this.hp >= this.maxHp) return;
     const pct = this.hp / this.maxHp;
     const radius = (TILE_SIZE - 8) / 2;
