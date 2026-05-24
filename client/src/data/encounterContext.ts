@@ -31,7 +31,7 @@ export interface Riddle {
 
 export interface EncounterDef {
   id: string;
-  title: string;
+  encounterTitle: string;
   description: string;
   encounterTypes: EncounterType[];
   mapId: string;

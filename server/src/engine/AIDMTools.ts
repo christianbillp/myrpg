@@ -142,9 +142,15 @@ export function applyAIDMTool(engine: GameEngine, name: string, input: Record<st
     case 'award_xp':
       events = engine.awardXp(input['amount'] as number);
       break;
-    case 'award_gold':
-      events = engine.awardGold(input['amount'] as number);
+    case 'award_gold': {
+      const amount = input['amount'] as number;
+      if (amount < 0 && engine.getState().player.gold + amount < 0) {
+        toolResultContent = `Transaction rejected: player only has ${engine.getState().player.gold} GP and cannot pay ${Math.abs(amount)} GP. Do not narrate this payment as successful — inform the player they cannot afford it.`;
+      } else {
+        events = engine.awardGold(amount);
+      }
       break;
+    }
     case 'adjust_npc_hp': {
       const logBefore = engine.getState().combatLog.length;
       events = engine.adjustNpcHp(input['entity'] as string, input['delta'] as number, input['damage_type'] as string | undefined);

@@ -37,7 +37,7 @@ function resolvePlayerAttack(
   withDisadvantage: boolean,
   profBonus = player.proficiencyBonus,
   autoCrit = false,
-): { damage: number; logs: LogEntry[]; vexApplied: boolean; slowApplied: boolean } {
+): { damage: number; isHit: boolean; logs: LogEntry[]; vexApplied: boolean; slowApplied: boolean } {
   const statMod = attack.statKey === 'str' ? mod(player.str) : mod(player.dex);
   const attackBonus = statMod + profBonus;
   const logs: LogEntry[] = [];
@@ -120,7 +120,7 @@ function resolvePlayerAttack(
     }
   }
 
-  return { damage, logs, vexApplied, slowApplied };
+  return { damage, isHit, logs, vexApplied, slowApplied };
 }
 
 export function playerMeleeAttack(
@@ -141,7 +141,7 @@ export function playerThrowAttack(
   withDisadvantage = false,
   profBonus?: number,
   autoCrit = false,
-): { damage: number; logs: LogEntry[]; vexApplied: boolean; slowApplied: boolean } {
+): { damage: number; isHit: boolean; logs: LogEntry[]; vexApplied: boolean; slowApplied: boolean } {
   return resolvePlayerAttack(player, attack, enemy, withAdvantage, withDisadvantage, profBonus ?? player.proficiencyBonus, autoCrit);
 }
 

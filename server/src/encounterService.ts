@@ -76,8 +76,6 @@ function buildQuests(types: EncounterType[], enemyCount: number): QuestDef[] {
     if (enemyCount > 1)
       quests.push({ id: 'slay_all',   title: 'Slay All',      goal: { type: 'kill',    target: enemyCount }, rewardXp: 25, rewardGp: 15 });
   }
-  if (types.includes('exploration'))
-    quests.push({ id: 'keen_eye',   title: 'Keen Eye',    goal: { type: 'explore', target: 2 }, rewardXp: 15, rewardGp: 10 });
   if (types.includes('social_interaction'))
     quests.push({ id: 'make_contact', title: 'Make Contact', goal: { type: 'talk', target: 1 }, rewardXp: 10, rewardGp: 5 });
   return quests;
@@ -127,7 +125,7 @@ export function buildEncounter(req: EncounterStartRequest): EncounterContext {
     context,
     mapName: mapLabel,
     enemyCount,
-    secrets:  req.encounterTypes.includes('exploration') ? pickSecrets(4) : [],
+    secrets:  pickSecrets(2),
     riddle:   req.encounterTypes.includes('social_interaction') ? pickRandom(RIDDLES) : null,
     quests:   buildQuests(req.encounterTypes, enemyCount),
     npcIds:        req.npcIds,

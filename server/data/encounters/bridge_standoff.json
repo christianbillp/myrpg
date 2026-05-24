@@ -1,6 +1,6 @@
 {
   "id": "bridge_standoff",
-  "title": "Bridge Toll",
+  "encounterTitle": "Bridge Toll",
   "description": "A pair of bandits blocks a narrow stone bridge, demanding 10 gold to pass. A frightened traveller stands at your side.",
   "encounterTypes": ["social_interaction"],
   "mapId": "bridge",

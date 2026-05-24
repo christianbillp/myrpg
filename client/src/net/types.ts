@@ -10,7 +10,7 @@ export interface EncounterRecord {
   id: string;
   timestamp: string;
   description: string;
-  encounterTypes: string[];
+  encounterTitle: string;
   xpGained: number;
   goldGained: number;
   outcome: 'survived' | 'defeated';
@@ -115,6 +115,7 @@ export interface GameState {
   logScrollOffset: number;
   encounterTypes: EncounterType[];
   mapName: string;
+  encounterTitle: string;
   quests: QuestState[];
   selectedTargetId: string | null;
   activeNpcIndex: number;
@@ -157,6 +158,7 @@ export interface CreateSessionRequest {
   mapType: 'open' | 'rooms' | 'saved';
   playerDefId: string;
   savedMapId?: string;
+  encounterTitle?: string;
   savedMapName?: string;
   savedMapDescription?: string;
   npcIds?: string[];

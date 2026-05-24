@@ -14,17 +14,20 @@ export class GameClient {
   private ws: WebSocket | null = null;
   private onStateUpdate: StateUpdateHandler | null = null;
   private onAIDMReply: AIDMReplyHandler | null = null;
+  private onDisconnect: (() => void) | null = null;
+  private intentionalClose = false;
 
   setStateUpdateHandler(fn: StateUpdateHandler): void { this.onStateUpdate = fn; }
   setAIDMReplyHandler(fn: AIDMReplyHandler): void { this.onAIDMReply = fn; }
+  setDisconnectHandler(fn: () => void): void { this.onDisconnect = fn; }
 
   resumeSession(sessionId: string): void { this.sessionId = sessionId; }
 
-  async loadWorld(): Promise<{ sessionId: string; state: GameState } | null> {
+  async loadWorld(): Promise<{ sessionId: string; state: GameState; dmHistory: { role: 'user' | 'assistant'; content: string }[] } | null> {
     try {
       const res = await fetch(`${API_URL}/world`, { signal: AbortSignal.timeout(5000) });
       if (!res.ok) return null;
-      return res.json() as Promise<{ sessionId: string; state: GameState }>;
+      return res.json() as Promise<{ sessionId: string; state: GameState; dmHistory: { role: 'user' | 'assistant'; content: string }[] }>;
     } catch {
       return null;
     }
@@ -44,6 +47,7 @@ export class GameClient {
 
   connectWebSocket(): void {
     if (!this.sessionId) { console.error('connectWebSocket: no sessionId'); return; }
+    this.intentionalClose = false;
     this.ws = new WebSocket(`${WS_URL}/game/session/${this.sessionId}/ws`);
     this.ws.onmessage = (event) => {
       const msg = JSON.parse(event.data as string) as ServerWSMessage;
@@ -54,13 +58,17 @@ export class GameClient {
       }
     };
     this.ws.onerror = (e) => console.error('WebSocket error:', e);
+    this.ws.onclose = () => {
+      if (!this.intentionalClose) this.onDisconnect?.();
+    };
   }
 
-  disconnect(): void {
+  async disconnect(): Promise<void> {
+    this.intentionalClose = true;
     this.ws?.close();
     this.ws = null;
     if (this.sessionId) {
-      fetch(`${API_URL}/game/session/${this.sessionId}`, { method: 'DELETE' }).catch(() => {});
+      await fetch(`${API_URL}/game/session/${this.sessionId}`, { method: 'DELETE' }).catch(() => {});
       this.sessionId = null;
     }
   }
@@ -99,6 +107,15 @@ export class GameClient {
 
   async deleteSave(characterId: string): Promise<void> {
     await fetch(`${API_URL}/save/${characterId}`, { method: 'DELETE' });
+  }
+
+  async checkHealth(): Promise<boolean> {
+    try {
+      const res = await fetch(`${API_URL}/health`, { signal: AbortSignal.timeout(3000) });
+      return res.ok;
+    } catch {
+      return false;
+    }
   }
 
   async generateStorylog(characterId: string, rewrite = false): Promise<StorylogEntry[]> {

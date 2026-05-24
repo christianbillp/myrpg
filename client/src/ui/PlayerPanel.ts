@@ -5,6 +5,9 @@ import { UIScale } from './UIScale';
 
 const GRID_H = GRID_ROWS * TILE_SIZE;
 const MAX_PICKER_SLOTS = 6;
+const PANEL_MIN_WIDTH = 120;
+const PANEL_MAX_WIDTH = 480;
+const PANEL_WIDTH_KEY = 'myrpg_player_panel_width';
 
 export interface QuestDisplay {
   title: string;
@@ -68,14 +71,15 @@ export class PlayerPanel {
   private readonly searchBtn: HTMLButtonElement;
   private readonly offResize: () => void;
 
-  private visible = false;
+  private visible = true;
   private pickerOpen = false;
   private lastActionState: PlayerPanelActionState | null = null;
-  private currentPickerItems: Array<{ id: string; name: string }> = [];
   private readonly callbacks: PlayerPanelCallbacks;
   private readonly playerDef: PlayerDef;
+  private readonly scale: UIScale;
 
   constructor(scale: UIScale, def: PlayerDef, callbacks: PlayerPanelCallbacks) {
+    this.scale = scale;
     this.playerDef = def;
     this.callbacks = callbacks;
 
@@ -87,16 +91,18 @@ export class PlayerPanel {
       })
       .join('\n');
 
+    const savedWidth = parseInt(localStorage.getItem(PANEL_WIDTH_KEY) ?? '', 10);
+    const initWidth = savedWidth >= PANEL_MIN_WIDTH ? savedWidth : PLAYER_PANEL_WIDTH;
+
     this.el = document.createElement('div');
     this.el.className = 'gui-panel';
     this.el.style.cssText += `
-      width: ${PLAYER_PANEL_WIDTH}px;
+      width: ${initWidth}px;
       height: ${GRID_H}px;
       background: #080810;
       border-right: 2px solid #334455;
       color: #aabbcc;
       z-index: 10;
-      display: none;
     `;
 
     this.el.innerHTML = `
@@ -144,6 +150,8 @@ export class PlayerPanel {
 
     this.updateCombatStats();
 
+    this.el.appendChild(this.buildResizeHandle());
+
     document.body.appendChild(this.el);
     const place = () => scale.placePanel(this.el, 0, 0);
     place();
@@ -176,6 +184,42 @@ export class PlayerPanel {
 
   toggle(): void {
     this.visible ? this.hide() : this.show();
+  }
+
+  private buildResizeHandle(): HTMLDivElement {
+    const handle = document.createElement('div');
+    handle.style.cssText = `
+      position:absolute;top:0;right:0;width:8px;height:100%;
+      cursor:col-resize;z-index:20;
+    `;
+
+    let dragging = false;
+    let dragStartX = 0;
+    let dragStartW = 0;
+
+    handle.addEventListener('pointerdown', (e) => {
+      dragging = true;
+      dragStartX = e.clientX;
+      dragStartW = parseInt(this.el.style.width) || PLAYER_PANEL_WIDTH;
+      handle.setPointerCapture(e.pointerId);
+      e.stopPropagation();
+    });
+
+    handle.addEventListener('pointermove', (e) => {
+      if (!dragging) return;
+      const newW = Math.max(PANEL_MIN_WIDTH, Math.min(PANEL_MAX_WIDTH,
+        dragStartW + (e.clientX - dragStartX) / this.scale.factor,
+      ));
+      this.el.style.width = `${newW}px`;
+    });
+
+    handle.addEventListener('pointerup', () => {
+      if (!dragging) return;
+      dragging = false;
+      localStorage.setItem(PANEL_WIDTH_KEY, String(parseInt(this.el.style.width)));
+    });
+
+    return handle;
   }
 
   refresh(hp: number, maxHp: number, xp: number, quests: QuestDisplay[] = [], showSearch = false): void {
@@ -217,6 +261,9 @@ export class PlayerPanel {
       atkEl.disabled = !attackEnabled;
       this.actionArea.prepend(atkEl);
 
+      if (state.throwableItems.length > 0)
+        this.actionArea.prepend(btn('THROW…', '#2a3a1e', () => { this.pickerOpen = true; this.refreshActions(state); }));
+
       if (playerHp < playerDef.maxHp && state.hitDiceRemaining > 0) {
         this.actionArea.prepend(btn('SHORT REST', '#1a2a3a', this.callbacks.onShortRest));
       }
@@ -234,8 +281,9 @@ export class PlayerPanel {
           e => !e.dead && chebyshev(state.playerTileX, state.playerTileY, e.tileX, e.tileY) <= 1,
         );
         const hasAnyLiving = enemies.some(e => !e.dead);
-        if (!hasAdjacent && state.throwableItems.length > 0)
-          this.actionArea.prepend(btn('THROW…', '#2a3a1e', () => { this.pickerOpen = true; this.refreshActions(state); }));
+        const throwEl = this.makeBtn('THROW…', '#2a3a1e', state.throwableItems.length > 0 ? () => { this.pickerOpen = true; this.refreshActions(state); } : () => {});
+        throwEl.disabled = state.throwableItems.length === 0;
+        this.actionArea.prepend(throwEl);
         this.actionArea.prepend(btn('DISENGAGE', '#1a3a4a', this.callbacks.onDisengage));
         if (!hasAdjacent && !hasAnyLiving) (this.actionArea.firstChild as HTMLElement)?.remove();
         this.actionArea.prepend(btn('DODGE', '#1a3a4a', this.callbacks.onDodge));
@@ -263,7 +311,6 @@ export class PlayerPanel {
 
   private renderPicker(): void {
     const items = this.lastActionState!.throwableItems.slice(0, MAX_PICKER_SLOTS);
-    this.currentPickerItems = items;
     for (const item of [...items].reverse()) {
       this.actionArea.prepend(this.makeBtn(item.name, '#1e2e1e', () => {
         this.pickerOpen = false;

@@ -1,6 +1,6 @@
 const STYLE_ID = 'game-ui-css';
 
-function injectStyles(): void {
+export function injectGameUIStyles(): void {
   if (document.getElementById(STYLE_ID)) return;
   const el = document.createElement('style');
   el.id = STYLE_ID;
@@ -82,6 +82,37 @@ function injectStyles(): void {
       padding: 0;
     }
     .gui-close-btn:hover { color: #aabbcc; }
+
+    /* Overlay action buttons — set background, border, color, padding, font-size inline */
+    .gui-btn-overlay {
+      font-family: monospace;
+      cursor: pointer;
+    }
+    .gui-btn-overlay:hover:not(:disabled) { opacity: 0.8; }
+    .gui-btn-overlay:disabled { opacity: 0.4; cursor: default; }
+
+    /* Ghost / dev buttons — dim, unobtrusive */
+    .gui-btn-ghost {
+      font-family: monospace;
+      cursor: pointer;
+      background: none;
+      border: 1px solid #2a2a3a;
+      color: #3a3a55;
+      letter-spacing: 1px;
+    }
+    .gui-btn-ghost:hover { border-color: #445566; color: #556677; }
+
+    /* HUD navigation buttons (NEW ENCOUNTER, DUNGEON MASTER) */
+    .gui-btn-hud {
+      height: 26px;
+      padding: 0 10px;
+      font-family: monospace;
+      font-size: 11px;
+      color: #aabbcc;
+      border: 1px solid #556677;
+      cursor: pointer;
+    }
+    .gui-btn-hud:hover { opacity: 0.75; }
   `;
   document.head.appendChild(el);
 }
@@ -97,7 +128,7 @@ export class UIScale {
     this.canvas = canvas;
     this.gameW = gameW;
     this.gameH = gameH;
-    injectStyles();
+    injectGameUIStyles();
     this.observer = new ResizeObserver(() => this.handlers.forEach(h => h()));
     this.observer.observe(canvas);
   }

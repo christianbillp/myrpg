@@ -84,8 +84,8 @@ export class InventoryOverlay extends BaseOverlay {
         inner = `
           <div style="font-size:11px;color:#c8dae8;margin-bottom:4px;">${escHtml(item.name)}</div>
           <div style="font-size:10px;color:${ACCENT};margin-bottom:8px;">${escHtml(serverLabel)}</div>
-          <button data-unequip="${key}" style="width:90px;height:22px;background:#1a1a2e;
-            border:1px solid ${DIM};color:#889aaa;font-family:monospace;font-size:10px;cursor:pointer;">
+          <button data-unequip="${key}" class="gui-btn-overlay" style="width:90px;height:22px;background:#1a1a2e;
+            border:1px solid ${DIM};color:#889aaa;font-size:10px;">
             UNEQUIP
           </button>`;
       } else {
@@ -128,8 +128,8 @@ export class InventoryOverlay extends BaseOverlay {
           <span style="font-size:11px;color:#b0c8dc;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;margin-right:8px;">
             ${labelText}
           </span>
-          <button data-equip="${slot}|${escHtml(item.id)}" style="width:72px;height:22px;background:#0a1520;
-            border:1px solid ${ACCENT};color:${ACCENT};font-family:monospace;font-size:10px;cursor:pointer;">
+          <button data-equip="${slot}|${escHtml(item.id)}" class="gui-btn-overlay" style="width:72px;height:22px;background:#0a1520;
+            border:1px solid ${ACCENT};color:${ACCENT};font-size:10px;">
             EQUIP
           </button>
         </div>`;
@@ -144,9 +144,8 @@ export class InventoryOverlay extends BaseOverlay {
         <span style="font-size:11px;color:#668877;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;margin-right:8px;">
           ${escHtml(name)} ×${count}
         </span>
-        <button ${canUseConsumable ? `data-use="${escHtml(id)}"` : 'disabled'} style="width:72px;height:22px;
-          background:${useBg};border:1px solid ${useBorder};color:${useColor};
-          font-family:monospace;font-size:10px;cursor:${canUseConsumable ? 'pointer' : 'default'};">
+        <button ${canUseConsumable ? `data-use="${escHtml(id)}"` : 'disabled'} class="gui-btn-overlay" style="width:72px;height:22px;
+          background:${useBg};border:1px solid ${useBorder};color:${useColor};font-size:10px;">
           USE
         </button>
       </div>`).join('');
@@ -188,22 +187,16 @@ export class InventoryOverlay extends BaseOverlay {
     // Wire equip/unequip/use buttons
     this.panelEl.querySelectorAll<HTMLButtonElement>("[data-unequip]").forEach(btn => {
       const slot = btn.dataset.unequip as "armor" | "weapon" | "shield";
-      btn.addEventListener("pointerover", () => { btn.style.borderColor = ACCENT; btn.style.color = "#c8dae8"; });
-      btn.addEventListener("pointerout",  () => { btn.style.borderColor = DIM;   btn.style.color = "#889aaa"; });
       btn.addEventListener("pointerdown", () => onUnequip(slot));
     });
 
     this.panelEl.querySelectorAll<HTMLButtonElement>("[data-equip]").forEach(btn => {
       const [slot, itemId] = btn.dataset.equip!.split("|") as ["armor" | "weapon" | "shield", string];
-      btn.addEventListener("pointerover", () => { btn.style.background = "#1a2a3a"; });
-      btn.addEventListener("pointerout",  () => { btn.style.background = "#0a1520"; });
       btn.addEventListener("pointerdown", () => onEquip(slot, itemId));
     });
 
     this.panelEl.querySelectorAll<HTMLButtonElement>("[data-use]").forEach(btn => {
       const itemId = btn.dataset.use!;
-      btn.addEventListener("pointerover", () => { btn.style.background = "#2a4a2a"; });
-      btn.addEventListener("pointerout",  () => { btn.style.background = useBg; });
       btn.addEventListener("pointerdown", () => onUse(itemId));
     });
   }

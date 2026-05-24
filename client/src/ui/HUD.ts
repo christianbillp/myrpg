@@ -72,7 +72,7 @@ export interface HUDState {
 
 export interface HUDCallbacks {
   onOpenDM: () => void;
-  onNewEncounter: () => void;
+  onLeaveEncounter: () => void;
   onScrollLog: (dy: number) => void;
 }
 
@@ -99,13 +99,8 @@ export class HUD {
     `;
 
     this.hudEl.innerHTML = `
-      <button data-new-enc style="position:absolute;top:10px;right:148px;
-        height:26px;padding:0 10px;background:#2a1a1a;border:1px solid #556677;
-        color:#aabbcc;font-family:monospace;font-size:11px;cursor:pointer;">NEW ENCOUNTER</button>
-
-      <button data-open-dm style="position:absolute;top:10px;right:12px;
-        height:26px;padding:0 10px;background:#1a1020;border:1px solid #556677;
-        color:#aabbcc;font-family:monospace;font-size:11px;cursor:pointer;">DUNGEON MASTER</button>
+      <button data-leave-enc class="gui-btn-hud" style="position:absolute;top:10px;right:148px;background:#2a1a1a;">LEAVE ENCOUNTER</button>
+      <button data-open-dm class="gui-btn-hud" style="position:absolute;top:10px;right:12px;background:#1a1020;">DUNGEON MASTER</button>
 
       <div data-phase style="position:absolute;top:10px;left:${PLAYER_PANEL_WIDTH + GRID_W / 2}px;
         transform:translateX(-50%);font-size:13px;color:#e2b96f;white-space:nowrap;"></div>
@@ -126,7 +121,7 @@ export class HUD {
     this.logEl        = ref('log');
     this.scrollHintEl = ref('scroll-hint');
 
-    (ref('new-enc') as HTMLButtonElement).onclick = callbacks.onNewEncounter;
+    (ref('leave-enc') as HTMLButtonElement).onclick = callbacks.onLeaveEncounter;
     (ref('open-dm') as HTMLButtonElement).onclick = callbacks.onOpenDM;
 
     this.logEl.addEventListener('wheel', (e) => {

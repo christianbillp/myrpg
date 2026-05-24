@@ -48,13 +48,20 @@ export class OverlayManager {
     this.introShown = false;
   }
 
+  seedAidmHistory(history: ChatMessage[]): void {
+    if (history.length > 0) {
+      this.aidmHistory = history;
+    }
+    this.introShown = true;
+  }
+
   showIntroIfNeeded(state: GameState): void {
     if (this.introShown || !state.introduction) return;
     this.introShown = true;
     const introduction = state.introduction;
     this.introOverlay = new IntroductionOverlay(
       this.scale,
-      state.encounterTypes,
+      state.encounterTitle,
       this.playerDef,
       { introduction, context: state.encounterContext, enemyCount: 0, secrets: [], riddle: null, quests: [] },
       () => {

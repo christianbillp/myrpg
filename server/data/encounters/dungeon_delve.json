@@ -1,6 +1,6 @@
 {
   "id": "dungeon_delve",
-  "title": "Dungeon Delve",
+  "encounterTitle": "Dungeon Delve",
   "description": "Something valuable was left behind in this forsaken dungeon. Search its five chambers — antechamber, guard room, flanking side chambers, and the sealed vault — before someone else finds it first.",
   "encounterTypes": ["exploration"],
   "mapId": "dungeon",

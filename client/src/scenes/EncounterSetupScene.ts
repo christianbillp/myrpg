@@ -1,7 +1,7 @@
 import Phaser from "phaser";
 import { PlayerDef } from "../data/player";
 import { ItemDef } from "../data/equipment";
-import { EncounterType, EncounterDef } from "../data/encounterContext";
+import { EncounterDef } from "../data/encounterContext";
 import { SavedMapDef } from "../data/maps";
 import { gameClient } from "../net/GameClient";
 import type { GameState, EquipmentSlots, EncounterRecord, StorylogEntry } from "../net/types";
@@ -29,16 +29,6 @@ const ENC_CARD_H = 155;
 const ENC_COL1_CX = 920;
 const ENC_COL2_CX = 1420;
 
-const TYPE_COLOR: Record<EncounterType, number> = {
-  simple_combat:      0xcc4444,
-  exploration:        0x44aa66,
-  social_interaction: 0x4488cc,
-};
-const TYPE_LABEL: Record<EncounterType, string> = {
-  simple_combat:      "Combat",
-  exploration:        "Exploration",
-  social_interaction: "Social",
-};
 
 const LAST_CHAR_KEY = 'myrpg_last_character';
 const saveKey = (id: string) => `myrpg_save_${id}`;
@@ -145,10 +135,11 @@ export class EncounterSetupScene extends Phaser.Scene {
     // Sync all characters from server to pick up encounterLog and storylog
     for (const char of this.characters) {
       gameClient.loadSave(char.id).then((data) => {
-        if (data && this.scene.isActive()) {
-          const save = data as LocalSave;
+        if (!data) return;
+        const save = data as LocalSave;
+        localStorage.setItem(saveKey(char.id), JSON.stringify(save));
+        if (this.scene.isActive()) {
           this.allSaves.set(char.id, save);
-          localStorage.setItem(saveKey(char.id), JSON.stringify(save));
           this.updateSaveDisplay(char, save);
         }
       }).catch(() => {});
@@ -226,24 +217,22 @@ export class EncounterSetupScene extends Phaser.Scene {
       fontSize: "10px", color: save ? "#995555" : "#445566", fontFamily: "monospace", resolution: DPR,
     }).setOrigin(0.5).setAlpha(save ? 1 : 0.3);
 
-    if (save) {
-      deleteBg.setInteractive({ useHandCursor: true });
-      deleteBg.on("pointerover", () => { deleteBg.setStrokeStyle(1, 0xaa4444); deleteLabel.setColor("#cc6666"); });
-      deleteBg.on("pointerout",  () => { deleteBg.setStrokeStyle(1, 0x663333); deleteLabel.setColor("#995555"); });
-      deleteBg.on("pointerdown", (pointer: Phaser.Input.Pointer) => {
-        pointer.event.stopPropagation();
-        localStorage.removeItem(saveKey(def.id));
-        this.allSaves.delete(def.id);
-        if (this.selectedPlayer?.id === def.id) this.selectedSave = null;
-        gameClient.deleteSave(def.id).catch(() => {});
-        infoText.setText("No save data").setColor("#445566");
-        equippedText.setText("");
-        deleteBg.disableInteractive().setStrokeStyle(1, 0x222222).setAlpha(0.3);
-        deleteLabel.setColor("#445566").setAlpha(0.3);
-        storylogBg.disableInteractive().setStrokeStyle(1, 0x222222).setAlpha(0.3);
-        storylogLabel.setColor("#445566").setAlpha(0.3);
-      });
-    }
+    deleteBg.setInteractive({ useHandCursor: true });
+    deleteBg.on("pointerover", () => { deleteBg.setStrokeStyle(1, 0xaa4444); deleteLabel.setColor("#cc6666"); });
+    deleteBg.on("pointerout",  () => { deleteBg.setStrokeStyle(1, 0x663333); deleteLabel.setColor("#995555"); });
+    deleteBg.on("pointerdown", (pointer: Phaser.Input.Pointer) => {
+      pointer.event.stopPropagation();
+      localStorage.removeItem(saveKey(def.id));
+      this.allSaves.delete(def.id);
+      if (this.selectedPlayer?.id === def.id) this.selectedSave = null;
+      gameClient.deleteSave(def.id).catch(() => {});
+      infoText.setText("No save data").setColor("#445566");
+      equippedText.setText("");
+      deleteBg.disableInteractive().setStrokeStyle(1, 0x222222).setAlpha(0.3);
+      deleteLabel.setColor("#445566").setAlpha(0.3);
+      storylogBg.disableInteractive().setStrokeStyle(1, 0x222222).setAlpha(0.3);
+      storylogLabel.setColor("#445566").setAlpha(0.3);
+    });
 
     const storylogBg = this.add.rectangle(cx, top + 455, 110, 22, 0x0d1a1a)
       .setStrokeStyle(1, save ? 0x2a7766 : 0x222222)
@@ -252,15 +241,13 @@ export class EncounterSetupScene extends Phaser.Scene {
       fontSize: "10px", color: save ? "#44aa88" : "#445566", fontFamily: "monospace", resolution: DPR,
     }).setOrigin(0.5).setAlpha(save ? 1 : 0.3);
 
-    if (save) {
-      storylogBg.setInteractive({ useHandCursor: true });
-      storylogBg.on("pointerover", () => { storylogBg.setStrokeStyle(1, 0x44aa88); storylogLabel.setColor("#66ccaa"); });
-      storylogBg.on("pointerout",  () => { storylogBg.setStrokeStyle(1, 0x2a7766); storylogLabel.setColor("#44aa88"); });
-      storylogBg.on("pointerdown", (pointer: Phaser.Input.Pointer) => {
-        pointer.event.stopPropagation();
-        this.openStorylogOverlay(def, storylogBg, storylogLabel);
-      });
-    }
+    storylogBg.setInteractive({ useHandCursor: true });
+    storylogBg.on("pointerover", () => { storylogBg.setStrokeStyle(1, 0x44aa88); storylogLabel.setColor("#66ccaa"); });
+    storylogBg.on("pointerout",  () => { storylogBg.setStrokeStyle(1, 0x2a7766); storylogLabel.setColor("#44aa88"); });
+    storylogBg.on("pointerdown", (pointer: Phaser.Input.Pointer) => {
+      pointer.event.stopPropagation();
+      this.openStorylogOverlay(def, storylogBg, storylogLabel);
+    });
 
     this.saveDisplays.set(def.id, { infoText, equippedText, deleteBg, deleteLabel, storylogBg, storylogLabel });
     this.add.text(cx, top + cardH - 24, "SELECT", { fontSize: "13px", color: colorHex, fontFamily: "monospace", resolution: DPR }).setOrigin(0.5, 0);
@@ -308,19 +295,9 @@ export class EncounterSetupScene extends Phaser.Scene {
     bg.on("pointerdown", () => this.selectEncounter(def));
 
     this.add.text(left + 14, top + 10, def.mapId.toUpperCase(), { fontSize: "9px", color: "#445566", fontFamily: "monospace", resolution: DPR, letterSpacing: 1 }).setOrigin(0, 0);
-    this.add.text(cx, top + 26, def.title, { fontSize: "14px", color: "#e8e8f8", fontFamily: "monospace", resolution: DPR }).setOrigin(0.5, 0);
+    this.add.text(cx, top + 26, def.encounterTitle, { fontSize: "14px", color: "#e8e8f8", fontFamily: "monospace", resolution: DPR }).setOrigin(0.5, 0);
 
-    let chipX = left + 14;
-    def.encounterTypes.forEach((t) => {
-      const label = TYPE_LABEL[t as EncounterType];
-      const color = TYPE_COLOR[t as EncounterType];
-      const chipW = label.length * 7 + 12;
-      this.add.rectangle(chipX + chipW / 2, top + 60, chipW, 16, color, 0.2).setStrokeStyle(1, color);
-      this.add.text(chipX + chipW / 2, top + 60, label, { fontSize: "9px", color: "#" + color.toString(16).padStart(6, "0"), fontFamily: "monospace", resolution: DPR }).setOrigin(0.5, 0.5);
-      chipX += chipW + 6;
-    });
-
-    this.add.text(cx, top + 78, def.description, { fontSize: "10px", color: "#8899aa", fontFamily: "monospace", resolution: DPR, wordWrap: { width: ENC_CARD_W - 28 }, lineSpacing: 4, align: "left" }).setOrigin(0.5, 0);
+    this.add.text(cx, top + 48, def.description, { fontSize: "10px", color: "#8899aa", fontFamily: "monospace", resolution: DPR, wordWrap: { width: ENC_CARD_W - 28 }, lineSpacing: 4, align: "left" }).setOrigin(0.5, 0);
   }
 
   private selectEncounter(def: EncounterDef): void {
@@ -362,6 +339,7 @@ export class EncounterSetupScene extends Phaser.Scene {
         mapType: "saved",
         playerDefId: player.id,
         savedMapId: savedMap?.id,
+        encounterTitle: enc.encounterTitle,
         savedMapName: savedMap?.name,
         savedMapDescription: savedMap?.mapdescription,
         npcIds: enc.npcIds,

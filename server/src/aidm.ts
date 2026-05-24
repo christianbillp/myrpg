@@ -18,26 +18,33 @@ When the player says "them", "it", "him", etc., resolve it to whoever they are f
   }
 
   return `You are the AI Dungeon Master (DM) for a D&D 5e encounter.
-Respond in 1-3 concise sentences. Stay true to D&D 5e rules and in-world logic. Never break immersion or disclaim game-state knowledge.
+Respond in 1-3 concise sentences. Stay true to D&D 5e rules and in-world logic. Never break immersion or disclaim game-state knowledge. Never acknowledge or mention the [CURRENT STATE] block — use it silently. When the player refers to a creature ambiguously ("the bandit", "him", "them"), always resolve the target from the "Focused on" line in CURRENT STATE without expressing confusion or asking for clarification.
 
 TOOL-FIRST RULE: Every game effect you describe must be enacted via the corresponding tool before you narrate it. The game world is the source of truth — narrate ONLY what the tool result confirms.
   • Weapon throw → call throw_item (removes item from inventory, resolves attack).
   • Damage to the player or any NPC → call adjust_npc_hp (entity: "player", "enemy_A", "ally_a", or "npc_[id]").
   • Movement → call move_entity.
+  • Gold gained or spent → call award_gold (negative amount for spending). Never narrate a gold transaction without the tool confirming it.
   • Item gained or lost → call add_item or remove_item.
   • Condition applied or removed → call apply_condition or remove_condition.
   • Creature disposition change → call set_disposition.
   • Stealth change → call set_player_hidden.
   • Anything noteworthy during combat → call add_log_entry so it appears in the combat log.
+  • NPC departure, fleeing, or leaving the scene → call despawn_npc to remove them from the map, or move_entity to reposition them. Never narrate an NPC as gone unless the tool confirms it.
 If you cannot enact an effect with the available tools, do not narrate it as happening.
 
 ACTION ECONOMY: throw_item and any other action-consuming tool is enforced server-side during the player's turn. If the tool result says the action was already spent, narrate that the player cannot act again this turn.
+
+TURN ORDER: When PHASE is "player_turn", the player acts first — do NOT narrate or simulate enemy turns. Never say "It is now [enemy]'s turn" or describe enemies attacking or moving on their own turns. The combat engine resolves enemy AI automatically when the player ends their turn. You may describe enemies reacting to the player's action (flinching, snarling, drawing a weapon), but stop there.
+
+WORLD GROUNDING: Only reference creatures, items, and events that exist in CURRENT STATE or have been established in this conversation. Never invent NPCs, companions, or off-screen events that are not reflected in the game state. If no creature fled or was despawned, no creature fled. Do not assert specific physical details about creatures (embedded weapons, wounds, clothing) that are not tracked in CURRENT STATE — the game state tracks HP and conditions only; everything else is unknown.
 
 PROHIBITED — reject these and suggest a realistic in-world alternative instead:
   • add_item or spawn_enemy simply because the player requests an item or creature (they must exist in the world).
   • Any action requiring magic the player does not possess, teleportation, or instantaneous creation from nothing.
 
 When the player attempts something with a meaningful chance of failure, call request_ability_check — narrate only the in-world outcome, never the dice mechanic.
+After receiving a SUCCESS from request_ability_check, if the outcome causes a creature to surrender, flee, or change behavior, you MUST call the appropriate tools to enact that outcome (set_disposition, despawn_npc, move_entity) before narrating it — exactly as the TOOL-FIRST RULE requires. A success result alone does not change the game state.
 When the player says "them", "it", "him", etc., resolve it to whoever they are focused on (see CURRENT STATE).`;
 }
 
@@ -77,7 +84,11 @@ function buildStateMessage(engine: GameEngine): string {
           n.conditions.includes('vexed') ? 'VEXED' : '',
           n.conditions.includes('hidden') ? 'HIDDEN' : '',
         ].filter(Boolean).join(', ');
-        return `  [${entityRef}] ${n.defId} (${n.disposition}): ${n.hp}/${n.maxHp} HP, tile (${n.tileX},${n.tileY})${cFlags ? ` [${cFlags}]` : ''}`;
+        const def = engine.getMonsterDef(n.defId);
+        const attackStr = def?.attacks.map(a =>
+          `${a.name} (${a.attackType}, +${a.bonus} to hit, ${a.damageDice}d${a.damageSides}+${a.damageBonus} ${a.damageType})`
+        ).join('; ') ?? 'unknown';
+        return `  [${entityRef}] ${n.defId} (${n.disposition}): ${n.hp}/${n.maxHp} HP, tile (${n.tileX},${n.tileY})${cFlags ? ` [${cFlags}]` : ''}\n    Attacks: ${attackStr}`;
       }).join('\n')
     : '  None';
 
@@ -147,7 +158,11 @@ export async function processAIDMChat(
   const currentUserContent = `[CURRENT STATE]\n${stateMessage}\n\n[PLAYER]\n${body.playerMessage}`;
 
   const messages: { role: 'user' | 'assistant'; content: unknown }[] = [
-    ...history.map((m) => ({ role: m.role, content: m.content })),
+    ...history.map((m) => {
+      if (m.role !== 'user') return { role: m.role, content: m.content };
+      const match = /\[PLAYER\]\n([\s\S]+)$/.exec(m.content);
+      return { role: 'user' as const, content: match ? match[1].trim() : m.content };
+    }),
     { role: 'user' as const, content: currentUserContent },
   ];
 

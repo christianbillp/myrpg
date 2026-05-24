@@ -42,13 +42,6 @@ export interface ActionResult {
   state: GameState;
 }
 
-function crGoldReward(cr: string): number {
-  if (cr.includes('/')) {
-    const [num, den] = cr.split('/').map(Number);
-    return Math.floor(10 * num / den);
-  }
-  return 10 * Number(cr);
-}
 
 let uidCounter = 0;
 function uid(): string { return `e${++uidCounter}`; }
@@ -65,6 +58,9 @@ export class GameEngine {
     applyEquipment(this.playerDef, state.player.equippedSlots, defs.equipment);
     state.player.equippedSlotLabels = computeEquippedSlotLabels(this.playerDef, state.player.equippedSlots, defs.equipment);
 
+    for (const npc of state.npcs) {
+      npc.inventoryIds ??= [];
+    }
     for (const id of [
       ...state.npcs.map((n) => n.id),
       ...state.mapItems.map((i) => i.id),
@@ -75,6 +71,7 @@ export class GameEngine {
   }
 
   getState(): GameState { return this.state; }
+  getMonsterDef(defId: string): MonsterDef | undefined { return this.resolveMonsterDef(defId); }
 
   private resolveMonsterDef(defId: string): MonsterDef | undefined {
     const direct = this.defs.monsters.find((m) => m.id === defId);
@@ -158,7 +155,9 @@ export class GameEngine {
   }
 
   awardGold(amount: number): GameEvent[] {
-    this.state.player.gold += amount;
+    const newGold = this.state.player.gold + amount;
+    if (newGold < 0) return [];
+    this.state.player.gold = newGold;
     return [];
   }
 
@@ -228,6 +227,7 @@ export class GameEngine {
     const s = this.state;
     const npcId = entity.replace('npc_', '');
     s.npcs = s.npcs.filter((n) => n.id !== npcId);
+    this.autoEndCombatIfNoEnemies();
     return [];
   }
 
@@ -249,7 +249,7 @@ export class GameEngine {
       disposition: 'enemy', factionId: def.id,
       hp: def.maxHp, maxHp: def.maxHp,
       isActive: false,
-      reactionUsed: false, conditions: [],
+      reactionUsed: false, conditions: [], inventoryIds: [],
     };
     s.npcs.push(npc);
     if (s.phase !== 'exploring') {
@@ -267,6 +267,13 @@ export class GameEngine {
     s.turnOrderIds = [];
     s.player.hidden = false;
     return [];
+  }
+
+  private autoEndCombatIfNoEnemies(): void {
+    const s = this.state;
+    if (s.phase === 'exploring' || s.phase === 'defeat') return;
+    if (s.npcs.some(n => n.disposition === 'enemy' && n.hp > 0)) return;
+    this.endCombat();
   }
 
   triggerCombat(): GameEvent[] {
@@ -300,6 +307,7 @@ export class GameEngine {
       npc.disposition = disposition as Disposition;
       if ((disposition === 'ally' || disposition === 'enemy') && !npc.label) this.assignCombatLabel(npc);
       if (disposition === 'enemy') this.aggroFaction(npc);
+      else this.autoEndCombatIfNoEnemies();
     }
     return [];
   }
@@ -611,10 +619,10 @@ export class GameEngine {
     s.player.actionUsed = true;
   }
 
-  private doThrow(itemId: string, targetId: string | undefined, _events: GameEvent[]): void {
+  private doThrow(itemId: string, targetId: string | undefined, events: GameEvent[]): void {
     const s = this.state;
-    if (s.phase !== 'player_turn' || s.player.actionUsed) return;
-    if (isIncapacitated(s.player.conditions)) return;
+    if (s.phase !== 'exploring' && s.phase !== 'player_turn') return;
+    if (s.phase === 'player_turn' && (s.player.actionUsed || isIncapacitated(s.player.conditions))) return;
 
     const itemIdx = s.player.inventoryIds.indexOf(itemId);
     if (itemIdx === -1) return;
@@ -626,13 +634,20 @@ export class GameEngine {
     const normalRange = isProperThrown ? Math.floor((itemDef as WeaponDef).throwNormal / 5) : 4;
     const longRange = isProperThrown ? Math.floor((itemDef as WeaponDef).throwLong / 5) : 12;
 
-    const inLongRange = (n: NpcState) =>
-      n.disposition === 'enemy' && n.hp > 0 &&
+    const inRange = (n: NpcState) =>
+      n.hp > 0 &&
       chebyshev(s.player.tileX, s.player.tileY, n.tileX, n.tileY) <= longRange;
 
-    let target = targetId ? (s.npcs.find((n) => n.id === targetId && inLongRange(n)) ?? null) : null;
-    if (!target) target = s.npcs.find(inLongRange) ?? null;
+    if (!targetId) return;
+    const target = s.npcs.find((n) => n.id === targetId && inRange(n)) ?? null;
     if (!target) return;
+
+    // Throwing at a neutral NPC turns them and their faction hostile.
+    if (target.disposition === 'neutral') {
+      target.disposition = 'enemy';
+      if (!target.label) this.assignCombatLabel(target);
+      this.aggroFaction(target);
+    }
 
     const targetDef = this.resolveMonsterDef(target.defId);
     if (!targetDef) return;
@@ -644,7 +659,9 @@ export class GameEngine {
 
     s.player.inventoryIds.splice(itemIdx, 1);
     this.executeThrowOnTarget(attack, profBonus, normalRange, itemDef, target, targetDef);
-    s.player.actionUsed = true;
+
+    if (s.phase === 'exploring') this.doStartCombat(events);
+    if (s.phase === 'player_turn') s.player.actionUsed = true;
   }
 
   throwItem(itemId: string, targetId?: string): GameEvent[] {
@@ -668,13 +685,11 @@ export class GameEngine {
     const normalRange = isProperThrown ? Math.floor((itemDef as WeaponDef).throwNormal / 5) : 4;
     const longRange = isProperThrown ? Math.floor((itemDef as WeaponDef).throwLong / 5) : 12;
 
-    const inLongRange = (n: NpcState) =>
-      n.disposition === 'enemy' && n.hp > 0 &&
+    const inRange = (n: NpcState) =>
+      n.hp > 0 &&
       chebyshev(s.player.tileX, s.player.tileY, n.tileX, n.tileY) <= longRange;
 
-    // Resolve entity ref using the same prefix conventions as moveEntity / setDisposition.
-    // Explicit target accepts any living NPC regardless of disposition (AIDM may target neutrals).
-    // No target: fall back to nearest enemy in range.
+    // Resolve target. Explicit targetId accepts any living NPC; fallback picks nearest in range.
     let target: NpcState | null = null;
     if (targetId) {
       if (targetId.startsWith('enemy_')) {
@@ -686,12 +701,18 @@ export class GameEngine {
       } else {
         target = s.npcs.find((n) => (n.id === targetId || n.label === targetId) && n.hp > 0) ?? null;
       }
+      // Reject if out of range.
+      if (target && !inRange(target)) return events;
     }
-    if (!target) target = s.npcs.find(inLongRange) ?? null;
+    if (!target) target = s.npcs.filter(n => n.disposition === 'enemy').find(inRange) ?? null;
     if (!target) return events;
 
-    // Attacking a neutral NPC turns them hostile.
-    if (target.disposition === 'neutral') target.disposition = 'enemy';
+    // Attacking a neutral NPC turns them and their faction hostile.
+    if (target.disposition === 'neutral') {
+      target.disposition = 'enemy';
+      if (!target.label) this.assignCombatLabel(target);
+      this.aggroFaction(target);
+    }
 
     const targetDef = this.resolveMonsterDef(target.defId);
     if (!targetDef) return events;
@@ -705,6 +726,7 @@ export class GameEngine {
     else s.player.inventoryIds.splice(inventoryIdx, 1);
     this.executeThrowOnTarget(attack, profBonus, normalRange, itemDef, target, targetDef);
 
+    if (s.phase === 'exploring') this.doStartCombat(events);
     if (s.phase === 'player_turn') s.player.actionUsed = true;
 
     return events;
@@ -740,6 +762,12 @@ export class GameEngine {
 
   private killNpc(id: string): void {
     const s = this.state;
+    const dying = s.npcs.find((n) => n.id === id);
+    if (dying) {
+      for (const defId of dying.inventoryIds) {
+        s.mapItems.push({ id: uid(), defId, tileX: dying.tileX, tileY: dying.tileY });
+      }
+    }
     s.npcs = s.npcs.filter((n) => n.id !== id);
     s.turnOrderIds = s.turnOrderIds.filter((tid) => tid !== id);
     if (s.selectedTargetId === id) s.selectedTargetId = null;
@@ -753,11 +781,9 @@ export class GameEngine {
 
   private killWithReward(npc: NpcState, def: MonsterDef, killMessage: string, includeTotal = true): void {
     const s = this.state;
-    const gold = crGoldReward(def.cr);
     s.player.xp += def.xp;
-    s.player.gold += gold;
-    const logs: LogEntry[] = [{ left: `${killMessage} +${def.xp} XP  +${gold} GP`, style: 'kill' }];
-    if (includeTotal) logs.push({ left: `Total XP: ${s.player.xp}  |  GP: ${s.player.gold}`, style: 'status' });
+    const logs: LogEntry[] = [{ left: `${killMessage} +${def.xp} XP`, style: 'kill' }];
+    if (includeTotal) logs.push({ left: `Total XP: ${s.player.xp}`, style: 'status' });
     this.addLogs(logs);
     this.killNpc(npc.id);
   }
@@ -780,11 +806,18 @@ export class GameEngine {
       || hasAttackDisadvantage(s.player.conditions) || adjacentEnemy;
     const autoCrit = isAutoCrit(target.conditions, dist);
     this.addLog({ left: `${this.playerDef.name} throws ${itemDef.name}`, style: 'normal' });
-    const { damage, logs, vexApplied, slowApplied } = playerThrowAttack(
+    const { damage, isHit, logs, vexApplied, slowApplied } = playerThrowAttack(
       this.playerDef, attack, targetDef, withAdvantage, withDisadvantage, profBonus, autoCrit,
     );
     s.player.hidden = false;
     this.addLogs(logs);
+
+    if (isHit) {
+      target.inventoryIds.push(itemDef.id);
+    } else {
+      s.mapItems.push({ id: uid(), defId: itemDef.id, tileX: target.tileX, tileY: target.tileY });
+    }
+
     const { finalDamage, log: resistLog } = this.resistMod(damage, attack.damageType, targetDef, target.name);
     if (resistLog) this.addLog(resistLog);
     target.hp = Math.max(0, target.hp - finalDamage);
@@ -1360,6 +1393,7 @@ export class GameEngine {
       logScrollOffset: 0,
       encounterTypes: req.encounterTypes,
       mapName: req.encounterContext.mapName ?? 'Unknown',
+      encounterTitle: req.encounterTitle ?? '',
       quests,
       selectedTargetId: null,
       activeNpcIndex: 0,

@@ -117,7 +117,7 @@ SRD stat blocks for all creatures — both random enemies and the underlying sta
 | `speed` | number | Movement speed in **feet**. |
 | `attacks` | Attack[] | One or more attack entries (see below). |
 | `xp` | number | XP awarded on kill. |
-| `cr` | string | Challenge Rating, e.g. `"1/8"`, `"1/4"`, `"1"`. Determines GP reward (`10 × CR`, rounded down). |
+| `cr` | string | Challenge Rating, e.g. `"1/8"`, `"1/4"`, `"1"`. Classifies encounter difficulty. Not used for automatic reward calculation — gold must be granted by the AIDM via `award_gold`. |
 | `color` | number | Token colour as a decimal integer. |
 | `vulnerabilities` | string[] | *(optional)* Damage types that deal double damage, e.g. `["bludgeoning"]`. |
 | `resistances` | string[] | *(optional)* Damage types that deal half damage. |
@@ -436,7 +436,14 @@ Stores the persistent player state that carries across encounters.
 
 ### World save — `saves/world.json`
 
-Stores the full encounter state so the player can resume mid-encounter. This file is deleted when the player starts a new encounter.
+Stores the full encounter state so the player can resume mid-encounter. This file is deleted when the player starts a new encounter. The `GET /world` endpoint also returns `dmHistory` (the AIDM conversation history for the session), which is kept in server session memory and restored to the client on reconnect.
+
+Key runtime fields of note:
+
+| Field | Notes |
+|---|---|
+| `npcs[].inventoryIds` | Items held by each NPC (string `id` values from `equipment/`). Populated when a thrown item hits the creature; each item is moved to `mapItems` at the creature's tile when it dies, making it recoverable. |
+| `dmHistory` | AIDM conversation — returned alongside `world.json` by `GET /world`. `[CURRENT STATE]` prefixes are stripped from historical user messages before each API call so the model always reasons from the current injected state, not stale snapshots. |
 
 ---
 

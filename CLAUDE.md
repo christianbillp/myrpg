@@ -79,6 +79,15 @@ Refactoring should optimise for **scalability, agility, and maintainability** �
 - **Readability for humans and AI agents** — code should be self-explanatory from names and structure alone. Avoid clever abbreviations; prefer the full canonical term.
 - **Low coupling** — components communicate through clear interfaces. Avoid reaching into the internals of another class or scene.
 
+## Dev Mode Buttons
+
+Dev buttons are hidden from regular players and must not influence UI layout. When designing or reviewing any panel or overlay:
+
+1. Design the layout as if dev buttons do not exist — it must look complete and balanced without them.
+2. Only after the design is settled, place dev buttons into whatever leftover space is available (e.g. an absolutely-positioned corner) without shifting, resizing, or rebalancing any non-dev element.
+
+Dev buttons are gated behind `DevMode.enabled` from `client/src/devMode.ts`. When the button is conditionally rendered, all references to it must guard against `null`.
+
 ## Reviewing
 
 A review checks whether the codebase needs refactoring. It considers three things together: the code as written, the reference documentation (`ui.md`, `requirements.md`, and any other docs), and the outstanding requirements. Specifically look for:

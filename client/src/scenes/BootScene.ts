@@ -1,6 +1,7 @@
 import Phaser from "phaser";
 import { PlayerDef } from "../data/player";
 import { gameClient } from "../net/GameClient";
+import { ConnectionMonitor } from "../net/ConnectionMonitor";
 
 const API_URL = "http://localhost:3000";
 const ABILITIES = ["str", "dex", "con", "int", "wis", "cha"] as const;
@@ -56,16 +57,12 @@ export class BootScene extends Phaser.Scene {
         const playerDef = (characters as PlayerDef[]).find(c => c.id === world.state.player.defId)
           ?? (characters as PlayerDef[])[0];
         gameClient.resumeSession(world.sessionId);
-        this.scene.start("GameScene", { sessionId: world.sessionId, playerDef });
+        this.scene.start("GameScene", { sessionId: world.sessionId, playerDef, dmHistory: world.dmHistory, isResume: true });
       } else {
         this.scene.start("EncounterSetupScene");
       }
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      this.add.text(20, 20, `Boot error: ${msg}`, {
-        fontSize: "14px", color: "#ff4444", fontFamily: "monospace",
-        wordWrap: { width: this.scale.width - 40 },
-      });
+    } catch {
+      ConnectionMonitor.notifyDisconnected();
     }
   }
 }

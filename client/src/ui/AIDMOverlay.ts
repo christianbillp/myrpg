@@ -1,6 +1,7 @@
 import { marked } from "marked";
 import { BaseOverlay } from "./BaseOverlay";
 import { UIScale } from "./UIScale";
+import { DevMode } from "../devMode";
 
 export interface ChatMessage {
   role: "user" | "assistant";
@@ -49,7 +50,7 @@ export class AIDMOverlay extends BaseOverlay {
   private readonly inputEl: HTMLInputElement;
   private readonly statusEl: HTMLDivElement;
   private readonly storyChip: HTMLButtonElement;
-  private readonly devChip: HTMLButtonElement;
+  private readonly devChip: HTMLButtonElement | null;
   private history: ChatMessage[];
   private thinking = false;
   private dmPersona: DMPersona;
@@ -94,7 +95,7 @@ export class AIDMOverlay extends BaseOverlay {
           <div style="font-size:15px;color:${ACCENT};">DUNGEON MASTER</div>
           <div style="display:flex;gap:6px;">
             <button data-chip="story" style="width:56px;height:18px;font-family:monospace;font-size:9px;cursor:pointer;border:1px solid #443300;background:#1a1a00;color:#665533;">STORY</button>
-            <button data-chip="dev"   style="width:56px;height:18px;font-family:monospace;font-size:9px;cursor:pointer;border:1px solid #224422;background:#001a00;color:#336633;">DEV</button>
+            ${DevMode.enabled ? `<button data-chip="dev" style="width:56px;height:18px;font-family:monospace;font-size:9px;cursor:pointer;border:1px solid #224422;background:#001a00;color:#336633;">DEV</button>` : ''}
           </div>
         </div>
 
@@ -115,9 +116,8 @@ export class AIDMOverlay extends BaseOverlay {
             style="flex:1;height:30px;background:#111122;border:1px solid #554422;
               color:#e0d0a0;font-family:monospace;font-size:12px;padding:0 8px;
               outline:none;box-sizing:border-box;caret-color:${ACCENT};" />
-          <button data-send style="width:72px;height:30px;background:#2a1e08;
-            border:1px solid ${ACCENT};color:${ACCENT};font-family:monospace;
-            font-size:12px;cursor:pointer;flex-shrink:0;">SEND</button>
+          <button data-send class="gui-btn-overlay" style="width:72px;height:30px;background:#2a1e08;
+            border:1px solid ${ACCENT};color:${ACCENT};font-size:12px;flex-shrink:0;">SEND</button>
         </div>
       </div>
     `);
@@ -132,10 +132,8 @@ export class AIDMOverlay extends BaseOverlay {
     this.refreshChips();
 
     this.storyChip.addEventListener("pointerdown", () => { this.dmPersona = "story"; this.refreshChips(); });
-    this.devChip.addEventListener("pointerdown",   () => { this.dmPersona = "dev";   this.refreshChips(); });
+    this.devChip?.addEventListener("pointerdown",  () => { this.dmPersona = "dev";   this.refreshChips(); });
 
-    (ref("send") as HTMLButtonElement).addEventListener("pointerover",  () => { (ref("send") as HTMLElement).style.opacity = "0.75"; });
-    (ref("send") as HTMLButtonElement).addEventListener("pointerout",   () => { (ref("send") as HTMLElement).style.opacity = "1"; });
     (ref("send") as HTMLButtonElement).addEventListener("pointerdown",  () => this.send());
 
     this.inputEl.addEventListener("keydown", (e) => {
@@ -152,8 +150,10 @@ export class AIDMOverlay extends BaseOverlay {
     const isStory = this.dmPersona === "story";
     this.storyChip.style.borderColor = isStory ? ACCENT   : "#443300";
     this.storyChip.style.color       = isStory ? ACCENT   : "#665533";
-    this.devChip.style.borderColor   = !isStory ? "#44cc44" : "#224422";
-    this.devChip.style.color         = !isStory ? "#66ee66" : "#336633";
+    if (this.devChip) {
+      this.devChip.style.borderColor = !isStory ? "#44cc44" : "#224422";
+      this.devChip.style.color       = !isStory ? "#66ee66" : "#336633";
+    }
   }
 
   private async send(): Promise<void> {

@@ -12,7 +12,7 @@ export interface EncounterLogLine {
 interface AdventureMeta {
   timestamp: string;
   description: string;
-  encounterTypes: string[];
+  encounterTitle: string;
   xpStart: number;
   goldStart: number;
 }
@@ -37,7 +37,7 @@ export function createSession(sessionId: string, engine: GameEngine): void {
     adventureMeta: {
       timestamp: new Date().toISOString(),
       description: s.introduction,
-      encounterTypes: s.encounterTypes,
+      encounterTitle: s.encounterTitle,
       xpStart: s.player.xp,
       goldStart: s.player.gold,
     },
@@ -57,6 +57,11 @@ export function getAdventureData(sessionId: string): { meta: AdventureMeta; line
 
 export function getAidmHistory(sessionId: string): AidmMessage[] | undefined {
   return sessions.get(sessionId)?.aidmHistory;
+}
+
+export function setAidmHistory(sessionId: string, history: AidmMessage[]): void {
+  const session = sessions.get(sessionId);
+  if (session) session.aidmHistory = history;
 }
 
 export function getSession(sessionId: string): Session | undefined {

@@ -5,7 +5,7 @@ export interface EncounterRecord {
   id: string;
   timestamp: string;
   description: string;
-  encounterTypes: string[];
+  encounterTitle: string;
   xpGained: number;
   goldGained: number;
   outcome: 'survived' | 'defeated';
@@ -21,7 +21,7 @@ const SYSTEM_PROMPT = `You are a fantasy novelist writing a single encounter ent
 
 You will receive the scene description and the sequence of events from one encounter.
 
-Write a short prose recap — a few sentences to a short paragraph. Write in third person. Weave the scene description naturally into the narrative — do not quote or restate it directly. Include meaningful dialogue where it appears in the events (use italics with *asterisks*). Never mention dice rolls, HP numbers, damage numbers, skill names, XP amounts, or gold amounts. Translate mechanical events into narrative: a hit is a blow landed, a kill is a death, Second Wind is finding a reserve of strength. Write as if narrating a fantasy novel, not logging a game session. Do not include headers, titles, or separators — output only the prose.`;
+Write exactly one short paragraph of two to three sentences. Write in third person. Weave the scene description naturally into the narrative — do not quote or restate it directly. Include one piece of meaningful dialogue at most (use italics with *asterisks*). Never mention dice rolls, HP numbers, damage numbers, skill names, XP amounts, or gold amounts. Translate mechanical events into narrative: a hit is a blow landed, a kill is a death, Second Wind is finding a reserve of strength. Write as if narrating a fantasy novel, not logging a game session. Do not include headers, titles, or separators — output only the prose.`;
 
 function buildPrompt(record: EncounterRecord): string {
   const events = record.lines.map((l) => {
@@ -46,7 +46,7 @@ export async function generateStorylog(
   for (const record of toGenerate) {
     const res = await anthropic.messages.create({
       model: 'claude-sonnet-4-6',
-      max_tokens: 500,
+      max_tokens: 400,
       system: SYSTEM_PROMPT,
       messages: [{ role: 'user', content: buildPrompt(record) }],
     });

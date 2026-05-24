@@ -276,6 +276,7 @@ export interface NpcState {
   isActive: boolean;
   reactionUsed: boolean;
   conditions: string[];
+  inventoryIds: string[];
 }
 
 export interface MapItemState {
@@ -322,6 +323,7 @@ export interface GameState {
   logScrollOffset: number;
   encounterTypes: EncounterType[];
   mapName: string;
+  encounterTitle: string;
   quests: QuestState[];
   selectedTargetId: string | null;
   activeNpcIndex: number;
@@ -372,6 +374,7 @@ export interface CreateSessionRequest {
   mapType: 'open' | 'rooms' | 'saved';
   playerDefId: string;
   savedMapId?: string;
+  encounterTitle?: string;
   npcIds?: string[];
   allyIds?: string[];
   customIntroduction?: string;

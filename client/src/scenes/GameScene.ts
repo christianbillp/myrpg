@@ -17,6 +17,7 @@ import { MonsterDef, NPCDef } from "../data/monsters";
 import { ItemDef, WeaponDef } from "../data/equipment";
 import { gameClient } from "../net/GameClient";
 import type { GameState, GameEvent, GameMap } from "../net/types";
+import type { ChatMessage } from "../ui/AIDMOverlay";
 
 const GAME_W = PLAYER_PANEL_WIDTH + GRID_COLS * TILE_SIZE + TARGET_PANEL_WIDTH;
 const GAME_H = GRID_ROWS * TILE_SIZE + HUD_HEIGHT;
@@ -45,6 +46,9 @@ export class GameScene extends Phaser.Scene {
   private highlightLayer!: Phaser.GameObjects.Graphics;
   private localLogScrollOffset = 0;
 
+  private pendingDmHistory: ChatMessage[] = [];
+  private pendingIsResume = false;
+
   private cursors!: Phaser.Types.Input.Keyboard.CursorKeys;
   private wasd!: {
     up: Phaser.Input.Keyboard.Key;
@@ -57,8 +61,10 @@ export class GameScene extends Phaser.Scene {
     super({ key: "GameScene" });
   }
 
-  init(data: { sessionId: string; playerDef: PlayerDef }): void {
+  init(data: { sessionId: string; playerDef: PlayerDef; dmHistory?: ChatMessage[]; isResume?: boolean }): void {
     this.playerDef = data.playerDef;
+    this.pendingIsResume = data.isResume ?? false;
+    this.pendingDmHistory = data.isResume ? (data.dmHistory ?? []) : [];
     this.player = null;
     this.eventQueue = [];
     this.animating = false;
@@ -88,6 +94,7 @@ export class GameScene extends Phaser.Scene {
       onRefresh:         () => { if (this.gameState) this.updateHUD(this.gameState); },
       getItems:          () => this.registry.get("equipment") as ItemDef[],
     });
+    if (this.pendingIsResume) this.overlays.seedAidmHistory(this.pendingDmHistory);
 
     this.setupInput();
     this.buildHUD();
@@ -220,7 +227,7 @@ export class GameScene extends Phaser.Scene {
     if (serverId === this.selectedEntityId) {
       if (this.selectedEntityId) {
         const nState = state.npcs.find(n => n.id === this.selectedEntityId);
-        if (nState && nState.hp > 0) this.targetPanel.refresh(nState.hp, nState.maxHp, nState.conditions);
+        if (nState && nState.hp > 0) this.targetPanel.refresh(nState, nState.maxHp);
       }
       return;
     }
@@ -237,7 +244,7 @@ export class GameScene extends Phaser.Scene {
       this.selectedEntityId = serverId;
       this.npcTokens.get(serverId)?.setSelected(true);
       const def = this.resolveMonsterDef(nState.defId);
-      this.targetPanel.show(def, nState.hp, nState.conditions);
+      this.targetPanel.show(def, nState, nState.conditions);
     }
   }
 
@@ -293,7 +300,7 @@ export class GameScene extends Phaser.Scene {
     const nState = this.gameState.npcs.find(n => n.id === id);
     if (nState) {
       const def = this.resolveMonsterDef(nState.defId);
-      this.targetPanel.show(def, nState.hp, nState.conditions);
+      this.targetPanel.show(def, nState, nState.conditions);
     }
     gameClient.sendAction({ type: "selectTarget", entityId: id });
     if (this.gameState) this.updateHUD(this.gameState);
@@ -361,14 +368,13 @@ export class GameScene extends Phaser.Scene {
     this.targetPanel = new TargetPanel(this.uiScale);
     this.hud = new HUD(this.uiScale, {
       onOpenDM:       () => this.overlays.openDM(),
-      onNewEncounter: () => {
+      onLeaveEncounter: () => {
         this.uiDestroyed = true;
         this.playerPanel.destroy();
         this.targetPanel.destroy();
         this.hud.destroy();
         this.uiScale.destroy();
-        gameClient.disconnect();
-        this.scene.start("EncounterSetupScene");
+        gameClient.disconnect().then(() => this.scene.start("EncounterSetupScene"));
       },
       onScrollLog: (dy) => {
         this.localLogScrollOffset = Math.max(0, this.localLogScrollOffset + (dy > 0 ? -1 : 1));
@@ -404,7 +410,7 @@ export class GameScene extends Phaser.Scene {
       combatLog:          state.combatLog,
       logScrollOffset:    this.localLogScrollOffset,
       selectedNpc,
-      searchAvailable:    state.encounterTypes.includes("exploration") && state.secrets.length > 0,
+      searchAvailable:    state.secrets.length > 0,
     };
   }
 
@@ -423,9 +429,13 @@ export class GameScene extends Phaser.Scene {
       playerTileY:      this.player?.tileY ?? state.player.tileY,
       hitDiceRemaining: this.playerDef.level - state.player.hitDiceUsed,
       throwableItems:   (() => {
+        if (!state.selectedTargetId) return [];
+        const target = state.npcs.find(n => n.id === state.selectedTargetId && n.hp > 0);
+        if (!target) return [];
         const allItems = this.registry.get("equipment") as ItemDef[];
         const px = this.player?.tileX ?? state.player.tileX;
         const py = this.player?.tileY ?? state.player.tileY;
+        const dist = Math.max(Math.abs(target.tileX - px), Math.abs(target.tileY - py));
         return [...new Set(state.player.inventoryIds)]
           .map(id => allItems.find(i => i.id === id))
           .filter((i): i is ItemDef => i !== undefined)
@@ -433,10 +443,7 @@ export class GameScene extends Phaser.Scene {
             const longRangeTiles = itemDef.type === "weapon" && (itemDef as WeaponDef).thrown
               ? Math.floor((itemDef as WeaponDef).throwLong / 5)
               : 12;
-            return state.npcs.some(n =>
-              n.disposition === "enemy" && n.hp > 0 &&
-              Math.max(Math.abs(n.tileX - px), Math.abs(n.tileY - py)) <= longRangeTiles,
-            );
+            return dist <= longRangeTiles;
           })
           .map(i => ({ id: i.id, name: i.name }));
       })(),
@@ -451,7 +458,7 @@ export class GameScene extends Phaser.Scene {
       completed: q.completed,
     }));
 
-    const showSearch = state.encounterTypes.includes("exploration") && state.secrets.length > 0;
+    const showSearch = state.secrets.length > 0;
     this.playerPanel.refresh(
       state.player.hp,
       this.playerDef.maxHp,
@@ -462,7 +469,7 @@ export class GameScene extends Phaser.Scene {
 
     if (this.selectedEntityId) {
       const nState = state.npcs.find(n => n.id === this.selectedEntityId);
-      if (nState && nState.hp > 0) this.targetPanel.refresh(nState.hp, nState.maxHp, nState.conditions);
+      if (nState && nState.hp > 0) this.targetPanel.refresh(nState, nState.maxHp);
     }
 
     this.playerPanel.refreshActions(this.buildActionState(state));

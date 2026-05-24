@@ -13,20 +13,30 @@ import { fileURLToPath } from "url";
 import { randomUUID } from "crypto";
 import { buildEncounter, EncounterStartRequest } from "./encounterService.js";
 import { processAIDMChat, AIDMChatRequest } from "./aidm.js";
-import { generateStorylog, type EncounterRecord, type StorylogEntry } from "./storylog.js";
+import {
+  generateStorylog,
+  type EncounterRecord,
+  type StorylogEntry,
+} from "./storylog.js";
 import { GameEngine, GameDefs } from "./engine/GameEngine.js";
-import { applyEquipment, applyFeats, applySpecies } from "./engine/EquipmentSystem.js";
+import {
+  applyEquipment,
+  applyFeats,
+  applySpecies,
+} from "./engine/EquipmentSystem.js";
 import { CreateSessionRequest } from "./engine/types.js";
 import {
   createSession,
   getEngine,
   getAidmHistory,
+  setAidmHistory,
   registerWebSocket,
   pushStateUpdate,
   deleteSession,
   pushAdventureLines,
   getAdventureData,
 } from "./sessions.js";
+import type { AidmMessage } from "./sessions.js";
 import type {
   PlayerAction,
   ServerWSMessage,
@@ -63,12 +73,26 @@ const defs: GameDefs = {
 };
 
 async function loadDefs(): Promise<void> {
-  const [playerDefs, monsters, npcs, equipment, rawMaps, feats, backgrounds, species] = await Promise.all([
+  const [
+    playerDefs,
+    monsters,
+    npcs,
+    equipment,
+    rawMaps,
+    feats,
+    backgrounds,
+    species,
+  ] = await Promise.all([
     readDir<GameDefs["playerDefs"][0]>(join(DATA_DIR, "characters")),
     readDir<GameDefs["monsters"][0]>(join(DATA_DIR, "monsters")),
     readDir<GameDefs["npcs"][0]>(join(DATA_DIR, "npcs")),
     readDir<GameDefs["equipment"][0]>(join(DATA_DIR, "equipment")),
-    readDir<{ id: string; name: string; mapdescription: string; rows: string[] }>(join(DATA_DIR, "maps")),
+    readDir<{
+      id: string;
+      name: string;
+      mapdescription: string;
+      rows: string[];
+    }>(join(DATA_DIR, "maps")),
     readDir<GameDefs["feats"][0]>(join(DATA_DIR, "feats")),
     readDir<GameDefs["backgrounds"][0]>(join(DATA_DIR, "backgrounds")),
     readDir<GameDefs["species"][0]>(join(DATA_DIR, "species")),
@@ -97,7 +121,7 @@ async function loadDefs(): Promise<void> {
 
 // ── Server setup ───────────────────────────────────────────────────────────────
 
-const server = Fastify({ logger: true });
+const server = Fastify({ logger: false });
 await server.register(cors, { origin: "http://localhost:5173" });
 await server.register(websocket);
 
@@ -110,10 +134,9 @@ server.get("/equipment", async () => defs.equipment);
 server.get("/feats", async () => defs.feats);
 server.get("/backgrounds", async () => defs.backgrounds);
 server.get("/species", async () => defs.species);
-server.get("/encounters", async () =>
-  readDir(join(DATA_DIR, "encounters")),
-);
+server.get("/encounters", async () => readDir(join(DATA_DIR, "encounters")));
 server.get("/maps", async () => defs.maps);
+server.get("/health", async () => ({ ok: true }));
 
 // ── Save routes (unchanged) ────────────────────────────────────────────────────
 
@@ -144,6 +167,7 @@ type SessionPlayerState = Pick<
 type WorldSave = Omit<GameState, "player"> & {
   player: SessionPlayerState;
   enemies?: unknown;
+  aidmHistory?: AidmMessage[];
 };
 
 interface CharSave {
@@ -158,7 +182,10 @@ interface CharSave {
   storylog?: StorylogEntry[];
 }
 
-async function saveWorldState(state: GameState): Promise<void> {
+async function saveWorldState(
+  state: GameState,
+  aidmHistory: AidmMessage[] = [],
+): Promise<void> {
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const {
     hp: _hp,
@@ -169,12 +196,15 @@ async function saveWorldState(state: GameState): Promise<void> {
     secondWindUses: _sw,
     ...sessionPlayer
   } = state.player;
-  const worldSave: WorldSave = { ...state, player: sessionPlayer };
+  const worldSave: WorldSave = { ...state, player: sessionPlayer, aidmHistory };
   await mkdir(SAVES_DIR, { recursive: true });
   await writeFile(WORLD_SAVE_PATH, JSON.stringify(worldSave));
 }
 
-async function loadWorldState(): Promise<GameState | null> {
+async function loadWorldState(): Promise<{
+  state: GameState;
+  aidmHistory: AidmMessage[];
+} | null> {
   let worldSave: WorldSave;
   try {
     worldSave = JSON.parse(
@@ -207,7 +237,8 @@ async function loadWorldState(): Promise<GameState | null> {
     conditions: [],
     equippedSlotLabels: { armor: null, weapon: null, shield: null },
   };
-  return { ...worldSave, player: fullPlayer };
+  const aidmHistory = worldSave.aidmHistory ?? [];
+  return { state: { ...worldSave, player: fullPlayer }, aidmHistory };
 }
 
 async function deleteWorldSave(): Promise<void> {
@@ -223,6 +254,16 @@ async function readSave(characterId: string): Promise<unknown> {
     return JSON.parse(await readFile(saveFilePath(characterId), "utf-8"));
   } catch {
     return defaultSave(characterId);
+  }
+}
+
+async function readSaveIfExists(characterId: string): Promise<CharSave | null> {
+  try {
+    return JSON.parse(
+      await readFile(saveFilePath(characterId), "utf-8"),
+    ) as CharSave;
+  } catch {
+    return null;
   }
 }
 
@@ -276,18 +317,39 @@ server.delete("/save/:characterId", async (req, reply) => {
 // ── World save (resume) ────────────────────────────────────────────────────────
 
 server.get("/world", async (_req, reply) => {
-  const state = await loadWorldState();
-  if (!state) return reply.code(404).send({ error: "No world save" });
+  const loaded = await loadWorldState();
+  if (!loaded) return reply.code(404).send({ error: "No world save" });
 
+  const { state, aidmHistory } = loaded;
   // Re-use the existing engine if the session is still alive (e.g. hot-reload),
   // otherwise restore from the saved GameState.
   let engine = getEngine(state.sessionId);
   if (!engine) {
     engine = new GameEngine(state, defs);
     createSession(state.sessionId, engine);
+    setAidmHistory(state.sessionId, aidmHistory);
   }
-  return reply.send({ sessionId: state.sessionId, state: engine.getState() });
+  return reply.send({
+    sessionId: state.sessionId,
+    state: engine.getState(),
+    dmHistory: buildDmDisplayHistory(aidmHistory),
+  });
 });
+
+function buildDmDisplayHistory(
+  history: AidmMessage[],
+): { role: "user" | "assistant"; content: string }[] {
+  const result: { role: "user" | "assistant"; content: string }[] = [];
+  for (const msg of history) {
+    if (msg.role === "assistant") {
+      result.push({ role: "assistant", content: msg.content });
+    } else {
+      const match = /\[PLAYER\]\n([\s\S]+)$/.exec(msg.content);
+      if (match) result.push({ role: "user", content: match[1].trim() });
+    }
+  }
+  return result;
+}
 
 // ── Legacy encounter start (kept for backwards compat) ─────────────────────────
 
@@ -361,14 +423,17 @@ server.post("/game/session/:id/action", async (req, reply) => {
   const { events, state } = engine.processAction(action);
 
   const newCombatEntries = state.combatLog.slice(logLengthBefore);
-  pushAdventureLines(id, newCombatEntries.map((e) => ({
-    type: 'combat' as const,
-    text: e.right ? `${e.left}  [${e.right}]` : e.left,
-  })));
+  pushAdventureLines(
+    id,
+    newCombatEntries.map((e) => ({
+      type: "combat" as const,
+      text: e.right ? `${e.left}  [${e.right}]` : e.left,
+    })),
+  );
 
   // Auto-save after each action — spread existing save to preserve adventureLog.
   const player = state.player;
-  const existingSave = await readSave(player.defId) as CharSave;
+  const existingSave = (await readSave(player.defId)) as CharSave;
   await writeSave(player.defId, {
     ...existingSave,
     playerDefId: player.defId,
@@ -381,7 +446,7 @@ server.post("/game/session/:id/action", async (req, reply) => {
   });
 
   pushStateUpdate(id, events, state);
-  await saveWorldState(state);
+  await saveWorldState(state, getAidmHistory(id) ?? []);
   return reply.send({ events, state });
 });
 
@@ -398,7 +463,7 @@ server.post("/game/session/:id/aidm", async (req, reply) => {
   if (!history) return reply.code(404).send({ error: "Session not found" });
 
   try {
-    pushAdventureLines(id, [{ type: 'dm_player', text: body.playerMessage }]);
+    pushAdventureLines(id, [{ type: "dm_player", text: body.playerMessage }]);
     const logLengthBefore = engine.getState().combatLog.length;
     const {
       reply: aidmReply,
@@ -409,13 +474,13 @@ server.post("/game/session/:id/aidm", async (req, reply) => {
     const newCombatEntries = state.combatLog.slice(logLengthBefore);
     pushAdventureLines(id, [
       ...newCombatEntries.map((e) => ({
-        type: 'combat' as const,
+        type: "combat" as const,
         text: e.right ? `${e.left}  [${e.right}]` : e.left,
       })),
-      { type: 'dm_reply' as const, text: aidmReply },
+      { type: "dm_reply" as const, text: aidmReply },
     ]);
     pushStateUpdate(id, events, state);
-    await saveWorldState(state);
+    await saveWorldState(state, history);
     return reply.send({ reply: aidmReply, rollResults });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
@@ -433,17 +498,22 @@ server.delete("/game/session/:id", async (req, reply) => {
       id,
       timestamp: meta.timestamp,
       description: meta.description,
-      encounterTypes: meta.encounterTypes,
+      encounterTitle: meta.encounterTitle,
       xpGained: state.player.xp - meta.xpStart,
       goldGained: state.player.gold - meta.goldStart,
-      outcome: state.phase === 'defeat' || state.player.hp <= 0 ? 'defeated' : 'survived',
+      outcome:
+        state.phase === "defeat" || state.player.hp <= 0
+          ? "defeated"
+          : "survived",
       lines,
     };
-    const existingSave = await readSave(state.player.defId) as CharSave;
-    await writeSave(state.player.defId, {
-      ...existingSave,
-      encounterLog: [record, ...(existingSave.encounterLog ?? [])],
-    });
+    const existingSave = await readSaveIfExists(state.player.defId);
+    if (existingSave) {
+      await writeSave(state.player.defId, {
+        ...existingSave,
+        encounterLog: [record, ...(existingSave.encounterLog ?? [])],
+      });
+    }
   }
   deleteSession(id);
   await deleteWorldSave();
@@ -455,12 +525,12 @@ server.delete("/game/session/:id", async (req, reply) => {
 server.post("/save/:characterId/storylog", async (req, reply) => {
   const { characterId } = req.params as { characterId: string };
   const { rewrite } = req.query as Record<string, string>;
-  const save = await readSave(characterId) as CharSave;
+  const save = (await readSave(characterId)) as CharSave;
   const storylog = await generateStorylog(
     anthropic,
     save.encounterLog ?? [],
     save.storylog ?? [],
-    rewrite === 'true',
+    rewrite === "true",
   );
   await writeSave(characterId, { ...save, storylog });
   return reply.send({ storylog });

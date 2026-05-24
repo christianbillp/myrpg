@@ -62,7 +62,7 @@ export function spawnEnemies(
         disposition: 'enemy', factionId: def.id,
         hp: def.maxHp, maxHp: def.maxHp,
         isActive: false,
-        reactionUsed: false, conditions: [],
+        reactionUsed: false, conditions: [], inventoryIds: [],
       });
     });
     return;
@@ -82,7 +82,7 @@ export function spawnEnemies(
       disposition: 'enemy', factionId: def.id,
       hp: def.maxHp, maxHp: def.maxHp,
       isActive: false,
-      reactionUsed: false, conditions: [],
+      reactionUsed: false, conditions: [], inventoryIds: [],
     });
   });
 }
@@ -145,7 +145,7 @@ export function spawnNpc(
     label: '',
     hp: maxHp, maxHp,
     isActive: false,
-    reactionUsed: false, conditions: [],
+    reactionUsed: false, conditions: [], inventoryIds: [],
   });
 }
 

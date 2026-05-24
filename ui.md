@@ -24,7 +24,7 @@ Canonical names for all UI regions and components. Use these consistently in cod
 
 ## Player Panel
 
-Defined in `client/src/ui/PlayerPanel.ts`. HTML DOM panel; hidden by default; toggled open/closed by clicking the player token on the Game Map.
+Defined in `client/src/ui/PlayerPanel.ts`. HTML DOM panel; **open by default** (200 px wide); toggled open/closed by clicking the player token on the Game Map. The panel is resizable — drag the right edge to any width between 120 px and 480 px; the chosen width is persisted in `localStorage`. Resize is DOM-only: the game map canvas origin is fixed at 200 px from the left edge.
 
 | Component          | Description                                                                                              |
 | ------------------ | -------------------------------------------------------------------------------------------------------- |
@@ -43,16 +43,17 @@ Defined in `client/src/ui/PlayerPanel.ts`. HTML DOM panel; hidden by default; to
 
 | Button              | Economy      | Condition                                                                    | Description                                                             |
 | ------------------- | ------------ | ---------------------------------------------------------------------------- | ----------------------------------------------------------------------- |
-| **Attack**          | Action       | Player's turn, action not yet spent, adjacent to any living enemy            | Make a melee attack; player stays in their turn after attacking         |
-| **THROW…**          | Action       | Player's turn, action not yet spent, no adjacent enemy, throwable item in inventory that can reach a living enemy | Open an inline item picker; select an item to throw at the nearest in-range enemy. Proper thrown weapons (javelin, dagger) use weapon stats and mastery; all other items are improvised (1d4 bludgeoning, STR mod, no proficiency bonus). Item is consumed on throw. |
-| **Dash**            | Action       | Player's turn, action not yet spent                                          | Double remaining movement for this turn; applies `dashing` condition    |
-| **Dodge**           | Action       | Player's turn, action not yet spent                                          | All incoming enemy attacks have Disadvantage until next turn; applies `dodging` condition |
-| **Disengage**       | Action       | Player's turn, action not yet spent, at least one living enemy               | Prevent Opportunity Attacks when moving away from enemies this turn; applies `disengaged` condition |
-| **Second Wind**     | Bonus Action | Player's turn, bonus action not yet spent, Fighter only, uses remaining, not at full HP | Spend a use to heal 1d10 + level HP                          |
-| **Hide**            | Bonus Action | Player's turn, bonus action not yet spent, Rogue only, not already hidden    | Attempt to hide (Cunning Action) for Sneak Attack advantage             |
-| **End Turn**        | —            | Player's turn                                                                | Explicitly end the player's turn and pass initiative to the enemies     |
-| **Roll Death Save** | —            | Player unconscious                                                           | Roll a d20 death saving throw                                           |
-| **Short Rest**      | —            | Exploring, player below max HP, Hit Dice remaining                           | Spend one Hit Die (d10+CON Fighter / d8+CON Rogue) to heal; resets each new encounter |
+| **ATTACK**          | Action       | Player's turn, action not yet spent, adjacent to any living enemy            | Make a melee attack; player stays in their turn after attacking         |
+| **THROW…**          | Action       | Player's turn, action not yet spent, throwable item in inventory that can reach a living enemy | Open an inline item picker; select an item to throw at the nearest in-range enemy. Proper thrown weapons (javelin, dagger) use weapon stats and mastery; all other items are improvised (1d4 bludgeoning, STR mod, no proficiency bonus). On a hit the item enters the target's inventory (dropped at their tile on death); on a miss it lands on the map at the target's tile. |
+| **↩ CANCEL**        | —            | Throw item picker is open                                                    | Close the throw item picker without spending the action                 |
+| **DASH**            | Action       | Player's turn, action not yet spent                                          | Double remaining movement for this turn; applies `dashing` condition    |
+| **DODGE**           | Action       | Player's turn, action not yet spent                                          | All incoming enemy attacks have Disadvantage until next turn; applies `dodging` condition |
+| **DISENGAGE**       | Action       | Player's turn, action not yet spent, at least one living enemy               | Prevent Opportunity Attacks when moving away from enemies this turn; applies `disengaged` condition |
+| **SECOND WIND**     | Bonus Action | Player's turn, bonus action not yet spent, Fighter only, uses remaining, not at full HP | Spend a use to heal 1d10 + level HP                          |
+| **HIDE**            | Bonus Action | Player's turn, bonus action not yet spent, Rogue only, not already hidden    | Attempt to hide (Cunning Action) for Sneak Attack advantage             |
+| **END TURN**        | —            | Player's turn                                                                | Explicitly end the player's turn and pass initiative to the enemies     |
+| **ROLL DEATH SAVE** | —            | Player unconscious                                                           | Roll a d20 death saving throw                                           |
+| **SHORT REST**      | —            | Exploring, player below max HP, Hit Dice remaining                           | Spend one Hit Die (d10+CON Fighter / d8+CON Rogue) to heal; resets each new encounter |
 
 ---
 
@@ -72,7 +73,7 @@ Rendered in `client/src/scenes/GameScene.ts`. Each tile = 5 ft. Occupies the are
 
 ## Target Panel
 
-Defined in `client/src/ui/TargetPanel.ts`. HTML DOM panel; visible only when a creature is selected. Positioned on the right side of the Game Map, mirroring the Player Panel's width and layout.
+Defined in `client/src/ui/TargetPanel.ts`. HTML DOM panel; visible only when a creature is selected. Positioned on the right side of the Game Map (200 px wide by default). The panel is resizable — drag the left edge to any width between 120 px and 480 px; the chosen width is persisted in `localStorage`. Resize is DOM-only: the game map canvas right boundary is fixed.
 
 Selection: clicking a creature in the Game Map selects it. The creature is highlighted with a coloured outline (its token colour). Clicking an empty tile or defeating the creature clears the selection and hides the panel.
 
@@ -98,24 +99,23 @@ Defined in `client/src/ui/HUD.ts`. HTML DOM bar spanning the full canvas width b
 | **Combat Log**      | Two-column scrollable log: left column shows the narrative (what happened), right column shows the dice detail (rolls, bonuses, totals). Each row is colour-coded by outcome — grey (normal), green (hit), yellow (crit), red (kill), teal (heal), blue (status), bright (header), dim (miss). Newest entries appear at the bottom; scroll with the mouse wheel. |
 | **Log Scroll Hint** | Small dim text showing scroll direction and how many newer entries are below                                  |
 | **DUNGEON MASTER**  | Button — open the AIDM chat overlay; conversation history is preserved across open/close cycles               |
-| **New Encounter**   | Button — trigger auto-save and return to the Encounter Setup screen                                           |
+| **LEAVE ENCOUNTER** | Button — trigger auto-save and return to the Encounter Setup screen                                           |
 
 ---
 
 ## Overlays
 
-HTML DOM modals that appear on top of the game canvas. All overlays extend `BaseOverlay` (`client/src/ui/BaseOverlay.ts`), which provides a semi-transparent backdrop, a centred panel, and a × close button. Clicking outside the panel or clicking × closes them. `UIScale` (`client/src/ui/UIScale.ts`) positions all HTML panels over the canvas and keeps them in sync with window resize events.
+HTML DOM modals that appear on top of the game canvas. Most overlays extend `BaseOverlay` (`client/src/ui/BaseOverlay.ts`), which provides a semi-transparent backdrop, a centred panel, and a × close button; `UIScale` positions them over the canvas and keeps them in sync with window resize events. **Exception:** `StorylogOverlay` is a standalone overlay that does not extend `BaseOverlay` and has no `UIScale` dependency, because it is opened from the Encounter Setup Scene where no `UIScale` instance exists.
 
 ### Introduction Overlay
 
-Appears automatically when the game map loads. Must be dismissed before the player can act.
+Appears automatically when the game map loads for the first time. Suppressed when the player reconnects to an existing session (browser reload). Dismissed by clicking × or the backdrop.
 
 | Component            | Description                                                               |
 | -------------------- | ------------------------------------------------------------------------- |
-| **Encounter Chips**  | Colour-coded encounter-type chips (Combat red, Exploration green, Social blue) |
+| **Encounter Title**  | Name of the encounter (e.g. "The Goblin Cave") in accent colour          |
 | **Player Summary**   | Player name and class line                                                |
 | **Introduction Text**| Narrative paragraph generated server-side for the encounter              |
-| **Dismiss Button**   | Closes the overlay and begins play                                        |
 
 ---
 
@@ -144,7 +144,7 @@ Defined in `client/src/ui/StorylogOverlay.ts`. Standalone HTML overlay (no `Base
 | **Title**            | "STORY LOG" label and character name                                      |
 | **Entry List**       | Scrollable list of encounters in chronological order (oldest first). Each entry shows the date and encounter type in a dim header row, followed by the AI-generated prose narrative. Dialogue within narratives is rendered in italics. Entries not yet generated show "Not yet written." in dim italic text. |
 | **GENERATE N ENTRIES** | Footer button; active when one or more encounters lack a narrative. Label shows the count of missing entries. Disabled (greyed, no-op on click) when all encounters are covered. |
-| **REWRITE ALL**      | Secondary footer button; always active when a save exists. Regenerates every entry from scratch regardless of existing content. Intended for development/debugging. |
+| **[DEV] REWRITE ALL** | Absolutely-positioned in the bottom-right corner of the panel (not in the footer row). Very dim styling; visible only in dev mode. Regenerates every entry from scratch regardless of existing content. Not intended for regular play. |
 
 ---
 
