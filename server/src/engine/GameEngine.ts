@@ -11,13 +11,13 @@ import { generateRoomsMap } from './RoomsMapGenerator.js';
 import { d, d20, mod } from './Dice.js';
 import {
   rollInitiative, playerMeleeAttack, playerThrowAttack, enemyAttack, playerHide, playerSecondWind,
-  drinkPotion, rollDeathSave, rollSkillCheck,
+  drinkPotion, rollDeathSave, rollSkillCheck, rollSavingThrow,
 } from './CombatSystem.js';
 import { applyEquipment, makePlayerAttack, computeEquippedSlotLabels } from './EquipmentSystem.js';
 import { runEnemyTurn, runAllyTurn, chebyshev } from './EnemyAI.js';
 import {
   isIncapacitated, grantsAdvantageAgainst, grantsDisadvantageAgainst,
-  hasAttackDisadvantage, hasSpeedZero, isAutoCrit, proneStandCost,
+  hasAttackDisadvantage, hasAttackAdvantage, hasSpeedZero, isAutoCrit, proneStandCost,
 } from './ConditionSystem.js';
 import {
   ZoneMap, parseStartingZones, findPlayerSpawn,
@@ -118,10 +118,37 @@ export class GameEngine {
 
   adjustPlayerHp(delta: number): GameEvent[] {
     const s = this.state;
+    let effective = delta;
+    if (effective < 0 && s.player.tempHp > 0) {
+      const absorbed = Math.min(s.player.tempHp, -effective);
+      s.player.tempHp -= absorbed;
+      effective += absorbed;
+      this.addLog(`${absorbed} damage absorbed by Temporary HP (${s.player.tempHp} remaining)`);
+      if (effective === 0) return [];
+    }
     const before = s.player.hp;
-    s.player.hp = Math.max(0, Math.min(this.playerDef.maxHp, s.player.hp + delta));
+    s.player.hp = Math.max(0, Math.min(this.playerDef.maxHp, s.player.hp + effective));
     this.addLog(`HP: ${before} → ${s.player.hp}/${this.playerDef.maxHp}`);
     if (s.player.hp <= 0 && s.phase === 'exploring') s.phase = 'defeat';
+    return [];
+  }
+
+  awardTempHp(amount: number): GameEvent[] {
+    const s = this.state;
+    s.player.tempHp = Math.max(s.player.tempHp, amount);
+    this.addLog(`Temporary HP: ${s.player.tempHp} (${amount} awarded — using higher value)`);
+    return [];
+  }
+
+  grantHeroicInspiration(): GameEvent[] {
+    this.state.player.heroicInspiration = true;
+    this.addLog('Heroic Inspiration granted — you may re-roll any one die.');
+    return [];
+  }
+
+  setExhaustionLevel(level: number): GameEvent[] {
+    this.state.player.exhaustionLevel = Math.max(0, Math.min(5, level));
+    this.addLog(`Exhaustion level: ${this.state.player.exhaustionLevel} (−${this.state.player.exhaustionLevel * 2} to all D20 Tests)`);
     return [];
   }
 
@@ -135,13 +162,22 @@ export class GameEngine {
     return [];
   }
 
-  adjustNpcHp(entity: string, delta: number): GameEvent[] {
+  adjustNpcHp(entity: string, delta: number, damageType?: string): GameEvent[] {
     if (entity === 'player') return this.adjustPlayerHp(delta);
     const npc = this.resolveNpcByEntity(entity);
     if (!npc) return [];
+    let finalDelta = delta;
+    if (damageType && delta < 0) {
+      const monsterDef = this.resolveMonsterDef(npc.defId);
+      if (monsterDef) {
+        const { finalDamage, log: resistLog } = this.resistMod(-delta, damageType, monsterDef, npc.name);
+        if (resistLog) this.addLog(resistLog);
+        finalDelta = -finalDamage;
+      }
+    }
     const before = npc.hp;
-    npc.hp = Math.max(0, Math.min(npc.maxHp, npc.hp + delta));
-    this.addLog(`${npc.name}: ${delta >= 0 ? '+' : ''}${delta} HP (${before} → ${npc.hp})`);
+    npc.hp = Math.max(0, Math.min(npc.maxHp, npc.hp + finalDelta));
+    this.addLog(`${npc.name}: ${finalDelta >= 0 ? '+' : ''}${finalDelta} HP (${before} → ${npc.hp})`);
     if (npc.hp === 0) this.killNpc(npc.id);
     return [];
   }
@@ -272,9 +308,15 @@ export class GameEngine {
     const s = this.state;
     if (entity === 'player') {
       if (!s.player.conditions.includes(condition)) s.player.conditions.push(condition);
+      if (condition === 'unconscious' && !s.player.conditions.includes('prone')) {
+        s.player.conditions.push('prone');
+      }
     } else {
       const npc = this.resolveNpcByEntity(entity);
       if (npc && !npc.conditions.includes(condition)) npc.conditions.push(condition);
+      if (condition === 'unconscious' && npc && !npc.conditions.includes('prone')) {
+        npc.conditions.push('prone');
+      }
     }
     return [];
   }
@@ -291,8 +333,66 @@ export class GameEngine {
   }
 
   rollAbilityCheck(skill: string, dc: number): { roll: number; total: number; success: boolean } {
-    const skillMod = this.playerDef.skills[skill] ?? 0;
-    return rollSkillCheck(skillMod, dc);
+    const { conditions, exhaustionLevel } = this.state.player;
+    const skillMod = (this.playerDef.skills[skill] ?? 0) - exhaustionLevel * 2;
+    // Per SRD: poisoned and frightened impose Disadvantage on ability checks.
+    const withDisadvantage = conditions.includes('poisoned') || conditions.includes('frightened');
+    return rollSkillCheck(skillMod, dc, false, withDisadvantage);
+  }
+
+  rollPlayerSavingThrow(ability: string, dc: number): { roll: number; total: number; success: boolean; autoFail: boolean } {
+    const { conditions, exhaustionLevel } = this.state.player;
+    // Per SRD: paralyzed, unconscious, and stunned cause automatic failure on Str/Dex saves.
+    if ((ability === 'str' || ability === 'dex') && (conditions.includes('paralyzed') || conditions.includes('unconscious') || conditions.includes('stunned'))) {
+      return { roll: 0, total: 0, success: false, autoFail: true };
+    }
+    const saveMod = (this.playerDef.savingThrows[ability] ?? 0) - exhaustionLevel * 2;
+    // Dodge grants advantage on Dex saves; restrained imposes disadvantage on Dex saves.
+    const withAdvantage = ability === 'dex' && conditions.includes('dodging');
+    const withDisadvantage = ability === 'dex' && conditions.includes('restrained');
+    return { ...rollSavingThrow(saveMod, dc, withAdvantage, withDisadvantage), autoFail: false };
+  }
+
+  rollAttackRoll(attacker: string, targetAc: number): { roll: number; total: number; isHit: boolean; isCrit: boolean; damage: number; rollStr: string } {
+    if (attacker === 'player') {
+      const attack = this.playerDef.mainAttack;
+      const statMod = attack.statKey === 'str' ? mod(this.playerDef.str) : mod(this.playerDef.dex);
+      const bonus = statMod + this.playerDef.proficiencyBonus;
+      const roll = d20();
+      const isCrit = roll === 20;
+      const isHit = (isCrit || roll + bonus >= targetAc) && roll !== 1;
+      let damage = 0;
+      let rollStr = `d20(${roll})+${bonus}=${roll + bonus} vs AC ${targetAc}`;
+      if (isHit) {
+        const diceCount = isCrit ? attack.damageDice * 2 : attack.damageDice;
+        const rolls: number[] = [];
+        let dmg = 0;
+        for (let i = 0; i < diceCount; i++) { const r = d(attack.damageSides); rolls.push(r); dmg += r; }
+        damage = Math.max(0, dmg + statMod);
+        rollStr += ` · ${diceCount}d${attack.damageSides}[${rolls.join(',')}]+${statMod}=${damage} ${attack.damageType}`;
+      }
+      return { roll, total: roll + bonus, isHit, isCrit, damage, rollStr };
+    }
+    const npc = this.resolveNpcByEntity(attacker);
+    if (!npc) return { roll: 0, total: 0, isHit: false, isCrit: false, damage: 0, rollStr: 'Unknown attacker.' };
+    const monsterDef = this.resolveMonsterDef(npc.defId);
+    if (!monsterDef || !monsterDef.attacks.length) return { roll: 0, total: 0, isHit: false, isCrit: false, damage: 0, rollStr: 'No attack available.' };
+    const atk = monsterDef.attacks[0];
+    const roll = d20();
+    const total = roll + atk.bonus;
+    const isCrit = roll === 20;
+    const isHit = (isCrit || total >= targetAc) && roll !== 1;
+    let damage = 0;
+    let rollStr = `d20(${roll})+${atk.bonus}=${total} vs AC ${targetAc}`;
+    if (isHit) {
+      const diceCount = isCrit ? atk.damageDice * 2 : atk.damageDice;
+      const rolls: number[] = [];
+      let dmg = 0;
+      for (let i = 0; i < diceCount; i++) { const r = d(atk.damageSides); rolls.push(r); dmg += r; }
+      damage = Math.max(0, dmg + atk.damageBonus);
+      rollStr += ` · ${diceCount}d${atk.damageSides}[${rolls.join(',')}]+${atk.damageBonus}=${damage} ${atk.damageType}`;
+    }
+    return { roll, total, isHit, isCrit, damage, rollStr };
   }
 
   // ── Private action implementations ─────────────────────────────────────────
@@ -483,7 +583,7 @@ export class GameEngine {
     if (!targetDef) return;
 
     const dist = chebyshev(s.player.tileX, s.player.tileY, target.tileX, target.tileY);
-    const withAdvantage = s.player.hidden || grantsAdvantageAgainst(target.conditions, dist);
+    const withAdvantage = s.player.hidden || hasAttackAdvantage(s.player.conditions) || grantsAdvantageAgainst(target.conditions, dist);
     const withDisadvantage = hasAttackDisadvantage(s.player.conditions) || grantsDisadvantageAgainst(target.conditions, dist);
     const autoCrit = isAutoCrit(target.conditions, dist);
     const { damage, logs, vexApplied, slowApplied } = playerMeleeAttack(this.playerDef, targetDef, withAdvantage, withDisadvantage, autoCrit);
@@ -801,6 +901,7 @@ export class GameEngine {
         playerHp: s.player.hp,
         playerHidden: s.player.hidden,
         playerDodging: s.player.conditions.includes('dodging'),
+        playerInvisible: s.player.conditions.includes('invisible'),
         passivePerception: 10 + (this.playerDef.skills['perception'] ?? 0),
         passable: s.map.passable,
         mapCols: s.map.cols,
@@ -1206,6 +1307,9 @@ export class GameEngine {
       deathSaveSuccesses: 0,
       deathSaveFailures: 0,
       hitDiceUsed: 0,
+      tempHp: 0,
+      heroicInspiration: false,
+      exhaustionLevel: 0,
       conditions: [] as string[],
       equippedSlotLabels: { armor: null, weapon: null, shield: null },
     };

@@ -25,8 +25,8 @@ export const AIDM_TOOLS = [
   },
   {
     name: 'adjust_npc_hp',
-    description: 'Adjust any combatant\'s HP by a delta. Positive heals, negative damages. Entity: "player", "enemy_A" (enemy by label A–Z), "ally_a" (ally by label a–z), or "npc_[id]" (neutral NPC by id). To kill, use a large negative delta.',
-    input_schema: { type: 'object' as const, properties: { entity: { type: 'string' }, delta: { type: 'integer' }, reason: { type: 'string' } }, required: ['entity', 'delta', 'reason'] },
+    description: 'Adjust any combatant\'s HP by a delta. Positive heals, negative damages. Entity: "player", "enemy_A" (enemy by label A–Z), "ally_a" (ally by label a–z), or "npc_[id]" (neutral NPC by id). To kill, use a large negative delta. Optionally supply damage_type (e.g. "fire", "poison", "piercing") so resistance and vulnerability are applied automatically.',
+    input_schema: { type: 'object' as const, properties: { entity: { type: 'string' }, delta: { type: 'integer' }, damage_type: { type: 'string' }, reason: { type: 'string' } }, required: ['entity', 'delta', 'reason'] },
   },
   {
     name: 'add_log_entry',
@@ -103,6 +103,31 @@ export const AIDM_TOOLS = [
     description: 'Throw an item at a target. Proper thrown weapons (javelin, dagger) use their weapon stats and mastery with proficiency. All other items are improvised weapons (1d4 bludgeoning, no proficiency bonus). The item is removed from the player\'s inventory or the map. item_id can be an inventory item id or a map item defId. target uses the same entity ref format as move_entity: "enemy_A" for an enemy by label, "npc_[id]" for a neutral or ally NPC by id; omit to auto-target the nearest enemy in range. Attacking a neutral NPC turns them hostile.',
     input_schema: { type: 'object' as const, properties: { item_id: { type: 'string' }, target: { type: 'string' }, reason: { type: 'string' } }, required: ['item_id', 'reason'] },
   },
+  {
+    name: 'request_saving_throw',
+    description: 'Ask the player to make a saving throw. The server rolls d20 + the relevant saving throw modifier automatically. Active conditions are applied: paralyzed/unconscious auto-fail Str/Dex saves; Dodge grants advantage on Dex saves; restrained imposes disadvantage on Dex saves. Use ability names: "str", "dex", "con", "int", "wis", "cha". Set DC using SRD guidelines: Very Easy 5, Easy 10, Medium 15, Hard 20, Very Hard 25.',
+    input_schema: { type: 'object' as const, properties: { ability: { type: 'string' }, dc: { type: 'integer' }, reason: { type: 'string' } }, required: ['ability', 'dc', 'reason'] },
+  },
+  {
+    name: 'award_temp_hp',
+    description: 'Grant the player Temporary Hit Points. Temporary HP act as a buffer — damage depletes them before real HP. Per SRD, Temporary HP don\'t stack: the player keeps whichever value is higher (existing or new).',
+    input_schema: { type: 'object' as const, properties: { amount: { type: 'integer' }, reason: { type: 'string' } }, required: ['amount', 'reason'] },
+  },
+  {
+    name: 'grant_heroic_inspiration',
+    description: 'Grant the player Heroic Inspiration. The player may expend it to re-roll any one die immediately after rolling. Per SRD, only one instance can be held at a time.',
+    input_schema: { type: 'object' as const, properties: { reason: { type: 'string' } }, required: ['reason'] },
+  },
+  {
+    name: 'request_attack_roll',
+    description: 'Roll an attack roll for the player or an NPC against a target AC (use this for attacking objects, doors, or off-turn attacks such as opportunity attacks). attacker: "player", "enemy_A" (enemy by label), or "npc_[id]". target_ac: the Armor Class to roll against. Returns hit/miss/critical and damage dealt.',
+    input_schema: { type: 'object' as const, properties: { attacker: { type: 'string' }, target_ac: { type: 'integer' }, reason: { type: 'string' } }, required: ['attacker', 'target_ac', 'reason'] },
+  },
+  {
+    name: 'set_exhaustion_level',
+    description: 'Set the player\'s Exhaustion level (0–5). Each level imposes −2 to all D20 Tests (ability checks and saving throws). Level 5 is lethal. Per SRD: a Long Rest removes one Exhaustion level.',
+    input_schema: { type: 'object' as const, properties: { level: { type: 'integer' }, reason: { type: 'string' } }, required: ['level', 'reason'] },
+  },
 ];
 
 export function applyAIDMTool(engine: GameEngine, name: string, input: Record<string, unknown>): AIDMToolResult {
@@ -122,7 +147,7 @@ export function applyAIDMTool(engine: GameEngine, name: string, input: Record<st
       break;
     case 'adjust_npc_hp': {
       const logBefore = engine.getState().combatLog.length;
-      events = engine.adjustNpcHp(input['entity'] as string, input['delta'] as number);
+      events = engine.adjustNpcHp(input['entity'] as string, input['delta'] as number, input['damage_type'] as string | undefined);
       const newEntries = engine.getState().combatLog.slice(logBefore);
       toolResultContent = newEntries.map((e) => e.right ? `${e.left} [${e.right}]` : e.left).join(' | ') || 'Applied.';
       break;
@@ -185,6 +210,42 @@ export function applyAIDMTool(engine: GameEngine, name: string, input: Record<st
       engine.addLog(`Ability check (${skill}): d20+mod = ${total} vs DC ${dc} — ${success ? 'Success!' : 'Failure'}`);
       toolResultContent = `Roll result: d20 + ${skill} mod = ${total} vs DC ${dc}. ${success ? 'SUCCESS' : 'FAILURE'}.`;
       rollResult = `${skill}: d20(${roll}) = ${total} vs DC ${dc} — ${success ? 'SUCCESS' : 'FAILURE'}`;
+      break;
+    }
+    case 'request_saving_throw': {
+      const ability = input['ability'] as string;
+      const dc = input['dc'] as number;
+      const result = engine.rollPlayerSavingThrow(ability, dc);
+      if (result.autoFail) {
+        engine.addLog(`Saving throw (${ability}): auto-fail — condition prevents Str/Dex saves`);
+        toolResultContent = `Auto-fail: condition (paralyzed/unconscious) causes automatic failure on ${ability} saves.`;
+        rollResult = `${ability} save: AUTO-FAIL vs DC ${dc}`;
+      } else {
+        engine.addLog(`Saving throw (${ability}): d20+mod = ${result.total} vs DC ${dc} — ${result.success ? 'Success!' : 'Failure'}`);
+        toolResultContent = `Roll result: d20 + ${ability} save mod = ${result.total} vs DC ${dc}. ${result.success ? 'SUCCESS' : 'FAILURE'}.`;
+        rollResult = `${ability} save: d20(${result.roll}) = ${result.total} vs DC ${dc} — ${result.success ? 'SUCCESS' : 'FAILURE'}`;
+      }
+      break;
+    }
+    case 'award_temp_hp':
+      events = engine.awardTempHp(input['amount'] as number);
+      break;
+    case 'grant_heroic_inspiration':
+      events = engine.grantHeroicInspiration();
+      break;
+    case 'set_exhaustion_level':
+      events = engine.setExhaustionLevel(input['level'] as number);
+      toolResultContent = `Exhaustion level set to ${input['level'] as number}.`;
+      break;
+    case 'request_attack_roll': {
+      const attacker = input['attacker'] as string;
+      const targetAc = input['target_ac'] as number;
+      const atk = engine.rollAttackRoll(attacker, targetAc);
+      const outcome = atk.isCrit ? 'CRITICAL HIT' : atk.isHit ? 'HIT' : 'MISS';
+      const dmgPart = atk.isHit ? ` — ${atk.damage} damage` : '';
+      engine.addLog(`Attack roll (${attacker}): ${atk.rollStr} — ${outcome}`);
+      toolResultContent = `${outcome}. ${atk.rollStr}${dmgPart}.`;
+      rollResult = `Attack: ${atk.rollStr} — ${outcome}${dmgPart}`;
       break;
     }
   }

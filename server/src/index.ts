@@ -196,6 +196,9 @@ async function loadWorldState(): Promise<GameState | null> {
     secondWindUses: charSave.secondWindUses,
     reactionUsed: false,
     hitDiceUsed: 0,
+    tempHp: 0,
+    heroicInspiration: false,
+    exhaustionLevel: 0,
     conditions: [],
     equippedSlotLabels: { armor: null, weapon: null, shield: null },
   };

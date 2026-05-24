@@ -1,6 +1,6 @@
 import { NpcState, MonsterDef, GameEvent, LogEntry } from './types.js';
 import { tryNimbleEscape, enemyAttack } from './CombatSystem.js';
-import { isIncapacitated, hasAttackDisadvantage, hasSpeedZero, proneStandCost } from './ConditionSystem.js';
+import { isIncapacitated, hasAttackDisadvantage, hasAttackAdvantage, hasSpeedZero, proneStandCost } from './ConditionSystem.js';
 
 export interface EnemyTurnConfig {
   playerTileX: number;
@@ -9,6 +9,7 @@ export interface EnemyTurnConfig {
   playerHp: number;
   playerHidden: boolean;
   playerDodging: boolean;
+  playerInvisible: boolean;
   passivePerception: number;
   passable: boolean[][];
   mapCols: number;
@@ -107,8 +108,8 @@ export function runEnemyTurn(
   }
 
   const playerUnconscious = config.playerHp <= 0;
-  const withAdvantage = enemyHidden || playerUnconscious;
-  const withDisadvantage = config.playerHidden || hasAttackDisadvantage(enemy.conditions) || config.playerDodging;
+  const withAdvantage = enemyHidden || playerUnconscious || hasAttackAdvantage(enemy.conditions);
+  const withDisadvantage = config.playerHidden || config.playerInvisible || hasAttackDisadvantage(enemy.conditions) || config.playerDodging;
   const { damage, isHit, isCrit, logs: attackLogs } = enemyAttack(def, meleeAttack, config.playerAc, withAdvantage, withDisadvantage);
   logs.push(...attackLogs);
 

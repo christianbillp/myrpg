@@ -31,6 +31,9 @@ export interface PlayerState {
   movesLeft: number;
   deathSaveSuccesses: number; deathSaveFailures: number;
   hitDiceUsed: number;
+  tempHp: number;
+  heroicInspiration: boolean;
+  exhaustionLevel: number;
   conditions: string[];
   equippedSlotLabels: { armor: string | null; weapon: string | null; shield: string | null };
 }

@@ -10,10 +10,13 @@ export const INCAPACITATING_CONDITIONS = ['paralyzed', 'stunned', 'unconscious',
 export const ADVANTAGE_AGAINST_CONDITIONS = ['blinded', 'paralyzed', 'restrained', 'stunned', 'unconscious'];
 
 /** Conditions that impose Disadvantage on the creature's own attack rolls. */
-export const ATTACK_DISADVANTAGE_CONDITIONS = ['blinded', 'poisoned', 'restrained', 'prone', 'vexed'];
+export const ATTACK_DISADVANTAGE_CONDITIONS = ['blinded', 'frightened', 'grappled', 'poisoned', 'restrained', 'prone', 'vexed'];
 
 /** Conditions that reduce the creature's speed to 0. */
-export const SPEED_ZERO_CONDITIONS = ['paralyzed', 'restrained', 'unconscious'];
+export const SPEED_ZERO_CONDITIONS = ['grappled', 'paralyzed', 'restrained', 'unconscious'];
+
+/** Conditions on a target that give attackers Disadvantage (regardless of range). */
+export const GRANTS_ATTACKER_DISADVANTAGE_CONDITIONS = ['invisible'];
 
 /** Conditions where a hit from within 1 tile is an automatic Critical Hit. */
 export const AUTO_CRIT_CONDITIONS = ['paralyzed', 'unconscious'];
@@ -34,15 +37,21 @@ export function grantsAdvantageAgainst(conditions: string[], dist: number): bool
 
 /**
  * True when attackers targeting this creature have Disadvantage.
- * Only prone at range (dist > 1) qualifies.
+ * Invisible targets impose Disadvantage at any range; prone targets impose it beyond 1 tile.
  */
 export function grantsDisadvantageAgainst(conditions: string[], dist: number): boolean {
-  return conditions.includes('prone') && dist > 1;
+  return GRANTS_ATTACKER_DISADVANTAGE_CONDITIONS.some((c) => conditions.includes(c))
+    || (conditions.includes('prone') && dist > 1);
 }
 
 /** True when this creature's own attack rolls have Disadvantage. */
 export function hasAttackDisadvantage(conditions: string[]): boolean {
   return ATTACK_DISADVANTAGE_CONDITIONS.some((c) => conditions.includes(c));
+}
+
+/** True when this creature's own attack rolls have Advantage (e.g. invisible attacker). */
+export function hasAttackAdvantage(conditions: string[]): boolean {
+  return conditions.includes('invisible');
 }
 
 /** True when this creature's speed is forced to 0 by a condition. */

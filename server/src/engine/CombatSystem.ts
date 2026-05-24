@@ -238,8 +238,28 @@ export function rollDeathSave(): { roll: number; outcome: 'nat20' | 'success' | 
 export function rollSkillCheck(
   skillMod: number,
   dc: number,
+  withAdvantage = false,
+  withDisadvantage = false,
 ): { roll: number; total: number; success: boolean } {
-  const roll = d20();
+  const effAdv = withAdvantage && !withDisadvantage;
+  const effDis = withDisadvantage && !withAdvantage;
+  let roll: number;
+  if (effAdv) {
+    roll = rollAdvantage().result;
+  } else if (effDis) {
+    roll = rollDisadvantage().result;
+  } else {
+    roll = d20();
+  }
   const total = roll + skillMod;
   return { roll, total, success: total >= dc };
+}
+
+export function rollSavingThrow(
+  saveMod: number,
+  dc: number,
+  withAdvantage = false,
+  withDisadvantage = false,
+): { roll: number; total: number; success: boolean } {
+  return rollSkillCheck(saveMod, dc, withAdvantage, withDisadvantage);
 }
