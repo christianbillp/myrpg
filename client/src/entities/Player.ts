@@ -9,7 +9,6 @@ export class Player {
   private container: Phaser.GameObjects.Container;
   private hpBar: Phaser.GameObjects.Graphics;
   private scene: Phaser.Scene;
-  private moving = false;
 
   constructor(scene: Phaser.Scene, tileX: number, tileY: number, color = 0x4fc3f7) {
     this.scene = scene;
@@ -41,31 +40,24 @@ export class Player {
     this.hpBar.fillRect(barX, barY, Math.floor(barW * pct), 4);
   }
 
+  moveTo(tx: number, ty: number, onComplete: () => void): void {
+    this.scene.tweens.killTweensOf(this.container);
+    this.tileX = tx;
+    this.tileY = ty;
+    this.scene.tweens.add({
+      targets: this.container,
+      x: tx * TILE_SIZE + TILE_SIZE / 2,
+      y: ty * TILE_SIZE + TILE_SIZE / 2,
+      duration: MOVE_DURATION,
+      ease: 'Sine.easeInOut',
+      onComplete,
+    });
+  }
+
   teleport(tx: number, ty: number): void {
+    this.scene.tweens.killTweensOf(this.container);
     this.tileX = tx;
     this.tileY = ty;
     this.container.setPosition(tx * TILE_SIZE + TILE_SIZE / 2, ty * TILE_SIZE + TILE_SIZE / 2);
-  }
-
-  move(dx: number, dy: number, cols: number, rows: number): void {
-    if (this.moving) return;
-
-    const nx = this.tileX + dx;
-    const ny = this.tileY + dy;
-
-    if (nx < 0 || ny < 0 || nx >= cols || ny >= rows) return;
-
-    this.tileX = nx;
-    this.tileY = ny;
-    this.moving = true;
-
-    this.scene.tweens.add({
-      targets: this.container,
-      x: nx * TILE_SIZE + TILE_SIZE / 2,
-      y: ny * TILE_SIZE + TILE_SIZE / 2,
-      duration: MOVE_DURATION,
-      ease: 'Sine.easeInOut',
-      onComplete: () => { this.moving = false; },
-    });
   }
 }

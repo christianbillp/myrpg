@@ -37,6 +37,7 @@ function resolvePlayerAttack(
   withDisadvantage: boolean,
   profBonus = player.proficiencyBonus,
   autoCrit = false,
+  playerHidden = false,
 ): { damage: number; isHit: boolean; logs: LogEntry[]; vexApplied: boolean; slowApplied: boolean } {
   const statMod = attack.statKey === 'str' ? mod(player.str) : mod(player.dex);
   const attackBonus = statMod + profBonus;
@@ -50,7 +51,7 @@ function resolvePlayerAttack(
     const { result, rolls } = rollAdvantage();
     naturalRoll = result;
     rollPart = `adv(${rolls[0]},${rolls[1]}→${naturalRoll})`;
-    logs.push({ left: `${player.name} strikes from the shadows`, style: 'normal' });
+    if (playerHidden) logs.push({ left: `${player.name} strikes from the shadows`, style: 'normal' });
   } else if (effDis) {
     const { result, rolls } = rollDisadvantage();
     naturalRoll = result;
@@ -129,8 +130,9 @@ export function playerMeleeAttack(
   withAdvantage: boolean,
   withDisadvantage = false,
   autoCrit = false,
+  playerHidden = false,
 ): { damage: number; logs: LogEntry[]; vexApplied: boolean; slowApplied: boolean } {
-  return resolvePlayerAttack(player, player.mainAttack, enemy, withAdvantage, withDisadvantage, player.proficiencyBonus, autoCrit);
+  return resolvePlayerAttack(player, player.mainAttack, enemy, withAdvantage, withDisadvantage, player.proficiencyBonus, autoCrit, playerHidden);
 }
 
 export function playerThrowAttack(
@@ -141,8 +143,9 @@ export function playerThrowAttack(
   withDisadvantage = false,
   profBonus?: number,
   autoCrit = false,
+  playerHidden = false,
 ): { damage: number; isHit: boolean; logs: LogEntry[]; vexApplied: boolean; slowApplied: boolean } {
-  return resolvePlayerAttack(player, attack, enemy, withAdvantage, withDisadvantage, profBonus ?? player.proficiencyBonus, autoCrit);
+  return resolvePlayerAttack(player, attack, enemy, withAdvantage, withDisadvantage, profBonus ?? player.proficiencyBonus, autoCrit, playerHidden);
 }
 
 export function playerHide(
@@ -160,7 +163,6 @@ export function playerHide(
 }
 
 export function enemyAttack(
-  enemy: MonsterDef,
   attack: MonsterAttack,
   playerAc: number,
   withAdvantage: boolean,
@@ -253,6 +255,48 @@ export function rollSkillCheck(
   }
   const total = roll + skillMod;
   return { roll, total, success: total >= dc };
+}
+
+export function rollPlayerAttackVsAc(
+  player: PlayerDef,
+  targetAc: number,
+): { roll: number; total: number; isHit: boolean; isCrit: boolean; damage: number; rollStr: string } {
+  const attack = player.mainAttack;
+  const statMod = attack.statKey === 'str' ? mod(player.str) : mod(player.dex);
+  const bonus = statMod + player.proficiencyBonus;
+  const roll = d20();
+  const isCrit = roll === 20;
+  const isHit = (isCrit || roll + bonus >= targetAc) && roll !== 1;
+  let damage = 0;
+  let rollStr = `d20(${roll})+${bonus}=${roll + bonus} vs AC ${targetAc}`;
+  if (isHit) {
+    const diceCount = isCrit ? attack.damageDice * 2 : attack.damageDice;
+    const { total: diceTot, rolls: diceRolls } = rollDice(diceCount, attack.damageSides);
+    damage = Math.max(0, diceTot + statMod);
+    rollStr += ` · ${diceCount}d${attack.damageSides}[${diceRolls.join(',')}]+${statMod}=${damage} ${attack.damageType}`;
+  }
+  return { roll, total: roll + bonus, isHit, isCrit, damage, rollStr };
+}
+
+export function rollNpcAttackVsAc(
+  def: MonsterDef,
+  targetAc: number,
+): { roll: number; total: number; isHit: boolean; isCrit: boolean; damage: number; rollStr: string } {
+  const atk = def.attacks[0];
+  if (!atk) return { roll: 0, total: 0, isHit: false, isCrit: false, damage: 0, rollStr: 'No attack available.' };
+  const roll = d20();
+  const total = roll + atk.bonus;
+  const isCrit = roll === 20;
+  const isHit = (isCrit || total >= targetAc) && roll !== 1;
+  let damage = 0;
+  let rollStr = `d20(${roll})+${atk.bonus}=${total} vs AC ${targetAc}`;
+  if (isHit) {
+    const diceCount = isCrit ? atk.damageDice * 2 : atk.damageDice;
+    const { total: diceTot, rolls: diceRolls } = rollDice(diceCount, atk.damageSides);
+    damage = Math.max(0, diceTot + atk.damageBonus);
+    rollStr += ` · ${diceCount}d${atk.damageSides}[${diceRolls.join(',')}]+${atk.damageBonus}=${damage} ${atk.damageType}`;
+  }
+  return { roll, total, isHit, isCrit, damage, rollStr };
 }
 
 export function rollSavingThrow(

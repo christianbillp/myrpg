@@ -69,7 +69,7 @@ export function runEnemyTurn(
   }
 
   const belowHalf = enemy.hp <= enemy.maxHp / 2;
-  if (!enemyHidden && (belowHalf || Math.random() < 0.3)) {
+  if (!enemyHidden && def.nimbleEscape && (belowHalf || Math.random() < 0.3)) {
     const { hidden, logs: hideLogs } = tryNimbleEscape(def, config.passivePerception);
     logs.push(...hideLogs);
     enemyHidden = hidden;
@@ -110,7 +110,7 @@ export function runEnemyTurn(
   const playerUnconscious = config.playerHp <= 0;
   const withAdvantage = enemyHidden || playerUnconscious || hasAttackAdvantage(enemy.conditions);
   const withDisadvantage = config.playerHidden || config.playerInvisible || hasAttackDisadvantage(enemy.conditions) || config.playerDodging;
-  const { damage, isHit, isCrit, logs: attackLogs } = enemyAttack(def, meleeAttack, config.playerAc, withAdvantage, withDisadvantage);
+  const { damage, isHit, isCrit, logs: attackLogs } = enemyAttack(meleeAttack, config.playerAc, withAdvantage, withDisadvantage);
   logs.push(...attackLogs);
 
   return { damage, isHit, isCrit, attacked: true, logs, events, finalTileX: tileX, finalTileY: tileY, hidden: enemyHidden };
@@ -166,7 +166,7 @@ export function runAllyTurn(
     return { attackedTargetId: null, damage: 0, isHit: false, isCrit: false, attacked: false, logs, events, finalTileX: tileX, finalTileY: tileY };
   }
 
-  const { damage, isHit, isCrit, logs: attackLogs } = enemyAttack(def, meleeAttack, nearest.ac, false, false);
+  const { damage, isHit, isCrit, logs: attackLogs } = enemyAttack(meleeAttack, nearest.ac, false, false);
   logs.push(...attackLogs);
 
   return { attackedTargetId: nearest.id, damage, isHit, isCrit, attacked: true, logs, events, finalTileX: tileX, finalTileY: tileY };
@@ -187,7 +187,10 @@ export function nextStepToward(
 
   visited[fromY][fromX] = true;
   const queue: [number, number][] = [[fromY, fromX]];
-  const dirs: [number, number][] = [[0, 1], [0, -1], [1, 0], [-1, 0]];
+  const dirs: [number, number][] = [
+    [0, 1], [0, -1], [1, 0], [-1, 0],
+    [1, 1], [1, -1], [-1, 1], [-1, -1],
+  ];
 
   while (queue.length > 0) {
     const [cy, cx] = queue.shift()!;
@@ -195,6 +198,7 @@ export function nextStepToward(
       const ny = cy + dr, nx = cx + dc;
       if (ny < 0 || ny >= rows || nx < 0 || nx >= cols) continue;
       if (!passable[ny][nx]) continue;
+      if (dr !== 0 && dc !== 0 && !passable[cy][cx + dc] && !passable[cy + dr][cx]) continue;
       if (visited[ny][nx]) continue;
       if (occupiedTiles.some(([ox, oy]) => ox === nx && oy === ny)) continue;
       visited[ny][nx] = true;

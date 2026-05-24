@@ -21,6 +21,9 @@ export const GRANTS_ATTACKER_DISADVANTAGE_CONDITIONS = ['invisible'];
 /** Conditions where a hit from within 1 tile is an automatic Critical Hit. */
 export const AUTO_CRIT_CONDITIONS = ['paralyzed', 'unconscious'];
 
+/** Conditions that expire at the end of the creature's own turn. */
+export const TURN_CONDITIONS = ['dodging', 'disengaged', 'dashing', 'slowed'];
+
 /** True when the creature cannot take actions, bonus actions, or reactions. */
 export function isIncapacitated(conditions: string[]): boolean {
   return INCAPACITATING_CONDITIONS.some((c) => conditions.includes(c));

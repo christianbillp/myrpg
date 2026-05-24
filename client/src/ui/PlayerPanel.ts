@@ -1,9 +1,10 @@
-import { PLAYER_PANEL_WIDTH, GRID_ROWS, TILE_SIZE } from '../constants';
+import { PLAYER_PANEL_WIDTH, GRID_ROWS, TILE_SIZE, HUD_HEIGHT } from '../constants';
 import { PlayerDef } from '../data/player';
-import { CombatMode } from '../net/types';
+import { AvailableActions, CombatMode } from '../net/types';
 import { UIScale } from './UIScale';
 
-const GRID_H = GRID_ROWS * TILE_SIZE;
+const GRID_H   = GRID_ROWS * TILE_SIZE;
+const PANEL_H  = GRID_H + HUD_HEIGHT;
 const MAX_PICKER_SLOTS = 6;
 const PANEL_MIN_WIDTH = 120;
 const PANEL_MAX_WIDTH = 480;
@@ -20,16 +21,10 @@ export interface PlayerPanelActionState {
   mode: CombatMode;
   actionUsed: boolean;
   bonusActionUsed: boolean;
-  playerHp: number;
-  secondWindUses: number;
-  playerHidden: boolean;
-  playerDef: PlayerDef;
-  npcs: Array<{ id: string; tileX: number; tileY: number; disposition: string; dead: boolean }>;
-  selectedTargetId: string | null;
-  playerTileX: number;
-  playerTileY: number;
-  hitDiceRemaining: number;
+  movesLeft: number;
+  moveMode: boolean;
   throwableItems: Array<{ id: string; name: string }>;
+  availableActions: AvailableActions;
 }
 
 export interface PlayerPanelCallbacks {
@@ -42,13 +37,11 @@ export interface PlayerPanelCallbacks {
   onDisengage: () => void;
   onSecondWind: () => void;
   onHide: () => void;
-  onEndTurn: () => void;
   onDeathSave: () => void;
   onShortRest: () => void;
-}
-
-function chebyshev(x1: number, y1: number, x2: number, y2: number): number {
-  return Math.max(Math.abs(x1 - x2), Math.abs(y1 - y2));
+  onToggleMoveMode: () => void;
+  onEndTurn: () => void;
+  onLeaveEncounter: () => void;
 }
 
 function hpColor(pct: number): string {
@@ -69,6 +62,7 @@ export class PlayerPanel {
   private readonly questsEl: HTMLElement;
   private readonly actionArea: HTMLElement;
   private readonly searchBtn: HTMLButtonElement;
+  private readonly endTurnBtn: HTMLButtonElement;
   private readonly offResize: () => void;
 
   private visible = true;
@@ -98,7 +92,7 @@ export class PlayerPanel {
     this.el.className = 'gui-panel';
     this.el.style.cssText += `
       width: ${initWidth}px;
-      height: ${GRID_H}px;
+      height: ${PANEL_H}px;
       background: #080810;
       border-right: 2px solid #334455;
       color: #aabbcc;
@@ -126,11 +120,12 @@ export class PlayerPanel {
       <div class="gui-label">QUESTS</div>
       <div style="padding:2px 12px;font-size:10px;color:#aabbcc;line-height:1.8;white-space:pre-wrap;" data-quests></div>
 
-      <div class="gui-sep" style="position:absolute;left:8px;right:0;bottom:89px;"></div>
-      <div style="position:absolute;left:0;right:0;bottom:89px;display:flex;flex-direction:column-reverse;gap:4px;padding-bottom:4px;" data-actions></div>
+      <div class="gui-sep" style="position:absolute;left:8px;right:0;bottom:108px;"></div>
+      <div style="position:absolute;left:0;right:0;bottom:108px;display:flex;flex-direction:column-reverse;gap:4px;padding-bottom:4px;" data-actions></div>
 
-      <div class="gui-sep" style="position:absolute;bottom:89px;left:8px;right:0;"></div>
-      <div style="position:absolute;bottom:0;left:0;right:0;height:89px;display:flex;flex-direction:column-reverse;gap:4px;padding:0 0 8px;">
+      <div style="position:absolute;bottom:0;left:0;right:0;height:108px;display:flex;flex-direction:column-reverse;gap:4px;padding:0 8px 8px;">
+        <button class="gui-btn" style="background:#3a1a1a;" data-leave-enc>LEAVE ENCOUNTER</button>
+        <button class="gui-btn" style="background:#3a3020;display:none;" data-end-turn>END TURN</button>
         <button class="gui-btn" style="background:#1a2a3a;display:none;" data-search>SEARCH</button>
         <button class="gui-btn" style="background:#0a1a2a;" data-inventory>INVENTORY</button>
       </div>
@@ -143,10 +138,13 @@ export class PlayerPanel {
     this.xpEl      = ref('xp');
     this.questsEl  = ref('quests');
     this.actionArea = ref('actions');
-    this.searchBtn = ref('search') as HTMLButtonElement;
+    this.searchBtn  = ref('search')   as HTMLButtonElement;
+    this.endTurnBtn = ref('end-turn') as HTMLButtonElement;
 
     (ref('inventory') as HTMLButtonElement).onclick = () => callbacks.onOpenInventory();
-    this.searchBtn.onclick = () => callbacks.onSearch();
+    (ref('leave-enc') as HTMLButtonElement).onclick = () => callbacks.onLeaveEncounter();
+    this.endTurnBtn.onclick = () => callbacks.onEndTurn();
+    this.searchBtn.onclick  = () => callbacks.onSearch();
 
     this.updateCombatStats();
 
@@ -244,6 +242,7 @@ export class PlayerPanel {
   refreshActions(state: PlayerPanelActionState): void {
     this.lastActionState = state;
     this.actionArea.innerHTML = '';
+    this.endTurnBtn.style.display = state.mode === 'player_turn' ? 'block' : 'none';
     if (!this.visible) return;
 
     if (this.pickerOpen) {
@@ -251,62 +250,57 @@ export class PlayerPanel {
       return;
     }
 
-    const { mode, actionUsed, bonusActionUsed, playerDef, playerHp, secondWindUses } = state;
+    const { mode, actionUsed, bonusActionUsed, movesLeft, moveMode, availableActions: aa } = state;
     const btn = (label: string, bg: string, onClick: () => void) => this.makeBtn(label, bg, onClick);
-    const enemies = state.npcs.filter(n => n.disposition === 'enemy');
 
     if (mode === 'exploring') {
-      const attackEnabled = this.isValidAttackTarget(state);
-      const atkEl = this.makeBtn('ATTACK', '#1a4a1e', attackEnabled ? this.callbacks.onAttack : () => {});
-      atkEl.disabled = !attackEnabled;
+      const atkEl = this.makeBtn('ATTACK', '#1a4a1e', aa.canAttack ? this.callbacks.onAttack : () => {});
+      atkEl.disabled = !aa.canAttack;
       this.actionArea.prepend(atkEl);
 
-      if (state.throwableItems.length > 0)
-        this.actionArea.prepend(btn('THROW…', '#2a3a1e', () => { this.pickerOpen = true; this.refreshActions(state); }));
+      const throwExEl = this.makeBtn('THROW', '#1a4a1e', state.throwableItems.length > 0 ? () => { this.pickerOpen = true; this.refreshActions(state); } : () => {});
+      throwExEl.disabled = state.throwableItems.length === 0;
+      this.actionArea.prepend(throwExEl);
 
-      if (playerHp < playerDef.maxHp && state.hitDiceRemaining > 0) {
+      if (aa.canShortRest)
         this.actionArea.prepend(btn('SHORT REST', '#1a2a3a', this.callbacks.onShortRest));
-      }
 
     } else if (mode === 'player_turn') {
-      this.actionArea.prepend(btn('END TURN', '#3a3020', this.callbacks.onEndTurn));
+      const GREEN = '#1a4a1e';
 
-      const attackEnabled = !actionUsed && this.isValidAttackTarget(state);
-      const atkEl = this.makeBtn('ATTACK', '#1a4a1e', attackEnabled ? this.callbacks.onAttack : () => {});
-      atkEl.disabled = !attackEnabled;
+      const atkEl = this.makeBtn('ATTACK', GREEN, aa.canAttack ? this.callbacks.onAttack : () => {});
+      atkEl.disabled = actionUsed;
       this.actionArea.prepend(atkEl);
 
-      if (!actionUsed) {
-        const hasAdjacent = enemies.some(
-          e => !e.dead && chebyshev(state.playerTileX, state.playerTileY, e.tileX, e.tileY) <= 1,
-        );
-        const hasAnyLiving = enemies.some(e => !e.dead);
-        const throwEl = this.makeBtn('THROW…', '#2a3a1e', state.throwableItems.length > 0 ? () => { this.pickerOpen = true; this.refreshActions(state); } : () => {});
-        throwEl.disabled = state.throwableItems.length === 0;
-        this.actionArea.prepend(throwEl);
-        this.actionArea.prepend(btn('DISENGAGE', '#1a3a4a', this.callbacks.onDisengage));
-        if (!hasAdjacent && !hasAnyLiving) (this.actionArea.firstChild as HTMLElement)?.remove();
-        this.actionArea.prepend(btn('DODGE', '#1a3a4a', this.callbacks.onDodge));
-        this.actionArea.prepend(btn('DASH', '#1a3a4a', this.callbacks.onDash));
-      }
+      const throwEl = this.makeBtn('THROW', GREEN, !actionUsed && state.throwableItems.length > 0 ? () => { this.pickerOpen = true; this.refreshActions(state); } : () => {});
+      throwEl.disabled = actionUsed || state.throwableItems.length === 0;
+      this.actionArea.prepend(throwEl);
 
-      if (!bonusActionUsed) {
-        if (playerDef.secondWindMaxUses > 0 && secondWindUses > 0 && playerHp < playerDef.maxHp)
-          this.actionArea.prepend(btn('SECOND WIND', '#1a3a5a', this.callbacks.onSecondWind));
-        if (playerDef.sneakAttackDice > 0 && !state.playerHidden && enemies.some(e => !e.dead))
-          this.actionArea.prepend(btn('HIDE', '#1a3a1a', this.callbacks.onHide));
-      }
+      const disEl = this.makeBtn('DISENGAGE', GREEN, this.callbacks.onDisengage);
+      disEl.disabled = actionUsed;
+      this.actionArea.prepend(disEl);
+
+      const dodEl = this.makeBtn('DODGE', GREEN, this.callbacks.onDodge);
+      dodEl.disabled = actionUsed;
+      this.actionArea.prepend(dodEl);
+
+      const dashEl = this.makeBtn('DASH', GREEN, this.callbacks.onDash);
+      dashEl.disabled = actionUsed;
+      this.actionArea.prepend(dashEl);
+
+      const swEl = this.makeBtn('SECOND WIND', '#1a3a5a', this.callbacks.onSecondWind);
+      swEl.disabled = bonusActionUsed || !aa.canSecondWind;
+      this.actionArea.prepend(swEl);
+
+      if (aa.canHide) this.actionArea.prepend(btn('HIDE', '#1a3a1a', this.callbacks.onHide));
+
+      const moveEl = this.makeBtn('MOVE', moveMode ? '#5a4800' : '#3a3000', this.callbacks.onToggleMoveMode);
+      moveEl.disabled = movesLeft <= 0;
+      this.actionArea.appendChild(moveEl);
 
     } else if (mode === 'death_saves') {
       this.actionArea.prepend(btn('ROLL DEATH SAVE', '#5a1a1a', this.callbacks.onDeathSave));
     }
-  }
-
-  private isValidAttackTarget(state: PlayerPanelActionState): boolean {
-    if (!state.selectedTargetId) return false;
-    const target = state.npcs.find(n => n.id === state.selectedTargetId);
-    if (!target || target.dead || target.disposition === 'ally') return false;
-    return chebyshev(state.playerTileX, state.playerTileY, target.tileX, target.tileY) <= 1;
   }
 
   private renderPicker(): void {

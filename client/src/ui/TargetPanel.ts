@@ -1,16 +1,21 @@
 import {
-  PLAYER_PANEL_WIDTH, GRID_COLS, GRID_ROWS, TILE_SIZE, TARGET_PANEL_WIDTH,
+  PLAYER_PANEL_WIDTH, GRID_COLS, GRID_ROWS, TILE_SIZE, TARGET_PANEL_WIDTH, HUD_HEIGHT,
 } from '../constants';
 import { MonsterDef } from '../data/monsters';
 import { NpcState } from '../net/types';
 import { UIScale } from './UIScale';
 import { DevMode } from '../devMode';
 
-const GRID_H = GRID_ROWS * TILE_SIZE;
-const GRID_X = PLAYER_PANEL_WIDTH + GRID_COLS * TILE_SIZE;
-const PANEL_MIN_WIDTH = 120;
-const PANEL_MAX_WIDTH = 480;
-const PANEL_WIDTH_KEY = 'myrpg_target_panel_width';
+const GRID_H           = GRID_ROWS * TILE_SIZE;
+const GRID_X           = PLAYER_PANEL_WIDTH + GRID_COLS * TILE_SIZE;
+const TOTAL_H          = GRID_H + HUD_HEIGHT;
+const MIN_PANEL_WIDTH  = 120;
+const MAX_PANEL_WIDTH  = 480;
+const MIN_PANEL_HEIGHT = 100;
+const MAX_PANEL_HEIGHT = Math.floor(TOTAL_H / 2);
+const DEFAULT_HEIGHT   = 380;
+const PANEL_WIDTH_KEY  = 'myrpg_target_panel_width';
+const PANEL_HEIGHT_KEY = 'myrpg_target_panel_height';
 
 function hpColor(pct: number): string {
   return pct > 0.5 ? '#27ae60' : pct > 0.25 ? '#f39c12' : '#e74c3c';
@@ -32,24 +37,29 @@ export class TargetPanel {
   private readonly conditionsEl: HTMLElement;
   private readonly offResize: () => void;
   private readonly scale: UIScale;
+  private panelHeight: number;
   private currentDef: MonsterDef | null = null;
   private currentNpcState: NpcState | null = null;
 
   constructor(scale: UIScale) {
     this.scale = scale;
-    const savedWidth = parseInt(localStorage.getItem(PANEL_WIDTH_KEY) ?? '', 10);
-    const initWidth = savedWidth >= PANEL_MIN_WIDTH ? savedWidth : TARGET_PANEL_WIDTH;
+
+    const savedWidth  = parseInt(localStorage.getItem(PANEL_WIDTH_KEY)  ?? '', 10);
+    const savedHeight = parseInt(localStorage.getItem(PANEL_HEIGHT_KEY) ?? '', 10);
+    const initWidth   = savedWidth  >= MIN_PANEL_WIDTH  ? savedWidth  : TARGET_PANEL_WIDTH;
+    this.panelHeight  = savedHeight >= MIN_PANEL_HEIGHT ? Math.min(savedHeight, MAX_PANEL_HEIGHT) : DEFAULT_HEIGHT;
 
     this.el = document.createElement('div');
     this.el.className = 'gui-panel';
     this.el.style.cssText += `
       width: ${initWidth}px;
-      height: ${GRID_H}px;
+      height: ${this.panelHeight}px;
       background: #080810;
       border-left: 2px solid #334455;
       color: #aabbcc;
       z-index: 10;
       display: none;
+      overflow: hidden;
     `;
 
     this.el.innerHTML = `
@@ -80,20 +90,21 @@ export class TargetPanel {
     this.abilitiesEl  = ref('abilities');
     this.conditionsEl = ref('conditions');
 
-    // Right edge is fixed at the canvas boundary; left edge moves with width.
+    // Right edge fixed at canvas right; left edge moves with width.
     const rightAnchor = GRID_X + TARGET_PANEL_WIDTH;
     const place = () => {
       const currentW = parseInt(this.el.style.width) || TARGET_PANEL_WIDTH;
       scale.placePanel(this.el, rightAnchor - currentW, 0);
     };
 
-    this.el.appendChild(this.buildResizeHandle(place));
+    this.el.appendChild(this.buildWidthHandle(place));
+    this.el.appendChild(this.buildHeightHandle());
 
     if (DevMode.enabled) {
       const btn = document.createElement('button');
       btn.className = 'gui-btn-ghost';
       btn.textContent = '[DEV] LOG';
-      btn.style.cssText = 'position:absolute;bottom:10px;right:10px;font-size:9px;padding:2px 6px;';
+      btn.style.cssText = 'position:absolute;bottom:18px;right:10px;font-size:9px;padding:2px 6px;';
       btn.addEventListener('click', () => console.log('[TargetPanel]', { def: this.currentDef, npcState: this.currentNpcState }));
       this.el.appendChild(btn);
     }
@@ -103,7 +114,7 @@ export class TargetPanel {
     this.offResize = scale.onChange(place);
   }
 
-  show(def: MonsterDef, npcState: NpcState, conditions: string[] = []): void {
+  show(def: MonsterDef, npcState: NpcState, _conditions: string[] = []): void {
     this.currentDef = def;
     this.currentNpcState = npcState;
     const colorHex = '#' + def.color.toString(16).padStart(6, '0');
@@ -139,12 +150,18 @@ export class TargetPanel {
       : '';
   }
 
-  private buildResizeHandle(reposition: () => void): HTMLDivElement {
+  private buildWidthHandle(reposition: () => void): HTMLDivElement {
     const handle = document.createElement('div');
     handle.style.cssText = `
-      position:absolute;top:0;left:0;width:8px;height:100%;
-      cursor:col-resize;z-index:20;
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 8px;
+      height: 100%;
+      cursor: col-resize;
+      z-index: 20;
     `;
+    handle.title = 'Drag to resize width';
 
     let dragging = false;
     let dragStartX = 0;
@@ -157,21 +174,61 @@ export class TargetPanel {
       handle.setPointerCapture(e.pointerId);
       e.stopPropagation();
     });
-
     handle.addEventListener('pointermove', (e) => {
       if (!dragging) return;
-      // Dragging left (toward center) increases width; right decreases it.
-      const newW = Math.max(PANEL_MIN_WIDTH, Math.min(PANEL_MAX_WIDTH,
+      const newW = Math.max(MIN_PANEL_WIDTH, Math.min(MAX_PANEL_WIDTH,
         dragStartW + (dragStartX - e.clientX) / this.scale.factor,
       ));
       this.el.style.width = `${newW}px`;
       reposition();
     });
-
     handle.addEventListener('pointerup', () => {
       if (!dragging) return;
       dragging = false;
       localStorage.setItem(PANEL_WIDTH_KEY, String(parseInt(this.el.style.width)));
+    });
+
+    return handle;
+  }
+
+  private buildHeightHandle(): HTMLDivElement {
+    const handle = document.createElement('div');
+    handle.style.cssText = `
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      width: 100%;
+      height: 8px;
+      cursor: row-resize;
+      z-index: 20;
+      background: linear-gradient(transparent 3px, #334455 3px, #334455 4px, transparent 4px);
+    `;
+    handle.title = 'Drag to resize height';
+
+    let dragging = false;
+    let dragStartY = 0;
+    let dragStartH = 0;
+
+    handle.addEventListener('pointerdown', (e) => {
+      dragging = true;
+      dragStartY = e.clientY;
+      dragStartH = this.panelHeight;
+      handle.setPointerCapture(e.pointerId);
+      e.preventDefault();
+    });
+    handle.addEventListener('pointermove', (e) => {
+      if (!dragging) return;
+      // Dragging down → height increases (panel grows downward from top anchor).
+      const newH = Math.max(MIN_PANEL_HEIGHT, Math.min(MAX_PANEL_HEIGHT,
+        dragStartH + (e.clientY - dragStartY) / this.scale.factor,
+      ));
+      this.panelHeight = newH;
+      this.el.style.height = `${newH}px`;
+    });
+    handle.addEventListener('pointerup', () => {
+      if (!dragging) return;
+      dragging = false;
+      localStorage.setItem(PANEL_HEIGHT_KEY, String(Math.round(this.panelHeight)));
     });
 
     return handle;

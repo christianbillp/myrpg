@@ -49,7 +49,7 @@ export function spawnEnemies(
   px: number, py: number, count: number,
   zone?: Zone,
 ): void {
-  const defs = monsters.filter((m) => m.cr !== '0');
+  const defs = monsters.filter((m) => m.combatSpawn !== false);
   const occupied = new Set<string>([`${px},${py}`, ...out.map((n) => `${n.tileX},${n.tileY}`)]);
 
   if (zone) {
@@ -57,7 +57,7 @@ export function spawnEnemies(
     free.forEach(([c, r], i) => {
       const def = defs[Math.floor(Math.random() * defs.length)];
       out.push({
-        id: `enemy_${i}`, defId: def.id, name: def.name, label: String.fromCharCode(65 + i),
+        id: `enemy_${i}`, defId: def.id, name: def.name, combatLabel: String.fromCharCode(65 + i),
         tileX: c, tileY: r,
         disposition: 'enemy', factionId: def.id,
         hp: def.maxHp, maxHp: def.maxHp,
@@ -77,7 +77,7 @@ export function spawnEnemies(
   picked.forEach(([r, c], i) => {
     const def = defs[Math.floor(Math.random() * defs.length)];
     out.push({
-      id: `enemy_${i}`, defId: def.id, name: def.name, label: String.fromCharCode(65 + i),
+      id: `enemy_${i}`, defId: def.id, name: def.name, combatLabel: String.fromCharCode(65 + i),
       tileX: c, tileY: r,
       disposition: 'enemy', factionId: def.id,
       hp: def.maxHp, maxHp: def.maxHp,
@@ -137,12 +137,12 @@ export function spawnNpc(
   if (candidates.length === 0) return;
   const [nx, ny] = candidates[Math.floor(Math.random() * candidates.length)];
   out.push({
-    id: `npc_${defId}_${out.length}`,
+    id: `${defId}_${out.length}`,
     defId,
     name: npcDef.name,
     tileX: nx, tileY: ny,
     disposition, factionId: defId,
-    label: '',
+    combatLabel: '',
     hp: maxHp, maxHp,
     isActive: false,
     reactionUsed: false, conditions: [], inventoryIds: [],

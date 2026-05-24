@@ -1,7 +1,7 @@
 import { GRID_ROWS, TILE_SIZE, HUD_HEIGHT } from '../constants';
 import { UIScale } from './UIScale';
 
-const GRID_H = GRID_ROWS * TILE_SIZE;
+const GAME_H = GRID_ROWS * TILE_SIZE + HUD_HEIGHT;
 
 export abstract class BaseOverlay {
   protected readonly panelEl: HTMLDivElement;
@@ -41,7 +41,7 @@ export abstract class BaseOverlay {
     this.backdropEl.appendChild(this.panelEl);
     document.body.appendChild(this.backdropEl);
 
-    const place = () => scale.placeModal(this.panelEl, panelW, panelH, GRID_H);
+    const place = () => scale.placeModal(this.panelEl, panelW, panelH, GAME_H);
     place();
     this.offResize = scale.onChange(place);
 

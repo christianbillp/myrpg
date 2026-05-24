@@ -18,7 +18,8 @@ import {
   type EncounterRecord,
   type StorylogEntry,
 } from "./storylog.js";
-import { GameEngine, GameDefs } from "./engine/GameEngine.js";
+import { GameEngine } from "./engine/GameEngine.js";
+import { GameDefs } from "./engine/types.js";
 import {
   applyEquipment,
   applyFeats,
@@ -155,7 +156,6 @@ type SessionPlayerState = Pick<
   | "defId"
   | "tileX"
   | "tileY"
-  | "hidden"
   | "actionUsed"
   | "bonusActionUsed"
   | "movesLeft"
