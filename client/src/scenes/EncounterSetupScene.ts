@@ -4,7 +4,8 @@ import { ItemDef } from "../data/equipment";
 import { EncounterType, EncounterDef } from "../data/encounterContext";
 import { SavedMapDef } from "../data/maps";
 import { gameClient } from "../net/GameClient";
-import type { GameState, EquipmentSlots } from "../net/types";
+import type { GameState, EquipmentSlots, EncounterRecord, StorylogEntry } from "../net/types";
+import { StorylogOverlay } from "../ui/StorylogOverlay";
 import {
   TILE_SIZE,
   GRID_COLS,
@@ -48,6 +49,8 @@ interface LocalSave {
   inventoryIds: string[];
   secondWindUses: number;
   equippedSlots?: EquipmentSlots;
+  encounterLog?: EncounterRecord[];
+  storylog?: StorylogEntry[];
 }
 
 interface SaveDisplay {
@@ -55,6 +58,8 @@ interface SaveDisplay {
   equippedText: Phaser.GameObjects.Text;
   deleteBg: Phaser.GameObjects.Rectangle;
   deleteLabel: Phaser.GameObjects.Text;
+  storylogBg: Phaser.GameObjects.Rectangle;
+  storylogLabel: Phaser.GameObjects.Text;
 }
 
 export class EncounterSetupScene extends Phaser.Scene {
@@ -137,18 +142,16 @@ export class EncounterSetupScene extends Phaser.Scene {
       if (def) this.selectChar(def);
     }
 
-    // Async server sync for characters without a local save
+    // Sync all characters from server to pick up encounterLog and storylog
     for (const char of this.characters) {
-      if (!this.allSaves.has(char.id)) {
-        gameClient.loadSave(char.id).then((data) => {
-          if (data && this.scene.isActive()) {
-            const save = data as LocalSave;
-            this.allSaves.set(char.id, save);
-            localStorage.setItem(saveKey(char.id), JSON.stringify(save));
-            this.updateSaveDisplay(char, save);
-          }
-        }).catch(() => {});
-      }
+      gameClient.loadSave(char.id).then((data) => {
+        if (data && this.scene.isActive()) {
+          const save = data as LocalSave;
+          this.allSaves.set(char.id, save);
+          localStorage.setItem(saveKey(char.id), JSON.stringify(save));
+          this.updateSaveDisplay(char, save);
+        }
+      }).catch(() => {});
     }
   }
 
@@ -161,6 +164,9 @@ export class EncounterSetupScene extends Phaser.Scene {
     display.deleteBg.setInteractive({ useHandCursor: true });
     display.deleteBg.setAlpha(1);
     display.deleteLabel.setAlpha(1);
+
+    display.storylogBg.setStrokeStyle(1, 0x2a7766).setAlpha(1).setInteractive({ useHandCursor: true });
+    display.storylogLabel.setColor("#44aa88").setAlpha(1);
   }
 
   private saveInfoLine(save: LocalSave, def: PlayerDef): string {
@@ -234,11 +240,52 @@ export class EncounterSetupScene extends Phaser.Scene {
         equippedText.setText("");
         deleteBg.disableInteractive().setStrokeStyle(1, 0x222222).setAlpha(0.3);
         deleteLabel.setColor("#445566").setAlpha(0.3);
+        storylogBg.disableInteractive().setStrokeStyle(1, 0x222222).setAlpha(0.3);
+        storylogLabel.setColor("#445566").setAlpha(0.3);
       });
     }
 
-    this.saveDisplays.set(def.id, { infoText, equippedText, deleteBg, deleteLabel });
+    const storylogBg = this.add.rectangle(cx, top + 455, 110, 22, 0x0d1a1a)
+      .setStrokeStyle(1, save ? 0x2a7766 : 0x222222)
+      .setAlpha(save ? 1 : 0.3);
+    const storylogLabel = this.add.text(cx, top + 455, "STORY LOG", {
+      fontSize: "10px", color: save ? "#44aa88" : "#445566", fontFamily: "monospace", resolution: DPR,
+    }).setOrigin(0.5).setAlpha(save ? 1 : 0.3);
+
+    if (save) {
+      storylogBg.setInteractive({ useHandCursor: true });
+      storylogBg.on("pointerover", () => { storylogBg.setStrokeStyle(1, 0x44aa88); storylogLabel.setColor("#66ccaa"); });
+      storylogBg.on("pointerout",  () => { storylogBg.setStrokeStyle(1, 0x2a7766); storylogLabel.setColor("#44aa88"); });
+      storylogBg.on("pointerdown", (pointer: Phaser.Input.Pointer) => {
+        pointer.event.stopPropagation();
+        this.openStorylogOverlay(def, storylogBg, storylogLabel);
+      });
+    }
+
+    this.saveDisplays.set(def.id, { infoText, equippedText, deleteBg, deleteLabel, storylogBg, storylogLabel });
     this.add.text(cx, top + cardH - 24, "SELECT", { fontSize: "13px", color: colorHex, fontFamily: "monospace", resolution: DPR }).setOrigin(0.5, 0);
+  }
+
+  private openStorylogOverlay(
+    def: PlayerDef,
+    storylogBg: Phaser.GameObjects.Rectangle,
+    storylogLabel: Phaser.GameObjects.Text,
+  ): void {
+    const save = this.allSaves.get(def.id);
+    if (!save) return;
+    const handleUpdated = (updated: StorylogEntry[]) => {
+      save.storylog = updated;
+      this.allSaves.set(def.id, save);
+      localStorage.setItem(saveKey(def.id), JSON.stringify(save));
+    };
+    new StorylogOverlay(
+      def.name,
+      save.encounterLog ?? [],
+      save.storylog ?? [],
+      () => gameClient.generateStorylog(def.id),
+      () => gameClient.generateStorylog(def.id, true),
+      handleUpdated,
+    );
   }
 
   private selectChar(def: PlayerDef): void {

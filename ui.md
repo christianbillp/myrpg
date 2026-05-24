@@ -135,6 +135,19 @@ Defined in `client/src/ui/AIDMOverlay.ts`. HTML DOM chat overlay powered by Clau
 
 ---
 
+### Story Log Overlay
+
+Defined in `client/src/ui/StorylogOverlay.ts`. Standalone HTML overlay (no `BaseOverlay`/`UIScale` dependency); opened from the Encounter Setup Scene via the STORY LOG button on a character card.
+
+| Component            | Description                                                               |
+| -------------------- | ------------------------------------------------------------------------- |
+| **Title**            | "STORY LOG" label and character name                                      |
+| **Entry List**       | Scrollable list of encounters in chronological order (oldest first). Each entry shows the date and encounter type in a dim header row, followed by the AI-generated prose narrative. Dialogue within narratives is rendered in italics. Entries not yet generated show "Not yet written." in dim italic text. |
+| **GENERATE N ENTRIES** | Footer button; active when one or more encounters lack a narrative. Label shows the count of missing entries. Disabled (greyed, no-op on click) when all encounters are covered. |
+| **REWRITE ALL**      | Secondary footer button; always active when a save exists. Regenerates every entry from scratch regardless of existing content. Intended for development/debugging. |
+
+---
+
 ### Inventory Overlay
 
 Defined in `client/src/ui/InventoryOverlay.ts`. HTML DOM overlay; opened via the INVENTORY button in the Player Panel.

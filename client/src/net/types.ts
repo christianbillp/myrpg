@@ -1,4 +1,26 @@
 // Mirror of server/src/engine/types.ts — keep in sync manually.
+// Also mirrors server/src/sessions.ts and server/src/index.ts types.
+
+export interface EncounterLogLine {
+  type: 'combat' | 'dm_player' | 'dm_reply';
+  text: string;
+}
+
+export interface EncounterRecord {
+  id: string;
+  timestamp: string;
+  description: string;
+  encounterTypes: string[];
+  xpGained: number;
+  goldGained: number;
+  outcome: 'survived' | 'defeated';
+  lines: EncounterLogLine[];
+}
+
+export interface StorylogEntry {
+  encounterId: string;
+  narrative: string;
+}
 
 export type LogEntryStyle = 'normal' | 'hit' | 'crit' | 'kill' | 'heal' | 'status' | 'header' | 'miss';
 

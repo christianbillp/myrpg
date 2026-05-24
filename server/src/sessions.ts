@@ -4,16 +4,55 @@ import type { ServerWSMessage, GameEvent, GameState } from './engine/types.js';
 
 export interface AidmMessage { role: 'user' | 'assistant'; content: string; }
 
+export interface EncounterLogLine {
+  type: 'combat' | 'dm_player' | 'dm_reply';
+  text: string;
+}
+
+interface AdventureMeta {
+  timestamp: string;
+  description: string;
+  encounterTypes: string[];
+  xpStart: number;
+  goldStart: number;
+}
+
 interface Session {
   engine: GameEngine;
   ws: WebSocket | null;
   aidmHistory: AidmMessage[];
+  adventureLines: EncounterLogLine[];
+  adventureMeta: AdventureMeta;
 }
 
 const sessions = new Map<string, Session>();
 
 export function createSession(sessionId: string, engine: GameEngine): void {
-  sessions.set(sessionId, { engine, ws: null, aidmHistory: [] });
+  const s = engine.getState();
+  sessions.set(sessionId, {
+    engine,
+    ws: null,
+    aidmHistory: [],
+    adventureLines: [],
+    adventureMeta: {
+      timestamp: new Date().toISOString(),
+      description: s.introduction,
+      encounterTypes: s.encounterTypes,
+      xpStart: s.player.xp,
+      goldStart: s.player.gold,
+    },
+  });
+}
+
+export function pushAdventureLines(sessionId: string, lines: EncounterLogLine[]): void {
+  const session = sessions.get(sessionId);
+  if (session && lines.length > 0) session.adventureLines.push(...lines);
+}
+
+export function getAdventureData(sessionId: string): { meta: AdventureMeta; lines: EncounterLogLine[]; state: GameState } | undefined {
+  const session = sessions.get(sessionId);
+  if (!session) return undefined;
+  return { meta: session.adventureMeta, lines: session.adventureLines, state: session.engine.getState() };
 }
 
 export function getAidmHistory(sessionId: string): AidmMessage[] | undefined {

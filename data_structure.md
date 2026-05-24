@@ -431,6 +431,8 @@ Stores the persistent player state that carries across encounters.
 | `inventoryIds` | string[] | Item `id` values currently in inventory. Repeated entries represent stacks. |
 | `secondWindUses` | number | Remaining Second Wind charges this encounter. |
 | `equippedSlots` | object | `{ armorId, weaponId, shieldId }` — currently equipped items. |
+| `encounterLog` | object[] | *(optional)* Raw record of every completed encounter, newest first. Each entry contains `id`, `timestamp`, `description`, `encounterTypes`, `xpGained`, `goldGained`, `outcome`, and `lines` (ordered log lines of type `combat`, `dm_player`, or `dm_reply`). Written when a session ends via `DELETE /game/session/:id`. |
+| `storylog` | object[] | *(optional)* AI-generated narrative entries keyed by `encounterId`. Each entry contains `encounterId` and `narrative` (prose string). Generated on demand by `POST /save/:characterId/storylog` via `server/src/storylog.ts` using Claude Sonnet; only missing entries are generated — existing entries are never overwritten unless `?rewrite=true` is passed. |
 
 ### World save — `saves/world.json`
 

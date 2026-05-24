@@ -157,7 +157,7 @@ export async function processAIDMChat(
   let narrativeText = '';
 
   let response = await anthropic.messages.create({
-    model: 'claude-sonnet-4-6',
+    model: 'claude-haiku-4-5-20251001',
     max_tokens: 600,
     system,
     tools: AIDM_TOOLS,
@@ -180,7 +180,7 @@ export async function processAIDMChat(
     messages.push({ role: 'user', content: toolResults });
 
     response = await anthropic.messages.create({
-      model: 'claude-sonnet-4-6',
+      model: 'claude-haiku-4-5-20251001',
       max_tokens: 600,
       system,
       tools: AIDM_TOOLS,

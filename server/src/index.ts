@@ -13,6 +13,7 @@ import { fileURLToPath } from "url";
 import { randomUUID } from "crypto";
 import { buildEncounter, EncounterStartRequest } from "./encounterService.js";
 import { processAIDMChat, AIDMChatRequest } from "./aidm.js";
+import { generateStorylog, type EncounterRecord, type StorylogEntry } from "./storylog.js";
 import { GameEngine, GameDefs } from "./engine/GameEngine.js";
 import { applyEquipment, applyFeats, applySpecies } from "./engine/EquipmentSystem.js";
 import { CreateSessionRequest } from "./engine/types.js";
@@ -23,6 +24,8 @@ import {
   registerWebSocket,
   pushStateUpdate,
   deleteSession,
+  pushAdventureLines,
+  getAdventureData,
 } from "./sessions.js";
 import type {
   PlayerAction,
@@ -116,7 +119,7 @@ server.get("/maps", async () => defs.maps);
 
 const SAVES_DIR = join(DATA_DIR, "saves");
 const WORLD_SAVE_PATH = join(SAVES_DIR, "world.json");
-import { writeFile, mkdir, unlink } from "fs/promises";
+import { writeFile, mkdir, unlink, access } from "fs/promises";
 
 function saveFilePath(characterId: string): string {
   return join(SAVES_DIR, `${characterId}.json`);
@@ -151,6 +154,8 @@ interface CharSave {
   inventoryIds: string[];
   secondWindUses: number;
   equippedSlots?: EquipmentSlots;
+  encounterLog?: EncounterRecord[];
+  storylog?: StorylogEntry[];
 }
 
 async function saveWorldState(state: GameState): Promise<void> {
@@ -237,6 +242,14 @@ async function defaultSave(characterId: string): Promise<unknown> {
 async function writeSave(characterId: string, data: unknown): Promise<void> {
   await mkdir(SAVES_DIR, { recursive: true });
   await writeFile(saveFilePath(characterId), JSON.stringify(data, null, 2));
+}
+
+async function ensureSaveExists(characterId: string): Promise<void> {
+  try {
+    await access(saveFilePath(characterId));
+  } catch {
+    await writeSave(characterId, await defaultSave(characterId));
+  }
 }
 
 server.get("/save/:characterId", async (req) =>
@@ -333,6 +346,7 @@ server.post("/game/session", async (req, reply) => {
     savedMap,
   );
   createSession(sessionId, engine);
+  await ensureSaveExists(playerDef.id);
 
   return reply.send({ sessionId, state: engine.getState() });
 });
@@ -342,12 +356,21 @@ server.post("/game/session/:id/action", async (req, reply) => {
   const engine = getEngine(id);
   if (!engine) return reply.code(404).send({ error: "Session not found" });
 
+  const logLengthBefore = engine.getState().combatLog.length;
   const action = req.body as PlayerAction;
   const { events, state } = engine.processAction(action);
 
-  // Auto-save after each action so state is never lost
+  const newCombatEntries = state.combatLog.slice(logLengthBefore);
+  pushAdventureLines(id, newCombatEntries.map((e) => ({
+    type: 'combat' as const,
+    text: e.right ? `${e.left}  [${e.right}]` : e.left,
+  })));
+
+  // Auto-save after each action — spread existing save to preserve adventureLog.
   const player = state.player;
+  const existingSave = await readSave(player.defId) as CharSave;
   await writeSave(player.defId, {
+    ...existingSave,
     playerDefId: player.defId,
     hp: player.hp,
     xp: player.xp,
@@ -375,12 +398,22 @@ server.post("/game/session/:id/aidm", async (req, reply) => {
   if (!history) return reply.code(404).send({ error: "Session not found" });
 
   try {
+    pushAdventureLines(id, [{ type: 'dm_player', text: body.playerMessage }]);
+    const logLengthBefore = engine.getState().combatLog.length;
     const {
       reply: aidmReply,
       events,
       rollResults,
     } = await processAIDMChat(id, engine, body, anthropic, history);
     const state = engine.getState();
+    const newCombatEntries = state.combatLog.slice(logLengthBefore);
+    pushAdventureLines(id, [
+      ...newCombatEntries.map((e) => ({
+        type: 'combat' as const,
+        text: e.right ? `${e.left}  [${e.right}]` : e.left,
+      })),
+      { type: 'dm_reply' as const, text: aidmReply },
+    ]);
     pushStateUpdate(id, events, state);
     await saveWorldState(state);
     return reply.send({ reply: aidmReply, rollResults });
@@ -393,9 +426,44 @@ server.post("/game/session/:id/aidm", async (req, reply) => {
 
 server.delete("/game/session/:id", async (req, reply) => {
   const { id } = req.params as { id: string };
+  const adventureData = getAdventureData(id);
+  if (adventureData) {
+    const { meta, lines, state } = adventureData;
+    const record: EncounterRecord = {
+      id,
+      timestamp: meta.timestamp,
+      description: meta.description,
+      encounterTypes: meta.encounterTypes,
+      xpGained: state.player.xp - meta.xpStart,
+      goldGained: state.player.gold - meta.goldStart,
+      outcome: state.phase === 'defeat' || state.player.hp <= 0 ? 'defeated' : 'survived',
+      lines,
+    };
+    const existingSave = await readSave(state.player.defId) as CharSave;
+    await writeSave(state.player.defId, {
+      ...existingSave,
+      encounterLog: [record, ...(existingSave.encounterLog ?? [])],
+    });
+  }
   deleteSession(id);
   await deleteWorldSave();
   return reply.code(200).send({ ok: true });
+});
+
+// ── Storylog generation ────────────────────────────────────────────────────────
+
+server.post("/save/:characterId/storylog", async (req, reply) => {
+  const { characterId } = req.params as { characterId: string };
+  const { rewrite } = req.query as Record<string, string>;
+  const save = await readSave(characterId) as CharSave;
+  const storylog = await generateStorylog(
+    anthropic,
+    save.encounterLog ?? [],
+    save.storylog ?? [],
+    rewrite === 'true',
+  );
+  await writeSave(characterId, { ...save, storylog });
+  return reply.send({ storylog });
 });
 
 // ── WebSocket endpoint ─────────────────────────────────────────────────────────

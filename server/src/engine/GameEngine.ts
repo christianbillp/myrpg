@@ -609,9 +609,6 @@ export class GameEngine {
     }
 
     s.player.actionUsed = true;
-    if (s.npcs.filter((n) => n.disposition === 'enemy' && n.hp > 0).length === 0) {
-      s.phase = 'exploring';
-    }
   }
 
   private doThrow(itemId: string, targetId: string | undefined, _events: GameEvent[]): void {
@@ -648,9 +645,6 @@ export class GameEngine {
     s.player.inventoryIds.splice(itemIdx, 1);
     this.executeThrowOnTarget(attack, profBonus, normalRange, itemDef, target, targetDef);
     s.player.actionUsed = true;
-    if (s.npcs.filter((n) => n.disposition === 'enemy' && n.hp > 0).length === 0) {
-      s.phase = 'exploring';
-    }
   }
 
   throwItem(itemId: string, targetId?: string): GameEvent[] {
@@ -711,12 +705,7 @@ export class GameEngine {
     else s.player.inventoryIds.splice(inventoryIdx, 1);
     this.executeThrowOnTarget(attack, profBonus, normalRange, itemDef, target, targetDef);
 
-    if (s.phase === 'player_turn') {
-      s.player.actionUsed = true;
-      if (s.npcs.filter((n) => n.disposition === 'enemy' && n.hp > 0).length === 0) {
-        s.phase = 'exploring';
-      }
-    }
+    if (s.phase === 'player_turn') s.player.actionUsed = true;
 
     return events;
   }
@@ -755,6 +744,11 @@ export class GameEngine {
     s.turnOrderIds = s.turnOrderIds.filter((tid) => tid !== id);
     if (s.selectedTargetId === id) s.selectedTargetId = null;
     this.advanceQuest('kill');
+    if (s.phase === 'player_turn' || s.phase === 'enemy_turn') {
+      if (s.npcs.filter((n) => n.disposition === 'enemy' && n.hp > 0).length === 0) {
+        s.phase = 'exploring';
+      }
+    }
   }
 
   private killWithReward(npc: NpcState, def: MonsterDef, killMessage: string, includeTotal = true): void {

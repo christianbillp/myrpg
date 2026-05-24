@@ -1,5 +1,5 @@
 import type {
-  GameState, GameEvent, PlayerAction, ServerWSMessage, CreateSessionRequest,
+  GameState, GameEvent, PlayerAction, ServerWSMessage, CreateSessionRequest, StorylogEntry,
 } from './types';
 
 const API_URL = 'http://localhost:3000';
@@ -99,6 +99,16 @@ export class GameClient {
 
   async deleteSave(characterId: string): Promise<void> {
     await fetch(`${API_URL}/save/${characterId}`, { method: 'DELETE' });
+  }
+
+  async generateStorylog(characterId: string, rewrite = false): Promise<StorylogEntry[]> {
+    const url = rewrite
+      ? `${API_URL}/save/${characterId}/storylog?rewrite=true`
+      : `${API_URL}/save/${characterId}/storylog`;
+    const res = await fetch(url, { method: 'POST' });
+    if (!res.ok) throw new Error(`Storylog generation failed: ${res.status}`);
+    const { storylog } = await res.json() as { storylog: StorylogEntry[] };
+    return storylog;
   }
 }
 
