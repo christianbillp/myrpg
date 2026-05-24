@@ -7,7 +7,18 @@ export interface AIDMToolResult {
   rollResult?: string;
 }
 
-export const AIDM_TOOLS = [
+interface AIDMDefs {
+  equipment: Array<{ id: string }>;
+  monsters: Array<{ id: string }>;
+}
+
+export function buildAIDMTools(defs: AIDMDefs) {
+  const itemIds = defs.equipment.map((i) => `"${i.id}"`).join(', ');
+  const monsterIds = defs.monsters.map((m) => `"${m.id}"`).join(', ');
+  return buildToolList(itemIds, monsterIds);
+}
+
+function buildToolList(itemIds: string, monsterIds: string) { return [
   {
     name: 'adjust_player_hp',
     description: "Adjust the player's HP. Positive delta heals, negative damages. Clamped to [0, maxHp].",
@@ -40,7 +51,7 @@ export const AIDM_TOOLS = [
   },
   {
     name: 'add_item',
-    description: 'Give the player an item. Valid item_id values: "health_potion", "greatsword", "shortsword", "flail", "longsword", "rapier", "dagger", "javelin", "shortbow", "chain_mail", "leather_armor", "studded_leather", "scale_mail", "breastplate", "splint_armor", "plate_armor", "shield".',
+    description: `Give the player an item. Valid item_id values: ${itemIds}.`,
     input_schema: { type: 'object' as const, properties: { item_id: { type: 'string' }, reason: { type: 'string' } }, required: ['item_id', 'reason'] },
   },
   {
@@ -55,7 +66,7 @@ export const AIDM_TOOLS = [
   },
   {
     name: 'spawn_enemy',
-    description: 'Spawn a new enemy on the map. Valid monster_id values: "goblin_minion", "bandit", "commoner", "skeleton", "guard".',
+    description: `Spawn a new enemy on the map. Valid monster_id values: ${monsterIds}.`,
     input_schema: { type: 'object' as const, properties: { monster_id: { type: 'string' }, reason: { type: 'string' } }, required: ['monster_id', 'reason'] },
   },
   {
@@ -128,7 +139,17 @@ export const AIDM_TOOLS = [
     description: 'Set the player\'s Exhaustion level (0–5). Each level imposes −2 to all D20 Tests (ability checks and saving throws). Level 5 is lethal. Per SRD: a Long Rest removes one Exhaustion level.',
     input_schema: { type: 'object' as const, properties: { level: { type: 'integer' }, reason: { type: 'string' } }, required: ['level', 'reason'] },
   },
-];
+  {
+    name: 'reveal_npc_name',
+    description: 'Call this when an NPC reveals their name to the player. Updates the NPC\'s map label to the revealed name and ensures continuity. entity: the full entity ref from CURRENT STATE, e.g. "npc_villager_0". revealed_name: the name the NPC gave.',
+    input_schema: { type: 'object' as const, properties: { entity: { type: 'string' }, revealed_name: { type: 'string' } }, required: ['entity', 'revealed_name'] },
+  },
+  {
+    name: 'set_npc_passive',
+    description: 'Mark an ally NPC as combat-passive (passive: true) so they skip their combat turn, or remove that restriction (passive: false). Use this when the player tells an ally to stay back, not fight, or stand down. Entity: the full entity ref from CURRENT STATE, e.g. "ally_a" or "npc_commoner_0".',
+    input_schema: { type: 'object' as const, properties: { entity: { type: 'string' }, passive: { type: 'boolean' }, reason: { type: 'string' } }, required: ['entity', 'passive', 'reason'] },
+  },
+]; }
 
 export function applyAIDMTool(engine: GameEngine, name: string, input: Record<string, unknown>): AIDMToolResult {
   let events: GameEvent[] = [];
@@ -243,6 +264,18 @@ export function applyAIDMTool(engine: GameEngine, name: string, input: Record<st
       events = engine.setExhaustionLevel(input['level'] as number);
       toolResultContent = `Exhaustion level set to ${input['level'] as number}.`;
       break;
+    case 'reveal_npc_name': {
+      const entity = input['entity'] as string;
+      const revealedName = input['revealed_name'] as string;
+      engine.revealNpcName(entity, revealedName);
+      toolResultContent = `${entity} is now known as "${revealedName}". Use this name for all future references to this NPC.`;
+      break;
+    }
+    case 'set_npc_passive': {
+      events = engine.setNpcPassive(input['entity'] as string, input['passive'] as boolean);
+      toolResultContent = `${input['entity']} is now ${input['passive'] ? 'passive — will skip combat turns' : 'active — will act normally in combat'}.`;
+      break;
+    }
     case 'request_attack_roll': {
       const attacker = input['attacker'] as string;
       const targetAc = input['target_ac'] as number;

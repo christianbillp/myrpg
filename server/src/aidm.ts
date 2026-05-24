@@ -1,7 +1,7 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { GameEngine } from './engine/GameEngine.js';
 import { GameEvent } from './engine/types.js';
-import { AIDM_TOOLS, applyAIDMTool } from './engine/AIDMTools.js';
+import { applyAIDMTool } from './engine/AIDMTools.js';
 import type { AidmMessage } from './sessions.js';
 
 export interface AIDMChatRequest {
@@ -31,6 +31,8 @@ TOOL-FIRST RULE: Every game effect you describe must be enacted via the correspo
   • Stealth change → call set_player_hidden.
   • Anything noteworthy during combat → call add_log_entry so it appears in the combat log.
   • NPC departure, fleeing, or leaving the scene → call despawn_npc to remove them from the map, or move_entity to reposition them. Never narrate an NPC as gone unless the tool confirms it.
+  • NPC says their name → call reveal_npc_name with the entity ref from CURRENT STATE (the value shown in brackets, e.g. "npc_commoner_0") and the name before writing any dialogue that contains the name. This applies even when the reveal is incidental. If you skip the tool, the game world does not register the name regardless of what you narrate.
+  • Player tells an ally to stay back, not fight, or stand down → call set_npc_passive (passive: true) immediately. Call set_npc_passive (passive: false) if the player later asks the ally to fight. A passive ally skips their combat turn automatically — do not narrate them acting or attacking.
 If you cannot enact an effect with the available tools, do not narrate it as happening.
 
 ACTION ECONOMY: throw_item and any other action-consuming tool is enforced server-side during the player's turn. If the tool result says the action was already spent, narrate that the player cannot act again this turn.
@@ -61,7 +63,7 @@ function buildStateMessage(engine: GameEngine): string {
   const p = s.player;
 
   const flags = [
-    p.hidden ? 'HIDDEN' : '',
+    p.conditions.includes('hidden') ? 'HIDDEN' : '',
     s.phase === 'player_turn' && p.actionUsed ? 'action used' : '',
     s.phase === 'player_turn' && p.bonusActionUsed ? 'bonus used' : '',
     s.phase === 'player_turn' ? `${p.movesLeft} moves left` : '',
@@ -72,8 +74,8 @@ function buildStateMessage(engine: GameEngine): string {
     ? (() => {
         const npc = s.npcs.find((n) => n.id === s.selectedTargetId);
         if (npc) {
-          const entityRef = npc.disposition === 'enemy' ? `enemy_${npc.label}`
-            : npc.disposition === 'ally' ? `ally_${npc.label}`
+          const entityRef = npc.disposition === 'enemy' ? `enemy_${npc.combatLabel}`
+            : npc.disposition === 'ally' ? `ally_${npc.combatLabel}`
             : `npc_${npc.id}`;
           return `Focused on: ${npc.defId} [${entityRef}] (${npc.disposition})`;
         }
@@ -84,11 +86,12 @@ function buildStateMessage(engine: GameEngine): string {
   const livingCombatants = s.npcs.filter((n) => n.disposition !== 'neutral' && n.hp > 0);
   const combatantLines = livingCombatants.length > 0
     ? livingCombatants.map((n) => {
-        const entityRef = n.disposition === 'enemy' ? `enemy_${n.label}`
-          : n.disposition === 'ally' ? `ally_${n.label}`
-          : `npc_${n.id}`;
+        const entityRef = n.disposition === 'enemy' ? `enemy_${n.combatLabel}`
+          : n.combatLabel ? `ally_${n.combatLabel}` : `npc_${n.id}`;
+        const knownAs = n.revealedName ? ` (known as: ${n.revealedName})` : n.disposition !== 'enemy' ? ' [NAME UNKNOWN — call reveal_npc_name if they give their name]' : '';
         const cFlags = [
           n.isActive ? 'ACTIVE TURN' : '',
+          n.combatPassive ? 'PASSIVE (skips combat turn)' : '',
           n.conditions.includes('vexed') ? 'VEXED' : '',
           n.conditions.includes('hidden') ? 'HIDDEN' : '',
         ].filter(Boolean).join(', ');
@@ -96,13 +99,16 @@ function buildStateMessage(engine: GameEngine): string {
         const attackStr = def?.attacks.map(a =>
           `${a.name} (${a.attackType}, +${a.bonus} to hit, ${a.damageDice}d${a.damageSides}+${a.damageBonus} ${a.damageType})`
         ).join('; ') ?? 'unknown';
-        return `  [${entityRef}] ${n.defId} (${n.disposition}): ${n.hp}/${n.maxHp} HP, tile (${n.tileX},${n.tileY})${cFlags ? ` [${cFlags}]` : ''}\n    Attacks: ${attackStr}`;
+        return `  [${entityRef}] ${n.defId}${knownAs} (${n.disposition}): ${n.hp}/${n.maxHp} HP, tile (${n.tileX},${n.tileY})${cFlags ? ` [${cFlags}]` : ''}\n    Attacks: ${attackStr}`;
       }).join('\n')
     : '  None';
 
   const livingNeutrals = s.npcs.filter((n) => n.disposition === 'neutral' && n.hp > 0);
   const neutralNpcLines = livingNeutrals.length > 0
-    ? livingNeutrals.map((n) => `  ${n.defId} [npc_${n.id}] at tile (${n.tileX},${n.tileY})`).join('\n')
+    ? livingNeutrals.map((n) => {
+        const knownAs = n.revealedName ? ` (known as: ${n.revealedName})` : '';
+        return `  ${n.defId} [npc_${n.id}] at tile (${n.tileX},${n.tileY})${knownAs}`;
+      }).join('\n')
     : '  None';
 
   const corpses = s.npcs.filter((n) => n.hp <= 0);
@@ -184,15 +190,18 @@ export async function processAIDMChat(
   ];
 
   const system = buildStaticPrompt(body.dmPersona ?? 'story');
+  const tools = engine.getAIDMTools();
   const allEvents: GameEvent[] = [];
   const rollResults: string[] = [];
   let narrativeText = '';
 
+  const model = body.dmPersona === 'dev' ? 'claude-haiku-4-5-20251001' : 'claude-sonnet-4-6';
+
   let response = await anthropic.messages.create({
-    model: 'claude-haiku-4-5-20251001',
+    model,
     max_tokens: 600,
     system,
-    tools: AIDM_TOOLS,
+    tools,
     messages: messages as Parameters<typeof anthropic.messages.create>[0]['messages'],
   });
 
@@ -212,10 +221,10 @@ export async function processAIDMChat(
     messages.push({ role: 'user', content: toolResults });
 
     response = await anthropic.messages.create({
-      model: 'claude-haiku-4-5-20251001',
+      model,
       max_tokens: 600,
       system,
-      tools: AIDM_TOOLS,
+      tools,
       messages: messages as Parameters<typeof anthropic.messages.create>[0]['messages'],
     });
   }

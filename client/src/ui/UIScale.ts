@@ -102,6 +102,9 @@ export function injectGameUIStyles(): void {
     }
     .gui-btn-ghost:hover { border-color: #445566; color: #556677; }
 
+    /* Allow text selection in log/chat areas */
+    .gui-selectable { user-select: text; }
+
     /* HUD navigation buttons (NEW ENCOUNTER, DUNGEON MASTER) */
     .gui-btn-hud {
       height: 26px;

@@ -10,7 +10,7 @@ export class NpcToken {
   tileX: number;
   tileY: number;
   hp: number;
-  label = "";
+  combatLabel = "";
   readonly maxHp: number;
   readonly id: string;
   readonly def: MonsterDef;
@@ -101,12 +101,16 @@ export class NpcToken {
     this.refreshHpBar();
   }
 
-  setLabel(label: string): void {
-    this.label = label;
+  setCombatLabel(label: string): void {
+    this.combatLabel = label;
+  }
+
+  setNameText(name: string): void {
+    this.nameText.setText(name);
   }
 
   setLabelVisible(visible: boolean): void {
-    this.labelText.setText(this.disposition !== 'neutral' && visible ? this.label : '');
+    this.labelText.setText(this.disposition !== 'neutral' && visible ? this.combatLabel : '');
   }
 
   setSelected(selected: boolean): void {

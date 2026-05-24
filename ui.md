@@ -38,6 +38,8 @@ Defined in `client/src/ui/PlayerPanel.ts`. HTML DOM panel; **open by default** (
 | **Action Buttons** | Context-sensitive combat buttons shown above INVENTORY/SEARCH (see below)                                |
 | **INVENTORY**      | Button at the bottom of the panel; always visible when the panel is open. Opens the Inventory Overlay.   |
 | **SEARCH**         | Button at the bottom of the panel; visible only during an Exploration encounter with secrets remaining. Rolls Wisdom (Perception) to detect a secret on an adjacent tile. |
+| **END TURN**       | Button at the bottom of the panel; visible only during `player_turn`. Ends the player's turn and passes initiative to the enemies. |
+| **LEAVE ENCOUNTER**| Button at the very bottom of the panel; always visible. Triggers auto-save and returns to the Encounter Setup screen. |
 
 ### Action Buttons
 
@@ -51,7 +53,6 @@ Defined in `client/src/ui/PlayerPanel.ts`. HTML DOM panel; **open by default** (
 | **DISENGAGE**       | Action       | Player's turn, action not yet spent, at least one living enemy               | Prevent Opportunity Attacks when moving away from enemies this turn; applies `disengaged` condition |
 | **SECOND WIND**     | Bonus Action | Player's turn, bonus action not yet spent, Fighter only, uses remaining, not at full HP | Spend a use to heal 1d10 + level HP                          |
 | **HIDE**            | Bonus Action | Player's turn, bonus action not yet spent, Rogue only, not already hidden    | Attempt to hide (Cunning Action) for Sneak Attack advantage             |
-| **END TURN**        | —            | Player's turn                                                                | Explicitly end the player's turn and pass initiative to the enemies     |
 | **ROLL DEATH SAVE** | —            | Player unconscious                                                           | Roll a d20 death saving throw                                           |
 | **SHORT REST**      | —            | Exploring, player below max HP, Hit Dice remaining                           | Spend one Hit Die (d10+CON Fighter / d8+CON Rogue) to heal; resets each new encounter |
 
@@ -64,10 +65,10 @@ Rendered in `client/src/scenes/GameScene.ts`. Each tile = 5 ft. Occupies the are
 | Component               | Description                                                                                                                           |
 | ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
 | **Player Token**        | Coloured circle representing the player character; shows an HP bar overlaid at the top of the circle when damaged                     |
-| **NPC Token**           | Coloured circle representing a non-player creature. All damaged tokens show an HP bar overlaid at the top of the circle. **Neutral** NPCs show their name just above the circle in the token colour; HP bar is blue-grey. **Enemy** NPCs show a red HP bar; letter labels A, B, C… are rendered in the centre of the token during combat and are hidden while exploring. **Ally** NPCs show a green HP bar; letter labels A, B, C… (uppercase, assigned from the same global pool as enemies) are rendered in the centre of the token during combat. **Dead NPCs (corpses)** remain on the map at 40% opacity with no HP bar and no label; clicking a corpse selects it and opens the Target Panel (showing the corpse's stats) but dead tokens cannot be attacked or targeted for any game effect. |
+| **NPC Token**           | Coloured circle representing a non-player creature. All damaged tokens show an HP bar overlaid at the top of the circle. **Neutral** NPCs show their name just above the circle in the token colour (the revealed name once `reveal_npc_name` fires, otherwise the generic NPC name); HP bar is blue-grey. **Enemy** NPCs show a red HP bar; their `combatLabel` (A, B, C…) is rendered in the centre of the token during combat and hidden while exploring. **Ally** NPCs show a green HP bar; their `combatLabel` is rendered in the centre during combat; once their name is revealed it replaces the generic name above the token. **Dead NPCs (corpses)** remain on the map at 40% opacity with no HP bar and no label; clicking a corpse selects it and opens the Target Panel (showing the corpse's stats) but dead tokens cannot be attacked or targeted for any game effect. |
 | **Item Token**          | Small green diamond on a tile; walking onto it picks up the item                                                                      |
 | **Movement Highlights** | Blue-tinted tiles showing reachable squares during the player's turn                                                                  |
-| **Turn Order Bar**      | Semi-transparent HTML strip pinned to the top of the Game Map (rendered by `HUD.ts`); visible during combat. One chip per combatant (player first, then all non-neutral NPCs in initiative order). The active chip is highlighted green; dead chips are dimmed. All NPC chips show "A · Name" (uppercase label). |
+| **Turn Order Bar**      | Semi-transparent HTML strip pinned to the top of the Game Map (rendered by `HUD.ts`); visible during combat. One chip per combatant (player first, then all non-neutral NPCs in initiative order). The active chip is highlighted green; dead chips are dimmed. All NPC chips show "A · Name" (`combatLabel` · monster name). |
 
 ---
 
@@ -90,16 +91,34 @@ Selection: clicking a creature in the Game Map selects it. The creature is highl
 
 ## HUD (Heads-Up Display)
 
-Defined in `client/src/ui/HUD.ts`. HTML DOM bar spanning the full canvas width below the Game Map. Also renders the Turn Order Bar as a second HTML element pinned to the top of the grid area.
+Defined in `client/src/ui/HUD.ts`. HTML DOM bar spanning the full canvas width below the Game Map. Also renders the Turn Order Bar as a second HTML element pinned to the top of the grid area. The HUD height is user-resizable (drag the top edge); the chosen height is persisted in `localStorage`.
+
+### Tab Bar
+
+Two tabs switch the HUD content area:
+
+| Tab              | Description                                              |
+| ---------------- | -------------------------------------------------------- |
+| **COMBAT LOG**   | Shows the two-column scrollable combat log               |
+| **DUNGEON MASTER** | Shows the inline DM chat panel                         |
+
+### Combat Log tab
 
 | Component           | Description                                                                                                   |
 | ------------------- | ------------------------------------------------------------------------------------------------------------- |
-| **Enemy Info**      | Top-right — enemy name, HP, and status tags (`[HIDDEN]`, `[VEXED]`)                                           |
 | **Phase Text**      | Top-centre — current game phase ("Exploring", "Your turn — N moves", enemy name + "…", death save state); appends "· action used" or "· bonus used" when the respective resource has been spent this turn |
-| **Combat Log**      | Two-column scrollable log: left column shows the narrative (what happened), right column shows the dice detail (rolls, bonuses, totals). Each row is colour-coded by outcome — grey (normal), green (hit), yellow (crit), red (kill), teal (heal), blue (status), bright (header), dim (miss). Newest entries appear at the bottom; scroll with the mouse wheel. |
-| **Log Scroll Hint** | Small dim text showing scroll direction and how many newer entries are below                                  |
-| **DUNGEON MASTER**  | Button — open the AIDM chat overlay; conversation history is preserved across open/close cycles               |
-| **LEAVE ENCOUNTER** | Button — trigger auto-save and return to the Encounter Setup screen                                           |
+| **Combat Log**      | Two-column scrollable log: left column shows the narrative (what happened), right column shows the dice detail (rolls, bonuses, totals). Each row is colour-coded by outcome — grey (normal), green (hit), yellow (crit), red (kill), teal (heal), blue (status), bright (header), dim (miss). Newest entries appear at the bottom; scroll with the mouse wheel. Text is selectable and can be copied. |
+
+### Dungeon Master tab
+
+| Component           | Description                                                                                                   |
+| ------------------- | ------------------------------------------------------------------------------------------------------------- |
+| **Persona Chips**   | **STORY** / **DEV** toggle. **Story DM** (default): enforces SRD 5.2.1 rules and in-world logic. **Dev DM**: fulfils all requests without restriction; replies with brief mechanical feedback. Persists across tab switches for the duration of the encounter. |
+| **Chat Area**       | Scrollable conversation history. Player messages in amber (`▸` prefix). DM responses in cool white, rendered as markdown. Roll results on their own line (green success / red failure) prefixed with 🎲. Text is selectable and can be copied. |
+| **Status Text**     | "The Dungeon Master considers…" shown while the AI is responding.                                             |
+| **Mode Button**     | Dropup button on the left of the input row. **DM** (default): message goes directly to the DM. **Say to [Name]**: message is prefixed with `[PlayerName says to Target]:` and sent in-character; only available when a living NPC is selected. Updates to show the NPC's revealed name once it is known. |
+| **Input Box**       | Text input (max 300 chars). Submits on Enter. WASD movement is disabled while the input is focused.          |
+| **Send Button**     | Submits the message.                                                                                          |
 
 ---
 
@@ -119,21 +138,6 @@ Appears automatically when the game map loads for the first time. Suppressed whe
 
 ---
 
-### AIDM Overlay
-
-Defined in `client/src/ui/AIDMOverlay.ts`. HTML DOM chat overlay powered by Claude Sonnet. DM responses are rendered as markdown using the `marked` library.
-
-| Component            | Description                                                               |
-| -------------------- | ------------------------------------------------------------------------- |
-| **Title**            | "DUNGEON MASTER" header                                                   |
-| **Persona Chips**    | STORY / DEV toggle in the header. **STORY** (default): enforces SRD 5.2.1 rules, narrative immersion. **DEV**: fulfils all requests without restriction for testing purposes. Persists across open/close cycles. |
-| **History Area**     | Scrollable chat log. Player messages in amber (`▸ ` prefix). DM responses in cool white. Roll results on their own line in green (success) or red (failure), prefixed with 🎲. |
-| **Scroll Bar**       | Thumb on right edge of history area; auto-scrolls to newest message      |
-| **Input Box**        | Text input for the player's message (max 300 chars)                      |
-| **Send Button**      | Submits the message; also triggered by Enter                             |
-| **Status Text**      | "The Dungeon Master considers…" shown while the AI is responding         |
-
----
 
 ### Story Log Overlay
 

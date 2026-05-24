@@ -14,7 +14,7 @@ import {
 } from "../constants";
 import { PlayerDef } from "../data/player";
 import { MonsterDef, NPCDef } from "../data/monsters";
-import { ItemDef, WeaponDef } from "../data/equipment";
+import { ItemDef } from "../data/equipment";
 import { gameClient } from "../net/GameClient";
 import type { GameState, GameEvent, GameMap } from "../net/types";
 import type { ChatMessage } from "../ui/AIDMOverlay";
@@ -44,8 +44,10 @@ export class GameScene extends Phaser.Scene {
   private gridView!: GridView;
   private overlays!: OverlayManager;
   private highlightLayer!: Phaser.GameObjects.Graphics;
-  private localLogScrollOffset = 0;
-
+  private movePathLayer!: Phaser.GameObjects.Graphics;
+  private moveMode = false;
+  private moveDist: number[][] = [];
+  private movePrev: Array<Array<[number, number] | null>> = [];
   private pendingDmHistory: ChatMessage[] = [];
   private pendingIsResume = false;
 
@@ -56,6 +58,7 @@ export class GameScene extends Phaser.Scene {
     left: Phaser.Input.Keyboard.Key;
     right: Phaser.Input.Keyboard.Key;
   };
+  private escKey!: Phaser.Input.Keyboard.Key;
 
   constructor() {
     super({ key: "GameScene" });
@@ -73,8 +76,10 @@ export class GameScene extends Phaser.Scene {
     this.itemTokens = new Map();
     this.selectedEntityId = null;
     this.uiDestroyed = false;
+    this.moveMode = false;
+    this.moveDist = [];
+    this.movePrev = [];
     if (this.overlays) this.overlays.reset();
-    this.localLogScrollOffset = 0;
   }
 
   create(): void {
@@ -82,22 +87,21 @@ export class GameScene extends Phaser.Scene {
 
     this.gridView = new GridView(this);
     this.highlightLayer = this.add.graphics();
+    this.movePathLayer  = this.add.graphics();
     this.gridView.container.add(this.highlightLayer);
+    this.gridView.container.add(this.movePathLayer);
 
     this.overlays = new OverlayManager(this.uiScale, this.playerDef, {
-      onEquip:           (slot, itemId) => gameClient.sendAction({ type: "equip", slot, itemId }),
-      onUnequip:         (slot) => gameClient.sendAction({ type: "unequip", slot }),
-      onUsePotion:       () => gameClient.sendAction({ type: "usePotion" }),
-      onSendAIDM:        (msg, persona) => gameClient.sendAIDMMessage(msg, persona),
-      onDisableKeyboard: () => this.input.keyboard?.disableGlobalCapture(),
-      onEnableKeyboard:  () => this.input.keyboard?.enableGlobalCapture(),
-      onRefresh:         () => { if (this.gameState) this.updateHUD(this.gameState); },
-      getItems:          () => this.registry.get("equipment") as ItemDef[],
+      onEquip:     (slot, itemId) => gameClient.sendAction({ type: "equip", slot, itemId }),
+      onUnequip:   (slot) => gameClient.sendAction({ type: "unequip", slot }),
+      onUsePotion: () => gameClient.sendAction({ type: "usePotion" }),
+      getItems:    () => this.registry.get("equipment") as ItemDef[],
     });
-    if (this.pendingIsResume) this.overlays.seedAidmHistory(this.pendingDmHistory);
+    if (this.pendingIsResume) this.overlays.markResumed();
 
     this.setupInput();
     this.buildHUD();
+    if (this.pendingIsResume) this.hud.seedDmHistory(this.pendingDmHistory);
 
     gameClient.setStateUpdateHandler((state, events) => this.handleStateUpdate(state, events));
     gameClient.connectWebSocket();
@@ -118,7 +122,6 @@ export class GameScene extends Phaser.Scene {
 
   private handleStateUpdate(state: GameState, events: GameEvent[]): void {
     this.gameState = state;
-    this.localLogScrollOffset = state.logScrollOffset;
     for (const ev of events) {
       if (ev.type === "entity_move") this.eventQueue.push(ev);
     }
@@ -133,6 +136,13 @@ export class GameScene extends Phaser.Scene {
     const event = this.eventQueue.shift()!;
     this.animating = true;
     if (event.type === "entity_move") {
+      if (event.entityId === 'player' && this.player) {
+        this.player.moveTo(event.toX, event.toY, () => {
+          this.animating = false;
+          this.processNextEvent();
+        });
+        return;
+      }
       const token = this.npcTokens.get(event.entityId);
       if (token) {
         token.moveTo(event.toX, event.toY, () => {
@@ -191,6 +201,7 @@ export class GameScene extends Phaser.Scene {
       if (!token) {
         const def = this.resolveMonsterDef(nState.defId);
         token = new NpcToken(this, nState.id, def, nState.tileX, nState.tileY, nState.disposition, nState.hp, nState.maxHp);
+        token.setNameText(nState.name);
         this.npcTokens.set(nState.id, token);
         this.gridView.container.add(token.gameObject);
       } else if (nState.disposition === "neutral" && nState.hp > 0) {
@@ -201,8 +212,9 @@ export class GameScene extends Phaser.Scene {
       if (nState.hp <= 0) {
         token.setDead();
       } else {
-        token.setLabel(nState.label);
+        token.setCombatLabel(nState.combatLabel);
         token.setLabelVisible(nState.disposition !== "neutral" && state.phase !== "exploring");
+        if (nState.revealedName) token.setNameText(nState.revealedName);
       }
     }
   }
@@ -261,6 +273,7 @@ export class GameScene extends Phaser.Scene {
       left:  this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.A),
       right: this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.D),
     };
+    this.escKey = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.ESC);
 
     this.input.on("wheel", (pointer: Phaser.Input.Pointer, _go: unknown, _dx: number, dy: number) => {
       if (this.overlays.isAnyOpen) return;
@@ -269,7 +282,10 @@ export class GameScene extends Phaser.Scene {
     });
 
     this.input.on("pointerdown", (p: Phaser.Input.Pointer) => this.gridView.pointerDown(p));
-    this.input.on("pointermove", (p: Phaser.Input.Pointer) => this.gridView.pointerMove(p));
+    this.input.on("pointermove", (p: Phaser.Input.Pointer) => {
+      this.gridView.pointerMove(p);
+      this.drawMovePreview(p);
+    });
     this.input.on("pointerup",   (p: Phaser.Input.Pointer) => {
       if (this.gridView.pointerUp(p)) this.handleMapClick(p);
     });
@@ -280,6 +296,13 @@ export class GameScene extends Phaser.Scene {
     const { tileX, tileY } = this.gridView.toTile(pointer);
     const { cols, rows } = this.gameState.map;
     if (tileX < 0 || tileX >= cols || tileY < 0 || tileY >= rows) return;
+
+    if (this.moveMode) {
+      const reachable = (this.moveDist[tileY]?.[tileX] ?? -1) > 0;
+      this.exitMoveMode();
+      if (reachable) gameClient.sendAction({ type: "moveTo", tileX, tileY });
+      return;
+    }
 
     const { player: ps, npcs } = this.gameState;
     if (tileX === ps.tileX && tileY === ps.tileY) {
@@ -323,6 +346,11 @@ export class GameScene extends Phaser.Scene {
   update(): void {
     if (this.overlays.isAnyOpen) return;
     if (!this.gameState || !this.player) return;
+    const active = document.activeElement;
+    if (active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement) return;
+
+    if (this.moveMode && Phaser.Input.Keyboard.JustDown(this.escKey))
+      this.exitMoveMode();
 
     const phase = this.gameState.phase;
     if (phase !== "exploring" && phase !== "player_turn") return;
@@ -348,7 +376,6 @@ export class GameScene extends Phaser.Scene {
     if (!map.passable[ny][nx]) return;
     if (npcs.some(n => n.hp > 0 && n.tileX === nx && n.tileY === ny)) return;
 
-    this.player.move(dx, dy, map.cols, map.rows);
     gameClient.sendAction({ type: "move", dx, dy });
   }
 
@@ -356,22 +383,19 @@ export class GameScene extends Phaser.Scene {
 
   private buildHUD(): void {
     this.playerPanel = new PlayerPanel(this.uiScale, this.playerDef, {
-      onOpenInventory: () => { if (this.gameState) this.overlays.openInventory(this.gameState); },
-      onSearch:        () => gameClient.sendAction({ type: "search" }),
-      onAttack:        () => gameClient.sendAction({ type: "attack", targetId: this.gameState?.selectedTargetId ?? undefined }),
-      onThrow:         (itemId) => gameClient.sendAction({ type: "throw", itemId, targetId: this.gameState?.selectedTargetId ?? undefined }),
-      onDash:          () => gameClient.sendAction({ type: "dash" }),
-      onDodge:         () => gameClient.sendAction({ type: "dodge" }),
-      onDisengage:     () => gameClient.sendAction({ type: "disengage" }),
-      onSecondWind:    () => gameClient.sendAction({ type: "secondWind" }),
-      onHide:          () => gameClient.sendAction({ type: "hide" }),
-      onEndTurn:       () => gameClient.sendAction({ type: "endTurn" }),
-      onDeathSave:     () => gameClient.sendAction({ type: "rollDeathSave" }),
-      onShortRest:     () => gameClient.sendAction({ type: "shortRest" }),
-    });
-    this.targetPanel = new TargetPanel(this.uiScale);
-    this.hud = new HUD(this.uiScale, {
-      onOpenDM:       () => this.overlays.openDM(),
+      onOpenInventory:  () => { if (this.gameState) this.overlays.openInventory(this.gameState); },
+      onSearch:         () => gameClient.sendAction({ type: "search" }),
+      onAttack:         () => gameClient.sendAction({ type: "attack", targetId: this.gameState?.selectedTargetId ?? undefined }),
+      onThrow:          (itemId) => gameClient.sendAction({ type: "throw", itemId, targetId: this.gameState?.selectedTargetId ?? undefined }),
+      onDash:           () => gameClient.sendAction({ type: "dash" }),
+      onDodge:          () => gameClient.sendAction({ type: "dodge" }),
+      onDisengage:      () => gameClient.sendAction({ type: "disengage" }),
+      onSecondWind:     () => gameClient.sendAction({ type: "secondWind" }),
+      onHide:           () => gameClient.sendAction({ type: "hide" }),
+      onDeathSave:      () => gameClient.sendAction({ type: "rollDeathSave" }),
+      onShortRest:      () => gameClient.sendAction({ type: "shortRest" }),
+      onToggleMoveMode: () => this.toggleMoveMode(),
+      onEndTurn:        () => gameClient.sendAction({ type: "endTurn" }),
       onLeaveEncounter: () => {
         this.uiDestroyed = true;
         this.playerPanel.destroy();
@@ -380,77 +404,50 @@ export class GameScene extends Phaser.Scene {
         this.uiScale.destroy();
         gameClient.disconnect().then(() => this.scene.start("EncounterSetupScene"));
       },
-      onScrollLog: (dy) => {
-        this.localLogScrollOffset = Math.max(0, this.localLogScrollOffset + (dy > 0 ? -1 : 1));
-        if (this.gameState) this.updateHUD(this.gameState);
-      },
+    });
+    this.targetPanel = new TargetPanel(this.uiScale);
+    this.hud = new HUD(this.uiScale, {
+      onSendAIDM:        (msg, persona) => gameClient.sendAIDMMessage(msg, persona),
+      onDisableKeyboard: () => this.input.keyboard?.disableGlobalCapture(),
+      onEnableKeyboard:  () => this.input.keyboard?.enableGlobalCapture(),
     });
   }
 
   private buildHUDState(state: GameState): HUDState {
     const activeNpcState = state.npcs.find(n => n.isActive);
     const activeNpc = activeNpcState ? (this.npcTokens.get(activeNpcState.id) ?? null) : null;
-    const selectedNpc = this.selectedEntityId ? (this.npcTokens.get(this.selectedEntityId) ?? null) : null;
     const combatNpcs = state.npcs
       .filter(n => n.disposition !== "neutral" && n.hp > 0)
       .map(n => this.npcTokens.get(n.id))
       .filter((n): n is NpcToken => n !== undefined);
+    const selectedNpcName = state.selectedTargetId
+      ? (() => { const n = state.npcs.find(n => n.id === state.selectedTargetId); return n ? (n.revealedName ?? n.name) : null; })()
+      : null;
 
     return {
-      mode:               state.phase,
-      playerDef:          this.playerDef,
-      playerHp:           state.player.hp,
-      movesLeft:          state.player.movesLeft,
-      actionUsed:         state.player.actionUsed,
-      bonusActionUsed:    state.player.bonusActionUsed,
-      playerHidden:       state.player.hidden,
-      playerConditions:   state.player.conditions,
+      mode:      state.phase,
+      playerDef: this.playerDef,
+      playerHp:  state.player.hp,
       activeNpc,
       combatNpcs,
-      enemyVexed:         activeNpcState?.conditions.includes('vexed') ?? false,
-      enemyHidden:        activeNpcState?.conditions.includes('hidden') ?? false,
-      deathSaveSuccesses: state.player.deathSaveSuccesses,
-      deathSaveFailures:  state.player.deathSaveFailures,
-      combatLog:          state.combatLog,
-      logScrollOffset:    this.localLogScrollOffset,
-      selectedNpc,
-      searchAvailable:    state.secrets.length > 0,
+      combatLog: state.combatLog,
+      selectedNpcName,
     };
   }
 
   private buildActionState(state: GameState): PlayerPanelActionState {
+    const allItems = this.registry.get('equipment') as ItemDef[];
     return {
-      mode:             state.phase,
-      actionUsed:       state.player.actionUsed,
-      bonusActionUsed:  state.player.bonusActionUsed,
-      playerHp:         state.player.hp,
-      secondWindUses:   state.player.secondWindUses,
-      playerHidden:     state.player.hidden,
-      playerDef:        this.playerDef,
-      npcs:             state.npcs.map(n => ({ id: n.id, tileX: n.tileX, tileY: n.tileY, disposition: n.disposition, dead: n.hp <= 0 })),
-      selectedTargetId: state.selectedTargetId,
-      playerTileX:      this.player?.tileX ?? state.player.tileX,
-      playerTileY:      this.player?.tileY ?? state.player.tileY,
-      hitDiceRemaining: this.playerDef.level - state.player.hitDiceUsed,
-      throwableItems:   (() => {
-        if (!state.selectedTargetId) return [];
-        const target = state.npcs.find(n => n.id === state.selectedTargetId && n.hp > 0);
-        if (!target) return [];
-        const allItems = this.registry.get("equipment") as ItemDef[];
-        const px = this.player?.tileX ?? state.player.tileX;
-        const py = this.player?.tileY ?? state.player.tileY;
-        const dist = Math.max(Math.abs(target.tileX - px), Math.abs(target.tileY - py));
-        return [...new Set(state.player.inventoryIds)]
-          .map(id => allItems.find(i => i.id === id))
-          .filter((i): i is ItemDef => i !== undefined)
-          .filter(itemDef => {
-            const longRangeTiles = itemDef.type === "weapon" && (itemDef as WeaponDef).thrown
-              ? Math.floor((itemDef as WeaponDef).throwLong / 5)
-              : 12;
-            return dist <= longRangeTiles;
-          })
-          .map(i => ({ id: i.id, name: i.name }));
-      })(),
+      mode:            state.phase,
+      actionUsed:      state.player.actionUsed,
+      bonusActionUsed: state.player.bonusActionUsed,
+      movesLeft:       state.player.movesLeft,
+      moveMode:        this.moveMode,
+      throwableItems:  state.availableActions.throwableItemIds
+        .map(id => allItems.find(i => i.id === id))
+        .filter((i): i is ItemDef => i !== undefined)
+        .map(i => ({ id: i.id, name: i.name })),
+      availableActions: state.availableActions,
     };
   }
 
@@ -496,14 +493,14 @@ export class GameScene extends Phaser.Scene {
 
   private drawHighlights(state: GameState): void {
     this.highlightLayer.clear();
-    if (state.phase !== "player_turn" || state.player.movesLeft <= 0) return;
-    if (!this.player) return;
+    this.movePathLayer.clear();
+    if (state.phase !== "player_turn" || state.player.movesLeft <= 0 || !this.player) return;
 
     const { cols, rows, passable } = state.map;
-    const px = this.player.tileX;
-    const py = this.player.tileY;
+    const px = this.player.tileX, py = this.player.tileY;
 
     const dist: number[][] = Array.from({ length: rows }, () => new Array<number>(cols).fill(-1));
+    const prev: Array<Array<[number, number] | null>> = Array.from({ length: rows }, () => new Array(cols).fill(null));
     dist[py][px] = 0;
     const queue: [number, number][] = [[py, px]];
 
@@ -521,17 +518,65 @@ export class GameScene extends Phaser.Scene {
         if (state.npcs.some(n => n.hp > 0 && n.tileX === nc && n.tileY === nr)) continue;
         if (dist[nr][nc] !== -1) continue;
         dist[nr][nc] = dist[cy][cx] + 1;
+        prev[nr][nc] = [cy, cx];
         queue.push([nr, nc]);
       }
     }
 
-    this.highlightLayer.fillStyle(0x4fc3f7, 0.15);
+    this.moveDist = dist;
+    this.movePrev = prev;
+
+    const color = this.moveMode ? 0xccaa00 : 0x4fc3f7;
+    const alpha = this.moveMode ? 0.22 : 0.15;
+    this.highlightLayer.fillStyle(color, alpha);
     for (let row = 0; row < rows; row++) {
       for (let col = 0; col < cols; col++) {
-        if (dist[row][col] > 0) {
+        if (dist[row][col] > 0)
           this.highlightLayer.fillRect(col * TILE_SIZE + 1, row * TILE_SIZE + 1, TILE_SIZE - 2, TILE_SIZE - 2);
-        }
       }
+    }
+  }
+
+  private drawMovePreview(pointer: Phaser.Input.Pointer): void {
+    this.movePathLayer.clear();
+    if (!this.moveMode || !this.player || !this.moveDist.length) return;
+    const { tileX, tileY } = this.gridView.toTile(pointer);
+    if (this.moveDist[tileY]?.[tileX] <= 0) return;
+
+    const path: [number, number][] = [];
+    let cur: [number, number] = [tileY, tileX];
+    const py = this.player.tileY, px = this.player.tileX;
+    while (cur[0] !== py || cur[1] !== px) {
+      path.push(cur);
+      const p = this.movePrev[cur[0]]?.[cur[1]];
+      if (!p) break;
+      cur = p;
+    }
+
+    this.movePathLayer.fillStyle(0xff9900, 0.45);
+    for (const [row, col] of path)
+      this.movePathLayer.fillRect(col * TILE_SIZE + 1, row * TILE_SIZE + 1, TILE_SIZE - 2, TILE_SIZE - 2);
+  }
+
+  private toggleMoveMode(): void {
+    if (this.moveMode) this.exitMoveMode();
+    else this.enterMoveMode();
+  }
+
+  private enterMoveMode(): void {
+    this.moveMode = true;
+    if (this.gameState) {
+      this.drawHighlights(this.gameState);
+      this.playerPanel.refreshActions(this.buildActionState(this.gameState));
+    }
+  }
+
+  private exitMoveMode(): void {
+    this.moveMode = false;
+    this.movePathLayer.clear();
+    if (this.gameState) {
+      this.drawHighlights(this.gameState);
+      this.playerPanel.refreshActions(this.buildActionState(this.gameState));
     }
   }
 

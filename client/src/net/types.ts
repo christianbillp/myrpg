@@ -41,6 +41,17 @@ export interface EquipmentSlots {
   shieldId: string | null;
 }
 
+export interface AvailableActions {
+  canAttack: boolean;
+  throwableItemIds: string[];
+  canHide: boolean;
+  canSecondWind: boolean;
+  canDash: boolean;
+  canDodge: boolean;
+  canDisengage: boolean;
+  canShortRest: boolean;
+}
+
 export interface PlayerState {
   defId: string;
   tileX: number; tileY: number;
@@ -48,7 +59,6 @@ export interface PlayerState {
   inventoryIds: string[];
   equippedSlots: EquipmentSlots;
   secondWindUses: number;
-  hidden: boolean;
   actionUsed: boolean; bonusActionUsed: boolean; reactionUsed: boolean;
   movesLeft: number;
   deathSaveSuccesses: number; deathSaveFailures: number;
@@ -64,7 +74,9 @@ export interface NpcState {
   id: string; defId: string; name: string;
   tileX: number; tileY: number;
   disposition: Disposition;
-  label: string;
+  combatLabel: string;
+  revealedName?: string;
+  combatPassive?: boolean;
   hp: number; maxHp: number;
   isActive: boolean;
   reactionUsed: boolean; conditions: string[];
@@ -123,6 +135,7 @@ export interface GameState {
   introduction: string;
   encounterContext: string;
   npcPersonas: NpcPersona[];
+  availableActions: AvailableActions;
 }
 
 export type GameEvent =
@@ -131,6 +144,7 @@ export type GameEvent =
 
 export type PlayerAction =
   | { type: 'move'; dx: number; dy: number }
+  | { type: 'moveTo'; tileX: number; tileY: number }
   | { type: 'attack'; targetId?: string }
   | { type: 'throw'; itemId: string; targetId?: string }
   | { type: 'hide' }

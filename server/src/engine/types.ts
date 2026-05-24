@@ -163,6 +163,8 @@ export interface MonsterDef {
   color: number;
   resistances?: string[];
   vulnerabilities?: string[];
+  nimbleEscape?: boolean;
+  combatSpawn?: boolean;
 }
 
 export interface NPCDef {
@@ -245,7 +247,6 @@ export interface PlayerState {
   inventoryIds: string[];
   equippedSlots: EquipmentSlots;
   secondWindUses: number;
-  hidden: boolean;
   actionUsed: boolean;
   bonusActionUsed: boolean;
   reactionUsed: boolean;
@@ -260,6 +261,17 @@ export interface PlayerState {
   equippedSlotLabels: { armor: string | null; weapon: string | null; shield: string | null };
 }
 
+export interface AvailableActions {
+  canAttack: boolean;
+  throwableItemIds: string[];
+  canHide: boolean;
+  canSecondWind: boolean;
+  canDash: boolean;
+  canDodge: boolean;
+  canDisengage: boolean;
+  canShortRest: boolean;
+}
+
 // Unified NPC state — covers neutral social NPCs, allied combatants, and enemies.
 // disposition drives rendering (token colour, HP bar) and AI (who they attack).
 export interface NpcState {
@@ -270,7 +282,9 @@ export interface NpcState {
   tileY: number;
   disposition: Disposition;
   factionId: string;
-  label: string;
+  combatLabel: string;
+  revealedName?: string;
+  combatPassive?: boolean;
   hp: number;
   maxHp: number;
   isActive: boolean;
@@ -331,6 +345,7 @@ export interface GameState {
   introduction: string;
   encounterContext: string;
   npcPersonas: NpcPersona[];
+  availableActions: AvailableActions;
 }
 
 // ── Animation events ───────────────────────────────────────────────────────────
@@ -343,6 +358,7 @@ export type GameEvent =
 
 export type PlayerAction =
   | { type: 'move'; dx: number; dy: number }
+  | { type: 'moveTo'; tileX: number; tileY: number }
   | { type: 'attack'; targetId?: string }
   | { type: 'throw'; itemId: string; targetId?: string }
   | { type: 'hide' }
@@ -391,4 +407,17 @@ export interface CreateSessionRequest {
 export interface CreateSessionResponse {
   sessionId: string;
   state: GameState;
+}
+
+// ── Loaded game data (all definition files combined) ──────────────────────────
+
+export interface GameDefs {
+  playerDefs: PlayerDef[];
+  monsters: MonsterDef[];
+  npcs: NPCDef[];
+  equipment: ItemDef[];
+  maps: { id: string; passable: boolean[][]; cols: number; rows: number; name: string; mapdescription: string }[];
+  feats: FeatDef[];
+  backgrounds: BackgroundDef[];
+  species: SpeciesDef[];
 }

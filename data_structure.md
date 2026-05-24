@@ -398,13 +398,14 @@ Only passable tiles (`.` in the map) are eligible for spawning regardless of the
   "description": "A pair of bandits blocks a narrow stone bridge...",
   "encounterTypes": ["social_interaction"],
   "mapId": "bridge",
-  "npcIds": ["bandit_npc", "bandit_npc"],
-  "allyIds": ["commoner"],
+  "npcIds": ["bridge_bandit", "bridge_bandit"],
+  "allyIds": ["frightened_traveller"],
   "customIntroduction": "You and a nervous traveller stand at the near end...",
   "customContext": "Two bandits block the bridge. If the player refuses to pay, call set_disposition on both...",
   "startingZones": [
     "##########################",
-    "#PPPPPPP##########NNNNNNN#",
+    "#.......##########.......#",
+    "#PPPPPP.............NNNNN#",
     ...
   ]
 }
@@ -442,6 +443,10 @@ Key runtime fields of note:
 
 | Field | Notes |
 |---|---|
+| `npcs[].id` | Generated at spawn as `{defId}_{index}` (e.g. `villager_0`). The AIDM entity ref is `npc_{id}` (e.g. `npc_villager_0`). |
+| `npcs[].combatLabel` | Single uppercase letter (A, B, C…) assigned when the NPC enters combat or is spawned as an enemy. Empty string for neutral NPCs that have not yet entered combat. Rendered in the centre of the token circle during combat. Shared letter pool across enemies and allies. |
+| `npcs[].revealedName` | *(optional)* The name an NPC disclosed in conversation, set by the `reveal_npc_name` AIDM tool. Replaces the generic name displayed above the map token and is shown as `(known as: X)` in the AIDM CURRENT STATE. |
+| `npcs[].combatPassive` | *(optional)* When `true`, the ally skips their combat turn (set via the `set_npc_passive` AIDM tool). Used when the player instructs an ally to stand down. Reversed by calling the tool with `passive: false`. |
 | `npcs[].inventoryIds` | Items held by each NPC (string `id` values from `equipment/`). Populated when a thrown item hits the creature; each item is moved to `mapItems` at the creature's tile when it dies, making it recoverable. |
 | `npcs[].hp` | When `hp` reaches 0 the NPC is treated as a corpse: it remains in the `npcs` array, stays on the map at 40% opacity, and is excluded from combat turns, movement AI, ability check triggers, and all AIDM state sections except CORPSES. `inventoryIds` is cleared and `isActive` is set to `false` on death. |
 | `dmHistory` | AIDM conversation — returned alongside `world.json` by `GET /world`. `[CURRENT STATE]` prefixes are stripped from historical user messages before each API call so the model always reasons from the current injected state, not stale snapshots. |
