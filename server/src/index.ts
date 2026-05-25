@@ -11,7 +11,7 @@ import { readFile, readdir } from "fs/promises";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
 import { randomUUID } from "crypto";
-import { buildEncounter, EncounterStartRequest } from "./encounterService.js";
+import { buildEncounter } from "./encounterService.js";
 import { processAIDMChat, AIDMChatRequest } from "./aidm.js";
 import {
   generateStorylog,
@@ -33,9 +33,13 @@ import {
   setAidmHistory,
   registerWebSocket,
   pushStateUpdate,
+  push,
   deleteSession,
   pushAdventureLines,
   getAdventureData,
+  tryAcquireAidmLock,
+  releaseAidmLock,
+  getAidmArchive,
 } from "./sessions.js";
 import type { AidmMessage } from "./sessions.js";
 import type {
@@ -351,13 +355,6 @@ function buildDmDisplayHistory(
   return result;
 }
 
-// ── Legacy encounter start (kept for backwards compat) ─────────────────────────
-
-server.post("/encounter/start", async (req, reply) => {
-  const body = req.body as EncounterStartRequest;
-  return reply.send(buildEncounter(body));
-});
-
 // ── Game session routes ────────────────────────────────────────────────────────
 
 server.post("/game/session", async (req, reply) => {
@@ -462,14 +459,30 @@ server.post("/game/session/:id/aidm", async (req, reply) => {
   const history = getAidmHistory(id);
   if (!history) return reply.code(404).send({ error: "Session not found" });
 
+  // Per-session mutex — defends against concurrent AIDM requests on the same
+  // session (double-clicks, dueling tabs) which would otherwise interleave
+  // engine mutations and history writes.
+  if (!tryAcquireAidmLock(id)) {
+    return reply.code(429).send({ error: "An AIDM request is already in progress for this session." });
+  }
+
   try {
     pushAdventureLines(id, [{ type: "dm_player", text: body.playerMessage }]);
     const logLengthBefore = engine.getState().combatLog.length;
+    const archive = getAidmArchive(id);
+
+    // E. Open the streaming AIDM channel on the WebSocket.
+    push(id, { type: "aidm_start" });
+
     const {
       reply: aidmReply,
       events,
       rollResults,
-    } = await processAIDMChat(id, engine, body, anthropic, history);
+    } = await processAIDMChat(engine, body, anthropic, history, archive, {
+      onChunk: (text) => push(id, { type: "aidm_chunk", text }),
+      onCheckpoint: () => push(id, { type: "aidm_checkpoint" }),
+      onSpeculativeDiscard: () => push(id, { type: "aidm_speculative_discard" }),
+    });
     const state = engine.getState();
     const newCombatEntries = state.combatLog.slice(logLengthBefore);
     pushAdventureLines(id, [
@@ -480,12 +493,15 @@ server.post("/game/session/:id/aidm", async (req, reply) => {
       { type: "dm_reply" as const, text: aidmReply },
     ]);
     pushStateUpdate(id, events, state);
+    push(id, { type: "aidm_done", reply: aidmReply, rollResults });
     await saveWorldState(state, history);
     return reply.send({ reply: aidmReply, rollResults });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     console.error("AIDM API error:", message);
     return reply.code(502).send({ error: message });
+  } finally {
+    releaseAidmLock(id);
   }
 });
 

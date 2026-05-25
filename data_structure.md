@@ -432,7 +432,7 @@ Stores the persistent player state that carries across encounters.
 | `inventoryIds` | string[] | Item `id` values currently in inventory. Repeated entries represent stacks. |
 | `secondWindUses` | number | Remaining Second Wind charges this encounter. |
 | `equippedSlots` | object | `{ armorId, weaponId, shieldId }` — currently equipped items. |
-| `encounterLog` | object[] | *(optional)* Raw record of every completed encounter, newest first. Each entry contains `id`, `timestamp`, `description`, `encounterTypes`, `xpGained`, `goldGained`, `outcome`, and `lines` (ordered log lines of type `combat`, `dm_player`, or `dm_reply`). Written when a session ends via `DELETE /game/session/:id`. |
+| `encounterLog` | object[] | *(optional)* Raw record of every completed encounter, newest first. Each entry contains `id`, `timestamp`, `description`, `encounterTitle`, `xpGained`, `goldGained`, `outcome`, and `lines` (ordered log lines of type `combat`, `dm_player`, or `dm_reply`). Written when a session ends via `DELETE /game/session/:id`. |
 | `storylog` | object[] | *(optional)* AI-generated narrative entries keyed by `encounterId`. Each entry contains `encounterId` and `narrative` (prose string). Generated on demand by `POST /save/:characterId/storylog` via `server/src/storylog.ts` using Claude Sonnet; only missing entries are generated — existing entries are never overwritten unless `?rewrite=true` is passed. |
 
 ### World save — `saves/world.json`
@@ -449,7 +449,16 @@ Key runtime fields of note:
 | `npcs[].combatPassive` | *(optional)* When `true`, the ally skips their combat turn (set via the `set_npc_passive` AIDM tool). Used when the player instructs an ally to stand down. Reversed by calling the tool with `passive: false`. |
 | `npcs[].inventoryIds` | Items held by each NPC (string `id` values from `equipment/`). Populated when a thrown item hits the creature; each item is moved to `mapItems` at the creature's tile when it dies, making it recoverable. |
 | `npcs[].hp` | When `hp` reaches 0 the NPC is treated as a corpse: it remains in the `npcs` array, stays on the map at 40% opacity, and is excluded from combat turns, movement AI, ability check triggers, and all AIDM state sections except CORPSES. `inventoryIds` is cleared and `isActive` is set to `false` on death. |
-| `dmHistory` | AIDM conversation — returned alongside `world.json` by `GET /world`. `[CURRENT STATE]` prefixes are stripped from historical user messages before each API call so the model always reasons from the current injected state, not stale snapshots. |
+| `aidmHistory` | The **sliding-window** AIDM conversation persisted into `world.json` (serialised from server session memory). Bounded to ~20 verbatim messages plus an optional leading `[SUMMARY OF EARLIER TURNS]` assistant message that collapses anything older. `[CURRENT STATE]` prefixes are stripped from historical user messages before each API call so the model always reasons from the current injected state, not stale snapshots. The `GET /world` response surfaces this under the `dmHistory` field for client-side display. |
+
+### Session-only AIDM state (in-memory)
+
+These are kept in server session memory only — not persisted to disk — and reset if the server restarts:
+
+| Field | Notes |
+|---|---|
+| `aidmArchive` | The **full, unsummarized record** of every user/assistant exchange this session. Used exclusively by the `recall_memory` tool for case-insensitive substring lookups. Separate from `aidmHistory` so summarisation doesn't erase searchable content. |
+| `aidmBusy` | Boolean mutex flag. While true, the `/aidm` route returns HTTP 429 for concurrent requests on the same session. Released in a `finally` block. |
 
 ---
 

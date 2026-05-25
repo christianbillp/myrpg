@@ -56,6 +56,7 @@ export function doStartCombat(ctx: GameContext, events: GameEvent[]): void {
 
 export function enterPlayerTurn(ctx: GameContext): void {
   const s = ctx.state;
+  const wasPlayerTurn = s.phase === 'player_turn';
   s.phase = 'player_turn';
   s.activeNpcIndex = 0;
   s.npcs.filter((n) => n.disposition !== 'neutral' && n.hp > 0).forEach((n) => {
@@ -74,6 +75,11 @@ export function enterPlayerTurn(ctx: GameContext): void {
     const standCost = proneStandCost(s.player.conditions, tileSpeed);
     s.player.movesLeft = Math.max(0, tileSpeed - standCost);
     if (standCost > 0) s.player.conditions = s.player.conditions.filter((c) => c !== 'prone');
+  }
+  // Mark the turn boundary in the log so the AIDM (and players reading the
+  // combat log) can see clearly that resources have reset for a new round.
+  if (!wasPlayerTurn) {
+    ctx.addLog({ left: `── ${ctx.playerDef.name}'s turn — Action & Bonus refreshed ──`, style: 'header' });
   }
 }
 

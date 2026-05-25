@@ -1,6 +1,5 @@
 import { marked } from "marked";
 import { BaseOverlay } from "./BaseOverlay";
-import { EncounterContext } from "../data/encounterContext";
 import { PlayerDef } from "../data/player";
 import { UIScale } from "./UIScale";
 
@@ -11,12 +10,12 @@ export class IntroductionOverlay extends BaseOverlay {
     scale: UIScale,
     encounterTitle: string,
     player: PlayerDef,
-    context: EncounterContext,
+    introduction: string,
     onClose: () => void,
   ) {
     super(scale, 680, 460, ACCENT, onClose);
 
-    const introHtml = String(marked.parse(context.introduction));
+    const introHtml = String(marked.parse(introduction));
 
     this.panelEl.insertAdjacentHTML('beforeend', `
       <div style="text-align:center;padding:24px 32px 0;">

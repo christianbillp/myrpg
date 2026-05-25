@@ -7,7 +7,6 @@ export interface EncounterContext {
   mapName: string;
   enemyCount: number;
   secrets: SecretDef[];
-  riddle: Riddle | null;
   quests: QuestDef[];
   npcIds?: string[];
   allyIds?: string[];
@@ -22,8 +21,6 @@ export type SecretReward =
 export interface SecretDef {
   id: string; dc: number; reward: SecretReward; successText: string; failureText: string;
 }
-
-interface Riddle { question: string; options: [string, string, string]; correctIndex: 0 | 1 | 2; }
 
 export interface QuestDef {
   id: string; title: string; goal: { type: QuestGoalType; target: number }; rewardXp: number; rewardGp: number;
@@ -58,13 +55,6 @@ const SECRET_POOL: SecretDef[] = [
   { id: 'healing_cache',  dc: 15, reward: { type: 'item', itemId: 'health_potion' }, successText: 'A hidden niche in the wall holds a carefully wrapped vial.', failureText: 'The walls show signs of age but nothing stands out.' },
 ];
 
-const RIDDLES: Riddle[] = [
-  { question: "I speak without a mouth\nand hear without ears.\nWhat am I?",       options: ['A shadow', 'An echo', 'The wind'],     correctIndex: 1 },
-  { question: "The more you take,\nthe more you leave behind.\nWhat am I?",        options: ['Time', 'Footsteps', 'Memories'],       correctIndex: 1 },
-  { question: "I can fly without wings\nand cry without eyes.\nWhat am I?",        options: ['A cloud', 'A ghost', 'Smoke'],         correctIndex: 0 },
-];
-
-function pickRandom<T>(arr: T[]): T { return arr[Math.floor(Math.random() * arr.length)]; }
 function shuffle<T>(arr: T[]): T[] { return [...arr].sort(() => Math.random() - 0.5); }
 function pickSecrets(count: number): SecretDef[] { return shuffle(SECRET_POOL).slice(0, count); }
 
@@ -76,8 +66,10 @@ function buildQuests(types: EncounterType[], enemyCount: number): QuestDef[] {
     if (enemyCount > 1)
       quests.push({ id: 'slay_all',   title: 'Slay All',      goal: { type: 'kill',    target: enemyCount }, rewardXp: 25, rewardGp: 15 });
   }
+  if (types.includes('exploration'))
+    quests.push({ id: 'keen_eye',     title: 'Keen Eye',     goal: { type: 'explore', target: 2 }, rewardXp: 15, rewardGp: 10 });
   if (types.includes('social_interaction'))
-    quests.push({ id: 'make_contact', title: 'Make Contact', goal: { type: 'talk', target: 1 }, rewardXp: 10, rewardGp: 5 });
+    quests.push({ id: 'make_contact', title: 'Make Contact', goal: { type: 'talk',    target: 1 }, rewardXp: 10, rewardGp: 5 });
   return quests;
 }
 
@@ -125,8 +117,7 @@ export function buildEncounter(req: EncounterStartRequest): EncounterContext {
     context,
     mapName: mapLabel,
     enemyCount,
-    secrets:  pickSecrets(2),
-    riddle:   req.encounterTypes.includes('social_interaction') ? pickRandom(RIDDLES) : null,
+    secrets:  pickSecrets(4),
     quests:   buildQuests(req.encounterTypes, enemyCount),
     npcIds:        req.npcIds,
     allyIds:       req.allyIds,

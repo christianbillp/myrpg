@@ -9,15 +9,18 @@ import {
 } from './ConditionSystem.js';
 import { chebyshev } from './EnemyAI.js';
 import { makePlayerAttack } from './EquipmentSystem.js';
+import {
+  canSpendAction, canDash as guardCanDash, canDodge as guardCanDodge,
+  canDisengage as guardCanDisengage, canHide as guardCanHide, canSecondWind as guardCanSecondWind,
+  canAttackTarget,
+} from './ActionGuards.js';
 
 export function doAttack(ctx: GameContext, targetId: string | undefined, events: GameEvent[]): void {
   const s = ctx.state;
 
   if (s.phase === 'exploring') {
-    if (!targetId) return;
-    const target = s.npcs.find((n) => n.id === targetId && n.hp > 0 && n.disposition !== 'ally');
-    if (!target) return;
-    if (chebyshev(s.player.tileX, s.player.tileY, target.tileX, target.tileY) > 1) return;
+    if (!canAttackTarget(ctx, targetId)) return;
+    const target = s.npcs.find((n) => n.id === targetId && n.hp > 0 && n.disposition !== 'ally')!;
     if (target.disposition === 'neutral') {
       target.disposition = 'enemy';
       if (!target.combatLabel) ctx.assignCombatLabel(target);
@@ -26,8 +29,7 @@ export function doAttack(ctx: GameContext, targetId: string | undefined, events:
     ctx.doStartCombat(events);
   }
 
-  if (s.phase !== 'player_turn' || s.player.actionUsed) return;
-  if (isIncapacitated(s.player.conditions)) return;
+  if (!canSpendAction(ctx)) return;
 
   const isAdjacent = (n: NpcState) =>
     n.disposition === 'enemy' && n.hp > 0 && chebyshev(s.player.tileX, s.player.tileY, n.tileX, n.tileY) <= 1;
@@ -62,7 +64,7 @@ export function throwItem(ctx: GameContext, itemId: string, targetId?: string): 
   const s = ctx.state;
   const events: GameEvent[] = [];
 
-  if (s.phase === 'player_turn' && (s.player.actionUsed || isIncapacitated(s.player.conditions))) return events;
+  if (s.phase === 'player_turn' && !canSpendAction(ctx)) return events;
 
   const inventoryIdx = s.player.inventoryIds.indexOf(itemId);
   const mapItemIdx = inventoryIdx === -1
@@ -163,10 +165,8 @@ function executeThrowOnTarget(
 
 export function doHide(ctx: GameContext): void {
   const s = ctx.state;
-  if (s.phase !== 'player_turn' || s.player.bonusActionUsed) return;
-  if (isIncapacitated(s.player.conditions)) return;
+  if (!guardCanHide(ctx)) return;
   const living = s.npcs.filter((n) => n.disposition === 'enemy' && n.hp > 0);
-  if (!living.length) return;
   const maxPP = Math.max(...living.map((n) => ctx.resolveMonsterDef(n.defId)?.passivePerception ?? 10));
   const { hidden, logs } = playerHide(ctx.playerDef, maxPP);
   if (hidden) {
@@ -180,8 +180,7 @@ export function doHide(ctx: GameContext): void {
 
 export function doDash(ctx: GameContext): void {
   const s = ctx.state;
-  if (s.phase !== 'player_turn' || s.player.actionUsed) return;
-  if (isIncapacitated(s.player.conditions)) return;
+  if (!guardCanDash(ctx)) return;
   s.player.movesLeft += ctx.playerDef.speed / 5;
   s.player.conditions.push('dashing');
   s.player.actionUsed = true;
@@ -190,8 +189,7 @@ export function doDash(ctx: GameContext): void {
 
 export function doDodge(ctx: GameContext): void {
   const s = ctx.state;
-  if (s.phase !== 'player_turn' || s.player.actionUsed) return;
-  if (isIncapacitated(s.player.conditions)) return;
+  if (!guardCanDodge(ctx)) return;
   s.player.conditions.push('dodging');
   s.player.actionUsed = true;
   ctx.addLog({ left: `${ctx.playerDef.name} Dodges — enemies attack with Disadvantage`, style: 'status' });
@@ -199,8 +197,7 @@ export function doDodge(ctx: GameContext): void {
 
 export function doDisengage(ctx: GameContext): void {
   const s = ctx.state;
-  if (s.phase !== 'player_turn' || s.player.actionUsed) return;
-  if (isIncapacitated(s.player.conditions)) return;
+  if (!guardCanDisengage(ctx)) return;
   s.player.conditions.push('disengaged');
   s.player.actionUsed = true;
   ctx.addLog({ left: `${ctx.playerDef.name} Disengages — no Opportunity Attacks this turn`, style: 'status' });
@@ -208,8 +205,7 @@ export function doDisengage(ctx: GameContext): void {
 
 export function doSecondWind(ctx: GameContext): void {
   const s = ctx.state;
-  if (s.phase !== 'player_turn' || s.player.bonusActionUsed || s.player.secondWindUses <= 0 || s.player.hp >= ctx.playerDef.maxHp) return;
-  if (isIncapacitated(s.player.conditions)) return;
+  if (!guardCanSecondWind(ctx)) return;
   const { healed, logs } = playerSecondWind(ctx.playerDef.level);
   const before = s.player.hp;
   s.player.hp = Math.min(ctx.playerDef.maxHp, s.player.hp + healed);

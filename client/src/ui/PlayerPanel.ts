@@ -235,10 +235,6 @@ export class PlayerPanel {
     this.searchBtn.style.display = showSearch ? 'block' : 'none';
   }
 
-  setSearchEnabled(enabled: boolean): void {
-    this.searchBtn.style.display = enabled ? 'block' : 'none';
-  }
-
   refreshActions(state: PlayerPanelActionState): void {
     this.lastActionState = state;
     this.actionArea.innerHTML = '';
@@ -264,6 +260,9 @@ export class PlayerPanel {
 
       if (aa.canShortRest)
         this.actionArea.prepend(btn('SHORT REST', '#1a2a3a', this.callbacks.onShortRest));
+
+      const moveExEl = this.makeBtn('MOVE', moveMode ? '#5a4800' : '#3a3000', this.callbacks.onToggleMoveMode);
+      this.actionArea.appendChild(moveExEl);
 
     } else if (mode === 'player_turn') {
       const GREEN = '#1a4a1e';

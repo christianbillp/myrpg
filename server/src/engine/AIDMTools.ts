@@ -2,23 +2,30 @@ import { GameEngine } from './GameEngine.js';
 import { GameEvent } from './types.js';
 
 export interface AIDMToolResult {
+  // GameEvent[] only carries client-facing animation signals (e.g. entity_move).
+  // Most tools return [] because their state changes are picked up by the full
+  // state snapshot pushed over WebSocket. Only move_entity meaningfully emits
+  // events today; others may extend this if they need bespoke client animations.
   events: GameEvent[];
   toolResultContent: string;
   rollResult?: string;
 }
 
-interface AIDMDefs {
-  equipment: Array<{ id: string }>;
-  monsters: Array<{ id: string }>;
+/** Side-channel context that some tools need (e.g. recall_memory). */
+export interface AIDMToolContext {
+  archive?: { role: 'user' | 'assistant'; content: string }[];
 }
 
-export function buildAIDMTools(defs: AIDMDefs) {
-  const itemIds = defs.equipment.map((i) => `"${i.id}"`).join(', ');
-  const monsterIds = defs.monsters.map((m) => `"${m.id}"`).join(', ');
-  return buildToolList(itemIds, monsterIds);
+// The tool list is fully static — content/IDs live in CURRENT STATE so the
+// tools block stays cache-stable even when JSON definitions change.
+export function buildAIDMTools() {
+  return buildToolList();
 }
 
-function buildToolList(itemIds: string, monsterIds: string) { return [
+// IMPORTANT: tool array order is part of the cacheable prompt prefix. Append new
+// tools at the END only — reordering or inserting in the middle invalidates the
+// Anthropic prompt cache and every following turn pays a cache miss until rewarm.
+function buildToolList() { return [
   {
     name: 'adjust_player_hp',
     description: "Adjust the player's HP. Positive delta heals, negative damages. Clamped to [0, maxHp].",
@@ -36,7 +43,7 @@ function buildToolList(itemIds: string, monsterIds: string) { return [
   },
   {
     name: 'adjust_npc_hp',
-    description: 'Adjust any combatant\'s HP by a delta. Positive heals, negative damages. Entity: "player", "enemy_A" (enemy by label A–Z), "ally_a" (ally by label a–z), or "npc_[id]" (neutral NPC by id). To kill, use a large negative delta. Optionally supply damage_type (e.g. "fire", "poison", "piercing") so resistance and vulnerability are applied automatically.',
+    description: 'Adjust any combatant\'s HP by a delta. Positive heals, negative damages. Entity: "player", "enemy_A" (enemy by uppercase combat label A–Z), "ally_A" (ally by uppercase combat label — same A–Z pool), or "npc_[id]" (neutral NPC, or any NPC by id). To kill, use a large negative delta. Optionally supply damage_type (e.g. "fire", "poison", "piercing") so resistance, vulnerability, and immunity are applied automatically.',
     input_schema: { type: 'object' as const, properties: { entity: { type: 'string' }, delta: { type: 'integer' }, damage_type: { type: 'string' }, reason: { type: 'string' } }, required: ['entity', 'delta', 'reason'] },
   },
   {
@@ -46,12 +53,12 @@ function buildToolList(itemIds: string, monsterIds: string) { return [
   },
   {
     name: 'move_entity',
-    description: 'Teleport an entity to a tile. Entity: "player", "enemy_A" (enemy by label), or "npc_[id]" (NPC or ally by id).',
+    description: 'Teleport an entity to a tile. Entity: "player", "enemy_A" (enemy by label), "ally_A" (ally by combat label), or "npc_[id]" (any NPC by id).',
     input_schema: { type: 'object' as const, properties: { entity: { type: 'string' }, tile_x: { type: 'integer' }, tile_y: { type: 'integer' }, reason: { type: 'string' } }, required: ['entity', 'tile_x', 'tile_y', 'reason'] },
   },
   {
     name: 'add_item',
-    description: `Give the player an item. Valid item_id values: ${itemIds}.`,
+    description: 'Give the player an item. Valid item_id values are listed in CURRENT STATE under REFERENCE DATA → ITEMS.',
     input_schema: { type: 'object' as const, properties: { item_id: { type: 'string' }, reason: { type: 'string' } }, required: ['item_id', 'reason'] },
   },
   {
@@ -66,7 +73,7 @@ function buildToolList(itemIds: string, monsterIds: string) { return [
   },
   {
     name: 'spawn_enemy',
-    description: `Spawn a new enemy on the map. Valid monster_id values: ${monsterIds}.`,
+    description: 'Spawn a new enemy on the map. Valid monster_id values are listed in CURRENT STATE under REFERENCE DATA → MONSTERS.',
     input_schema: { type: 'object' as const, properties: { monster_id: { type: 'string' }, reason: { type: 'string' } }, required: ['monster_id', 'reason'] },
   },
   {
@@ -91,7 +98,7 @@ function buildToolList(itemIds: string, monsterIds: string) { return [
   },
   {
     name: 'apply_condition',
-    description: 'Apply a condition to the player or an NPC. Entity: "player", "enemy_A" (by label), or "npc_[id]". Common conditions: blinded, charmed, frightened, grappled, incapacitated, paralyzed, poisoned, prone, restrained, stunned.',
+    description: 'Apply a condition to the player or an NPC. Entity: "player", "enemy_A" (by label), "ally_A" (by combat label), or "npc_[id]" (any NPC by id). Common conditions: blinded, charmed, frightened, grappled, incapacitated, paralyzed, poisoned, prone, restrained, stunned.',
     input_schema: { type: 'object' as const, properties: { entity: { type: 'string' }, condition: { type: 'string' }, reason: { type: 'string' } }, required: ['entity', 'condition', 'reason'] },
   },
   {
@@ -106,12 +113,12 @@ function buildToolList(itemIds: string, monsterIds: string) { return [
   },
   {
     name: 'set_disposition',
-    description: 'Change an NPC\'s disposition. Entity: "enemy_A" (by label) or "npc_[id]". Disposition: "ally" (fights alongside the player), "neutral" (does not participate in combat), "enemy" (fights the player).',
+    description: 'Change an NPC\'s disposition. Entity: "enemy_A" (by label), "ally_A" (by combat label), or "npc_[id]" (any NPC by id). Disposition: "ally" (fights alongside the player), "neutral" (does not participate in combat), "enemy" (fights the player).',
     input_schema: { type: 'object' as const, properties: { entity: { type: 'string' }, disposition: { type: 'string' }, reason: { type: 'string' } }, required: ['entity', 'disposition', 'reason'] },
   },
   {
     name: 'throw_item',
-    description: 'Throw an item at a target. Proper thrown weapons (javelin, dagger) use their weapon stats and mastery with proficiency. All other items are improvised weapons (1d4 bludgeoning, no proficiency bonus). The item is removed from the player\'s inventory or the map. item_id can be an inventory item id or a map item defId. target uses the same entity ref format as move_entity: "enemy_A" for an enemy by label, "npc_[id]" for a neutral or ally NPC by id; omit to auto-target the nearest enemy in range. Attacking a neutral NPC turns them hostile.',
+    description: 'Throw an item at a target. Proper thrown weapons (javelin, dagger) use their weapon stats and mastery with proficiency. All other items are improvised weapons (1d4 bludgeoning, no proficiency bonus). The item is removed from the player\'s inventory or the map. item_id can be an inventory item id or a map item defId. target uses the same entity ref format as move_entity: "enemy_A" / "ally_A" by combat label, or "npc_[id]" by id; omit to auto-target the nearest enemy in range. Attacking a neutral NPC turns them hostile.',
     input_schema: { type: 'object' as const, properties: { item_id: { type: 'string' }, target: { type: 'string' }, reason: { type: 'string' } }, required: ['item_id', 'reason'] },
   },
   {
@@ -131,7 +138,7 @@ function buildToolList(itemIds: string, monsterIds: string) { return [
   },
   {
     name: 'request_attack_roll',
-    description: 'Roll an attack roll for the player or an NPC against a target AC (use this for attacking objects, doors, or off-turn attacks such as opportunity attacks). attacker: "player", "enemy_A" (enemy by label), or "npc_[id]". target_ac: the Armor Class to roll against. Returns hit/miss/critical and damage dealt.',
+    description: 'Roll an attack roll for the player or an NPC against a target AC (use this for attacking objects, doors, or off-turn attacks such as opportunity attacks). attacker: "player", "enemy_A" (by label), "ally_A" (by combat label), or "npc_[id]" (any NPC by id). target_ac: the Armor Class to roll against. Returns hit/miss/critical and damage dealt.',
     input_schema: { type: 'object' as const, properties: { attacker: { type: 'string' }, target_ac: { type: 'integer' }, reason: { type: 'string' } }, required: ['attacker', 'target_ac', 'reason'] },
   },
   {
@@ -146,78 +153,222 @@ function buildToolList(itemIds: string, monsterIds: string) { return [
   },
   {
     name: 'set_npc_passive',
-    description: 'Mark an ally NPC as combat-passive (passive: true) so they skip their combat turn, or remove that restriction (passive: false). Use this when the player tells an ally to stay back, not fight, or stand down. Entity: the full entity ref from CURRENT STATE, e.g. "ally_a" or "npc_commoner_0".',
+    description: 'Mark an ally NPC as combat-passive (passive: true) so they skip their combat turn, or remove that restriction (passive: false). Use this when the player tells an ally to stay back, not fight, or stand down. Entity: the full entity ref from CURRENT STATE, e.g. "ally_A" or "npc_commoner_0".',
     input_schema: { type: 'object' as const, properties: { entity: { type: 'string' }, passive: { type: 'boolean' }, reason: { type: 'string' } }, required: ['entity', 'passive', 'reason'] },
+  },
+  {
+    name: 'recall_memory',
+    description: 'Search the full, unsummarized conversation archive for past content matching a keyword or phrase. Use this when the sliding-window history doesn\'t contain enough detail — e.g. to look up an NPC\'s previous statements, a quest hook the player mentioned long ago, or any earlier exchange. Returns up to 8 matching message snippets (player and DM lines) with rough turn indices. The query is a case-insensitive substring match.',
+    input_schema: { type: 'object' as const, properties: { query: { type: 'string' }, reason: { type: 'string' } }, required: ['query', 'reason'] },
   },
 ]; }
 
-export function applyAIDMTool(engine: GameEngine, name: string, input: Record<string, unknown>): AIDMToolResult {
+// Tracks quests force-completed within a single AIDM turn so that subsequent
+// award_xp calls in the same turn can detect and reject double-credit attempts.
+// Reset between turns by callers (see resetTurnGuards).
+let questsCompletedThisTurn = new Set<string>();
+let xpAwardedThisTurnFromQuests = 0;
+
+export function resetTurnGuards(): void {
+  questsCompletedThisTurn = new Set();
+  xpAwardedThisTurnFromQuests = 0;
+}
+
+export function applyAIDMTool(
+  engine: GameEngine,
+  name: string,
+  input: Record<string, unknown>,
+  ctx: AIDMToolContext = {},
+): AIDMToolResult {
   let events: GameEvent[] = [];
   let toolResultContent = 'Applied.';
   let rollResult: string | undefined;
 
   switch (name) {
-    case 'adjust_player_hp':
-      events = engine.adjustPlayerHp(input['delta'] as number);
+    case 'adjust_player_hp': {
+      const delta = input['delta'] as number;
+      const before = engine.getState().player.hp;
+      events = engine.adjustPlayerHp(delta);
+      const s = engine.getState();
+      toolResultContent = `Player HP ${before} → ${s.player.hp} (${delta >= 0 ? '+' : ''}${delta}).`;
+      if (s.phase === 'death_saves') toolResultContent += ' Player is now Unconscious — death saves required.';
+      if (s.phase === 'defeat') toolResultContent += ' Player has been defeated.';
       break;
-    case 'award_xp':
-      events = engine.awardXp(input['amount'] as number);
+    }
+    case 'award_xp': {
+      const amount = input['amount'] as number;
+      // Guard: if the AIDM already collected XP this turn via complete_quest,
+      // refuse direct award_xp calls — those would double-credit the player.
+      if (questsCompletedThisTurn.size > 0 && amount > 0) {
+        toolResultContent = `award_xp rejected — you already granted ${xpAwardedThisTurnFromQuests} XP this turn via complete_quest for: ${[...questsCompletedThisTurn].join(', ')}. Quest rewards are awarded automatically; do not also call award_xp for the same outcome.`;
+        break;
+      }
+      events = engine.awardXp(amount);
+      toolResultContent = `Awarded ${amount} XP. Total XP: ${engine.getState().player.xp}.`;
       break;
+    }
     case 'award_gold': {
       const amount = input['amount'] as number;
       if (amount < 0 && engine.getState().player.gold + amount < 0) {
         toolResultContent = `Transaction rejected: player only has ${engine.getState().player.gold} GP and cannot pay ${Math.abs(amount)} GP. Do not narrate this payment as successful — inform the player they cannot afford it.`;
       } else {
         events = engine.awardGold(amount);
+        const s = engine.getState();
+        toolResultContent = `${amount >= 0 ? '+' : ''}${amount} GP. Player now has ${s.player.gold} GP.`;
       }
       break;
     }
     case 'adjust_npc_hp': {
-      const logBefore = engine.getState().combatLog.length;
-      events = engine.adjustNpcHp(input['entity'] as string, input['delta'] as number, input['damage_type'] as string | undefined);
-      const newEntries = engine.getState().combatLog.slice(logBefore);
-      toolResultContent = newEntries.map((e) => e.right ? `${e.left} [${e.right}]` : e.left).join(' | ') || 'Applied.';
+      // Compute the result from before/after state directly — never slice the
+      // combat log, which may contain unrelated entries (quest fires, etc.).
+      const entity = input['entity'] as string;
+      const delta = input['delta'] as number;
+      const damageType = input['damage_type'] as string | undefined;
+      const stateBefore = engine.getState();
+
+      if (entity === 'player') {
+        const beforeHp = stateBefore.player.hp;
+        events = engine.adjustPlayerHp(delta);
+        const afterState = engine.getState();
+        const afterHp = afterState.player.hp;
+        toolResultContent = `Player HP ${beforeHp} → ${afterHp} (${delta >= 0 ? '+' : ''}${delta}).`;
+        if (afterState.phase === 'death_saves') toolResultContent += ' Player is now Unconscious — death saves required.';
+        if (afterState.phase === 'defeat') toolResultContent += ' Player has been defeated.';
+        break;
+      }
+
+      const npcBefore = stateBefore.npcs.find((n) => {
+        if (entity.startsWith('enemy_')) return n.combatLabel === entity.slice(6) && n.disposition === 'enemy';
+        if (entity.startsWith('ally_')) return n.combatLabel === entity.slice(5) && n.disposition === 'ally';
+        if (entity.startsWith('npc_')) return n.id === entity.slice(4);
+        return false;
+      });
+      if (!npcBefore) { toolResultContent = `${entity} not found.`; break; }
+
+      const beforeHp = npcBefore.hp;
+      const monsterDef = engine.getMonsterDef(npcBefore.defId);
+      events = engine.adjustNpcHp(entity, delta, damageType);
+      const afterNpc = engine.getState().npcs.find((n) => n.id === npcBefore.id);
+      const afterHp = afterNpc?.hp ?? 0;
+
+      let typeNote = '';
+      if (damageType && delta < 0 && monsterDef) {
+        if (monsterDef.immunities?.includes(damageType)) typeNote = ` (immune to ${damageType})`;
+        else if (monsterDef.resistances?.includes(damageType)) typeNote = ` (resists ${damageType}, ×½)`;
+        else if (monsterDef.vulnerabilities?.includes(damageType)) typeNote = ` (vulnerable to ${damageType}, ×2)`;
+      }
+      const killNote = afterHp === 0 && beforeHp > 0 ? ' — killed.' : '.';
+      toolResultContent = `${npcBefore.name} HP ${beforeHp} → ${afterHp}${typeNote}${killNote}`;
       break;
     }
     case 'add_log_entry':
       engine.addLog(input['text'] as string);
+      toolResultContent = `Log entry added: "${input['text']}".`;
       break;
-    case 'move_entity':
-      events = engine.moveEntity(input['entity'] as string, input['tile_x'] as number, input['tile_y'] as number);
+    case 'move_entity': {
+      const entity = input['entity'] as string;
+      const tx = input['tile_x'] as number;
+      const ty = input['tile_y'] as number;
+      events = engine.moveEntity(entity, tx, ty);
+      toolResultContent = events.length > 0
+        ? `${entity} moved to (${tx}, ${ty}).`
+        : `${entity} not found — no move performed.`;
       break;
-    case 'add_item':
-      events = engine.addItem(input['item_id'] as string);
+    }
+    case 'add_item': {
+      const itemId = input['item_id'] as string;
+      events = engine.addItem(itemId);
+      toolResultContent = events.length === 0
+        ? `Unknown item_id "${itemId}" — nothing added.`
+        : `${itemId} added to player inventory.`;
       break;
-    case 'remove_item':
-      events = engine.removeItem(input['item_id'] as string);
+    }
+    case 'remove_item': {
+      const itemId = input['item_id'] as string;
+      const had = engine.getState().player.inventoryIds.includes(itemId);
+      events = engine.removeItem(itemId);
+      toolResultContent = had
+        ? `Removed one ${itemId} from player inventory.`
+        : `Player does not carry "${itemId}" — nothing removed.`;
       break;
-    case 'despawn_npc':
-      events = engine.despawnNpc(input['entity'] as string);
+    }
+    case 'despawn_npc': {
+      const entity = input['entity'] as string;
+      const npcBefore = engine.getState().npcs.length;
+      events = engine.despawnNpc(entity);
+      const npcAfter = engine.getState().npcs.length;
+      toolResultContent = npcAfter < npcBefore
+        ? `${entity} removed from the map.`
+        : `${entity} not found — nothing removed.`;
       break;
-    case 'spawn_enemy':
-      events = engine.spawnEnemy(input['monster_id'] as string);
+    }
+    case 'spawn_enemy': {
+      const monsterId = input['monster_id'] as string;
+      const npcBefore = engine.getState().npcs.length;
+      events = engine.spawnEnemy(monsterId);
+      const after = engine.getState().npcs;
+      const newOne = after[after.length - 1];
+      toolResultContent = after.length > npcBefore && newOne
+        ? `Spawned ${monsterId} at tile (${newOne.tileX}, ${newOne.tileY}) as enemy_${newOne.combatLabel}.`
+        : `Could not spawn ${monsterId} (unknown id or no free tile).`;
       break;
+    }
     case 'end_combat':
       events = engine.endCombat();
+      toolResultContent = 'Combat ended. Phase is now "exploring".';
       break;
-    case 'trigger_combat':
+    case 'trigger_combat': {
+      const before = engine.getState().phase;
       events = engine.triggerCombat();
+      const after = engine.getState().phase;
+      toolResultContent = before !== after
+        ? `Combat triggered. Phase: ${before} → ${after}.`
+        : 'No combat triggered (no living enemies or already in combat).';
       break;
-    case 'complete_quest':
-      events = engine.completeQuest(input['quest_id'] as string);
+    }
+    case 'complete_quest': {
+      const questId = input['quest_id'] as string;
+      const q = engine.getState().quests.find((q) => q.id === questId);
+      events = engine.completeQuest(questId);
+      if (q) {
+        questsCompletedThisTurn.add(q.title);
+        xpAwardedThisTurnFromQuests += q.rewardXp;
+        toolResultContent = `Quest "${q.title}" force-completed — rewards (+${q.rewardXp} XP, +${q.rewardGp} GP) granted automatically. Do NOT also call award_xp for this outcome.`;
+      } else {
+        toolResultContent = `Unknown quest_id "${questId}".`;
+      }
       break;
-    case 'set_player_hidden':
-      events = engine.setPlayerHidden(input['hidden'] as boolean);
+    }
+    case 'set_player_hidden': {
+      const hidden = input['hidden'] as boolean;
+      events = engine.setPlayerHidden(hidden);
+      toolResultContent = `Player is now ${hidden ? 'HIDDEN' : 'visible'}.`;
       break;
-    case 'apply_condition':
-      events = engine.applyCondition(input['entity'] as string, input['condition'] as string);
+    }
+    case 'apply_condition': {
+      const entity = input['entity'] as string;
+      const condition = input['condition'] as string;
+      events = engine.applyCondition(entity, condition);
+      toolResultContent = `Applied condition "${condition}" to ${entity}.`;
       break;
-    case 'remove_condition':
-      events = engine.removeCondition(input['entity'] as string, input['condition'] as string);
+    }
+    case 'remove_condition': {
+      const entity = input['entity'] as string;
+      const condition = input['condition'] as string;
+      events = engine.removeCondition(entity, condition);
+      toolResultContent = `Removed condition "${condition}" from ${entity}.`;
       break;
-    case 'set_disposition':
-      events = engine.setDisposition(input['entity'] as string, input['disposition'] as string);
+    }
+    case 'set_disposition': {
+      const entity = input['entity'] as string;
+      const disposition = input['disposition'] as string;
+      events = engine.setDisposition(entity, disposition);
+      toolResultContent = `${entity} disposition set to "${disposition}".`;
+      if (disposition === 'enemy' && engine.getState().phase === 'exploring') {
+        toolResultContent += ' Phase is still "exploring" — call trigger_combat to start the fight.';
+      }
       break;
+    }
     case 'throw_item': {
       const stateBeforeThrow = engine.getState();
       if (stateBeforeThrow.phase === 'player_turn' && stateBeforeThrow.player.actionUsed) {
@@ -226,8 +377,14 @@ export function applyAIDMTool(engine: GameEngine, name: string, input: Record<st
       }
       const logBefore = stateBeforeThrow.combatLog.length;
       events = engine.throwItem(input['item_id'] as string, input['target'] as string | undefined);
-      const newEntries = engine.getState().combatLog.slice(logBefore);
-      toolResultContent = newEntries.map((e) => e.right ? `${e.left} [${e.right}]` : e.left).join(' | ') || 'Applied.';
+      // Filter out lines that aren't part of the throw outcome — quest progress,
+      // turn-boundary markers, and quest completion can fire as side effects of
+      // a kill and shouldn't be conflated with the throw result.
+      const SIDE_EFFECT_PREFIXES = ['Quest complete:', 'Total XP:', '──'];
+      const newEntries = engine.getState().combatLog
+        .slice(logBefore)
+        .filter((e) => !SIDE_EFFECT_PREFIXES.some((p) => e.left.startsWith(p)));
+      toolResultContent = newEntries.map((e) => e.right ? `${e.left} [${e.right}]` : e.left).join(' | ') || 'Throw resolved.';
       break;
     }
     case 'request_ability_check': {
@@ -254,11 +411,19 @@ export function applyAIDMTool(engine: GameEngine, name: string, input: Record<st
       }
       break;
     }
-    case 'award_temp_hp':
-      events = engine.awardTempHp(input['amount'] as number);
+    case 'award_temp_hp': {
+      const amount = input['amount'] as number;
+      const before = engine.getState().player.tempHp;
+      events = engine.awardTempHp(amount);
+      const after = engine.getState().player.tempHp;
+      toolResultContent = after > before
+        ? `Player gained ${amount} Temp HP — now has ${after} Temp HP (kept higher per SRD).`
+        : `Awarded ${amount} Temp HP, but player already has ${before} — kept the higher value.`;
       break;
+    }
     case 'grant_heroic_inspiration':
       events = engine.grantHeroicInspiration();
+      toolResultContent = 'Heroic Inspiration granted. Player may expend it to re-roll any one die.';
       break;
     case 'set_exhaustion_level':
       events = engine.setExhaustionLevel(input['level'] as number);
@@ -268,7 +433,7 @@ export function applyAIDMTool(engine: GameEngine, name: string, input: Record<st
       const entity = input['entity'] as string;
       const revealedName = input['revealed_name'] as string;
       engine.revealNpcName(entity, revealedName);
-      toolResultContent = `${entity} is now known as "${revealedName}". Use this name for all future references to this NPC.`;
+      toolResultContent = `${entity} is now known as "${revealedName}". The player has NOT been told the name yet — they only see your narrative reply. You MUST speak the name in this reply, in-character (e.g. "'I'm ${revealedName},' she says."). Use this name for all future references to this NPC.`;
       break;
     }
     case 'set_npc_passive': {
@@ -285,6 +450,31 @@ export function applyAIDMTool(engine: GameEngine, name: string, input: Record<st
       engine.addLog(`Attack roll (${attacker}): ${atk.rollStr} — ${outcome}`);
       toolResultContent = `${outcome}. ${atk.rollStr}${dmgPart}.`;
       rollResult = `Attack: ${atk.rollStr} — ${outcome}${dmgPart}`;
+      break;
+    }
+    case 'recall_memory': {
+      const query = String(input['query'] ?? '').trim();
+      const archive = ctx.archive ?? [];
+      if (!query) { toolResultContent = 'recall_memory needs a non-empty query.'; break; }
+      const lower = query.toLowerCase();
+      const MAX_HITS = 8;
+      const MAX_SNIPPET = 240;
+      const hits: string[] = [];
+      // Iterate newest-first so most recent matches surface; cap output.
+      for (let i = archive.length - 1; i >= 0 && hits.length < MAX_HITS; i--) {
+        const msg = archive[i];
+        // Skip the synthetic seed "Begin the encounter." and historic CURRENT STATE blocks.
+        let text = msg.content;
+        const m = /\[PLAYER\]\n([\s\S]+)$/.exec(text);
+        if (m) text = m[1];
+        if (!text.toLowerCase().includes(lower)) continue;
+        const snippet = text.length > MAX_SNIPPET ? text.slice(0, MAX_SNIPPET) + '…' : text;
+        const turn = Math.floor(i / 2) + 1;
+        hits.push(`turn ${turn} [${msg.role}]: ${snippet}`);
+      }
+      toolResultContent = hits.length === 0
+        ? `No archived messages match "${query}".`
+        : `Found ${hits.length} match${hits.length === 1 ? '' : 'es'} for "${query}" (newest first):\n${hits.join('\n---\n')}`;
       break;
     }
   }

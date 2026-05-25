@@ -53,6 +53,7 @@ Defined in `client/src/ui/PlayerPanel.ts`. HTML DOM panel; **open by default** (
 | **DISENGAGE**       | Action       | Player's turn, action not yet spent, at least one living enemy               | Prevent Opportunity Attacks when moving away from enemies this turn; applies `disengaged` condition |
 | **SECOND WIND**     | Bonus Action | Player's turn, bonus action not yet spent, Fighter only, uses remaining, not at full HP | Spend a use to heal 1d10 + level HP                          |
 | **HIDE**            | Bonus Action | Player's turn, bonus action not yet spent, Rogue only, not already hidden    | Attempt to hide (Cunning Action) for Sneak Attack advantage             |
+| **MOVE**            | —            | Exploring, or player's turn with moves remaining                              | Toggle move-mode: yellow tile overlay shows reachable squares; clicking a tile path-walks the player along the cheapest route. In combat, the reach is capped by remaining movement; in exploration, the entire reachable map is highlighted. Press ESC or the MOVE button again to exit. |
 | **ROLL DEATH SAVE** | —            | Player unconscious                                                           | Roll a d20 death saving throw                                           |
 | **SHORT REST**      | —            | Exploring, player below max HP, Hit Dice remaining                           | Spend one Hit Die (d10+CON Fighter / d8+CON Rogue) to heal; resets each new encounter |
 
@@ -106,7 +107,6 @@ Two tabs switch the HUD content area:
 
 | Component           | Description                                                                                                   |
 | ------------------- | ------------------------------------------------------------------------------------------------------------- |
-| **Phase Text**      | Top-centre — current game phase ("Exploring", "Your turn — N moves", enemy name + "…", death save state); appends "· action used" or "· bonus used" when the respective resource has been spent this turn |
 | **Combat Log**      | Two-column scrollable log: left column shows the narrative (what happened), right column shows the dice detail (rolls, bonuses, totals). Each row is colour-coded by outcome — grey (normal), green (hit), yellow (crit), red (kill), teal (heal), blue (status), bright (header), dim (miss). Newest entries appear at the bottom; scroll with the mouse wheel. Text is selectable and can be copied. |
 
 ### Dungeon Master tab
@@ -114,8 +114,8 @@ Two tabs switch the HUD content area:
 | Component           | Description                                                                                                   |
 | ------------------- | ------------------------------------------------------------------------------------------------------------- |
 | **Persona Chips**   | **STORY** / **DEV** toggle. **Story DM** (default): enforces SRD 5.2.1 rules and in-world logic. **Dev DM**: fulfils all requests without restriction; replies with brief mechanical feedback. Persists across tab switches for the duration of the encounter. |
-| **Chat Area**       | Scrollable conversation history. Player messages in amber (`▸` prefix). DM responses in cool white, rendered as markdown. Roll results on their own line (green success / red failure) prefixed with 🎲. Text is selectable and can be copied. |
-| **Status Text**     | "The Dungeon Master considers…" shown while the AI is responding.                                             |
+| **Chat Area**       | Scrollable conversation history. Player messages in amber (`▸` prefix). DM responses in cool white, rendered as markdown, **streamed live** — text appears as the AI generates it rather than after the full reply completes. Roll results on their own line (green success / red failure) prefixed with 🎲. Text is selectable and can be copied. |
+| **Status Text**     | "The Dungeon Master considers…" shown while the AI is responding (visible until the first chunk arrives).      |
 | **Mode Button**     | Dropup button on the left of the input row. **DM** (default): message goes directly to the DM. **Say to [Name]**: message is prefixed with `[PlayerName says to Target]:` and sent in-character; only available when a living NPC is selected. Updates to show the NPC's revealed name once it is known. |
 | **Input Box**       | Text input (max 300 chars). Submits on Enter. WASD movement is disabled while the input is focused.          |
 | **Send Button**     | Submits the message.                                                                                          |

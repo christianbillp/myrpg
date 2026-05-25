@@ -1,27 +1,20 @@
 import {
-  GameState, GameEvent, PlayerAction, CombatMode,
-  PlayerDef, MonsterDef, ItemDef, ConsumableDef, WeaponDef,
-  EquipmentSlots, NpcState, Disposition, MapItemState, SecretState, QuestState,
-  QuestGoalType, NpcPersona, GameMap, LogEntry, GameDefs,
-  CreateSessionRequest,
+  GameState, GameEvent, PlayerAction,
+  PlayerDef, MonsterDef,
+  NpcState, Disposition,
+  QuestGoalType, LogEntry, GameDefs,
+  CreateSessionRequest, GameMap,
 } from './types.js';
 import { advanceQuest as questAdvance, completeQuest as questComplete } from './QuestSystem.js';
 import type { EncounterContext } from '../encounterService.js';
-import { generateMap } from './MapGenerator.js';
-import { generateRoomsMap } from './RoomsMapGenerator.js';
-import { d, d20, mod } from './Dice.js';
 import {
-  drinkPotion, rollSkillCheck, rollSavingThrow,
+  rollSkillCheck, rollSavingThrow,
   rollPlayerAttackVsAc, rollNpcAttackVsAc,
 } from './CombatSystem.js';
 import { applyEquipment, computeEquippedSlotLabels } from './EquipmentSystem.js';
 import { chebyshev } from './EnemyAI.js';
-import { isIncapacitated } from './ConditionSystem.js';
-import {
-  ZoneMap, parseStartingZones, findPlayerSpawn,
-  spawnEnemies, spawnItems, spawnNpc, spawnSecrets,
-} from './SpawnHelpers.js';
 import { buildAIDMTools } from './AIDMTools.js';
+import * as Guard from './ActionGuards.js';
 import type { GameContext } from './GameContext.js';
 import {
   endCombat as cfEndCombat, autoEndCombatIfNoEnemies as cfAutoEndCombat,
@@ -32,9 +25,15 @@ import {
   doAttack as caDoAttack, throwItem as caThrowItem,
   doHide as caDoHide, doDash as caDoDash, doDodge as caDoDodge,
   doDisengage as caDoDisengage, doSecondWind as caDoSecondWind,
-  doEnemyOpportunityAttack as caDoEnemyOA,
   doPlayerOpportunityAttack as caDoPlayerOA,
 } from './CombatActions.js';
+import {
+  doMove as exDoMove, doMoveTo as exDoMoveTo,
+  doSearch as exDoSearch, doShortRest as exDoShortRest, doUsePotion as exDoUsePotion,
+} from './ExplorationActions.js';
+import { doEquip as ivDoEquip, doUnequip as ivDoUnequip } from './InventoryActions.js';
+import { buildSessionState } from './SessionBuilder.js';
+import { WeaponDef } from './types.js';
 
 export interface ActionResult {
   events: GameEvent[];
@@ -51,10 +50,16 @@ export class GameEngine {
 
   constructor(state: GameState, defs: GameDefs) {
     this.state = state;
-    this.defs = defs;
-    this.playerDef = defs.playerDefs.find((p) => p.id === state.player.defId)!;
-    applyEquipment(this.playerDef, state.player.equippedSlots, defs.equipment);
-    state.player.equippedSlotLabels = computeEquippedSlotLabels(this.playerDef, state.player.equippedSlots, defs.equipment);
+    // Clone the player def so per-session equipment mutations never leak into the
+    // shared GameDefs (which is reused across every session in the process).
+    const sharedDef = defs.playerDefs.find((p) => p.id === state.player.defId)!;
+    this.playerDef = JSON.parse(JSON.stringify(sharedDef));
+    this.defs = {
+      ...defs,
+      playerDefs: defs.playerDefs.map((p) => p.id === this.playerDef.id ? this.playerDef : p),
+    };
+    applyEquipment(this.playerDef, state.player.equippedSlots, this.defs.equipment);
+    state.player.equippedSlotLabels = computeEquippedSlotLabels(this.playerDef, state.player.equippedSlots, this.defs.equipment);
 
     for (const npc of state.npcs) npc.inventoryIds ??= [];
     for (const id of [
@@ -88,13 +93,15 @@ export class GameEngine {
       killWithReward: (npc, def, msg, t) => this.killWithReward(npc, def, msg, t),
       applyMasteryConditions: (tgt, v, s) => this.applyMasteryConditions(tgt, v, s),
       doStartCombat: (ev) => cfDoStartCombat(this.ctx, ev),
-      doPlayerOpportunityAttack: (npc, ev) => caDoPlayerOA(this.ctx, npc),
+      doPlayerOpportunityAttack: (npc) => caDoPlayerOA(this.ctx, npc),
     };
   }
 
   getState(): GameState { this.computeAvailableActions(); return this.state; }
   getMonsterDef(defId: string): MonsterDef | undefined { return this.resolveMonsterDef(defId); }
-  getAIDMTools() { return buildAIDMTools(this.defs); }
+  getAIDMTools() { return buildAIDMTools(); }
+  getItemIds(): string[] { return this.defs.equipment.map((i) => i.id); }
+  getMonsterIds(): string[] { return this.defs.monsters.map((m) => m.id); }
 
   private resolveMonsterDef(defId: string): MonsterDef | undefined {
     const direct = this.defs.monsters.find((m) => m.id === defId);
@@ -106,10 +113,11 @@ export class GameEngine {
   processAction(action: PlayerAction): ActionResult {
     const events: GameEvent[] = [];
     const s = this.state;
+    this.computeAvailableActions();
 
     switch (action.type) {
-      case 'move':         this.doMove(action.dx, action.dy, events); break;
-      case 'moveTo':       this.doMoveTo(action.tileX, action.tileY, events); break;
+      case 'move':         exDoMove(this.ctx, action.dx, action.dy, events); break;
+      case 'moveTo':       exDoMoveTo(this.ctx, action.tileX, action.tileY, events); break;
       case 'attack':       caDoAttack(this.ctx, action.targetId, events); break;
       case 'throw':
         if (s.phase === 'exploring' || s.phase === 'player_turn')
@@ -124,11 +132,11 @@ export class GameEngine {
         if (s.phase === 'player_turn') cfEnterEnemyPhase(this.ctx, events);
         break;
       case 'rollDeathSave': cfDoRollDeathSave(this.ctx, events); break;
-      case 'shortRest':    this.doShortRest(); break;
-      case 'search':       this.doSearch(); break;
-      case 'usePotion':    this.doUsePotion(); break;
-      case 'equip':        this.doEquip(action.slot, action.itemId); break;
-      case 'unequip':      this.doUnequip(action.slot); break;
+      case 'shortRest':    exDoShortRest(this.ctx); break;
+      case 'search':       exDoSearch(this.ctx); break;
+      case 'usePotion':    exDoUsePotion(this.ctx); break;
+      case 'equip':        ivDoEquip(this.ctx, action.slot, action.itemId); break;
+      case 'unequip':      ivDoUnequip(this.ctx, action.slot); break;
       case 'selectTarget': s.selectedTargetId = action.entityId; break;
       case 'scrollLog': {
         const maxOffset = Math.max(0, s.combatLog.length - 6);
@@ -385,7 +393,7 @@ export class GameEngine {
     return rollNpcAttackVsAc(monsterDef, targetAc);
   }
 
-  // ── Private helpers ─────────────────────────────────────────────────────────
+  // ── Private helpers shared with the GameContext ─────────────────────────────
 
   private resolveNpcByEntity(entity: string): NpcState | undefined {
     const s = this.state;
@@ -422,6 +430,9 @@ export class GameEngine {
   }
 
   private resistMod(damage: number, damageType: string, def: MonsterDef, displayName: string): { finalDamage: number; log: LogEntry | null } {
+    if (def.immunities?.includes(damageType)) {
+      return { finalDamage: 0, log: { left: `${displayName} is immune to ${damageType} — ${damage}→0`, right: '×0', style: 'status' } };
+    }
     if (def.resistances?.includes(damageType)) {
       const fd = Math.floor(damage / 2);
       return { finalDamage: fd, log: { left: `${displayName} resists ${damageType} — ${damage}→${fd}`, right: '×½', style: 'status' } };
@@ -485,247 +496,16 @@ export class GameEngine {
     }
   }
 
-  // ── Exploration actions ─────────────────────────────────────────────────────
-
-  private doMove(dx: number, dy: number, events: GameEvent[]): void {
-    const s = this.state;
-    if (s.phase !== 'exploring' && s.phase !== 'player_turn') return;
-    if (isIncapacitated(s.player.conditions)) return;
-
-    const nx = s.player.tileX + dx;
-    const ny = s.player.tileY + dy;
-    if (nx < 0 || ny < 0 || nx >= s.map.cols || ny >= s.map.rows) return;
-    if (!s.map.passable[ny][nx]) return;
-    if (dx !== 0 && dy !== 0) {
-      if (!s.map.passable[s.player.tileY][nx] && !s.map.passable[ny][s.player.tileX]) return;
-    }
-    if (s.npcs.some((n) => n.hp > 0 && n.tileX === nx && n.tileY === ny)) return;
-    if (s.phase === 'player_turn' && s.player.movesLeft <= 0) return;
-
-    const oldX = s.player.tileX;
-    const oldY = s.player.tileY;
-    s.player.tileX = nx;
-    s.player.tileY = ny;
-    events.push({ type: 'entity_move', entityId: 'player', toX: nx, toY: ny });
-
-    if (s.phase === 'player_turn') {
-      s.player.movesLeft--;
-      if (!s.player.conditions.includes('disengaged')) {
-        for (const npc of s.npcs.filter((n) => n.disposition === 'enemy' && n.hp > 0 && !n.reactionUsed)) {
-          if (chebyshev(oldX, oldY, npc.tileX, npc.tileY) <= 1 &&
-              chebyshev(nx, ny, npc.tileX, npc.tileY) > 1) {
-            caDoEnemyOA(this.ctx, npc, events);
-            if ((this.state.phase as string) === 'death_saves' || (this.state.phase as string) === 'defeat') return;
-          }
-        }
-      }
-    } else {
-      this.checkItemPickup();
-      this.checkCombatTrigger(events);
-    }
-  }
-
-  private doMoveTo(targetX: number, targetY: number, events: GameEvent[]): void {
-    const s = this.state;
-    if (s.phase !== 'exploring' && s.phase !== 'player_turn') return;
-    const { cols, rows, passable } = s.map;
-    if (targetX < 0 || targetX >= cols || targetY < 0 || targetY >= rows) return;
-
-    const dist: number[][] = Array.from({ length: rows }, () => new Array<number>(cols).fill(-1));
-    const prev: Array<Array<[number, number] | null>> = Array.from({ length: rows }, () => new Array(cols).fill(null));
-    const px = s.player.tileX, py = s.player.tileY;
-    dist[py][px] = 0;
-    const queue: [number, number][] = [[py, px]];
-    while (queue.length > 0) {
-      const [cy, cx] = queue.shift()!;
-      for (const [dr, dc] of [[0,1],[0,-1],[1,0],[-1,0],[1,1],[1,-1],[-1,1],[-1,-1]] as [number,number][]) {
-        const nr = cy + dr, nc = cx + dc;
-        if (nr < 0 || nr >= rows || nc < 0 || nc >= cols) continue;
-        if (!passable[nr][nc]) continue;
-        if (dr !== 0 && dc !== 0 && !passable[cy][nc] && !passable[nr][cx]) continue;
-        if (s.npcs.some((n) => n.hp > 0 && n.tileX === nc && n.tileY === nr)) continue;
-        if (dist[nr][nc] !== -1) continue;
-        dist[nr][nc] = dist[cy][cx] + 1;
-        prev[nr][nc] = [cy, cx];
-        queue.push([nr, nc]);
-      }
-    }
-    if (dist[targetY][targetX] === -1) return;
-
-    const path: [number, number][] = [];
-    let cur: [number, number] = [targetY, targetX];
-    while (cur[0] !== py || cur[1] !== px) {
-      path.unshift(cur);
-      cur = prev[cur[0]][cur[1]]!;
-    }
-    for (const [ny, nx] of path) {
-      const phase = this.state.phase as string;
-      if (phase === 'death_saves' || phase === 'defeat') break;
-      this.doMove(nx - this.state.player.tileX, ny - this.state.player.tileY, events);
-    }
-  }
-
-  private checkItemPickup(): void {
-    const s = this.state;
-    const idx = s.mapItems.findIndex((i) => i.tileX === s.player.tileX && i.tileY === s.player.tileY);
-    if (idx === -1) return;
-    const item = s.mapItems[idx];
-    const def = this.defs.equipment.find((i) => i.id === item.defId);
-    if (def) {
-      s.player.inventoryIds.push(item.defId);
-      this.addLog(`Picked up ${def.name}!`);
-    }
-    s.mapItems.splice(idx, 1);
-    this.advanceQuest('collect');
-  }
-
-  private checkCombatTrigger(events: GameEvent[]): void {
-    const s = this.state;
-    const enemies = s.npcs.filter((n) => n.disposition === 'enemy' && n.hp > 0);
-    for (const enemy of enemies) {
-      if (chebyshev(s.player.tileX, s.player.tileY, enemy.tileX, enemy.tileY) <= 2) {
-        cfDoStartCombat(this.ctx, events);
-        s.selectedTargetId = enemy.id;
-        return;
-      }
-    }
-  }
-
-  private doSearch(): void {
-    const s = this.state;
-    if (s.phase !== 'exploring') return;
-
-    const roll = d20() + (this.playerDef.skills['perception'] ?? 0);
-    const adj = s.secrets.filter(
-      (sec) => chebyshev(s.player.tileX, s.player.tileY, sec.tileX, sec.tileY) <= 1,
-    );
-
-    if (adj.length === 0) {
-      this.addLog({ left: `Search (${roll}) — nothing found`, style: 'miss' });
-      return;
-    }
-
-    const secret = adj[0];
-    const success = roll >= secret.def.dc;
-    s.secrets = s.secrets.filter((sec) => sec !== secret);
-
-    const logs: LogEntry[] = [];
-    if (success) {
-      this.advanceQuest('explore');
-      logs.push({ left: `Search (${roll} vs DC ${secret.def.dc}) — ${secret.def.successText}`, style: 'hit' });
-      const r = secret.def.reward;
-      if (r.type === 'gold') {
-        s.player.gold += r.amount;
-        logs.push({ left: `+${r.amount} GP`, style: 'status' });
-      } else if (r.type === 'item') {
-        const item = this.defs.equipment.find((i) => i.id === r.itemId);
-        if (item) { s.player.inventoryIds.push(r.itemId); logs.push({ left: `Found: ${item.name}`, style: 'status' }); }
-      } else {
-        logs.push({ left: `Lore: "${r.text}"`, style: 'normal' });
-      }
-    } else {
-      logs.push({ left: `Search (${roll} vs DC ${secret.def.dc}) — ${secret.def.failureText}`, style: 'miss' });
-    }
-    this.addLogs(logs);
-  }
-
-  private doShortRest(): void {
-    const s = this.state;
-    if (s.phase !== 'exploring' || s.player.hp <= 0 || s.player.hp >= this.playerDef.maxHp) return;
-    const hitDiceRemaining = this.playerDef.level - s.player.hitDiceUsed;
-    if (hitDiceRemaining <= 0) return;
-    const conMod = mod(this.playerDef.con);
-    const roll = d(this.playerDef.hitDieType);
-    const healed = Math.max(1, roll + conMod);
-    const before = s.player.hp;
-    s.player.hp = Math.min(this.playerDef.maxHp, s.player.hp + healed);
-    s.player.hitDiceUsed++;
-    const remaining = this.playerDef.level - s.player.hitDiceUsed;
-    this.addLogs([
-      { left: `Short Rest — +${healed} HP restored`, right: `1d${this.playerDef.hitDieType}+CON(${conMod >= 0 ? '+' : ''}${conMod})=[${roll}]+${conMod}=${healed}`, style: 'heal' },
-      { left: `HP: ${before} → ${s.player.hp}/${this.playerDef.maxHp}  (${remaining} Hit ${remaining === 1 ? 'Die' : 'Dice'} left)`, style: 'status' },
-    ]);
-  }
-
-  private doUsePotion(): void {
-    const s = this.state;
-    if (s.phase === 'player_turn' && s.player.bonusActionUsed) return;
-    if (s.phase !== 'player_turn' && s.phase !== 'exploring') return;
-
-    const idx = s.player.inventoryIds.findIndex((id) => {
-      const item = this.defs.equipment.find((i) => i.id === id);
-      return item?.type === 'consumable';
-    });
-    if (idx === -1) return;
-
-    const itemId = s.player.inventoryIds.splice(idx, 1)[0];
-    const item = this.defs.equipment.find((i) => i.id === itemId) as ConsumableDef;
-    const { healed, logs } = drinkPotion(item);
-    const before = s.player.hp;
-    s.player.hp = Math.min(this.playerDef.maxHp, s.player.hp + healed);
-    this.addLogs([...logs, { left: `HP: ${before} → ${s.player.hp}/${this.playerDef.maxHp}`, style: 'status' }]);
-    if (s.phase === 'player_turn') s.player.bonusActionUsed = true;
-  }
-
-  private doEquip(slot: 'armor' | 'weapon' | 'shield', itemId: string): void {
-    const s = this.state;
-    const slotKey = `${slot}Id` as keyof EquipmentSlots;
-    if (!s.player.inventoryIds.includes(itemId)) return;
-
-    if (slot === 'shield') {
-      const weapon = this.defs.equipment.find((i) => i.id === s.player.equippedSlots.weaponId) as WeaponDef | undefined;
-      if (weapon?.twoHanded) return;
-    }
-    if (slot === 'weapon') {
-      const incoming = this.defs.equipment.find((i) => i.id === itemId) as WeaponDef | undefined;
-      if (incoming?.twoHanded && s.player.equippedSlots.shieldId) {
-        s.player.inventoryIds.push(s.player.equippedSlots.shieldId);
-        s.player.equippedSlots.shieldId = null;
-      }
-    }
-
-    const currentId = s.player.equippedSlots[slotKey];
-    if (currentId) s.player.inventoryIds.push(currentId);
-
-    const removeIdx = s.player.inventoryIds.indexOf(itemId);
-    if (removeIdx !== -1) s.player.inventoryIds.splice(removeIdx, 1);
-    s.player.equippedSlots[slotKey] = itemId;
-    applyEquipment(this.playerDef, s.player.equippedSlots, this.defs.equipment);
-    s.player.equippedSlots = { ...s.player.equippedSlots };
-    s.player.equippedSlotLabels = computeEquippedSlotLabels(this.playerDef, s.player.equippedSlots, this.defs.equipment);
-  }
-
-  private doUnequip(slot: 'armor' | 'weapon' | 'shield'): void {
-    const s = this.state;
-    const slotKey = `${slot}Id` as keyof EquipmentSlots;
-    const currentId = s.player.equippedSlots[slotKey];
-    if (!currentId) return;
-    s.player.inventoryIds.push(currentId);
-    s.player.equippedSlots[slotKey] = null;
-    applyEquipment(this.playerDef, s.player.equippedSlots, this.defs.equipment);
-    s.player.equippedSlots = { ...s.player.equippedSlots };
-    s.player.equippedSlotLabels = computeEquippedSlotLabels(this.playerDef, s.player.equippedSlots, this.defs.equipment);
-  }
-
   private computeAvailableActions(): void {
     const s = this.state;
     const p = s.player;
     const phase = s.phase;
-    const playerHidden = p.conditions.includes('hidden');
-    const livingEnemies = s.npcs.filter((n) => n.disposition === 'enemy' && n.hp > 0);
     const selectedTarget = s.selectedTargetId
       ? s.npcs.find((n) => n.id === s.selectedTargetId && n.hp > 0 && n.disposition !== 'ally')
       : null;
-    const targetAdjacent = selectedTarget
-      ? chebyshev(p.tileX, p.tileY, selectedTarget.tileX, selectedTarget.tileY) <= 1
-      : false;
-    const actionFree = !p.actionUsed;
-    const bonusFree = !p.bonusActionUsed;
-    const notIncapacitated = !isIncapacitated(p.conditions);
-    const hitDiceRemaining = this.playerDef.level - p.hitDiceUsed;
 
     let throwableItemIds: string[] = [];
-    if (selectedTarget && (phase === 'exploring' || (phase === 'player_turn' && actionFree))) {
+    if (selectedTarget && (phase === 'exploring' || (phase === 'player_turn' && !p.actionUsed))) {
       const dist = chebyshev(p.tileX, p.tileY, selectedTarget.tileX, selectedTarget.tileY);
       const seen = new Set<string>();
       throwableItemIds = p.inventoryIds.filter((id) => {
@@ -740,14 +520,14 @@ export class GameEngine {
     }
 
     s.availableActions = {
-      canAttack: (phase === 'exploring' || (phase === 'player_turn' && actionFree && notIncapacitated)) && targetAdjacent,
+      canAttack: Guard.canAttackTarget(this.ctx),
       throwableItemIds,
-      canHide: phase === 'player_turn' && bonusFree && notIncapacitated && this.playerDef.sneakAttackDice > 0 && !playerHidden && livingEnemies.length > 0,
-      canSecondWind: phase === 'player_turn' && bonusFree && notIncapacitated && this.playerDef.secondWindMaxUses > 0 && p.secondWindUses > 0 && p.hp < this.playerDef.maxHp,
-      canDash: phase === 'player_turn' && actionFree && notIncapacitated,
-      canDodge: phase === 'player_turn' && actionFree && notIncapacitated,
-      canDisengage: phase === 'player_turn' && actionFree && notIncapacitated && livingEnemies.length > 0,
-      canShortRest: phase === 'exploring' && p.hp > 0 && p.hp < this.playerDef.maxHp && hitDiceRemaining > 0,
+      canHide: Guard.canHide(this.ctx),
+      canSecondWind: Guard.canSecondWind(this.ctx),
+      canDash: Guard.canDash(this.ctx),
+      canDodge: Guard.canDodge(this.ctx),
+      canDisengage: Guard.canDisengage(this.ctx),
+      canShortRest: Guard.canShortRest(this.ctx),
     };
   }
 
@@ -780,121 +560,8 @@ export class GameEngine {
     defs: GameDefs,
     savedMap?: GameMap,
   ): GameEngine {
-    const playerDef = defs.playerDefs.find((p) => p.id === req.playerDefId);
-    if (!playerDef) throw new Error(`Unknown playerDefId: ${req.playerDefId}`);
-
-    const map: GameMap = savedMap ?? (req.mapType === 'rooms' ? generateRoomsMap() : generateMap());
-
-    const equippedSlots: EquipmentSlots = req.resumeEquippedSlots ?? { ...playerDef.defaultEquipment };
-    const ownedDef: PlayerDef = JSON.parse(JSON.stringify(playerDef));
-    applyEquipment(ownedDef, equippedSlots, defs.equipment);
-
-    const inventoryIds: string[] = req.resumeInventoryIds ?? [...(playerDef.defaultInventoryIds ?? [])];
-
-    const rawZones = req.startingZones ?? req.encounterContext.startingZones;
-    const zoneMap: ZoneMap = rawZones ? parseStartingZones(rawZones, map) : new Map();
-    const playerZone = zoneMap.get('P');
-    const allyZone   = zoneMap.get('A') ?? playerZone;
-    const npcZone    = zoneMap.get('N');
-    const enemyZone  = zoneMap.get('E');
-
-    const [pX, pY] = findPlayerSpawn(map, playerZone);
-
-    const player = {
-      defId: playerDef.id,
-      tileX: pX, tileY: pY,
-      hp: req.resumeHp ?? playerDef.maxHp,
-      xp: req.resumeXp ?? playerDef.xp,
-      gold: req.resumeGold ?? 0,
-      inventoryIds,
-      equippedSlots,
-      secondWindUses: req.resumeSecondWindUses ?? playerDef.secondWindMaxUses,
-      actionUsed: false,
-      bonusActionUsed: false,
-      reactionUsed: false,
-      movesLeft: 0,
-      deathSaveSuccesses: 0,
-      deathSaveFailures: 0,
-      hitDiceUsed: 0,
-      tempHp: 0,
-      heroicInspiration: false,
-      exhaustionLevel: 0,
-      conditions: [] as string[],
-      equippedSlotLabels: { armor: null, weapon: null, shield: null },
-    };
-
-    const isCombat = req.encounterTypes.includes('simple_combat');
-
-    const npcs: NpcState[] = [];
-    const mapItems: MapItemState[] = [];
-    const secrets: SecretState[] = [];
-
-    for (const defId of (req.allyIds ?? req.encounterContext.allyIds ?? [])) {
-      spawnNpc(npcs, map, defs.npcs, defs.monsters, defId, player.tileX, player.tileY, 'ally', allyZone);
-    }
-    if (isCombat) {
-      spawnEnemies(npcs, map, defs.monsters, player.tileX, player.tileY, req.encounterContext.enemyCount ?? 2, enemyZone);
-      spawnItems(mapItems, map, defs.equipment, player.tileX, player.tileY, npcs);
-    }
-    if (req.encounterTypes.includes('social_interaction')) {
-      for (const defId of (req.npcIds ?? req.encounterContext.npcIds ?? [])) {
-        spawnNpc(npcs, map, defs.npcs, defs.monsters, defId, player.tileX, player.tileY, 'neutral', npcZone);
-      }
-    }
-    if (req.encounterTypes.includes('exploration')) {
-      spawnSecrets(secrets, map, req.encounterContext.secrets ?? [], player.tileX, player.tileY, npcs);
-    }
-
-    const npcPersonas: NpcPersona[] = npcs
-      .filter((n) => n.disposition === 'neutral')
-      .flatMap((ns) => {
-        const def = defs.npcs.find((n) => n.id === ns.defId);
-        return def?.persona ? [{ id: ns.id, name: def.name, persona: def.persona }] : [];
-      });
-
-    const quests: QuestState[] = (req.encounterContext.quests ?? []).map((q) => ({
-      id: q.id,
-      title: q.title,
-      goalType: q.goal.type,
-      goalTarget: q.goal.target,
-      rewardXp: q.rewardXp,
-      rewardGp: q.rewardGp,
-      progress: 0,
-      completed: false,
-    }));
-
-    const state: GameState = {
-      sessionId,
-      phase: 'exploring',
-      map,
-      player,
-      npcs,
-      mapItems,
-      secrets,
-      combatLog: [],
-      logScrollOffset: 0,
-      encounterTypes: req.encounterTypes,
-      mapName: req.encounterContext.mapName ?? 'Unknown',
-      encounterTitle: req.encounterTitle ?? '',
-      quests,
-      selectedTargetId: null,
-      activeNpcIndex: 0,
-      turnOrderIds: [],
-      introduction: req.encounterContext.introduction,
-      encounterContext: req.encounterContext.context,
-      npcPersonas,
-      availableActions: {
-        canAttack: false, throwableItemIds: [],
-        canHide: false, canSecondWind: false, canDash: false,
-        canDodge: false, canDisengage: false, canShortRest: false,
-      },
-    };
-
-    const sessionDefs: GameDefs = {
-      ...defs,
-      playerDefs: defs.playerDefs.map((p) => p.id === ownedDef.id ? ownedDef : p),
-    };
-
-    return new GameEngine(state, sessionDefs);
+    const state = buildSessionState(sessionId, req, defs, savedMap);
+    // The constructor clones playerDef internally to avoid mutating shared defs.
+    return new GameEngine(state, defs);
   }
 }

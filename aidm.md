@@ -6,37 +6,74 @@ The AI Dungeon Master (AIDM) is a Claude-powered narrative layer that runs along
 
 ## How it works
 
-```
-Player message
-     │
-     ▼
- Build prompt (static system + current CURRENT STATE block)
-     │
-     ▼
- Claude (claude-sonnet-4-6, max 600 tokens)
-     │
-     ├─ tool_use ──► applyAIDMTool() ──► GameEngine ──► events + tool result
-     │    └─ loop until stop_reason ≠ "tool_use"
-     │
-     └─ text block ──► narrative reply
+```mermaid
+sequenceDiagram
+    participant P as Player
+    participant S as Server
+    participant C as Claude
+
+    autonumber
+
+    P->>S: Send DM chat message
+    S->>C: Stream request (game state, player message, tools)
+    C-->>S: Stream text deltas
+    S-->>P: Forward chunks live as aidm_chunk
+    C-->>S: Tool calls at end of stream
+    Note over S: Apply tools, update game state
+    Note over S: Refresh CURRENT STATE, loop back<br/>until Claude finishes without tool calls
+    S->>P: Refresh map and finalize reply as aidm_done
+
 ```
 
+The exchange is **streamed**: text deltas from Claude flow to the player over the WebSocket as they arrive (`aidm_chunk` messages). When a response turns out to contain a roll-requesting tool, the chunks it emitted are speculative — the server sends `aidm_speculative_discard` and the client rolls back. Non-speculative chunk runs are confirmed with `aidm_checkpoint`. The full streaming protocol is documented under [Streaming protocol](#streaming-protocol).
+
 Every exchange appends a `user`/`assistant` pair to the in-memory history so the model retains context across the encounter. On the first exchange the encounter introduction is seeded as an `assistant` message to establish narrative context.
+
+### Tool-use loop
+
+The conversation with Claude can iterate when the model wants to call tools. Each iteration:
+
+1. Stream Claude's response, forwarding text deltas to the client.
+2. If the response carries `tool_use` blocks, dispatch each one through `applyAIDMTool` (updates the engine, builds a `toolResultContent` string).
+3. Append the assistant turn + the `tool_result` user turn to the message list.
+4. **Rebuild the `[CURRENT STATE]` block** on the original turn user message so the next iteration reasons from fresh state.
+5. Mark the most-recent `tool_result` with `cache_control: ephemeral` — the prior turn becomes a new cacheable prefix breakpoint, so long tool chains don't re-pay all preceding tokens.
+6. Call Claude again.
+
+The loop is capped at **8 iterations** (`MAX_TOOL_ITERATIONS`). On the final allowed iteration every tool result is overridden with a `TOOL BUDGET EXHAUSTED` signal and a tool-less follow-up call forces the model to write its closing narrative. This bounds the cost of any single message.
+
+### Concurrency
+
+`processAIDMChat` is protected by a **per-session mutex** (`tryAcquireAidmLock` / `releaseAidmLock`). A concurrent request on the same session (double-click, second tab) returns `429` immediately rather than interleaving engine mutations with the in-flight turn.
+
+### Transient-error retry
+
+Each Claude streaming call is wrapped in a single retry with 600 ms backoff on transient status codes (408, 425, 429, 500, 502, 503, 504, 529). Non-transient errors (400 schema mismatches, auth) bubble up immediately and surface to the client as `502`.
+
+### Prompt caching
+
+The system prompt and the tool list are sent as content-block arrays with `cache_control: { type: 'ephemeral' }` markers. Anthropic's prompt cache (5-minute TTL) covers both blocks across turns and within the tool-use loop. Tool descriptions are **fully static** — no dynamic IDs interpolated — so adding or removing JSON definitions doesn't invalidate the cache. Inside the tool-use loop, each iteration's most-recent `tool_result` block also carries `cache_control: ephemeral`, extending the cacheable prefix as the chain grows.
+
+The dynamic CURRENT STATE lives in the user message and is intentionally uncached — it changes every turn. The first message after a deploy or a 5-minute idle pays a cache miss; subsequent turns hit cache.
+
+> **Tool list ordering:** the array order is part of the cacheable prompt prefix. Append new tools at the END only — reordering or inserting in the middle invalidates the cache.
 
 ### CURRENT STATE block
 
 Every user message is prefixed with a `[CURRENT STATE]` block that the engine builds fresh from `GameState`. It includes:
 
 - Map name, phase, and encounter types
-- Player tile, HP, gold, inventory, equipped items, active flags
+- Player tile, HP, gold, inventory, equipped items, and explicit action-economy fields: `Action: AVAILABLE`/`USED`, `Bonus: AVAILABLE`/`USED`, `N moves left`, `Second Wind ×N`, `HIDDEN`
 - All combatants (enemies and allies) with HP, tile, disposition, conditions
-- Neutral NPCs with tile
+- Neutral NPCs with tile, including revealed names if any (see [`reveal_npc_name`](#reveal_npc_name))
+- A separate **CORPSES** section listing dead NPCs (searchable but cannot act)
 - Active quests with progress
-- Items on the ground and secrets remaining
+- Items on the ground, with a trailing `Secrets remaining: N` count
 - NPC personas
-- The 15 most-recent combat log lines
+- A **REFERENCE DATA** section listing valid `item_id` and `monster_id` values (the source of truth for `add_item` and `spawn_enemy`)
+- The full combat log for the current encounter — including `── Aldric's turn — Action & Bonus refreshed ──` marker lines at every new player turn
 
-The model uses this block to resolve pronouns ("them", "it") to concrete entity references.
+The model uses this block to resolve pronouns ("them", "it") to concrete entity references and to determine action availability. The block is rebuilt **once per tool-loop iteration**, not just once per turn, so mid-loop state changes (HP drops, disposition shifts, deaths) are immediately visible.
 
 ---
 
@@ -44,10 +81,27 @@ The model uses this block to resolve pronouns ("them", "it") to concrete entity 
 
 Two personas are available, selected per request via `dmPersona`.
 
-| Persona | Behaviour |
-|---------|-----------|
-| `story` (default) | Immersive DM — 1–3 sentence in-world replies, full tool-first discipline, no breaking immersion. |
-| `dev` | Development mode — fulfils all requests without restriction, replies with brief mechanical feedback only. |
+| Persona           | Model                       | Behaviour                                                                                                 |
+| ----------------- | --------------------------- | --------------------------------------------------------------------------------------------------------- |
+| `story` (default) | `claude-sonnet-4-6`         | Immersive DM — 1–3 sentence in-world replies, full tool-first discipline, no breaking immersion.          |
+| `dev`             | `claude-haiku-4-5-20251001` | Development mode — fulfils all requests without restriction, replies with brief mechanical feedback only. |
+
+Both personas share the same **tool invariants** (set_disposition doesn't auto-trigger combat, request_attack_roll doesn't auto-apply damage, reveal_npc_name must precede name narration, complete_quest auto-awards XP, throw_item consumes the Action). The dev persona prompt restates these invariants in a compact list; the story prompt embeds them across the TOOL-FIRST and ACTION ECONOMY sections.
+
+---
+
+## History management
+
+The server keeps two histories per session:
+
+| Buffer                                 | Purpose                                                        | Lifecycle                                                                                                                                                                                              |
+| -------------------------------------- | -------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `aidmHistory` (the **sliding window**) | What's actually sent to Claude on each turn. Bounded for cost. | Summarised when it exceeds 40 messages — the oldest entries are collapsed into a single `[SUMMARY OF EARLIER TURNS]` assistant message by a Haiku call; the most recent 20 messages are kept verbatim. |
+| `aidmArchive` (the **full record**)    | Untouched record of every user/assistant pair this encounter.  | Grows for the life of the session; consulted only by [`recall_memory`](#recall_memory).                                                                                                                |
+
+Historical `[CURRENT STATE]` blocks are stripped from prior user messages before each API call, so the model always reasons from the freshly injected state — never a stale snapshot.
+
+If summary generation fails (e.g. transient Haiku error) the loop falls back to a trivial placeholder summary so the sliding window still bounds.
 
 ---
 
@@ -55,54 +109,75 @@ Two personas are available, selected per request via `dmPersona`.
 
 Most tools that target a creature use a common entity reference format.
 
-| Reference | Resolves to |
-|-----------|-------------|
-| `"player"` | The player character |
-| `"enemy_A"` … `"enemy_Z"` | Enemy by combat label (A–Z, assigned at combat start) |
-| `"ally_a"` … `"ally_z"` | Ally by combat label (a–z) |
-| `"npc_[id]"` | Neutral or ally NPC by their runtime id (visible in CURRENT STATE) |
+| Reference                 | Resolves to                                                                  |
+| ------------------------- | ---------------------------------------------------------------------------- |
+| `"player"`                | The player character                                                         |
+| `"enemy_A"` … `"enemy_Z"` | Enemy by uppercase combat label (A–Z, assigned at combat start)              |
+| `"ally_A"` … `"ally_Z"`   | Ally by uppercase combat label — drawn from the **same A–Z pool** as enemies |
+| `"npc_[id]"`              | Neutral or ally NPC by their runtime id (visible in CURRENT STATE)           |
 
 ---
 
 ## Tool-first rule
 
-Every game effect the AIDM describes must be enacted by the corresponding tool before narration. If no tool can enact the effect, the AIDM must not narrate it as happening and instead suggests a realistic in-world alternative. Text generated before a tool call is discarded — only the post-tool narrative is returned to the player.
+Every game effect the AIDM describes must be enacted by the corresponding tool before narration. If no tool can enact the effect, the AIDM must not narrate it as happening and instead suggests a realistic in-world alternative.
+
+Text retention: text accompanying a [roll-requesting tool](#d20-tests) (`request_attack_roll`, `request_ability_check`, `request_saving_throw`) is discarded — it is necessarily speculative because the roll outcome is not yet known. Text accompanying any other tool (e.g. `reveal_npc_name`, `set_disposition`, `award_gold`) is kept and shown to the player, because the outcome is determined by the tool's input arguments.
+
+## Addressee rule
+
+When the player's message starts with `[PlayerName says to TargetName]:`, that NPC is the addressee and must respond in the AIDM's reply — voice their reaction, dialogue, or refusal. Pivoting to a different NPC or to the environment in place of the addressee's response is forbidden.
+
+## Narrative-mirror rule
+
+The player only sees the narrative reply — never the tool calls. Every player-visible tool effect must therefore also appear in the narrative, in-fiction:
+
+- `reveal_npc_name` → have the NPC speak their name (e.g. _"'I'm Mira,' she answers softly."_)
+- `award_gold` / `adjust_player_hp` / `add_item` / `remove_item` → describe the transaction
+- `set_disposition` to `enemy` → describe the hostile shift
+- `apply_condition` / `remove_condition` → describe cause and effect
+- `move_entity` / `despawn_npc` → describe the movement or departure
+
+A silent tool call is invisible to the player and counts as a bug.
 
 ---
 
 ## Tools
 
-Tools are grouped below by function. All tools accept a `reason` parameter (string) that is logged server-side for debugging.
+Tools are grouped below by function. Most tools accept a `reason` parameter (string) that is logged server-side for debugging; the per-tool parameter tables are authoritative for which exact fields each tool requires. The two exceptions that omit `reason` are `reveal_npc_name` and `add_log_entry`.
 
 ### HP and healing
 
 #### `adjust_player_hp`
+
 Adjusts the player's HP by a signed delta. Positive heals, negative damages. Clamped to `[0, maxHp]`. Temporary HP is consumed first when the delta is negative.
 
-| Parameter | Type | Required |
-|-----------|------|----------|
-| `delta` | integer | yes |
-| `reason` | string | yes |
+| Parameter | Type    | Required |
+| --------- | ------- | -------- |
+| `delta`   | integer | yes      |
+| `reason`  | string  | yes      |
 
 #### `adjust_npc_hp`
-Adjusts any combatant's HP. Positive heals, negative damages. When `damage_type` is supplied the engine automatically applies the target's resistance (half damage) or vulnerability (double damage) before clamping.
 
-| Parameter | Type | Required | Notes |
-|-----------|------|----------|-------|
-| `entity` | string | yes | Entity reference — see above |
-| `delta` | integer | yes | Negative to damage, positive to heal |
-| `damage_type` | string | no | e.g. `"fire"`, `"poison"`, `"piercing"` |
-| `reason` | string | yes | |
+Adjusts any combatant's HP. Positive heals, negative damages. When `damage_type` is supplied and the target is an NPC, the engine automatically applies the target's resistance (half damage), vulnerability (double damage), or immunity (zero damage) before clamping.
 
-Passing `"player"` as `entity` delegates to `adjust_player_hp` (including Temporary HP consumption).
+| Parameter     | Type    | Required | Notes                                   |
+| ------------- | ------- | -------- | --------------------------------------- |
+| `entity`      | string  | yes      | Entity reference — see above            |
+| `delta`       | integer | yes      | Negative to damage, positive to heal    |
+| `damage_type` | string  | no       | e.g. `"fire"`, `"poison"`, `"piercing"` |
+| `reason`      | string  | yes      |                                         |
+
+Passing `"player"` as `entity` delegates to `adjust_player_hp` (including Temporary HP consumption). The player has no resistance/vulnerability/immunity fields, so `damage_type` is accepted but has no mechanical effect on the player path.
 
 #### `award_temp_hp`
+
 Grants the player Temporary Hit Points. Temporary HP deplete before real HP and do not stack — the engine keeps whichever value is higher (existing or new). Temporary HP are lost on a Long Rest.
 
-| Parameter | Type | Required |
-|-----------|------|----------|
-| `amount` | integer | yes |
-| `reason` | string | yes |
+| Parameter | Type    | Required |
+| --------- | ------- | -------- |
+| `amount`  | integer | yes      |
+| `reason`  | string  | yes      |
 
 ---
 
@@ -111,19 +186,21 @@ Grants the player Temporary Hit Points. Temporary HP deplete before real HP and 
 All three D20 test types are resolved server-side. The engine rolls, applies the relevant modifier and any condition modifiers, compares against DC, and returns the outcome to the model as a tool result. The model then narrates the in-world consequence — never the dice mechanic.
 
 #### `request_ability_check`
+
 Rolls `d20 + skill modifier` vs DC. Active conditions modify the roll automatically:
 
 - **Disadvantage**: `poisoned`, `frightened`
 
 Skill names match the player's `skills` map keys, e.g. `"perception"`, `"stealth"`, `"athletics"`.
 
-| Parameter | Type | Required |
-|-----------|------|----------|
-| `skill` | string | yes |
-| `dc` | integer | yes |
-| `reason` | string | yes |
+| Parameter | Type    | Required |
+| --------- | ------- | -------- |
+| `skill`   | string  | yes      |
+| `dc`      | integer | yes      |
+| `reason`  | string  | yes      |
 
 #### `request_saving_throw`
+
 Rolls `d20 + saving throw modifier` vs DC. Active conditions modify the roll automatically:
 
 - **Auto-fail** (no roll): `paralyzed` or `unconscious` on Str or Dex saves
@@ -132,13 +209,14 @@ Rolls `d20 + saving throw modifier` vs DC. Active conditions modify the roll aut
 
 Ability names: `"str"`, `"dex"`, `"con"`, `"int"`, `"wis"`, `"cha"`.
 
-| Parameter | Type | Required |
-|-----------|------|----------|
-| `ability` | string | yes |
-| `dc` | integer | yes |
-| `reason` | string | yes |
+| Parameter | Type    | Required |
+| --------- | ------- | -------- |
+| `ability` | string  | yes      |
+| `dc`      | integer | yes      |
+| `reason`  | string  | yes      |
 
 #### `request_attack_roll`
+
 Rolls an attack for the player or any NPC against a fixed AC. Use this for off-turn attacks (opportunity attacks), attacking objects (doors, barrels), or any attack outside the normal player-action flow.
 
 - **Player**: uses `mainAttack` — stat modifier + proficiency bonus. Returns hit/crit/damage.
@@ -146,16 +224,16 @@ Rolls an attack for the player or any NPC against a fixed AC. Use this for off-t
 
 The tool logs the roll to the Combat Log and returns the outcome string. It does **not** apply damage — call `adjust_npc_hp` separately if the hit should wound a specific creature.
 
-| Parameter | Type | Required | Notes |
-|-----------|------|----------|-------|
-| `attacker` | string | yes | `"player"` or entity reference |
-| `target_ac` | integer | yes | AC to roll against |
-| `reason` | string | yes | |
+| Parameter   | Type    | Required | Notes                          |
+| ----------- | ------- | -------- | ------------------------------ |
+| `attacker`  | string  | yes      | `"player"` or entity reference |
+| `target_ac` | integer | yes      | AC to roll against             |
+| `reason`    | string  | yes      |                                |
 
 **DC difficulty guidelines** (SRD):
 
-| Difficulty | DC |
-|------------|-----|
+| Difficulty | DC  |
+| ---------- | --- |
 | Very easy  | 5   |
 | Easy       | 10  |
 | Medium     | 15  |
@@ -167,66 +245,73 @@ The tool logs the roll to the Combat Log and returns the outcome string. It does
 ### Rewards
 
 #### `award_xp`
+
 Awards experience points to the player.
 
-| Parameter | Type | Required |
-|-----------|------|----------|
-| `amount` | integer | yes |
-| `reason` | string | yes |
+| Parameter | Type    | Required |
+| --------- | ------- | -------- |
+| `amount`  | integer | yes      |
+| `reason`  | string  | yes      |
 
 #### `award_gold`
+
 Awards gold pieces to the player.
 
-| Parameter | Type | Required |
-|-----------|------|----------|
-| `amount` | integer | yes |
-| `reason` | string | yes |
+| Parameter | Type    | Required |
+| --------- | ------- | -------- |
+| `amount`  | integer | yes      |
+| `reason`  | string  | yes      |
 
 #### `grant_heroic_inspiration`
+
 Grants the player Heroic Inspiration. The player may expend it to re-roll any one die immediately after rolling. Per SRD, only one instance can be held at a time — granting it when the player already has it has no additional effect.
 
-| Parameter | Type | Required |
-|-----------|------|----------|
-| `reason` | string | yes |
+| Parameter | Type   | Required |
+| --------- | ------ | -------- |
+| `reason`  | string | yes      |
 
 #### `set_exhaustion_level`
+
 Sets the player's Exhaustion level (0–5). Each level imposes −2 to all D20 Tests (ability checks and saving throws). Level 5 is lethal. Per SRD, a Long Rest removes one level.
 
-| Parameter | Type | Required |
-|-----------|------|----------|
-| `level` | integer | yes |
-| `reason` | string | yes |
+| Parameter | Type    | Required |
+| --------- | ------- | -------- |
+| `level`   | integer | yes      |
+| `reason`  | string  | yes      |
 
 ---
 
 ### Inventory
 
 #### `add_item`
+
 Adds one item to the player's inventory.
 
-| Parameter | Type | Required |
-|-----------|------|----------|
-| `item_id` | string | yes |
-| `reason` | string | yes |
+| Parameter | Type   | Required |
+| --------- | ------ | -------- |
+| `item_id` | string | yes      |
+| `reason`  | string | yes      |
 
-Valid `item_id` values: `health_potion`, `greatsword`, `shortsword`, `flail`, `longsword`, `rapier`, `dagger`, `javelin`, `shortbow`, `chain_mail`, `leather_armor`, `studded_leather`, `scale_mail`, `breastplate`, `splint_armor`, `plate_armor`, `shield`.
+Valid `item_id` values are injected into the tool description at runtime from the JSON files in `server/data/equipment/`. Adding or removing a file in that directory updates the list the model sees on the next server start — the canonical source is the filesystem, not this document.
 
 #### `remove_item`
+
 Removes one instance of an item from the player's inventory.
 
-| Parameter | Type | Required |
-|-----------|------|----------|
-| `item_id` | string | yes |
-| `reason` | string | yes |
+| Parameter | Type   | Required |
+| --------- | ------ | -------- |
+| `item_id` | string | yes      |
+| `reason`  | string | yes      |
 
 #### `throw_item`
+
 Throws an item at a target, consuming an action if in `player_turn`. Proper thrown weapons (`javelin`, `dagger`) use their weapon stats and proficiency bonus. All other items are improvised weapons (1d4 bludgeoning, no proficiency bonus). The item is removed from the player's inventory or the map.
 
-| Parameter | Type | Required | Notes |
-|-----------|------|----------|-------|
-| `item_id` | string | yes | Inventory item id or map item `defId` |
-| `target` | string | no | Entity reference; omit to auto-target nearest enemy in range |
-| `reason` | string | yes | |
+| Parameter | Type   | Required | Notes                                                        |
+| --------- | ------ | -------- | ------------------------------------------------------------ |
+| `item_id` | string | yes      | Inventory item id or map item `defId`                        |
+| `target`  | string | no       | Entity reference; omit to auto-target nearest enemy in range |
+| `reason`  | string | yes      |                                                              |
 
 Attacking a neutral NPC with `throw_item` turns them hostile.
 
@@ -235,144 +320,187 @@ Attacking a neutral NPC with `throw_item` turns them hostile.
 ### Combat
 
 #### `trigger_combat`
+
 Starts combat when the phase is `exploring` and enemies are present on the map. Rolls initiative and transitions to `player_turn` or `enemy_turn`.
 
-| Parameter | Type | Required |
-|-----------|------|----------|
-| `reason` | string | yes |
+| Parameter | Type   | Required |
+| --------- | ------ | -------- |
+| `reason`  | string | yes      |
 
 #### `end_combat`
+
 Ends combat immediately — all enemies flee, surrender, or are removed. Transitions to `exploring`.
 
-| Parameter | Type | Required |
-|-----------|------|----------|
-| `reason` | string | yes |
+| Parameter | Type   | Required |
+| --------- | ------ | -------- |
+| `reason`  | string | yes      |
 
 #### `spawn_enemy`
+
 Spawns a new enemy near the player. In combat, the enemy is inserted into the turn order.
 
-| Parameter | Type | Required |
-|-----------|------|----------|
-| `monster_id` | string | yes |
-| `reason` | string | yes |
+| Parameter    | Type   | Required |
+| ------------ | ------ | -------- |
+| `monster_id` | string | yes      |
+| `reason`     | string | yes      |
 
-Valid `monster_id` values: `goblin_minion`, `bandit`, `commoner`, `skeleton`.
+Valid `monster_id` values are injected into the tool description at runtime from the JSON files in `server/data/monsters/`. The canonical source is the filesystem, not this document.
 
 ---
 
 ### NPCs and positioning
 
 #### `despawn_npc`
+
 Removes an NPC from the map. Does not award XP or gold.
 
-| Parameter | Type | Required |
-|-----------|------|----------|
-| `entity` | string | yes | `"npc_[id]"` |
-| `reason` | string | yes |
+| Parameter | Type   | Required |
+| --------- | ------ | -------- | ------------ |
+| `entity`  | string | yes      | `"npc_[id]"` |
+| `reason`  | string | yes      |
 
 #### `set_disposition`
+
 Changes a creature's disposition, which determines who they attack and how they are rendered.
 
-| Disposition | Behaviour |
-|-------------|-----------|
-| `"ally"` | Fights alongside the player; included in turn order |
-| `"neutral"` | Does not participate in combat |
-| `"enemy"` | Fights the player; setting this also makes all same-faction neutrals hostile |
+| Disposition | Behaviour                                                                    |
+| ----------- | ---------------------------------------------------------------------------- |
+| `"ally"`    | Fights alongside the player; included in turn order                          |
+| `"neutral"` | Does not participate in combat                                               |
+| `"enemy"`   | Fights the player; setting this also makes all same-faction neutrals hostile |
 
-| Parameter | Type | Required |
-|-----------|------|----------|
-| `entity` | string | yes | Entity reference |
-| `disposition` | string | yes | `"ally"`, `"neutral"`, or `"enemy"` |
-| `reason` | string | yes |
+| Parameter     | Type   | Required |
+| ------------- | ------ | -------- | ----------------------------------- |
+| `entity`      | string | yes      | Entity reference                    |
+| `disposition` | string | yes      | `"ally"`, `"neutral"`, or `"enemy"` |
+| `reason`      | string | yes      |
 
 #### `move_entity`
+
 Teleports a creature to an exact tile coordinate. Bypasses movement rules and pathfinding.
 
-| Parameter | Type | Required |
-|-----------|------|----------|
-| `entity` | string | yes | Entity reference |
-| `tile_x` | integer | yes | |
-| `tile_y` | integer | yes | |
-| `reason` | string | yes |
+| Parameter | Type    | Required |
+| --------- | ------- | -------- | ---------------- |
+| `entity`  | string  | yes      | Entity reference |
+| `tile_x`  | integer | yes      |                  |
+| `tile_y`  | integer | yes      |                  |
+| `reason`  | string  | yes      |
+
+#### `reveal_npc_name`
+
+Records the name an NPC discloses in conversation, updating `NpcState.revealedName`. The new name replaces the generic NPC label above the map token and appears in CURRENT STATE as `(known as: X)`. Must be called **before** any narration that uses the name — otherwise the game world does not register the disclosure and the token label is unchanged. The tool result reminds the model to speak the name in the same reply so the player actually hears it (per the [narrative-mirror rule](#narrative-mirror-rule)).
+
+| Parameter       | Type   | Required | Notes                                                        |
+| --------------- | ------ | -------- | ------------------------------------------------------------ |
+| `entity`        | string | yes      | Entity reference from CURRENT STATE, e.g. `"npc_villager_0"` |
+| `revealed_name` | string | yes      | The name the NPC gave                                        |
+
+#### `set_npc_passive`
+
+Marks an ally NPC as combat-passive. Passive allies skip their combat turn entirely — they remain in the initiative order but the engine never moves or attacks for them. Use when the player tells an ally to stay back, stand down, or not fight. Reversed by calling again with `passive: false`.
+
+| Parameter | Type    | Required | Notes                                                   |
+| --------- | ------- | -------- | ------------------------------------------------------- |
+| `entity`  | string  | yes      | Entity reference, e.g. `"ally_A"` or `"npc_commoner_0"` |
+| `passive` | boolean | yes      | `true` to mark passive, `false` to reactivate           |
+| `reason`  | string  | yes      |                                                         |
 
 ---
 
 ### Conditions
 
 #### `apply_condition`
+
 Applies a condition to the player or any NPC.
 
-| Parameter | Type | Required |
-|-----------|------|----------|
-| `entity` | string | yes | Entity reference |
-| `condition` | string | yes | Condition name (see table below) |
-| `reason` | string | yes |
+| Parameter   | Type   | Required |
+| ----------- | ------ | -------- | -------------------------------- |
+| `entity`    | string | yes      | Entity reference                 |
+| `condition` | string | yes      | Condition name (see table below) |
+| `reason`    | string | yes      |
 
 #### `remove_condition`
+
 Removes a condition from the player or any NPC.
 
-| Parameter | Type | Required |
-|-----------|------|----------|
-| `entity` | string | yes | Entity reference |
-| `condition` | string | yes | |
-| `reason` | string | yes |
+| Parameter   | Type   | Required |
+| ----------- | ------ | -------- | ---------------- |
+| `entity`    | string | yes      | Entity reference |
+| `condition` | string | yes      |                  |
+| `reason`    | string | yes      |
 
 **Condition engine effects:**
 
-| Condition | Engine effect |
-|-----------|---------------|
-| `blinded` | Attacker has Advantage against this creature; creature's own attacks at Disadvantage |
-| `charmed` | No engine enforcement — narrative only |
-| `dashing` | Cleared at start of next turn (set by Dash action) |
-| `disengaged` | Movement does not provoke opportunity attacks; cleared at start of next turn |
-| `dodging` | Advantage on Dex saves; enemy attacks against this creature at Disadvantage; cleared at start of next turn |
-| `frightened` | Disadvantage on ability checks and attack rolls |
-| `grappled` | Speed 0; own attack rolls at Disadvantage |
-| `incapacitated` | Cannot take actions, bonus actions, or reactions |
-| `invisible` | Creature's own attacks have Advantage; attackers targeting this creature have Disadvantage |
-| `paralyzed` | Cannot act; attackers have Advantage; melee attacks are auto-crits; speed 0; auto-fail Str/Dex saves |
-| `poisoned` | Disadvantage on attack rolls and ability checks |
-| `prone` | Disadvantage on own attack rolls; attackers at range > 1 tile have Disadvantage; melee attackers within 1 tile have Advantage; costs half speed to stand |
-| `restrained` | Speed 0; own attack rolls at Disadvantage; attackers have Advantage; Disadvantage on Dex saves |
-| `slowed` | Speed reduced by 10 ft; cleared at start of next turn |
-| `stunned` | Cannot act; attackers have Advantage; speed 0; auto-fail Str/Dex saves |
-| `unconscious` | Cannot act; attackers have Advantage; melee attacks are auto-crits; speed 0; auto-fail Str/Dex saves; auto-applies prone |
-| `vexed` | Own attack rolls at Disadvantage; cleared at start of next turn (applied by Vex/Sap weapon masteries) |
+| Condition       | Engine effect                                                                                                                                            |
+| --------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `blinded`       | Attacker has Advantage against this creature; creature's own attacks at Disadvantage                                                                     |
+| `charmed`       | No engine enforcement — narrative only                                                                                                                   |
+| `dashing`       | Cleared at start of next turn (set by Dash action)                                                                                                       |
+| `disengaged`    | Movement does not provoke opportunity attacks; cleared at start of next turn                                                                             |
+| `dodging`       | Advantage on Dex saves; enemy attacks against this creature at Disadvantage; cleared at start of next turn                                               |
+| `frightened`    | Disadvantage on ability checks and attack rolls                                                                                                          |
+| `grappled`      | Speed 0; own attack rolls at Disadvantage                                                                                                                |
+| `incapacitated` | Cannot take actions, bonus actions, or reactions                                                                                                         |
+| `invisible`     | Creature's own attacks have Advantage; attackers targeting this creature have Disadvantage                                                               |
+| `paralyzed`     | Cannot act; attackers have Advantage; melee attacks are auto-crits; speed 0; auto-fail Str/Dex saves                                                     |
+| `poisoned`      | Disadvantage on attack rolls and ability checks                                                                                                          |
+| `prone`         | Disadvantage on own attack rolls; attackers at range > 1 tile have Disadvantage; melee attackers within 1 tile have Advantage; costs half speed to stand |
+| `restrained`    | Speed 0; own attack rolls at Disadvantage; attackers have Advantage; Disadvantage on Dex saves                                                           |
+| `slowed`        | Speed reduced by 10 ft; cleared at start of next turn                                                                                                    |
+| `stunned`       | Cannot act; attackers have Advantage; speed 0; auto-fail Str/Dex saves                                                                                   |
+| `unconscious`   | Cannot act; attackers have Advantage; melee attacks are auto-crits; speed 0; auto-fail Str/Dex saves; auto-applies prone                                 |
+| `vexed`         | Own attack rolls at Disadvantage; cleared at start of next turn (applied by Vex/Sap weapon masteries)                                                    |
 
 ---
 
 ### Narrative
 
 #### `add_log_entry`
+
 Appends a line to the Combat Log without changing any game state. Use this to record notable events that do not correspond to a mechanical outcome.
 
-| Parameter | Type | Required |
-|-----------|------|----------|
-| `text` | string | yes |
+| Parameter | Type   | Required |
+| --------- | ------ | -------- |
+| `text`    | string | yes      |
+
+---
+
+### Memory
+
+#### `recall_memory`
+
+Searches the full, unsummarized conversation archive for past content matching a keyword or phrase. Use this when the sliding-window history (see [History management](#history-management)) doesn't contain enough detail — e.g. to look up an NPC's previous statements, a quest hook the player mentioned long ago, or any earlier exchange. The query is a case-insensitive substring match. Returns up to 8 matching message snippets (player and DM lines), newest first, each truncated at 240 characters and tagged with a rough turn index.
+
+| Parameter | Type   | Required |
+| --------- | ------ | -------- |
+| `query`   | string | yes      |
+| `reason`  | string | yes      |
 
 ---
 
 ### Quests
 
 #### `complete_quest`
-Force-completes a quest and immediately awards its XP and GP rewards.
 
-| Parameter | Type | Required |
-|-----------|------|----------|
-| `quest_id` | string | yes | Quest `id` from CURRENT STATE |
-| `reason` | string | yes |
+Force-completes a quest and immediately awards its XP and GP rewards. The XP/GP grant is **automatic** — do NOT also call `award_xp` for the same outcome. To enforce this, the server tracks quests completed within a turn; a subsequent positive `award_xp` in the same turn is rejected with a clear explanation.
+
+| Parameter  | Type   | Required |
+| ---------- | ------ | -------- | ----------------------------- |
+| `quest_id` | string | yes      | Quest `id` from CURRENT STATE |
+| `reason`   | string | yes      |
 
 ---
 
 ### Stealth
 
 #### `set_player_hidden`
+
 Sets the player's hidden status. When hidden, the player's next attack has Advantage and reveals their position.
 
-| Parameter | Type | Required |
-|-----------|------|----------|
-| `hidden` | boolean | yes |
-| `reason` | string | yes |
+| Parameter | Type    | Required |
+| --------- | ------- | -------- |
+| `hidden`  | boolean | yes      |
+| `reason`  | string  | yes      |
 
 ---
 
@@ -388,16 +516,93 @@ The AIDM must reject the following and suggest a realistic in-world alternative 
 
 ## Action economy
 
-`throw_item` and any other action-consuming tool is enforced server-side during `player_turn`. If the tool result reports that the action was already spent, the AIDM narrates that the player cannot act again this turn and must end their turn or use a bonus action instead.
+CURRENT STATE shows action-economy resources as explicit literal fields, not by absence: `Action: AVAILABLE` / `Action: USED`, `Bonus: AVAILABLE` / `Bonus: USED`, and `N moves left`. These fields are authoritative for the current turn — they reset every time a new player turn begins, and the combat log shows a turn-boundary line (`── Aldric's turn — Action & Bonus refreshed ──`) at every reset. The AIDM must trust these fields over conversation history.
+
+Resource consumption:
+
+| Activity                                                                                      | Cost                                              |
+| --------------------------------------------------------------------------------------------- | ------------------------------------------------- |
+| `attack`, `throw_item`, `dash`, `dodge`, `disengage`, cast a spell, study, influence, utilize | Action                                            |
+| Second Wind, Hide (Cunning Action), drink potion in combat                                    | Bonus Action                                      |
+| Movement                                                                                      | Drawn from `movesLeft` (1 tile per 5 ft of speed) |
+
+When the player requests something the current flags forbid, the AIDM must state explicitly which resource is spent and what remains — vague deflection ("press your advantage and wait") is forbidden. Examples:
+
+- `Action: USED` + player asks to attack → _"You've already used your Action this turn. You can still move, use a Bonus Action if available, or end your turn."_
+- `Bonus: USED` + player asks for Second Wind → _"You've already spent your Bonus Action this turn. End your turn to reset."_
+- `0 moves left` + player asks to move → _"You have no movement left this turn — only your Action or Bonus Action, or End Turn."_
+
+Server-side enforcement remains the final word: tools like `throw_item` reject silently and return a result string telling the AIDM to inform the player.
+
+---
+
+## Tool result strings
+
+Every tool returns a one-line `toolResultContent` string describing what changed. Examples:
+
+- `"Player HP 12 → 7 (-5)."` (HP adjustment)
+- `"Bandit HP 14 → 0 — killed."` (NPC kill)
+- `"+15 GP. Player now has 30 GP."` (gold award)
+- `"Spawned bandit at tile (8, 4) as enemy_C."` (spawn)
+- `"Quest \"Slay All\" force-completed — rewards (+25 XP, +15 GP) granted automatically. Do NOT also call award_xp for this outcome."` (quest with double-credit warning)
+- `"Player gained 5 Temp HP — now has 5 Temp HP (kept higher per SRD)."` (temp HP)
+- `"Heroic Inspiration granted. Player may expend it to re-roll any one die."` (heroic inspiration)
+- `"TOOL BUDGET EXHAUSTED. Do not call any more tools this turn. Write the final narrative reply to the player now."` (loop-cap signal)
+
+Tools that fail or are blocked return a string explaining the failure, suitable for relaying to the player in-fiction. Tools that involve a die roll (`request_*_roll`) also populate a `rollResult` string that is rendered inline in the DM overlay as a 🎲 entry.
+
+`adjust_npc_hp` builds its result from before/after state directly (not by slicing the combat log), so unrelated log lines that may fire during a kill (quest completion, turn markers) can't pollute the result. `throw_item` slices the log but filters out `Quest complete:`, `Total XP:`, and turn-boundary markers.
+
+---
+
+## Streaming protocol
+
+The AIDM reply is **streamed** to the client over the WebSocket. Text chunks appear in the DM chat panel as they're generated rather than after the full reply completes — important for the story persona, where Claude Sonnet responses can take several seconds.
+
+### Server → client messages
+
+| Message                              | When                                                          | Client effect                                                                                                                             |
+| ------------------------------------ | ------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| `aidm_start`                         | Beginning of a `processAIDMChat` call                         | Open a fresh assistant bubble; baseline = 0.                                                                                              |
+| `aidm_chunk` `{ text }`              | Each text delta from Claude                                   | Append `text` to the current bubble.                                                                                                      |
+| `aidm_checkpoint`                    | After a non-speculative response completes                    | Advance the discard baseline to the current bubble length (chunks before this point are now permanent).                                   |
+| `aidm_speculative_discard`           | After a response that called a roll-requesting tool completes | Roll the bubble back to the last baseline (the chunks were speculative — Claude will write the real text after the roll result is known). |
+| `aidm_done` `{ reply, rollResults }` | End of the turn                                               | Replace the streamed bubble with the canonical `reply`; insert any `rollResults` before it as 🎲 entries.                                 |
+| `state_update`                       | Engine state changed via tool calls                           | Map and panels refresh (independent of the chat stream).                                                                                  |
+
+### Speculative-text handling
+
+When the model writes text alongside `request_attack_roll` / `request_ability_check` / `request_saving_throw`, that text is speculation about an unknown roll outcome. The chunks still stream to the client immediately, but the response is flagged speculative on completion — the server emits `aidm_speculative_discard` and the client rolls back. The next iteration's response (post-roll) contains the real narrative and gets a normal `aidm_checkpoint`.
+
+For all other tools (`reveal_npc_name`, `set_disposition`, `award_gold`, …) the outcome is determined by the tool's arguments, so accompanying text is canonical and kept (`aidm_checkpoint`).
 
 ---
 
 ## Implementation files
 
+### Server
+
 | File | Purpose |
 |------|---------|
-| `server/src/aidm.ts` | Conversation loop — prompt construction, Claude API call, tool dispatch |
-| `server/src/engine/AIDMTools.ts` | Tool schema definitions (`AIDM_TOOLS`) and `applyAIDMTool` switch |
+| `server/src/aidm.ts` | Conversation loop — prompt construction, prompt-cache markers, streaming Claude API call, retry/backoff, history summarization, state refresh, tool dispatch |
+| `server/src/engine/AIDMTools.ts` | Tool schema definitions (`buildAIDMTools`), `applyAIDMTool` switch, per-turn guards (`resetTurnGuards` — quest/XP double-credit detection) |
 | `server/src/engine/GameEngine.ts` | Engine methods called by `applyAIDMTool` |
 | `server/src/engine/ConditionSystem.ts` | Condition constants and predicate functions |
-| `server/src/engine/CombatSystem.ts` | Roll functions: `rollSkillCheck`, `rollSavingThrow` |
+| `server/src/engine/CombatSystem.ts` | Roll functions: `rollSkillCheck`, `rollSavingThrow`, `rollPlayerAttackVsAc`, `rollNpcAttackVsAc` |
+| `server/src/engine/CombatFlow.ts` | Turn transitions; emits the `── Aldric's turn ──` boundary marker |
+| `server/src/sessions.ts` | Per-session storage: sliding-window history, full archive, AIDM mutex, WebSocket push |
+| `server/src/index.ts` | `/game/session/:id/aidm` route — mutex acquire, stream wiring, persistence |
+
+### Client
+
+| File | Purpose |
+|------|---------|
+| `client/src/net/GameClient.ts` | WebSocket message dispatch — routes `aidm_start` / `aidm_chunk` / `aidm_checkpoint` / `aidm_speculative_discard` / `aidm_done` to handlers |
+| `client/src/ui/HUD.ts` | DM chat panel — streaming `aidmStart` / `aidmChunk` / `aidmCheckpoint` / `aidmSpeculativeDiscard` / `aidmDone` methods render text live with baseline-based rollback |
+| `client/src/scenes/GameScene.ts` | Wires `GameClient` stream handlers to the HUD methods |
+
+### Shared
+
+| File | Purpose |
+|------|---------|
+| `shared/types.ts` | `ServerWSMessage` discriminated union — streaming protocol message shapes |

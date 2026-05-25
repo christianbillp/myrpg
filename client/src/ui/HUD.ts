@@ -133,6 +133,13 @@ export class HUD {
   private dmPersona: DMPersona = 'story';
   private dmThinking = false;
 
+  // Streaming AIDM state. While `dmStreaming` is true, the last entry of
+  // `dmHistory` is an assistant message being grown by aidm_chunk events;
+  // `dmStreamBaseline` is the text length BEFORE the latest run of chunks so
+  // aidm_speculative_discard can roll it back.
+  private dmStreaming = false;
+  private dmStreamBaseline = 0;
+
   constructor(scale: UIScale, callbacks: HUDCallbacks) {
     this.scale = scale;
     this.callbacks = callbacks;
@@ -406,21 +413,86 @@ export class HUD {
     this.dmStatusEl.textContent = 'The Dungeon Master considers…';
 
     try {
-      const { reply, rollResults } = await this.callbacks.onSendAIDM(prompt, this.dmPersona);
-      for (const r of rollResults) {
-        this.dmHistory.push({ role: 'user', content: ROLL_PREFIX + r });
-      }
-      this.dmHistory.push({ role: 'assistant', content: reply });
+      // Streaming chunks arrive in parallel via aidmChunk(). The HTTP promise
+      // resolves after the final aidm_done has fired. We rely on aidmDone() to
+      // append the rollResults and finalize the streaming bubble; the HTTP
+      // result is just a confirmation that the round completed.
+      await this.callbacks.onSendAIDM(prompt, this.dmPersona);
     } catch {
-      this.dmHistory.push({ role: 'assistant', content: '(The Dungeon Master is silent.)' });
+      // If streaming never produced anything, leave an apology in the bubble.
+      if (this.dmStreaming) {
+        this.aidmDone('(The Dungeon Master is silent.)', []);
+      } else {
+        this.dmHistory.push({ role: 'assistant', content: '(The Dungeon Master is silent.)' });
+        this.renderDmHistory();
+      }
     }
 
     this.dmThinking = false;
     this.dmInputEl.disabled = false;
     this.dmInputEl.focus();
     this.dmStatusEl.textContent = '';
-    this.renderDmHistory();
     this.callbacks.onDisableKeyboard();
+  }
+
+  // ── Streaming AIDM handlers (called from GameClient via GameScene) ─────────
+
+  aidmStart(): void {
+    // Open a fresh assistant bubble that incoming chunks will append to.
+    this.dmHistory.push({ role: 'assistant', content: '' });
+    this.dmStreaming = true;
+    this.dmStreamBaseline = 0;
+    this.renderDmHistory();
+  }
+
+  aidmChunk(text: string): void {
+    if (!this.dmStreaming) return;
+    const last = this.dmHistory[this.dmHistory.length - 1];
+    if (!last || last.role !== 'assistant') return;
+    last.content += text;
+    this.renderDmHistory();
+  }
+
+  aidmCheckpoint(): void {
+    if (!this.dmStreaming) return;
+    const last = this.dmHistory[this.dmHistory.length - 1];
+    if (!last || last.role !== 'assistant') return;
+    // The current run of chunks is canonical — future discards can only revert
+    // to here, not earlier.
+    this.dmStreamBaseline = last.content.length;
+  }
+
+  aidmSpeculativeDiscard(): void {
+    if (!this.dmStreaming) return;
+    const last = this.dmHistory[this.dmHistory.length - 1];
+    if (!last || last.role !== 'assistant') return;
+    last.content = last.content.slice(0, this.dmStreamBaseline);
+    this.renderDmHistory();
+  }
+
+  aidmDone(reply: string, rollResults: string[]): void {
+    if (this.dmStreaming) {
+      // Replace the streamed text with the canonical reply (handles any
+      // post-processing trim/whitespace differences) and append roll results.
+      const last = this.dmHistory[this.dmHistory.length - 1];
+      if (last && last.role === 'assistant') {
+        // Insert roll results BEFORE the final assistant reply so they appear
+        // in the same order as the non-streaming path.
+        this.dmHistory.pop();
+        for (const r of rollResults) {
+          this.dmHistory.push({ role: 'user', content: ROLL_PREFIX + r });
+        }
+        this.dmHistory.push({ role: 'assistant', content: reply });
+      }
+    } else {
+      for (const r of rollResults) {
+        this.dmHistory.push({ role: 'user', content: ROLL_PREFIX + r });
+      }
+      this.dmHistory.push({ role: 'assistant', content: reply });
+    }
+    this.dmStreaming = false;
+    this.dmStreamBaseline = 0;
+    this.renderDmHistory();
   }
 
   private renderDmHistory(): void {

@@ -8,17 +8,29 @@ const WS_URL  = 'ws://localhost:3000';
 export type StateUpdateHandler = (state: GameState, events: GameEvent[]) => void;
 export type AIDMReplyHandler   = (reply: string) => void;
 
+// Streaming AIDM handlers — fed by aidm_start / aidm_chunk /
+// aidm_speculative_discard / aidm_done WebSocket messages.
+export interface AIDMStreamHandlers {
+  onStart?: () => void;
+  onChunk?: (text: string) => void;
+  onCheckpoint?: () => void;
+  onSpeculativeDiscard?: () => void;
+  onDone?: (reply: string, rollResults: string[]) => void;
+}
+
 
 export class GameClient {
   private sessionId: string | null = null;
   private ws: WebSocket | null = null;
   private onStateUpdate: StateUpdateHandler | null = null;
   private onAIDMReply: AIDMReplyHandler | null = null;
+  private aidmStreamHandlers: AIDMStreamHandlers | null = null;
   private onDisconnect: (() => void) | null = null;
   private intentionalClose = false;
 
   setStateUpdateHandler(fn: StateUpdateHandler): void { this.onStateUpdate = fn; }
   setAIDMReplyHandler(fn: AIDMReplyHandler): void { this.onAIDMReply = fn; }
+  setAIDMStreamHandlers(handlers: AIDMStreamHandlers): void { this.aidmStreamHandlers = handlers; }
   setDisconnectHandler(fn: () => void): void { this.onDisconnect = fn; }
 
   resumeSession(sessionId: string): void { this.sessionId = sessionId; }
@@ -55,6 +67,16 @@ export class GameClient {
         this.onStateUpdate?.(msg.state, msg.events);
       } else if (msg.type === 'aidm_reply') {
         this.onAIDMReply?.(msg.reply);
+      } else if (msg.type === 'aidm_start') {
+        this.aidmStreamHandlers?.onStart?.();
+      } else if (msg.type === 'aidm_chunk') {
+        this.aidmStreamHandlers?.onChunk?.(msg.text);
+      } else if (msg.type === 'aidm_checkpoint') {
+        this.aidmStreamHandlers?.onCheckpoint?.();
+      } else if (msg.type === 'aidm_speculative_discard') {
+        this.aidmStreamHandlers?.onSpeculativeDiscard?.();
+      } else if (msg.type === 'aidm_done') {
+        this.aidmStreamHandlers?.onDone?.(msg.reply, msg.rollResults);
       }
     };
     this.ws.onerror = (e) => console.error('WebSocket error:', e);

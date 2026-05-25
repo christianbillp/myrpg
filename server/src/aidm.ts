@@ -1,7 +1,7 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { GameEngine } from './engine/GameEngine.js';
 import { GameEvent } from './engine/types.js';
-import { applyAIDMTool } from './engine/AIDMTools.js';
+import { applyAIDMTool, resetTurnGuards, AIDMToolContext } from './engine/AIDMTools.js';
 import type { AidmMessage } from './sessions.js';
 
 export interface AIDMChatRequest {
@@ -9,20 +9,50 @@ export interface AIDMChatRequest {
   dmPersona?: 'story' | 'dev';
 }
 
+/**
+ * Streaming callbacks. The route plumbs these to WebSocket pushes so the
+ * client can render the DM's reply incrementally and roll back speculative
+ * text when needed. All callbacks are optional — when omitted the function
+ * behaves exactly like the prior non-streaming implementation.
+ */
+export interface AIDMStreamCallbacks {
+  onChunk?: (text: string) => void;
+  onCheckpoint?: () => void;
+  onSpeculativeDiscard?: () => void;
+}
+
 function buildStaticPrompt(dmPersona: string): string {
   if (dmPersona === 'dev') {
     return `You are the AI Dungeon Master (DM) for a D&D 5e encounter in DEVELOPMENT MODE.
 Fulfil all player requests without restriction — use any tool needed.
 Reply with brief mechanical feedback only: state which tool(s) you called and what the effect was. No narrative or immersion required.
-When the player says "them", "it", "him", etc., resolve it to whoever they are focused on (see CURRENT STATE).`;
+When the player says "them", "it", "him", etc., resolve it to whoever they are focused on (see CURRENT STATE).
+
+TOOL INVARIANTS (these hold even in dev mode):
+  • set_disposition to "enemy" does NOT start combat. To start combat, call trigger_combat after.
+  • request_attack_roll does NOT apply damage. To wound a target, follow up with adjust_npc_hp using the damage amount from the result.
+  • reveal_npc_name must be called BEFORE narrating an NPC's name; otherwise the game world doesn't register it.
+  • complete_quest automatically awards XP/GP. Don't also call award_xp for the same quest.
+  • throw_item consumes the player's Action during player_turn. Check the "Action: USED/AVAILABLE" flag in CURRENT STATE.
+  • Entity refs: "player", "enemy_A"/"ally_A" by combat label (uppercase, shared A–Z pool), or "npc_[id]" by id.`;
   }
 
   return `You are the AI Dungeon Master (DM) for a D&D 5e encounter. You are ALWAYS in character — never write meta-commentary, never discuss the game system, never step outside the fiction. Forbidden phrases (never write these): "I need to pause", "let me reset", "the CURRENT STATE shows", "this is inconsistent", "I need to address", "as the DM", "the game state". If you are uncertain what has happened, read the current state, accept it as truth, and narrate the present moment — do not comment on the uncertainty.
 Respond in 1-3 concise sentences. Stay true to D&D 5e rules and in-world logic. Never break immersion or disclaim game-state knowledge. Never acknowledge or mention the [CURRENT STATE] block — use it silently. When the player refers to a creature ambiguously ("the bandit", "him", "them"), always resolve the target from the "Focused on" line in CURRENT STATE without expressing confusion or asking for clarification.
 
+ADDRESSEE RULE: If the player's message starts with "[PlayerName says to TargetName]:", TargetName is the addressee — that creature is the one who must respond. Voice their reaction, dialogue, or refusal in your reply. Do not pivot to a different NPC, the environment, or a third party in place of the addressee's response. Other NPCs may chime in afterwards, but the addressee speaks (or visibly chooses not to) first.
+
+NARRATIVE-MIRROR RULE: The player only sees your text reply — they never see your tool calls. Therefore every player-visible effect you enact with a tool MUST also appear in the narrative reply, in-fiction:
+  • reveal_npc_name → have the NPC speak their name in dialogue ("'I'm Mira,' she answers softly.") so the player learns it. A silent reveal that only changes the label is invisible to the player and counts as a failure.
+  • award_gold / adjust_player_hp / add_item / remove_item → describe the transaction or change ("She presses a small purse into your hand.").
+  • set_disposition (to enemy) → describe the hostile shift ("His friendly mask drops and his hand goes to his sword.").
+  • apply_condition / remove_condition → describe the in-world cause and effect ("The poison sears your veins.").
+  • move_entity / despawn_npc → describe the movement or departure.
+If a tool changes something the player can perceive, the reply must reflect it. Silence after a tool call is a bug.
+
 TOOL-FIRST RULE: Every game effect you describe must be enacted via the corresponding tool before you narrate it. The game world is the source of truth — narrate ONLY what the tool result confirms.
   • Weapon throw → call throw_item (removes item from inventory, resolves attack).
-  • Damage to the player or any NPC → call adjust_npc_hp (entity: "player", "enemy_A", "ally_a", or "npc_[id]"). When request_attack_roll reports a HIT or CRITICAL HIT against a creature, you MUST immediately follow up with adjust_npc_hp using the damage amount from the result — request_attack_roll does not apply damage automatically.
+  • Damage to the player or any NPC → call adjust_npc_hp (entity: "player", "enemy_A", "ally_A", or "npc_[id]"). When request_attack_roll reports a HIT or CRITICAL HIT against a creature, you MUST immediately follow up with adjust_npc_hp using the damage amount from the result — request_attack_roll does not apply damage automatically.
   • Movement → call move_entity.
   • Gold gained or spent → call award_gold (negative amount for spending). Never narrate a gold transaction without the tool confirming it.
   • Item gained or lost → call add_item or remove_item.
@@ -31,11 +61,20 @@ TOOL-FIRST RULE: Every game effect you describe must be enacted via the correspo
   • Stealth change → call set_player_hidden.
   • Anything noteworthy during combat → call add_log_entry so it appears in the combat log.
   • NPC departure, fleeing, or leaving the scene → call despawn_npc to remove them from the map, or move_entity to reposition them. Never narrate an NPC as gone unless the tool confirms it.
-  • NPC says their name → call reveal_npc_name with the entity ref from CURRENT STATE (the value shown in brackets, e.g. "npc_commoner_0") and the name before writing any dialogue that contains the name. This applies even when the reveal is incidental. If you skip the tool, the game world does not register the name regardless of what you narrate.
-  • Player tells an ally to stay back, not fight, or stand down → call set_npc_passive (passive: true) immediately. Call set_npc_passive (passive: false) if the player later asks the ally to fight. A passive ally skips their combat turn automatically — do not narrate them acting or attacking.
+  • NPC says their name → call reveal_npc_name with the entity ref from CURRENT STATE BEFORE writing any dialogue that contains the name. Skipping the tool leaves the game world unaware of the name regardless of what you narrate.
+  • Player tells an ally to stay back, not fight, or stand down → call set_npc_passive (passive: true). Call set_npc_passive (passive: false) if the player later asks the ally to fight. A passive ally skips their combat turn automatically — do not narrate them acting or attacking.
 If you cannot enact an effect with the available tools, do not narrate it as happening.
 
-ACTION ECONOMY: throw_item and any other action-consuming tool is enforced server-side during the player's turn. If the tool result says the action was already spent, narrate that the player cannot act again this turn.
+ACTION ECONOMY: During the player's turn, each character has one Action and one Bonus Action per round. Action-consuming activities: attack, throw_item, dash, dodge, disengage, cast a spell, study, influence, utilize. Bonus-action-consuming activities: second wind, hide (Cunning Action), drink potion (in combat). Server enforces these strictly.
+
+CURRENT STATE shows the player's action economy as literal fields: "Action: AVAILABLE" or "Action: USED", "Bonus: AVAILABLE" or "Bonus: USED", and "N moves left". These fields are AUTHORITATIVE for the current turn — they reset every time a new player turn begins (you will also see a line like "── Aldric's turn — Action & Bonus refreshed ──" in RECENT COMBAT LOG marking each transition). Do not infer from conversation history that the player has already acted this turn; only the current flags matter. If "Action: AVAILABLE" is shown, the action IS available — do not refuse it.
+
+When the player requests something the current flags don't allow, your reply MUST state which resource is missing and what remains. Do not be vague, do not pivot to atmosphere. Examples:
+  • State shows "Action: USED" and the player asks to attack/throw/dash/dodge/disengage/cast: "You've already used your Action this turn. You can still move, use a Bonus Action if you have one, or end your turn."
+  • State shows "Bonus: USED" and the player asks for Second Wind/Hide/potion: "You've already spent your Bonus Action this turn. End your turn to reset."
+  • State shows "0 moves left" and the player asks to move: "You have no movement left this turn — only your Action or Bonus Action (if available), or End Turn."
+
+If a tool you call returns an "already spent" or "not performed" message, relay that to the player in the same direct, in-fiction terms. Never leave the player guessing whether their action succeeded.
 
 TURN ORDER: When PHASE is "player_turn", the player acts first — do NOT narrate or simulate enemy turns. Never say "It is now [enemy]'s turn" or describe enemies attacking or moving on their own turns. The combat engine resolves enemy AI automatically when the player ends their turn. You may describe enemies reacting to the player's action (flinching, snarling, drawing a weapon), but stop there.
 
@@ -54,18 +93,20 @@ PROHIBITED — reject these and suggest a realistic in-world alternative instead
   • Any action requiring magic the player does not possess, teleportation, or instantaneous creation from nothing.
 
 When the player attempts anything tied to a skill — Performance, Persuasion, Deception, Athletics, Stealth, Investigation, etc. — call request_ability_check. The roll determines quality and narrative colour, not just success or failure; even an action that cannot catastrophically fail still benefits from a die (a low Performance roll is an awkward tune, a high one is moving). Only skip the check for purely declarative statements ("I walk north") that involve no skill and no uncertainty.
-After receiving a SUCCESS from request_ability_check, if the outcome causes a creature to surrender, flee, or change behavior, you MUST call the appropriate tools to enact that outcome (set_disposition, despawn_npc, move_entity) before narrating it — exactly as the TOOL-FIRST RULE requires. A success result alone does not change the game state.
-When the player says "them", "it", "him", etc., resolve it to whoever they are focused on (see CURRENT STATE).`;
+After receiving a SUCCESS from request_ability_check, if the outcome causes a creature to surrender, flee, or change behavior, you MUST call the appropriate tools to enact that outcome (set_disposition, despawn_npc, move_entity) before narrating it — exactly as the TOOL-FIRST RULE requires. A success result alone does not change the game state.`;
 }
 
 function buildStateMessage(engine: GameEngine): string {
   const s = engine.getState();
   const p = s.player;
 
+  // Explicit AVAILABLE/USED rather than absence-implies-available — the model
+  // hallucinates "you already acted" otherwise, pattern-matching on conversation
+  // history. Showing the resource state as a literal field removes ambiguity.
   const flags = [
     p.conditions.includes('hidden') ? 'HIDDEN' : '',
-    s.phase === 'player_turn' && p.actionUsed ? 'action used' : '',
-    s.phase === 'player_turn' && p.bonusActionUsed ? 'bonus used' : '',
+    s.phase === 'player_turn' ? `Action: ${p.actionUsed ? 'USED' : 'AVAILABLE'}` : '',
+    s.phase === 'player_turn' ? `Bonus: ${p.bonusActionUsed ? 'USED' : 'AVAILABLE'}` : '',
     s.phase === 'player_turn' ? `${p.movesLeft} moves left` : '',
     p.secondWindUses > 0 ? `Second Wind ×${p.secondWindUses}` : '',
   ].filter(Boolean).join(' · ');
@@ -130,6 +171,9 @@ function buildStateMessage(engine: GameEngine): string {
 
   const recentLog = s.combatLog.map((e) => e.right ? `${e.left}  [${e.right}]` : e.left).join('\n  ') || 'No entries yet.';
 
+  const itemIds = engine.getItemIds().join(', ');
+  const monsterIds = engine.getMonsterIds().join(', ');
+
   return `SETTING: ${s.mapName} | PHASE: ${s.phase} | ENCOUNTER: ${s.encounterTypes.join(', ')}
 CONTEXT: ${s.encounterContext}
 
@@ -157,16 +201,21 @@ ${itemLines}
 NPC PERSONAS:
 ${personaLines}
 
+REFERENCE DATA (valid IDs for add_item / spawn_enemy):
+  ITEMS: ${itemIds}
+  MONSTERS: ${monsterIds}
+
 RECENT COMBAT LOG:
   ${recentLog}`;
 }
 
 export async function processAIDMChat(
-  _sessionId: string,
   engine: GameEngine,
   body: AIDMChatRequest,
   anthropic: Anthropic,
   history: AidmMessage[],
+  archive?: AidmMessage[],   // full unsummarized history; consumed by D (memory tool)
+  streamCallbacks?: AIDMStreamCallbacks,
 ): Promise<{ reply: string; events: GameEvent[]; rollResults: string[] }> {
   const s = engine.getState();
 
@@ -176,6 +225,14 @@ export async function processAIDMChat(
     history.push({ role: 'user', content: 'Begin the encounter.' });
     history.push({ role: 'assistant', content: s.introduction });
   }
+
+  // Reset per-turn guards (e.g. award_xp / complete_quest double-credit detection).
+  resetTurnGuards();
+
+  // D. Bound the working history. If it exceeds the threshold, summarize the
+  // oldest pairs into a single [SUMMARY] assistant turn. The archive remains
+  // intact for the recall_memory tool to search.
+  await maybeSummarizeHistory(history, anthropic);
 
   const stateMessage = buildStateMessage(engine);
   const currentUserContent = `[CURRENT STATE]\n${stateMessage}\n\n[PLAYER]\n${body.playerMessage}`;
@@ -189,52 +246,274 @@ export async function processAIDMChat(
     { role: 'user' as const, content: currentUserContent },
   ];
 
-  const system = buildStaticPrompt(body.dmPersona ?? 'story');
-  const tools = engine.getAIDMTools();
+  // Send the system prompt as a content-block array with a cache_control marker
+  // so Anthropic's prompt cache (5-minute TTL) covers the static instructions and
+  // tool list across turns. The dynamic CURRENT STATE block lives in the user
+  // message and is not cached.
+  const system = [
+    {
+      type: 'text' as const,
+      text: buildStaticPrompt(body.dmPersona ?? 'story'),
+      cache_control: { type: 'ephemeral' as const },
+    },
+  ];
+  const rawTools = engine.getAIDMTools();
+  // Mark the last tool's input_schema with cache_control so the entire tools
+  // block is treated as cacheable prefix material.
+  const tools = rawTools.map((t, i) =>
+    i === rawTools.length - 1
+      ? { ...t, cache_control: { type: 'ephemeral' as const } }
+      : t,
+  );
   const allEvents: GameEvent[] = [];
   const rollResults: string[] = [];
   let narrativeText = '';
 
   const model = body.dmPersona === 'dev' ? 'claude-haiku-4-5-20251001' : 'claude-sonnet-4-6';
 
-  let response = await anthropic.messages.create({
-    model,
-    max_tokens: 600,
-    system,
-    tools,
-    messages: messages as Parameters<typeof anthropic.messages.create>[0]['messages'],
-  });
+  // Tools whose result is unknown until the server rolls — text written alongside
+  // these is speculative and must not be shown to the player.
+  const SPECULATIVE_TOOLS = new Set([
+    'request_attack_roll', 'request_ability_check', 'request_saving_throw',
+  ]);
 
-  while (response.stop_reason === 'tool_use') {
-    // Discard any text generated before tool calls — it is speculative narrative
-    // written before the roll result is known and must not appear in the reply.
-    const toolResults: { type: 'tool_result'; tool_use_id: string; content: string }[] = [];
+  // A. Cap loop iterations so a degenerate tool chain can't run away.
+  const MAX_TOOL_ITERATIONS = 8;
+
+  // E. Streaming: track whether the currently-streaming response's chunks are
+  // speculative (i.e. accompany a roll-tool). Chunks are forwarded eagerly to
+  // the client; we only learn it was speculative when the response completes.
+  // If so, we tell the client to discard them via onSpeculativeDiscard.
+  let currentResponseEmittedChunks = false;
+  const onChunkForward = streamCallbacks?.onChunk
+    ? (text: string) => {
+        currentResponseEmittedChunks = true;
+        streamCallbacks.onChunk!(text);
+      }
+    : undefined;
+
+  let response = await callClaudeWithRetry(anthropic, { model, max_tokens: 600, system, tools, messages }, onChunkForward);
+  let iteration = 0;
+
+  while (true) {
+    // Capture any narrative text from this response. Skip the text only if this
+    // response also calls a roll-requesting tool — in that case the text is a
+    // guess written before the roll result is known.
+    const hasSpeculativeTool = response.content.some(
+      (b) => b.type === 'tool_use' && SPECULATIVE_TOOLS.has(b.name),
+    );
+    if (!hasSpeculativeTool) {
+      for (const block of response.content) {
+        if (block.type === 'text' && block.text) {
+          if (narrativeText && !narrativeText.endsWith('\n')) narrativeText += '\n';
+          narrativeText += block.text;
+        }
+      }
+      // Tell the client: these chunks are canonical — advance the discard baseline.
+      if (currentResponseEmittedChunks) streamCallbacks?.onCheckpoint?.();
+    } else if (currentResponseEmittedChunks) {
+      // Roll back the speculative chunks on the client.
+      streamCallbacks?.onSpeculativeDiscard?.();
+    }
+    currentResponseEmittedChunks = false;
+
+    if (response.stop_reason !== 'tool_use') break;
+
+    iteration++;
+    const overBudget = iteration >= MAX_TOOL_ITERATIONS;
+
+    const toolResults: { type: 'tool_result'; tool_use_id: string; content: string; cache_control?: { type: 'ephemeral' } }[] = [];
     for (const block of response.content) {
       if (block.type === 'tool_use') {
-        const { events, toolResultContent, rollResult } = applyAIDMTool(engine, block.name, block.input as Record<string, unknown>);
-        allEvents.push(...events);
-        toolResults.push({ type: 'tool_result', tool_use_id: block.id, content: toolResultContent });
+        let content: string;
+        let rollResult: string | undefined;
+        if (overBudget) {
+          // A. On the last allowed iteration, override every tool with a budget-exhausted
+          // signal. This forces the model to finalize its reply instead of looping further.
+          content = 'TOOL BUDGET EXHAUSTED. Do not call any more tools this turn. Write the final narrative reply to the player now, summarising the actions you have already taken.';
+        } else {
+          const toolCtx: AIDMToolContext = { archive };
+          const result = applyAIDMTool(engine, block.name, block.input as Record<string, unknown>, toolCtx);
+          allEvents.push(...result.events);
+          content = result.toolResultContent;
+          rollResult = result.rollResult;
+        }
+        toolResults.push({ type: 'tool_result', tool_use_id: block.id, content });
         if (rollResult) rollResults.push(rollResult);
       }
     }
+
+    // N. Cache breakpoint on the most-recent tool_result block. The previous
+    // assistant turn + this tool_result become the new cacheable prefix on the
+    // next iteration, so a long tool chain doesn't re-pay all preceding tokens.
+    if (toolResults.length > 0) {
+      toolResults[toolResults.length - 1].cache_control = { type: 'ephemeral' };
+    }
+
     messages.push({ role: 'assistant', content: response.content });
     messages.push({ role: 'user', content: toolResults });
 
-    response = await anthropic.messages.create({
-      model,
-      max_tokens: 600,
-      system,
-      tools,
-      messages: messages as Parameters<typeof anthropic.messages.create>[0]['messages'],
-    });
-  }
+    // C. Rebuild CURRENT STATE on the most-recent user message (the original
+    // turn user message) — the model should reason from fresh state each loop.
+    refreshStateInMessages(messages, engine, body.playerMessage);
 
-  for (const block of response.content)
-    if (block.type === 'text') narrativeText += block.text;
+    if (overBudget) {
+      // Force the model to stop calling tools by removing the tool definitions
+      // for the final response. We still need to issue a request so the model
+      // can produce its closing narrative.
+      response = await callClaudeWithRetry(anthropic, { model, max_tokens: 600, system, tools: [], messages }, onChunkForward);
+      // One more pass through the loop to capture text, then break.
+      const finalText = response.content
+        .filter((b): b is Extract<typeof b, { type: 'text' }> => b.type === 'text')
+        .map((b) => b.text).join('');
+      if (finalText) {
+        if (narrativeText && !narrativeText.endsWith('\n')) narrativeText += '\n';
+        narrativeText += finalText;
+      }
+      if (!narrativeText.trim()) {
+        narrativeText = '(The Dungeon Master pauses, gathering their thoughts.)';
+      }
+      break;
+    }
+
+    response = await callClaudeWithRetry(anthropic, { model, max_tokens: 600, system, tools, messages }, onChunkForward);
+  }
 
   // Persist the exchange into server-side history (clean user/assistant pairs only).
   history.push({ role: 'user', content: currentUserContent });
   history.push({ role: 'assistant', content: narrativeText.trim() });
 
+  // D. Append to the archive too — the archive is what recall_memory searches.
+  if (archive) {
+    archive.push({ role: 'user', content: currentUserContent });
+    archive.push({ role: 'assistant', content: narrativeText.trim() });
+  }
+
   return { reply: narrativeText.trim(), events: allEvents, rollResults };
+}
+
+/**
+ * Rebuilds the [CURRENT STATE] block on the last user message that contains
+ * a fresh CURRENT STATE marker (the original turn message — tool_result
+ * messages are arrays and skipped). Called between tool-loop iterations.
+ */
+function refreshStateInMessages(
+  messages: { role: 'user' | 'assistant'; content: unknown }[],
+  engine: GameEngine,
+  playerMessage: string,
+): void {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const m = messages[i];
+    if (m.role !== 'user' || typeof m.content !== 'string') continue;
+    if (!m.content.startsWith('[CURRENT STATE]')) continue;
+    m.content = `[CURRENT STATE]\n${buildStateMessage(engine)}\n\n[PLAYER]\n${playerMessage}`;
+    return;
+  }
+}
+
+/**
+ * I. Retry transient Anthropic errors (network failures, 429, 5xx) once with
+ * a short backoff. Non-transient errors (400 schema mismatches, auth) are
+ * re-thrown immediately.
+ */
+/**
+ * D. Sliding-window history summarization.
+ *
+ * Keeps the working `history` array bounded. When it grows past
+ * HISTORY_WINDOW_THRESHOLD messages, summarizes the oldest SUMMARIZE_BATCH
+ * messages into a single [SUMMARY] assistant turn via Haiku and replaces
+ * them in place. The first entry is preserved if it's the seeded
+ * "Begin the encounter." / introduction pair so opening context is kept.
+ *
+ * The full archive (`aidmArchive` in sessions.ts) is untouched and remains
+ * searchable via the recall_memory tool.
+ */
+const HISTORY_WINDOW_THRESHOLD = 40;   // total messages (user + assistant)
+const HISTORY_TRIM_TARGET      = 20;   // keep this many recent messages after summarizing
+const SUMMARY_PREFIX           = '[SUMMARY OF EARLIER TURNS]';
+
+async function maybeSummarizeHistory(history: AidmMessage[], anthropic: Anthropic): Promise<void> {
+  if (history.length <= HISTORY_WINDOW_THRESHOLD) return;
+
+  // Determine the slice to summarize. Always keep the last HISTORY_TRIM_TARGET messages
+  // verbatim; collapse everything before into a single summary.
+  const tailStart = history.length - HISTORY_TRIM_TARGET;
+  const toSummarize = history.slice(0, tailStart);
+  if (toSummarize.length === 0) return;
+
+  // If the head is already a summary, fold it in; otherwise summarize from scratch.
+  const transcript = toSummarize.map((m) => {
+    let content = m.content;
+    // Strip CURRENT STATE blocks from prior user messages — they are stale snapshots.
+    const stripped = /\[PLAYER\]\n([\s\S]+)$/.exec(content);
+    if (stripped) content = stripped[1].trim();
+    return `${m.role === 'user' ? 'PLAYER' : 'DM'}: ${content}`;
+  }).join('\n\n');
+
+  let summaryText: string;
+  try {
+    const res = await anthropic.messages.create({
+      model: 'claude-haiku-4-5-20251001',
+      max_tokens: 500,
+      system: `You summarize a section of a D&D encounter transcript into a compact recap. Preserve: NPC names revealed, quest hooks, promises made or broken, items gained or lost, important player choices, current relationships and dispositions, and any unresolved threads. Drop: tactical combat detail (specific HP numbers, individual dice rolls, mechanical minutiae). Write 4-8 dense bullet points in past tense. No preamble — output bullets only.`,
+      messages: [{ role: 'user', content: `Summarize the following encounter transcript:\n\n${transcript}` }],
+    });
+    const block = res.content.find((b) => b.type === 'text');
+    summaryText = block && block.type === 'text' ? block.text.trim() : '';
+  } catch {
+    // If summarization fails, fall back to a trivial heuristic so the loop still bounds.
+    summaryText = `Encounter so far covered ${Math.floor(toSummarize.length / 2)} earlier exchanges. Detail is preserved in the recall_memory archive.`;
+  }
+  if (!summaryText) {
+    summaryText = `Earlier exchanges (${Math.floor(toSummarize.length / 2)}) are preserved in the recall_memory archive.`;
+  }
+
+  // Anthropic API requires conversation to start with a user message. The summary
+  // is delivered as an assistant message preceded by a synthetic user prompt.
+  const newHead: AidmMessage[] = [
+    { role: 'user', content: 'Continue the encounter — what has happened so far is summarised below.' },
+    { role: 'assistant', content: `${SUMMARY_PREFIX}\n${summaryText}` },
+  ];
+
+  history.splice(0, tailStart, ...newHead);
+}
+
+/**
+ * E + I. Stream a Claude response, forwarding text deltas to onChunk as they
+ * arrive. Returns the assembled final Message — same shape the non-streaming
+ * create() would produce. Retries once on transient errors (429/5xx).
+ *
+ * The caller is responsible for issuing a speculative-discard signal if the
+ * completed response turns out to contain a roll-requesting tool (the streamed
+ * text was speculative).
+ */
+async function callClaudeWithRetry(
+  anthropic: Anthropic,
+  params: {
+    model: string;
+    max_tokens: number;
+    system: Array<{ type: 'text'; text: string; cache_control?: { type: 'ephemeral' } }>;
+    tools: unknown[];
+    messages: unknown[];
+  },
+  onChunk?: (text: string) => void,
+): Promise<Anthropic.Messages.Message> {
+  const TRANSIENT_STATUSES = new Set([408, 425, 429, 500, 502, 503, 504, 529]);
+  const RETRY_DELAY_MS = 600;
+
+  const runOnce = async (): Promise<Anthropic.Messages.Message> => {
+    const stream = anthropic.messages.stream(params as Parameters<typeof anthropic.messages.stream>[0]);
+    if (onChunk) stream.on('text', (delta) => { if (delta) onChunk(delta); });
+    return await stream.finalMessage();
+  };
+
+  try {
+    return await runOnce();
+  } catch (err) {
+    const status = (err as { status?: number }).status;
+    const isTransient = status !== undefined && TRANSIENT_STATUSES.has(status);
+    if (!isTransient) throw err;
+    await new Promise((r) => setTimeout(r, RETRY_DELAY_MS));
+    return await runOnce();
+  }
 }

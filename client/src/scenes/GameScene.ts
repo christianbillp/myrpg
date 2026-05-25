@@ -411,6 +411,14 @@ export class GameScene extends Phaser.Scene {
       onDisableKeyboard: () => this.input.keyboard?.disableGlobalCapture(),
       onEnableKeyboard:  () => this.input.keyboard?.enableGlobalCapture(),
     });
+    // E. Hook the AIDM streaming protocol into the HUD's chat panel.
+    gameClient.setAIDMStreamHandlers({
+      onStart:              () => this.hud.aidmStart(),
+      onChunk:              (text) => this.hud.aidmChunk(text),
+      onCheckpoint:         () => this.hud.aidmCheckpoint(),
+      onSpeculativeDiscard: () => this.hud.aidmSpeculativeDiscard(),
+      onDone:               (reply, rollResults) => this.hud.aidmDone(reply, rollResults),
+    });
   }
 
   private buildHUDState(state: GameState): HUDState {
@@ -494,7 +502,11 @@ export class GameScene extends Phaser.Scene {
   private drawHighlights(state: GameState): void {
     this.highlightLayer.clear();
     this.movePathLayer.clear();
-    if (state.phase !== "player_turn" || state.player.movesLeft <= 0 || !this.player) return;
+    if (!this.player) return;
+
+    const inCombatTurn = state.phase === "player_turn" && state.player.movesLeft > 0;
+    const inExploringMoveMode = state.phase === "exploring" && this.moveMode;
+    if (!inCombatTurn && !inExploringMoveMode) return;
 
     const { cols, rows, passable } = state.map;
     const px = this.player.tileX, py = this.player.tileY;
@@ -504,9 +516,12 @@ export class GameScene extends Phaser.Scene {
     dist[py][px] = 0;
     const queue: [number, number][] = [[py, px]];
 
+    // Combat caps movement by movesLeft; exploration walk is unlimited.
+    const maxDist = state.phase === "player_turn" ? state.player.movesLeft : Infinity;
+
     while (queue.length > 0) {
       const [cy, cx] = queue.shift()!;
-      if (dist[cy][cx] >= state.player.movesLeft) continue;
+      if (dist[cy][cx] >= maxDist) continue;
       for (const [dr, dc] of [
         [0, 1], [0, -1], [1, 0], [-1, 0],
         [1, 1], [1, -1], [-1, 1], [-1, -1],

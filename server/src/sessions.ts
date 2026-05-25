@@ -21,8 +21,10 @@ interface Session {
   engine: GameEngine;
   ws: WebSocket | null;
   aidmHistory: AidmMessage[];
+  aidmArchive: AidmMessage[];   // full history (pre-summarization); for the memory tool
   adventureLines: EncounterLogLine[];
   adventureMeta: AdventureMeta;
+  aidmBusy: boolean;             // simple mutex flag
 }
 
 const sessions = new Map<string, Session>();
@@ -33,6 +35,7 @@ export function createSession(sessionId: string, engine: GameEngine): void {
     engine,
     ws: null,
     aidmHistory: [],
+    aidmArchive: [],
     adventureLines: [],
     adventureMeta: {
       timestamp: new Date().toISOString(),
@@ -41,7 +44,28 @@ export function createSession(sessionId: string, engine: GameEngine): void {
       xpStart: s.player.xp,
       goldStart: s.player.gold,
     },
+    aidmBusy: false,
   });
+}
+
+export function getAidmArchive(sessionId: string): AidmMessage[] | undefined {
+  return sessions.get(sessionId)?.aidmArchive;
+}
+
+/**
+ * Acquire the per-session AIDM mutex. Returns true if acquired (caller must
+ * call releaseAidmLock when done), false if another request is already running.
+ */
+export function tryAcquireAidmLock(sessionId: string): boolean {
+  const session = sessions.get(sessionId);
+  if (!session || session.aidmBusy) return false;
+  session.aidmBusy = true;
+  return true;
+}
+
+export function releaseAidmLock(sessionId: string): void {
+  const session = sessions.get(sessionId);
+  if (session) session.aidmBusy = false;
 }
 
 export function pushAdventureLines(sessionId: string, lines: EncounterLogLine[]): void {
