@@ -17,16 +17,6 @@ export interface QuestDisplay {
   completed: boolean;
 }
 
-export interface PlayerPanelSpell {
-  id: string;
-  name: string;
-  level: number;
-  castingTime: string;
-  range: string;
-  /** Short mechanical summary, e.g. "1d10 fire · ranged spell" or "DEX save DC 13 · 3d6 fire · 15-ft cone". */
-  detail: string;
-}
-
 /** Display info for a class feature button + resource chip. */
 export interface PlayerPanelFeature {
   id: string;
@@ -46,8 +36,6 @@ export interface PlayerPanelActionState {
   throwableItems: Array<{ id: string; name: string }>;
   availableActions: AvailableActions;
   mainAttackName: string;
-  /** Subset of known/prepared spells the player can cast right now (full metadata + label). */
-  castableSpells: PlayerPanelSpell[];
   /** Currently remaining spell slots indexed by level − 1. */
   spellSlots: number[];
   /** Spell id currently being concentrated on, or null. */
@@ -56,6 +44,8 @@ export interface PlayerPanelActionState {
   concentratingOnName: string | null;
   /** Class features this character knows — used to render class-specific buttons + resource chips. */
   features: PlayerPanelFeature[];
+  /** When set, the action area is replaced with a "Select target for: NAME" banner instead of the usual buttons. */
+  spellTargetPrompt: { spellName: string; asRitual: boolean } | null;
 }
 
 export interface PlayerPanelCallbacks {
@@ -63,7 +53,6 @@ export interface PlayerPanelCallbacks {
   onSearch: () => void;
   onAttack: () => void;
   onThrow: (itemId: string) => void;
-  onCast: (spellId: string) => void;
   onUseFeature: (featureId: string) => void;
   onDash: () => void;
   onDodge: () => void;
@@ -99,7 +88,6 @@ export class PlayerPanel {
 
   private visible = true;
   private pickerOpen = false;
-  private spellPickerOpen = false;
   private lastActionState: PlayerPanelActionState | null = null;
   private readonly callbacks: PlayerPanelCallbacks;
   private readonly playerDef: PlayerDef;
@@ -283,18 +271,25 @@ export class PlayerPanel {
 
     if (!this.visible) return;
 
-    if (this.pickerOpen) {
-      this.renderPicker();
+    // Spell-targeting mode replaces all action buttons with a guidance banner.
+    // The Game Scene owns the actual click handling; this is purely the prompt.
+    if (state.spellTargetPrompt) {
+      const banner = document.createElement('div');
+      const ritualSuffix = state.spellTargetPrompt.asRitual ? ' (ritual)' : '';
+      banner.style.cssText = `padding:14px 12px;font-size:11px;color:#c8dae8;text-align:center;
+        background:#0a1a2a;border:1px solid #2a4a6a;line-height:1.5;margin:0 8px;`;
+      banner.innerHTML = `Select target for:<br/><span style="color:#7aadcc;font-size:12px;">${escHtml(state.spellTargetPrompt.spellName)}${escHtml(ritualSuffix)}</span><br/><span style="color:#556677;font-size:10px;">Click a creature, or press ESC to cancel.</span>`;
+      this.actionArea.appendChild(banner);
       return;
     }
-    if (this.spellPickerOpen) {
-      this.renderSpellPicker();
+
+    if (this.pickerOpen) {
+      this.renderPicker();
       return;
     }
 
     const { mode, actionUsed, bonusActionUsed, movesLeft, moveMode, availableActions: aa } = state;
     const btn = (label: string, bg: string, onClick: () => void) => this.makeBtn(label, bg, onClick);
-    const canCastAny = aa.castableSpellIds.length > 0;
 
     if (mode === 'exploring') {
       const atkEl = this.makeTwoLineBtn('ATTACK', state.mainAttackName, '#1a4a1e', aa.canAttack ? this.callbacks.onAttack : () => {});
@@ -304,12 +299,6 @@ export class PlayerPanel {
       const throwExEl = this.makeBtn('THROW', '#1a4a1e', state.throwableItems.length > 0 ? () => { this.pickerOpen = true; this.refreshActions(state); } : () => {});
       throwExEl.disabled = state.throwableItems.length === 0;
       this.actionArea.prepend(throwExEl);
-
-      if (state.castableSpells.length > 0 || state.spellSlots.length > 0) {
-        const castEl = this.makeBtn('CAST', '#1a4a1e', canCastAny ? () => { this.spellPickerOpen = true; this.refreshActions(state); } : () => {});
-        castEl.disabled = !canCastAny;
-        this.actionArea.prepend(castEl);
-      }
 
       if (aa.canShortRest)
         this.actionArea.prepend(btn('SHORT REST', '#1a2a3a', this.callbacks.onShortRest));
@@ -331,12 +320,6 @@ export class PlayerPanel {
       const throwEl = this.makeBtn('THROW', GREEN, !actionUsed && state.throwableItems.length > 0 ? () => { this.pickerOpen = true; this.refreshActions(state); } : () => {});
       throwEl.disabled = actionUsed || state.throwableItems.length === 0;
       this.actionArea.prepend(throwEl);
-
-      if (state.castableSpells.length > 0 || state.spellSlots.length > 0) {
-        const castEl = this.makeBtn('CAST', '#1a4a1e', canCastAny ? () => { this.spellPickerOpen = true; this.refreshActions(state); } : () => {});
-        castEl.disabled = !canCastAny;
-        this.actionArea.prepend(castEl);
-      }
 
       const disEl = this.makeBtn('DISENGAGE', GREEN, this.callbacks.onDisengage);
       disEl.disabled = actionUsed;
@@ -383,28 +366,6 @@ export class PlayerPanel {
     }
     this.actionArea.prepend(this.makeBtn('↩ CANCEL', '#2a1a1a', () => {
       this.pickerOpen = false;
-      if (this.lastActionState) this.refreshActions(this.lastActionState);
-    }));
-  }
-
-  private renderSpellPicker(): void {
-    const state = this.lastActionState!;
-    const castableIds = new Set(state.availableActions.castableSpellIds);
-    // Sort: cantrips first, then by level. Render up to MAX_PICKER_SLOTS.
-    const spells = state.castableSpells
-      .filter((sp) => castableIds.has(sp.id))
-      .slice(0, MAX_PICKER_SLOTS);
-
-    for (const sp of [...spells].reverse()) {
-      const tag = sp.level === 0 ? 'cantrip' : `L${sp.level}`;
-      this.actionArea.prepend(this.makeTwoLineBtn(`${sp.name} · ${tag}`, sp.detail, '#1e1a4a', () => {
-        this.spellPickerOpen = false;
-        this.callbacks.onCast(sp.id);
-        if (this.lastActionState) this.refreshActions(this.lastActionState);
-      }));
-    }
-    this.actionArea.prepend(this.makeBtn('↩ CANCEL', '#2a1a1a', () => {
-      this.spellPickerOpen = false;
       if (this.lastActionState) this.refreshActions(this.lastActionState);
     }));
   }

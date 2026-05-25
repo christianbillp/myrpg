@@ -566,6 +566,8 @@ export interface PlayerState {
   exhaustionLevel: number;
   conditions: string[];
   equippedSlotLabels: { armor: string | null; weapon: string | null; shield: string | null };
+  /** Current effective AC after armor / shield / Mage Armor / Defense fighting style. Synced from `playerDef.ac` after every `applyEquipment` call so the client doesn't have to recompute. */
+  ac: number;
   // ── Spellcasting runtime state ───────────────────────────────────────────
   /** Currently remaining spell slots, indexed by `spell.level − 1`. Empty array for non-casters. */
   spellSlots: number[];
@@ -674,7 +676,42 @@ export interface GameState {
   encounterContext: string;
   npcPersonas: NpcPersona[];
   availableActions: AvailableActions;
+  /** Set when the engine has paused on a reaction-eligible trigger. The next player action must be `resolveReaction`. Cleared on resolution. */
+  pendingReaction: PendingReaction | null;
 }
+
+// ── Reaction prompts ─────────────────────────────────────────────────────────
+//
+// When an enemy turn produces a reaction-eligible trigger (a target moves out
+// of the player's reach → potential Opportunity Attack; an incoming attack
+// would land by ≤5 over AC → potential Shield), the engine STOPS the turn
+// loop and surfaces a `pendingReaction` to the client. The next action MUST
+// be a `resolveReaction { accept }`. After that the engine applies (or skips)
+// the reaction and resumes advancing turns.
+
+export interface PendingReactionOA {
+  kind: 'opportunity_attack';
+  /** Id of the NPC that moved out of reach and is now provoking the OA. */
+  npcId: string;
+  /** Display name of the provoking NPC (already disambiguated, e.g. "Bridge Bandit (A)"). */
+  npcName: string;
+}
+
+export interface PendingReactionShield {
+  kind: 'shield';
+  /** Id of the attacking NPC. */
+  attackerId: string;
+  /** Display name of the attacker (disambiguated). */
+  attackerName: string;
+  /** Damage that lands if the player declines Shield. */
+  incomingDamage: number;
+  /** The attack roll total — exposed so the UI can explain what Shield would convert. */
+  attackTotal: number;
+  /** What the player's AC would become with Shield up. */
+  shieldedAc: number;
+}
+
+export type PendingReaction = PendingReactionOA | PendingReactionShield;
 
 // ── Animation events ─────────────────────────────────────────────────────────
 
@@ -689,9 +726,10 @@ export type PlayerAction =
   | { type: 'moveTo'; tileX: number; tileY: number }
   | { type: 'attack'; targetId?: string }
   | { type: 'throw'; itemId: string; targetId?: string }
-  | { type: 'castSpell'; spellId: string; slotLevel: number; targetIds?: string[]; tile?: { x: number; y: number } }
+  | { type: 'castSpell'; spellId: string; slotLevel: number; targetIds?: string[]; tile?: { x: number; y: number }; asRitual?: boolean }
   | { type: 'hide' }
   | { type: 'useFeature'; featureId: string; targetId?: string; tile?: { x: number; y: number } }
+  | { type: 'resolveReaction'; accept: boolean }
   | { type: 'dash' }
   | { type: 'dodge' }
   | { type: 'disengage' }

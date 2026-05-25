@@ -64,7 +64,7 @@ Every user message is prefixed with a `[CURRENT STATE]` block that the engine bu
 
 - Map name, phase, and encounter types
 - Player tile, HP, gold, inventory, equipped items, and explicit action-economy fields: `Action: AVAILABLE`/`USED`, `Bonus: AVAILABLE`/`USED`, `N moves left`, `HIDDEN`. Class-feature resource pools appear as `{feature-id} ×N` chips (e.g. `second-wind ×2`) — one chip per non-empty entry in `PlayerState.resources`. Caster characters additionally show `Slots L1:n[,L2:n…]`, `Concentrating: <spellId>` while a concentration spell is active, and a `Prepared spells: [ids]` line beneath the equipped slots.
-- All combatants (enemies and allies) with HP, tile, disposition, conditions
+- All combatants (enemies and allies) with HP, tile, disposition, conditions, and (while combat is active) a `Reaction: AVAILABLE`/`USED` flag — Reactions refresh at the start of each creature's own turn, so an enemy that has already burned its Reaction (e.g. on an Opportunity Attack) cannot react again until its next turn comes around
 - Neutral NPCs with tile, including revealed names if any (see [`reveal_npc_name`](#reveal_npc_name))
 - A separate **CORPSES** section listing dead NPCs (searchable but cannot act)
 - Active quests with progress

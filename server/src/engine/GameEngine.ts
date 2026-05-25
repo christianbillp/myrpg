@@ -20,6 +20,7 @@ import {
   endCombat as cfEndCombat, autoEndCombatIfNoEnemies as cfAutoEndCombat,
   triggerCombat as cfTriggerCombat, doStartCombat as cfDoStartCombat,
   enterEnemyPhase as cfEnterEnemyPhase, doRollDeathSave as cfDoRollDeathSave,
+  doResolveReaction as cfDoResolveReaction,
 } from './CombatFlow.js';
 import {
   doAttack as caDoAttack, throwItem as caThrowItem,
@@ -62,6 +63,7 @@ export class GameEngine {
       playerDefs: defs.playerDefs.map((p) => p.id === this.playerDef.id ? this.playerDef : p),
     };
     applyEquipment(this.playerDef, state.player.equippedSlots, this.defs.equipment, state.player.mageArmor);
+    state.player.ac = this.playerDef.ac;
     state.player.equippedSlotLabels = computeEquippedSlotLabels(this.playerDef, state.player.equippedSlots, this.defs.equipment);
 
     for (const npc of state.npcs) npc.inventoryIds ??= [];
@@ -128,10 +130,11 @@ export class GameEngine {
           events.push(...caThrowItem(this.ctx, action.itemId, action.targetId));
         break;
       case 'castSpell':
-        spDoCastSpell(this.ctx, action.spellId, action.slotLevel, action.targetIds, action.tile, events);
+        spDoCastSpell(this.ctx, action.spellId, action.slotLevel, action.targetIds, action.tile, !!action.asRitual, events);
         break;
       case 'hide':         caDoHide(this.ctx); break;
       case 'useFeature':   doUseFeature(this.ctx, action.featureId, { targetId: action.targetId, tile: action.tile }, events); break;
+      case 'resolveReaction': cfDoResolveReaction(this.ctx, action.accept, events); break;
       case 'dash':         caDoDash(this.ctx); break;
       case 'dodge':        caDoDodge(this.ctx); break;
       case 'disengage':    caDoDisengage(this.ctx); break;
@@ -322,9 +325,9 @@ export class GameEngine {
     return caThrowItem(this.ctx, itemId, targetId);
   }
 
-  castSpell(spellId: string, slotLevel: number, targetIds?: string[], tile?: { x: number; y: number }): GameEvent[] {
+  castSpell(spellId: string, slotLevel: number, targetIds?: string[], tile?: { x: number; y: number }, asRitual = false): GameEvent[] {
     const events: GameEvent[] = [];
-    spDoCastSpell(this.ctx, spellId, slotLevel, targetIds, tile, events);
+    spDoCastSpell(this.ctx, spellId, slotLevel, targetIds, tile, asRitual, events);
     return events;
   }
 

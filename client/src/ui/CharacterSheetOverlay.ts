@@ -64,6 +64,10 @@ export interface CharacterSheetCallbacks {
   onEquip: (slot: "armor" | "weapon" | "shield", itemId: string) => void;
   onUnequip: (slot: "armor" | "weapon" | "shield") => void;
   onUse: (itemId: string) => void;
+  /** Begin a normal cast for the named spell. Caller handles target prompting + closing the sheet. */
+  onCastSpell: (spellId: string) => void;
+  /** Begin a ritual cast for the named spell (no slot, exploring-only). */
+  onRitualCast: (spellId: string) => void;
   onClose: () => void;
 }
 
@@ -78,6 +82,10 @@ export interface CharacterSheetInputs {
   allSpells: SpellDef[];
   /** Concentration display name (resolved by caller from concentratingOn). */
   concentratingOnName: string | null;
+  /** Spell ids the engine considers currently castable (action-economy + slot ok). */
+  castableSpellIds: string[];
+  /** Phase — gates ritual casting (exploring-only). */
+  isExploring: boolean;
 }
 
 export class CharacterSheetOverlay extends BaseOverlay {
@@ -222,8 +230,8 @@ export class CharacterSheetOverlay extends BaseOverlay {
             <div style="font-size:14px;color:#aabbcc;">${state.hp} / ${playerDef.maxHp}</div>
           </div>
           <div style="flex:1;padding:6px 8px;border:1px solid ${DIM};background:#0a0a18;">
-            <div style="font-size:9px;color:#556677;letter-spacing:1px;">AC</div>
-            <div style="font-size:14px;color:#aabbcc;">${playerDef.ac}</div>
+            <div style="font-size:9px;color:#556677;letter-spacing:1px;">AC${state.mageArmor ? " (Mage Armor)" : ""}</div>
+            <div style="font-size:14px;color:#aabbcc;">${state.ac}</div>
           </div>
           <div style="flex:1;padding:6px 8px;border:1px solid ${DIM};background:#0a0a18;">
             <div style="font-size:9px;color:#556677;letter-spacing:1px;">SPEED</div>
@@ -382,7 +390,7 @@ export class CharacterSheetOverlay extends BaseOverlay {
 
       <div style="height:1px;background:${DIM};margin:6px 0;"></div>
       <div style="font-size:11px;color:${ACCENT};text-align:center;padding-bottom:4px;">
-        AC ${playerDef.ac}  ·  ${state.gold} GP  ·  ${escHtml(playerDef.mainAttack.name)} ${escHtml(atkText)}
+        AC ${state.ac}${state.mageArmor ? " (Mage Armor)" : ""}  ·  ${state.gold} GP  ·  ${escHtml(playerDef.mainAttack.name)} ${escHtml(atkText)}
       </div>
     `);
 
@@ -420,6 +428,9 @@ export class CharacterSheetOverlay extends BaseOverlay {
     const bookIds    = playerDef.defaultSpellbookIds ?? [];
     const preparedSet = new Set(state.preparedSpellIds);
 
+    const castableSet = new Set(this.inputs.castableSpellIds);
+    const isExploring = this.inputs.isExploring;
+
     const renderSpellRow = (id: string, opts: { prepared?: boolean; tag?: string } = {}): string => {
       const sp = byId[id];
       if (!sp) return `<div style="font-size:10px;color:#445566;padding:2px 0;">${escHtml(id)} (unknown)</div>`;
@@ -429,13 +440,31 @@ export class CharacterSheetOverlay extends BaseOverlay {
       if (sp.area) bits.push(`${sp.area.sizeFeet}-ft ${sp.area.shape}`);
       else if (sp.rangeFeet > 0) bits.push(`${sp.rangeFeet} ft`);
       if (sp.concentration) bits.push("Concentration");
+      if (sp.ritual) bits.push("Ritual");
       const tag = opts.tag ?? (sp.level === 0 ? "cantrip" : `L${sp.level}`);
       const tagColor = opts.prepared ? ACCENT : "#778899";
+
+      // Buttons:
+      //   CAST         — visible iff the engine considers the spell castable now
+      //                  (i.e. it's in `castableSpellIds`).
+      //   RITUAL CAST  — visible iff the spell has the Ritual tag AND the
+      //                  character knows it (cantrip / spellbook); only enabled
+      //                  out of combat (exploring phase).
+      const castable = castableSet.has(id);
+      const castBtn = castable
+        ? `<button data-cast="${escHtml(id)}" class="gui-btn-overlay" style="margin-left:8px;width:54px;height:20px;background:#0a1520;border:1px solid ${ACCENT};color:${ACCENT};font-size:9px;">CAST</button>`
+        : "";
+      const ritualBtn = sp.ritual && isExploring
+        ? `<button data-ritual="${escHtml(id)}" class="gui-btn-overlay" style="margin-left:6px;width:78px;height:20px;background:#1a1a2e;border:1px solid #6a5a8e;color:#a89dcc;font-size:9px;">RITUAL CAST</button>`
+        : "";
+
       return `
-        <div style="display:flex;align-items:baseline;justify-content:space-between;padding:3px 4px;border-bottom:1px solid #1a2030;">
-          <span style="font-size:11px;color:${opts.prepared ? "#c8dae8" : "#778899"};">${escHtml(sp.name)}</span>
+        <div style="display:flex;align-items:center;justify-content:space-between;padding:3px 4px;border-bottom:1px solid #1a2030;">
+          <span style="font-size:11px;color:${opts.prepared ? "#c8dae8" : "#778899"};min-width:120px;">${escHtml(sp.name)}</span>
           <span style="font-size:9px;color:#556677;text-align:right;flex:1;margin-left:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escHtml(bits.join(" · "))}</span>
           <span style="font-size:9px;color:${tagColor};margin-left:10px;min-width:42px;text-align:right;">${escHtml(tag)}</span>
+          ${castBtn}
+          ${ritualBtn}
         </div>`;
     };
 
@@ -486,5 +515,18 @@ export class CharacterSheetOverlay extends BaseOverlay {
         ` : ""}
       </div>
     `);
+
+    this.contentEl.querySelectorAll<HTMLButtonElement>("[data-cast]").forEach((btn) => {
+      btn.addEventListener("pointerdown", (e) => {
+        e.stopPropagation();
+        this.callbacks.onCastSpell(btn.dataset.cast!);
+      });
+    });
+    this.contentEl.querySelectorAll<HTMLButtonElement>("[data-ritual]").forEach((btn) => {
+      btn.addEventListener("pointerdown", (e) => {
+        e.stopPropagation();
+        this.callbacks.onRitualCast(btn.dataset.ritual!);
+      });
+    });
   }
 }

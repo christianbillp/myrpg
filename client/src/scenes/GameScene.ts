@@ -47,9 +47,24 @@ export class GameScene extends Phaser.Scene {
   private overlays!: OverlayManager;
   private highlightLayer!: Phaser.GameObjects.Graphics;
   private movePathLayer!: Phaser.GameObjects.Graphics;
+  /** Persistent overlays driven by player state: Detect Magic ring, etc. Redrawn each state tick. */
+  private spellAuraLayer!: Phaser.GameObjects.Graphics;
+  /** Cursor-following AOE preview during spell-targeting mode. Cleared on exit. */
+  private spellAoeLayer!: Phaser.GameObjects.Graphics;
   private moveMode = false;
   private moveDist: number[][] = [];
   private movePrev: Array<Array<[number, number] | null>> = [];
+  /** Spell-targeting mode — set after CAST on a spell that needs a target.
+   *   - `kind: "creature"` waits for a creature click (attack-roll / auto-hit).
+   *   - `kind: "aoe"`      waits for a tile click. The area shape determines
+   *                       what gets highlighted as the cursor moves:
+   *                         shape "cone"  — origin = player tile, direction = cursor.
+   *                         shape "sphere"/"cube" + selfAnchored — disc on player tile.
+   *                         shape "sphere"/"cube" otherwise        — disc on cursor tile. */
+  private spellTargetMode:
+    | { kind: "creature"; spellId: string; spellName: string; asRitual: boolean }
+    | { kind: "aoe"; spellId: string; spellName: string; asRitual: boolean; radiusTiles: number; selfAnchored: boolean; shape: "cone" | "sphere" | "cube" | "line" }
+    | null = null;
   private pendingDmHistory: ChatMessage[] = [];
   private pendingIsResume = false;
 
@@ -90,13 +105,21 @@ export class GameScene extends Phaser.Scene {
     this.gridView = new GridView(this);
     this.highlightLayer = this.add.graphics();
     this.movePathLayer  = this.add.graphics();
+    this.spellAuraLayer = this.add.graphics();
+    this.spellAoeLayer  = this.add.graphics();
     this.gridView.container.add(this.highlightLayer);
     this.gridView.container.add(this.movePathLayer);
+    this.gridView.container.add(this.spellAuraLayer);
+    this.gridView.container.add(this.spellAoeLayer);
 
     this.overlays = new OverlayManager(this.uiScale, this.playerDef, {
       onEquip:     (slot, itemId) => gameClient.sendAction({ type: "equip", slot, itemId }),
       onUnequip:   (slot) => gameClient.sendAction({ type: "unequip", slot }),
       onUsePotion: () => gameClient.sendAction({ type: "usePotion" }),
+      onBeginSpellCast:  (spellId) => this.beginSpellCast(spellId, false),
+      onBeginRitualCast: (spellId) => this.beginSpellCast(spellId, true),
+      onAcceptReaction:  () => gameClient.sendAction({ type: "resolveReaction", accept: true }),
+      onDeclineReaction: () => gameClient.sendAction({ type: "resolveReaction", accept: false }),
       getItems:    () => this.registry.get("equipment") as ItemDef[],
       getSpells:   () => (this.registry.get("spells") ?? []) as SpellDef[],
     });
@@ -182,6 +205,7 @@ export class GameScene extends Phaser.Scene {
 
     this.overlays.showIntroIfNeeded(state);
     this.overlays.refreshCharacterSheetIfOpen(state);
+    this.overlays.syncReactionPrompt(state);
 
     this.updateHUD(state);
   }
@@ -289,6 +313,7 @@ export class GameScene extends Phaser.Scene {
     this.input.on("pointermove", (p: Phaser.Input.Pointer) => {
       this.gridView.pointerMove(p);
       this.drawMovePreview(p);
+      this.drawSpellAoePreview(p);
     });
     this.input.on("pointerup",   (p: Phaser.Input.Pointer) => {
       if (this.gridView.pointerUp(p)) this.handleMapClick(p);
@@ -309,13 +334,28 @@ export class GameScene extends Phaser.Scene {
     }
 
     const { player: ps, npcs } = this.gameState;
+    const nState = npcs.find(n => n.hp > 0 && n.tileX === tileX && n.tileY === tileY)
+      ?? npcs.find(n => n.tileX === tileX && n.tileY === tileY);
+
+    // Spell-target mode swallows the click. For creature-target spells, a
+    // creature click resolves and anything else cancels. For AOE spells, ANY
+    // tile click resolves at that tile (self-anchored spells ignore the tile
+    // and re-center on the player).
+    if (this.spellTargetMode) {
+      if (this.spellTargetMode.kind === "creature") {
+        const validTarget = nState && nState.hp > 0 ? nState.id : null;
+        this.finishSpellTargetClick(validTarget, tileX, tileY);
+      } else {
+        this.finishSpellTargetClick(null, tileX, tileY);
+      }
+      return;
+    }
+
     if (tileX === ps.tileX && tileY === ps.tileY) {
       this.playerPanel.toggle();
       return;
     }
 
-    const nState = npcs.find(n => n.hp > 0 && n.tileX === tileX && n.tileY === tileY)
-      ?? npcs.find(n => n.tileX === tileX && n.tileY === tileY);
     if (nState) {
       this.selectEntity(nState.id);
     } else {
@@ -355,6 +395,8 @@ export class GameScene extends Phaser.Scene {
 
     if (this.moveMode && Phaser.Input.Keyboard.JustDown(this.escKey))
       this.exitMoveMode();
+    if (this.spellTargetMode && Phaser.Input.Keyboard.JustDown(this.escKey))
+      this.exitSpellTargetMode();
 
     const phase = this.gameState.phase;
     if (phase !== "exploring" && phase !== "player_turn") return;
@@ -391,7 +433,6 @@ export class GameScene extends Phaser.Scene {
       onSearch:         () => gameClient.sendAction({ type: "search" }),
       onAttack:         () => gameClient.sendAction({ type: "attack", targetId: this.gameState?.selectedTargetId ?? undefined }),
       onThrow:          (itemId) => gameClient.sendAction({ type: "throw", itemId, targetId: this.gameState?.selectedTargetId ?? undefined }),
-      onCast:           (spellId) => this.castSpell(spellId),
       onDash:           () => gameClient.sendAction({ type: "dash" }),
       onDodge:          () => gameClient.sendAction({ type: "dodge" }),
       onDisengage:      () => gameClient.sendAction({ type: "disengage" }),
@@ -475,36 +516,6 @@ export class GameScene extends Phaser.Scene {
     const mainAttackName = weapon?.name ?? 'Unarmed Strike';
 
     // Build castable spell info — cantrips + prepared, then filter to castableSpellIds.
-    const knownIds = new Set<string>([
-      ...(this.playerDef.defaultCantripIds ?? []),
-      ...state.player.preparedSpellIds,
-    ]);
-    const castableSet = new Set(state.availableActions.castableSpellIds);
-    const dc = 8 + this.playerDef.proficiencyBonus + Math.floor(((this.playerDef.spellcastingAbility ? this.playerDef[this.playerDef.spellcastingAbility] : 10) - 10) / 2);
-    const castableSpells = allSpells
-      .filter(sp => knownIds.has(sp.id))
-      .map(sp => {
-        const bits: string[] = [];
-        if (sp.damage) bits.push(`${sp.damage.dice}d${sp.damage.sides}${sp.damage.bonus ? '+' + sp.damage.bonus : ''} ${sp.damage.type}`);
-        if (sp.attack === 'ranged-spell' || sp.attack === 'melee-spell') bits.push(`spell atk`);
-        if (sp.attack === 'auto-hit' && sp.darts) bits.push(`${sp.darts} darts`);
-        if (sp.save) bits.push(`${sp.save.ability.toUpperCase()} save DC ${dc}`);
-        if (sp.area) bits.push(`${sp.area.sizeFeet}-ft ${sp.area.shape}`);
-        else if (sp.rangeFeet > 0) bits.push(`${sp.rangeFeet} ft`);
-        return {
-          id: sp.id, name: sp.name, level: sp.level,
-          castingTime: sp.castingTime, range: sp.range,
-          detail: bits.join(' · '),
-        };
-      })
-      // Order: castable first (so they appear at the top of the picker), cantrips before levelled
-      .sort((a, b) => {
-        const aCastable = castableSet.has(a.id) ? 0 : 1;
-        const bCastable = castableSet.has(b.id) ? 0 : 1;
-        if (aCastable !== bCastable) return aCastable - bCastable;
-        return a.level - b.level;
-      });
-
     const concSpell = state.player.concentratingOn
       ? allSpells.find(sp => sp.id === state.player.concentratingOn)
       : null;
@@ -544,25 +555,76 @@ export class GameScene extends Phaser.Scene {
         .map(i => ({ id: i.id, name: i.name })),
       availableActions: state.availableActions,
       mainAttackName,
-      castableSpells,
       spellSlots:        state.player.spellSlots,
       concentratingOn:   state.player.concentratingOn,
       concentratingOnName: concSpell?.name ?? null,
       features,
+      spellTargetPrompt: this.spellTargetMode
+        ? { spellName: this.spellTargetMode.spellName, asRitual: this.spellTargetMode.asRitual }
+        : null,
     };
   }
 
-  private castSpell(spellId: string): void {
-    // Single-target spells: send the currently selected target's id (if any).
-    // AOE/self spells: omit target — server resolves based on player tile.
+  /**
+   * Entry point from the Character Sheet's CAST / RITUAL CAST buttons. If the
+   * spell needs a target (attack-roll spell), we enter `spellTargetMode` and
+   * wait for the next creature click; otherwise the spell fires immediately
+   * against the player tile.
+   */
+  private beginSpellCast(spellId: string, asRitual: boolean): void {
     const allSpells = (this.registry.get('spells') ?? []) as SpellDef[];
     const spell = allSpells.find(sp => sp.id === spellId);
     if (!spell) return;
     const slotLevel = spell.level === 0 ? 0 : spell.level;
-    const targetIds: string[] | undefined = (spell.attack === 'ranged-spell' || spell.attack === 'melee-spell' || spell.attack === 'auto-hit')
-      ? (this.gameState?.selectedTargetId ? [this.gameState.selectedTargetId] : undefined)
-      : undefined;
-    gameClient.sendAction({ type: "castSpell", spellId, slotLevel, targetIds });
+
+    const needsCreatureTarget =
+      spell.attack === 'ranged-spell' || spell.attack === 'melee-spell' || spell.attack === 'auto-hit';
+    const isAoe = !!spell.area;
+
+    if (needsCreatureTarget) {
+      this.spellTargetMode = { kind: "creature", spellId, spellName: spell.name, asRitual };
+    } else if (isAoe) {
+      const radiusTiles = Math.max(1, Math.ceil((spell.area?.sizeFeet ?? 5) / 5));
+      const selfAnchored = spell.range === 'self' || spell.rangeFeet === 0;
+      const shape = (spell.area?.shape ?? "sphere") as "cone" | "sphere" | "cube" | "line";
+      this.spellTargetMode = { kind: "aoe", spellId, spellName: spell.name, asRitual, radiusTiles, selfAnchored, shape };
+    } else {
+      // Self / utility: fire immediately.
+      gameClient.sendAction({ type: "castSpell", spellId, slotLevel, asRitual });
+      return;
+    }
+
+    if (this.gameState) this.playerPanel.refreshActions(this.buildActionState(this.gameState));
+  }
+
+  private exitSpellTargetMode(): void {
+    if (!this.spellTargetMode) return;
+    this.spellTargetMode = null;
+    this.spellAoeLayer.clear();
+    if (this.gameState) this.playerPanel.refreshActions(this.buildActionState(this.gameState));
+  }
+
+  /** Resolve a click while in spell-target mode. Single-target spells take a creature id; AOE spells take a tile. Any other click cancels. */
+  private finishSpellTargetClick(targetNpcId: string | null, tileX: number, tileY: number): void {
+    const stm = this.spellTargetMode;
+    if (!stm) return;
+    const allSpells = (this.registry.get('spells') ?? []) as SpellDef[];
+    const spell = allSpells.find(sp => sp.id === stm.spellId);
+    if (!spell) { this.exitSpellTargetMode(); return; }
+    const slotLevel = spell.level === 0 ? 0 : spell.level;
+
+    if (stm.kind === "creature") {
+      if (!targetNpcId) { this.exitSpellTargetMode(); return; }
+      gameClient.sendAction({ type: "castSpell", spellId: stm.spellId, slotLevel, targetIds: [targetNpcId], asRitual: stm.asRitual });
+    } else {
+      // AOE: the `tile` payload is the cursor click. For cones it tells the
+      // server the direction; for spheres/cubes it's the centre. Self-anchored
+      // sphere spells ignore the tile server-side but we still pass cursor —
+      // server resolves correctly either way.
+      const tile = { x: tileX, y: tileY };
+      gameClient.sendAction({ type: "castSpell", spellId: stm.spellId, slotLevel, tile, asRitual: stm.asRitual });
+    }
+    this.exitSpellTargetMode();
   }
 
   private updateHUD(state: GameState): void {
@@ -589,6 +651,7 @@ export class GameScene extends Phaser.Scene {
     this.playerPanel.refreshActions(this.buildActionState(state));
     this.hud.refresh(this.buildHUDState(state));
     this.drawHighlights(state);
+    this.drawSpellAura(state);
   }
 
   // ── Map drawing ───────────────────────────────────────────────────────────
@@ -691,6 +754,78 @@ export class GameScene extends Phaser.Scene {
       for (let col = 0; col < cols; col++) {
         if (dist[row][col] > 0)
           this.highlightLayer.fillRect(col * TILE_SIZE + 1, row * TILE_SIZE + 1, TILE_SIZE - 2, TILE_SIZE - 2);
+      }
+    }
+  }
+
+  /**
+   * Persistent overlay driven by concentration / lasting-effect state. Right now
+   * it draws the Detect Magic 30-ft sense ring; future ambient effects (Faerie
+   * Fire glow, Hex marker, etc.) plug in here.
+   */
+  private drawSpellAura(state: GameState): void {
+    this.spellAuraLayer.clear();
+    if (!this.player) return;
+    if (state.player.concentratingOn === "detect-magic") {
+      const cx = this.player.tileX * TILE_SIZE + TILE_SIZE / 2;
+      const cy = this.player.tileY * TILE_SIZE + TILE_SIZE / 2;
+      const radius = 6 * TILE_SIZE; // 30 ft = 6 tiles
+      this.spellAuraLayer.lineStyle(2, 0xffffff, 0.6);
+      this.spellAuraLayer.strokeCircle(cx, cy, radius);
+      // Inner fill — very faint so it doesn't clobber map detail.
+      this.spellAuraLayer.fillStyle(0xffffff, 0.04);
+      this.spellAuraLayer.fillCircle(cx, cy, radius);
+    }
+  }
+
+  /**
+   * AOE preview during spell-targeting mode. The shape of the highlight
+   * matches the spell's `area.shape` and the same tile-set logic the server
+   * uses to find affected creatures, so what you see is what gets hit.
+   *
+   *   - cone   → origin = player tile, direction = cursor. Tiles within the
+   *             53°-half-angle expanding triangle out to `radiusTiles`.
+   *   - sphere/cube + selfAnchored → chebyshev disc centred on player.
+   *   - sphere/cube otherwise       → chebyshev disc centred on cursor.
+   */
+  private drawSpellAoePreview(pointer: Phaser.Input.Pointer): void {
+    this.spellAoeLayer.clear();
+    const stm = this.spellTargetMode;
+    if (!stm || stm.kind !== "aoe" || !this.gameState || !this.player) return;
+    const { tileX, tileY } = this.gridView.toTile(pointer);
+    const { cols, rows } = this.gameState.map;
+    const r = stm.radiusTiles;
+    this.spellAoeLayer.fillStyle(0xff8844, 0.28);
+
+    const paintTile = (x: number, y: number): void => {
+      if (x < 0 || y < 0 || x >= cols || y >= rows) return;
+      this.spellAoeLayer.fillRect(x * TILE_SIZE + 1, y * TILE_SIZE + 1, TILE_SIZE - 2, TILE_SIZE - 2);
+    };
+
+    if (stm.shape === "cone") {
+      const ox = this.player.tileX, oy = this.player.tileY;
+      let dx = tileX - ox, dy = tileY - oy;
+      const len = Math.hypot(dx, dy);
+      if (len === 0) { dx = 1; dy = 0; } else { dx /= len; dy /= len; }
+      for (let ry = -r; ry <= r; ry++) {
+        for (let rx = -r; rx <= r; rx++) {
+          if (rx === 0 && ry === 0) continue;
+          const along = rx * dx + ry * dy;
+          if (along <= 0 || along > r + 0.5) continue;
+          const perp = Math.abs(-rx * dy + ry * dx);
+          if (perp > along * 0.5 + 0.5) continue;
+          paintTile(ox + rx, oy + ry);
+        }
+      }
+    } else {
+      const center = stm.selfAnchored
+        ? { x: this.player.tileX, y: this.player.tileY }
+        : { x: tileX, y: tileY };
+      for (let dy = -r; dy <= r; dy++) {
+        for (let dx = -r; dx <= r; dx++) {
+          if (Math.max(Math.abs(dx), Math.abs(dy)) > r) continue;
+          paintTile(center.x + dx, center.y + dy);
+        }
       }
     }
   }

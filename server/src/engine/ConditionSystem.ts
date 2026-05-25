@@ -30,6 +30,15 @@ export function isIncapacitated(conditions: string[]): boolean {
 }
 
 /**
+ * True when the creature is observable to others. Hidden and invisible creatures
+ * cannot be the target of reactions (e.g. Opportunity Attacks) — the SRD's
+ * reaction triggers require "a creature you can see".
+ */
+export function isVisible(conditions: string[]): boolean {
+  return !conditions.includes('hidden') && !conditions.includes('invisible');
+}
+
+/**
  * True when attackers targeting this creature have Advantage.
  * Prone grants advantage only within 1 tile; all other qualifying conditions always grant it.
  */

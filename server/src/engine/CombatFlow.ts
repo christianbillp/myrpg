@@ -2,9 +2,9 @@ import { GameEvent, NpcState, LogEntry, CombatMode } from './types.js';
 import type { GameContext } from './GameContext.js';
 import { rollOneInitiative, rollDeathSave } from './CombatSystem.js';
 import { runEnemyTurn, runAllyTurn, chebyshev } from './EnemyAI.js';
-import { isIncapacitated, hasSpeedZero, proneStandCost, TURN_CONDITIONS } from './ConditionSystem.js';
+import { isIncapacitated, isVisible, hasSpeedZero, proneStandCost, TURN_CONDITIONS } from './ConditionSystem.js';
 import { mod, d20 as d20Local } from './Dice.js';
-import { tryReactiveShield } from './SpellSystem.js';
+import { doNpcOpportunityAttack } from './CombatActions.js';
 
 // ── Combat lifecycle ────────────────────────────────────────────────────────
 
@@ -123,6 +123,9 @@ export function doStartCombat(ctx: GameContext, events: GameEvent[]): void {
  */
 export function advanceTurn(ctx: GameContext, events: GameEvent[]): void {
   const s = ctx.state;
+  // Paused on a reaction prompt — the next player action must be `resolveReaction`.
+  // Once resolved, doResolveReaction will call back into advanceTurn to continue.
+  if (s.pendingReaction) return;
   if (s.phase === 'defeat' || s.phase === 'death_saves') return;
   if (s.turnOrderIds.length === 0) return;
 
@@ -170,7 +173,11 @@ export function enterPlayerTurn(ctx: GameContext): void {
   s.phase = s.player.hp <= 0 ? 'death_saves' : 'player_turn';
   s.npcs.filter((n) => n.disposition !== 'neutral' && n.hp > 0).forEach((n) => {
     n.isActive = false;
-    n.reactionUsed = false;
+    // NOTE: NPC reactions reset at the START of THAT NPC's own turn — see
+    // runSingleEnemyTurn / runSingleAllyTurn. Resetting here would let an NPC
+    // that already burned its reaction (e.g. an Opportunity Attack against an
+    // ally during its own turn) get it back as soon as the player's turn
+    // begins, regardless of whether the NPC has acted again.
     n.conditions = n.conditions.filter((c) => !TURN_CONDITIONS.includes(c));
   });
   s.player.actionUsed = false;
@@ -271,7 +278,7 @@ export function doRollDeathSave(ctx: GameContext, events: GameEvent[]): void {
  * NPC: bare name when unique, "Name (Label)" when more than one NPC in the
  * current encounter shares the same base name and the NPC has a combat label.
  */
-function combatantDisplayName(npc: NpcState, allNpcs: NpcState[]): string {
+export function combatantDisplayName(npc: NpcState, allNpcs: NpcState[]): string {
   const base = npc.revealedName ?? npc.name;
   const duplicates = allNpcs.filter((n) => (n.revealedName ?? n.name) === base && n.disposition !== 'neutral').length;
   if (duplicates > 1 && npc.combatLabel) return `${base} (${npc.combatLabel})`;
@@ -282,6 +289,8 @@ function runSingleEnemyTurn(ctx: GameContext, npc: NpcState, events: GameEvent[]
   const s = ctx.state;
   const def = ctx.resolveMonsterDef(npc.defId);
   if (!def) { npc.isActive = false; return; }
+  // Per SRD: a creature's Reaction refreshes at the start of its own turn.
+  npc.reactionUsed = false;
 
   const occupied: [number, number][] = s.npcs
     .filter((n) => n !== npc && n.hp > 0)
@@ -307,6 +316,14 @@ function runSingleEnemyTurn(ctx: GameContext, npc: NpcState, events: GameEvent[]
 
   const endedAdjacentToPlayer = chebyshev(result.finalTileX, result.finalTileY, s.player.tileX, s.player.tileY) <= 1;
 
+  // Snapshot which allies were adjacent at the START of this enemy's movement.
+  // We resolve their OAs after the move using start-vs-end positions, mirroring
+  // how the player's OA against this enemy is detected.
+  const allyOAProvokers = s.npcs.filter((ally) =>
+    ally.disposition === 'ally' && ally.hp > 0
+    && chebyshev(ally.tileX, ally.tileY, npc.tileX, npc.tileY) <= 1,
+  );
+
   npc.tileX = result.finalTileX;
   npc.tileY = result.finalTileY;
   if (result.hidden) {
@@ -318,42 +335,129 @@ function runSingleEnemyTurn(ctx: GameContext, npc: NpcState, events: GameEvent[]
   if (!isIncapacitated(npc.conditions)) npc.conditions = npc.conditions.filter((c) => c !== 'prone');
   events.push(...result.events);
 
+  // ── Ally OAs against this moving enemy ─────────────────────────────────
+  // Per SRD: a reaction triggers when a creature you can see moves out of your
+  // reach. Allies auto-take their OA (no prompt) — NPCs don't get the player
+  // UI gate.
+  for (const ally of allyOAProvokers) {
+    if (ally.reactionUsed) continue;
+    if (isIncapacitated(ally.conditions)) continue;
+    if (!isVisible(npc.conditions)) continue;
+    if (chebyshev(ally.tileX, ally.tileY, npc.tileX, npc.tileY) <= 1) continue;
+    doNpcOpportunityAttack(
+      ctx, ally, npc,
+      combatantDisplayName(ally, s.npcs),
+      combatantDisplayName(npc, s.npcs),
+    );
+    if (npc.hp <= 0) {
+      ctx.addLogs(result.logs);
+      finalizeNpcTurn(ctx, npc);
+      return;
+    }
+  }
+
+  // ── Player OA against this moving enemy ────────────────────────────────
+  // Player can take an OA when an enemy moves out of their reach without
+  // attacking. If the player has a reaction available AND the enemy is
+  // visible to them, defer to the prompt and suspend the turn loop until
+  // they decide.
   if (startedAdjacentToPlayer && !endedAdjacentToPlayer && !result.attacked) {
-    ctx.doPlayerOpportunityAttack(npc, events);
+    if (playerCanReact(ctx) && isVisible(npc.conditions)) {
+      ctx.addLogs(result.logs);  // Surface the move log BEFORE the prompt fires.
+      s.pendingReaction = {
+        kind: 'opportunity_attack',
+        npcId: npc.id,
+        npcName: combatantDisplayName(npc, s.npcs),
+      };
+      ctx.addLog({ left: `⚡ Opportunity Attack: ${combatantDisplayName(npc, s.npcs)} provokes`, style: 'header' });
+      return;
+    }
   }
 
   ctx.addLogs(result.logs);
 
-  // Shield reaction: if the hit lands by ≤5, the player can react with Shield
-  // to convert it to a miss. Auto-cast when the spell is known and a slot is free.
-  let shieldNegated = false;
-  if (result.attacked && result.isHit && !result.isCrit) {
-    if (tryReactiveShield(ctx, result.attackTotal, result.isCrit)) {
-      shieldNegated = true;
-      ctx.addLog({ left: `The attack glances off the magical barrier — miss`, style: 'miss' });
-    }
+  // ── Shield reaction ────────────────────────────────────────────────────
+  // Per SRD: Shield's trigger is "you are hit by an attack roll". Prompt on
+  // any non-critical hit when the player can cast Shield — the player decides
+  // whether the +5 AC (until start of their next turn) is worth the slot.
+  // It's never strictly wasted: even if it doesn't negate this attack, it
+  // still raises AC against later attacks this round from other enemies.
+  // Crits ignore Shield's AC bonus per SRD (nat 20 hits regardless).
+  if (result.attacked && result.isHit && !result.isCrit && shieldAvailable(ctx)) {
+    s.pendingReaction = {
+      kind: 'shield',
+      attackerId: npc.id,
+      attackerName: combatantDisplayName(npc, s.npcs),
+      incomingDamage: result.damage,
+      attackTotal: result.attackTotal,
+      shieldedAc: ctx.state.player.ac + 5,
+    };
+    ctx.addLog({ left: `⚡ Shield: ${combatantDisplayName(npc, s.npcs)} hits for ${result.damage} — react with Shield?`, style: 'header' });
+    return;
   }
 
-  if (result.attacked && result.isHit && !shieldNegated) {
-    if (s.player.hp <= 0) {
-      const adjacentToPlayer = chebyshev(result.finalTileX, result.finalTileY, s.player.tileX, s.player.tileY) <= 1;
-      const effectivelyCrit = result.isCrit || adjacentToPlayer;
-      const failures = effectivelyCrit ? 2 : 1;
-      s.player.deathSaveFailures = Math.min(3, s.player.deathSaveFailures + failures);
-      ctx.addLogs([
-        { left: `Strikes unconscious ${ctx.playerDef.name}!${effectivelyCrit ? ' CRITICAL — 2 failures!' : ' 1 failure.'}`, style: 'status' },
-        { left: `Death saves: ${s.player.deathSaveSuccesses} ✓  ${s.player.deathSaveFailures} ✗`, style: 'status' },
-      ]);
-      if (s.player.deathSaveFailures >= 3) {
-        ctx.addLog({ left: `${ctx.playerDef.name} has died.`, style: 'kill' });
-        s.phase = 'defeat';
-      } else {
-        s.phase = 'death_saves';
-      }
-    } else {
-      ctx.applyDamageToPlayer(result.damage, events);
-    }
+  if (result.attacked && result.isHit) {
+    applyEnemyHitToPlayer(ctx, npc, result, events);
   }
+  finalizeNpcTurn(ctx, npc);
+}
+
+/** Does the player meet basic reaction eligibility (not used, conscious, not incapacitated)? */
+function playerCanReact(ctx: GameContext): boolean {
+  const p = ctx.state.player;
+  return !p.reactionUsed && p.hp > 0 && !isIncapacitated(p.conditions);
+}
+
+/** Can the player cast Shield right now (reaction + L1 slot + knows the spell)? Whether it would actually help is the player's call, not ours. */
+function shieldAvailable(ctx: GameContext): boolean {
+  if (!playerCanReact(ctx)) return false;
+  if ((ctx.state.player.spellSlots[0] ?? 0) <= 0) return false;
+  return ctx.state.player.preparedSpellIds.includes('shield')
+    || (ctx.playerDef.defaultSpellbookIds?.includes('shield') ?? false);
+}
+
+/**
+ * Apply an enemy hit's damage to the player, including death-save accrual when
+ * the player is already at 0 HP. Factored out so it can be re-run from the
+ * Shield resolver after a "decline" decision.
+ */
+function applyEnemyHitToPlayer(
+  ctx: GameContext,
+  npc: NpcState,
+  result: { damage: number; isCrit: boolean; finalTileX: number; finalTileY: number },
+  events: GameEvent[],
+): void {
+  const s = ctx.state;
+  if (s.player.hp <= 0) {
+    const adjacentToPlayer = chebyshev(result.finalTileX, result.finalTileY, s.player.tileX, s.player.tileY) <= 1;
+    const effectivelyCrit = result.isCrit || adjacentToPlayer;
+    const failures = effectivelyCrit ? 2 : 1;
+    s.player.deathSaveFailures = Math.min(3, s.player.deathSaveFailures + failures);
+    ctx.addLogs([
+      { left: `Strikes unconscious ${ctx.playerDef.name}!${effectivelyCrit ? ' CRITICAL — 2 failures!' : ' 1 failure.'}`, style: 'status' },
+      { left: `Death saves: ${s.player.deathSaveSuccesses} ✓  ${s.player.deathSaveFailures} ✗`, style: 'status' },
+    ]);
+    if (s.player.deathSaveFailures >= 3) {
+      ctx.addLog({ left: `${ctx.playerDef.name} has died.`, style: 'kill' });
+      s.phase = 'defeat';
+    } else {
+      s.phase = 'death_saves';
+    }
+  } else {
+    ctx.applyDamageToPlayer(result.damage, events);
+  }
+  void npc;
+}
+
+/**
+ * Cleanup at the end of an NPC's turn — runs after the reaction-deferral
+ * points have all resolved. Currently:
+ *   - clears the player's `hidden` condition (they're revealed by being struck
+ *     at / observed during the enemy turn).
+ *   - per-NPC Sleep re-save (SRD: target re-saves at end of its next turn).
+ */
+function finalizeNpcTurn(ctx: GameContext, npc: NpcState): void {
+  const s = ctx.state;
   s.player.conditions = s.player.conditions.filter((c) => c !== 'hidden');
 
   // Sleep re-save: per SRD, the Incapacitated condition from Sleep ends at the
@@ -392,6 +496,8 @@ function runSingleAllyTurn(ctx: GameContext, ally: NpcState, events: GameEvent[]
   const s = ctx.state;
   const def = ctx.resolveMonsterDef(ally.defId);
   if (!def) return;
+  // Per SRD: a creature's Reaction refreshes at the start of its own turn.
+  ally.reactionUsed = false;
 
   const enemyTargets = s.npcs
     .filter((n) => n.disposition === 'enemy' && n.hp > 0)
@@ -404,6 +510,13 @@ function runSingleAllyTurn(ctx: GameContext, ally: NpcState, events: GameEvent[]
     [s.player.tileX, s.player.tileY],
     ...s.npcs.filter((n) => n !== ally && n.hp > 0).map((n): [number, number] => [n.tileX, n.tileY]),
   ];
+
+  // Snapshot which enemies were adjacent at the START of the ally's movement —
+  // they get the chance to OA if the ally then moves out of reach.
+  const enemyOAProvokers = s.npcs.filter((enemy) =>
+    enemy.disposition === 'enemy' && enemy.hp > 0
+    && chebyshev(enemy.tileX, enemy.tileY, ally.tileX, ally.tileY) <= 1,
+  );
 
   const result = runAllyTurn(ally, def, {
     displayName: combatantDisplayName(ally, s.npcs),
@@ -419,6 +532,20 @@ function runSingleAllyTurn(ctx: GameContext, ally: NpcState, events: GameEvent[]
   events.push(...result.events);
   ctx.addLogs(result.logs);
 
+  // ── Enemy OAs against this moving ally ─────────────────────────────────
+  for (const enemy of enemyOAProvokers) {
+    if (enemy.reactionUsed) continue;
+    if (isIncapacitated(enemy.conditions)) continue;
+    if (!isVisible(ally.conditions)) continue;
+    if (chebyshev(enemy.tileX, enemy.tileY, ally.tileX, ally.tileY) <= 1) continue;
+    doNpcOpportunityAttack(
+      ctx, enemy, ally,
+      combatantDisplayName(enemy, s.npcs),
+      combatantDisplayName(ally, s.npcs),
+    );
+    if (ally.hp <= 0) return;
+  }
+
   if (result.attacked && result.isHit && result.attackedTargetId) {
     const target = s.npcs.find((n) => n.id === result.attackedTargetId);
     if (target) {
@@ -432,4 +559,51 @@ function runSingleAllyTurn(ctx: GameContext, ally: NpcState, events: GameEvent[]
       }
     }
   }
+}
+
+/**
+ * Resolve a pending player reaction. Applies the deferred outcome (fires the
+ * Opportunity Attack or negates the incoming damage with Shield) when the
+ * player accepts; otherwise skips the reaction entirely. Either way the NPC's
+ * turn cleanup runs and the turn loop resumes via `advanceTurn`.
+ */
+export function doResolveReaction(ctx: GameContext, accept: boolean, events: GameEvent[]): void {
+  const s = ctx.state;
+  const pending = s.pendingReaction;
+  if (!pending) return;
+  s.pendingReaction = null;
+
+  if (pending.kind === 'opportunity_attack') {
+    const npc = s.npcs.find((n) => n.id === pending.npcId);
+    if (npc) {
+      if (accept) {
+        ctx.doPlayerOpportunityAttack(npc, events);
+      } else {
+        ctx.addLog({ left: `${ctx.playerDef.name} holds — no Opportunity Attack`, style: 'status' });
+      }
+      finalizeNpcTurn(ctx, npc);
+    }
+  } else if (pending.kind === 'shield') {
+    const attacker = s.npcs.find((n) => n.id === pending.attackerId);
+    if (accept) {
+      // Consume slot + reaction; the attack misses.
+      if ((s.player.spellSlots[0] ?? 0) > 0) s.player.spellSlots[0] -= 1;
+      s.player.reactionUsed = true;
+      ctx.addLog({ left: `⚡ ${ctx.playerDef.name} casts Shield (reaction) — +5 AC until next turn`, style: 'status' });
+      ctx.addLog({ left: `The attack glances off the magical barrier — miss`, style: 'miss' });
+    } else if (attacker) {
+      // Decline → apply the damage we saved when deferring.
+      const synthResult = {
+        damage: pending.incomingDamage,
+        isCrit: false,
+        finalTileX: attacker.tileX,
+        finalTileY: attacker.tileY,
+      };
+      applyEnemyHitToPlayer(ctx, attacker, synthResult, events);
+    }
+    if (attacker) finalizeNpcTurn(ctx, attacker);
+  }
+
+  // Resume the turn loop.
+  advanceTurn(ctx, events);
 }

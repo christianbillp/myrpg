@@ -148,6 +148,11 @@ function buildStateMessage(engine: GameEngine): string {
           n.combatPassive ? 'PASSIVE (skips combat turn)' : '',
           n.conditions.includes('vexed') ? 'VEXED' : '',
           n.conditions.includes('hidden') ? 'HIDDEN' : '',
+          // Reactions refresh at the start of each creature's own turn. USED
+          // means this creature has spent its Reaction (e.g. an Opportunity
+          // Attack against the player or another NPC) and cannot take another
+          // until its next turn comes around.
+          s.phase !== 'exploring' ? `Reaction: ${n.reactionUsed ? 'USED' : 'AVAILABLE'}` : '',
         ].filter(Boolean).join(', ');
         const def = engine.getMonsterDef(n.defId);
         const attackStr = def?.attacks.map(a =>

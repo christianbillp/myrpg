@@ -18,6 +18,7 @@ import { chebyshev } from './EnemyAI.js';
 import { canCastSpell } from './ActionGuards.js';
 import { startConcentration } from './ConcentrationSystem.js';
 import { applyEquipment } from './EquipmentSystem.js';
+import { combatantDisplayName } from './CombatFlow.js';
 
 /** Ability mod for the player's spellcasting ability (defaults to 0 if unset). */
 function spellMod(ctx: GameContext): number {
@@ -61,7 +62,12 @@ function npcSaveMod(target: NpcState, def: MonsterDef, ability: string): number 
   return typeof score === 'number' ? mod(score) : 0;
 }
 
-/** Apply damage to a single NPC, routing through resistMod. */
+/**
+ * Apply damage to a single NPC, routing through resistMod. Idempotent on
+ * already-dead targets — repeated calls do nothing instead of re-firing kill
+ * rewards (which would otherwise grant duplicate XP for e.g. extra Magic
+ * Missile darts that strike a corpse).
+ */
 function applyDamageToNpc(
   ctx: GameContext,
   target: NpcState,
@@ -69,18 +75,23 @@ function applyDamageToNpc(
   damageType: string,
 ): void {
   if (amount <= 0) return;
+  if (target.hp <= 0) return;
   const def = ctx.resolveMonsterDef(target.defId);
   if (!def) return;
   const { finalDamage, log: resistLog } = ctx.resistMod(amount, damageType, def, target.name);
   if (resistLog) ctx.addLog(resistLog);
   target.hp = Math.max(0, target.hp - finalDamage);
-  if (target.hp <= 0) ctx.killWithReward(target, def, `☠ ${target.name} is slain!`);
+  if (target.hp <= 0) ctx.killWithReward(target, def, `☠ ${combatantDisplayName(target, ctx.state.npcs)} is slain!`);
 }
 
 // ── Action-economy + slot consumption ────────────────────────────────────────
 
-function consumeCastingResources(ctx: GameContext, spell: SpellDef, slotLevel: number): void {
+function consumeCastingResources(ctx: GameContext, spell: SpellDef, slotLevel: number, asRitual: boolean): void {
   const s = ctx.state;
+  // Ritual casts don't consume a spell slot (SRD: the spell is cast over 10
+  // minutes from the spellbook). They also don't spend the action/bonus
+  // action — they're a fictional time cost, only legal out of combat.
+  if (asRitual) return;
   if (spell.level > 0) {
     s.player.spellSlots[spell.level - 1] = Math.max(0, (s.player.spellSlots[spell.level - 1] ?? 0) - 1);
   }
@@ -116,7 +127,7 @@ function resolveAttackRollSpell(
 
   if (!hit) {
     ctx.addLog({
-      left: `${ctx.playerDef.name} casts ${spell.name} at ${target.name} — miss`,
+      left: `${ctx.playerDef.name} casts ${spell.name} at ${combatantDisplayName(target, ctx.state.npcs)} — miss`,
       right: `d20(${roll})+${bonus}=${total} vs AC ${def.ac}`,
       style: 'miss',
     });
@@ -144,7 +155,7 @@ function resolveAttackRollSpell(
   // short to avoid sprawling per-spell logic.
   if (spell.id === 'ray-of-frost') {
     if (!target.conditions.includes('slowed')) target.conditions.push('slowed');
-    ctx.addLog({ left: `${target.name} is slowed (Speed −10 ft until end of next turn)`, style: 'status' });
+    ctx.addLog({ left: `${combatantDisplayName(target, ctx.state.npcs)} is slowed (Speed −10 ft until end of next turn)`, style: 'status' });
   }
 }
 
@@ -176,22 +187,92 @@ function resolveAutoHitSpell(
 
   if (assignments.length === 0) return;
 
-  // Damage per dart.
-  let totalDealt = 0;
+  // SRD: all darts strike simultaneously. Pool damage per target so a single
+  // application resolves the entire spell — prevents duplicate kill rewards
+  // when 2+ darts target the same creature.
+  const perTarget = new Map<string, { target: NpcState; darts: number; total: number }>();
   for (const target of assignments) {
     const { total } = rollDamage(spell.damage.dice, spell.damage.sides, spell.damage.bonus ?? 0);
-    totalDealt += total;
+    const acc = perTarget.get(target.id) ?? { target, darts: 0, total: 0 };
+    acc.darts += 1;
+    acc.total += total;
+    perTarget.set(target.id, acc);
+  }
+
+  let grandTotal = 0;
+  for (const { target, total } of perTarget.values()) {
+    grandTotal += total;
     applyDamageToNpc(ctx, target, total, spell.damage.type);
   }
-  // Group log line: which targets, how many darts each.
-  const counts = new Map<string, number>();
-  for (const t of assignments) counts.set(t.name, (counts.get(t.name) ?? 0) + 1);
-  const summary = [...counts.entries()].map(([n, c]) => `${n}×${c}`).join(', ');
+  const summary = [...perTarget.values()].map((v) => `${combatantDisplayName(v.target, ctx.state.npcs)}×${v.darts}`).join(', ');
   ctx.addLog({
-    left: `${ctx.playerDef.name} casts ${spell.name} → ${summary} (${totalDealt} ${spell.damage.type})`,
+    left: `${ctx.playerDef.name} casts ${spell.name} → ${summary} (${grandTotal} ${spell.damage.type})`,
     right: `${darts} darts × 1d${spell.damage.sides}+${spell.damage.bonus ?? 0}`,
     style: 'hit',
   });
+}
+
+/**
+ * Compute the set of tile coordinates affected by a cone of `lengthTiles`
+ * originating at `(ox, oy)` pointing toward `(targetX, targetY)`. Models a
+ * D&D 5e cone (length = base diameter, ~53° total angle): at distance d along
+ * the cone's axis, tiles within perpendicular distance ≤ d/2 + 0.5 are in.
+ * Returns "x,y" strings for O(1) membership lookup.
+ */
+function coneTileSet(
+  ox: number, oy: number,
+  targetX: number, targetY: number,
+  lengthTiles: number,
+): Set<string> {
+  let dx = targetX - ox;
+  let dy = targetY - oy;
+  const len = Math.hypot(dx, dy);
+  if (len === 0) { dx = 1; dy = 0; } else { dx /= len; dy /= len; }
+  const out = new Set<string>();
+  for (let ry = -lengthTiles; ry <= lengthTiles; ry++) {
+    for (let rx = -lengthTiles; rx <= lengthTiles; rx++) {
+      if (rx === 0 && ry === 0) continue;                      // skip origin
+      const along = rx * dx + ry * dy;                         // signed scalar projection
+      if (along <= 0 || along > lengthTiles + 0.5) continue;
+      const perp = Math.abs(-rx * dy + ry * dx);               // perpendicular distance
+      if (perp > along * 0.5 + 0.5) continue;                  // cone half-angle ~27°
+      out.add(`${ox + rx},${oy + ry}`);
+    }
+  }
+  return out;
+}
+
+/**
+ * Living non-player creatures in a spell's area, computed from the spell's
+ * `area.shape`. Cones key off (player tile → target tile) direction; spheres
+ * and cubes use a chebyshev disc centered on the spell's anchor (player tile
+ * for `range: "self"`, otherwise the targeted tile). Includes allies — AOE
+ * spells like Burning Hands are indiscriminate per SRD.
+ */
+function creaturesInArea(
+  ctx: GameContext,
+  spell: SpellDef,
+  tile: { x: number; y: number } | undefined,
+): NpcState[] {
+  const s = ctx.state;
+  const sizeFeet = spell.area?.sizeFeet ?? 5;
+  const radiusTiles = Math.max(1, Math.ceil(sizeFeet / 5));
+
+  if (spell.area?.shape === 'cone') {
+    // Cone origins at the caster's tile (self-range — the only shape we ship
+    // today); direction comes from the `tile` payload.
+    const tx = tile?.x ?? s.player.tileX + 1;
+    const ty = tile?.y ?? s.player.tileY;
+    const inCone = coneTileSet(s.player.tileX, s.player.tileY, tx, ty, radiusTiles);
+    return s.npcs.filter((n) => n.hp > 0 && inCone.has(`${n.tileX},${n.tileY}`));
+  }
+
+  // Sphere / cube → chebyshev disc.
+  const cx = spell.range === 'self' ? s.player.tileX : (tile?.x ?? s.player.tileX);
+  const cy = spell.range === 'self' ? s.player.tileY : (tile?.y ?? s.player.tileY);
+  return s.npcs.filter((n) =>
+    n.hp > 0 && chebyshev(cx, cy, n.tileX, n.tileY) <= radiusTiles,
+  );
 }
 
 function resolveSaveSpell(
@@ -201,22 +282,9 @@ function resolveSaveSpell(
   slotLevel: number,
 ): void {
   if (!spell.save) return;
-  const s = ctx.state;
   const dc = spellSaveDC(ctx);
 
-  // Area: default 5 ft sphere centered on `tile`; cone radiates from player
-  // for `Self` range. SRD areas use feet; we convert to chebyshev tile radius
-  // = ceil(sizeFeet / 5). For cone vs sphere we cheat and treat both as a
-  // chebyshev disc — a simplification adequate for an isometric grid.
-  const sizeFeet = spell.area?.sizeFeet ?? 5;
-  const radiusTiles = Math.max(1, Math.ceil(sizeFeet / 5));
-  const cx = spell.range === 'self' ? s.player.tileX : (tile?.x ?? s.player.tileX);
-  const cy = spell.range === 'self' ? s.player.tileY : (tile?.y ?? s.player.tileY);
-
-  const targets = s.npcs.filter((n) =>
-    n.hp > 0 && n.disposition !== 'ally'
-    && chebyshev(cx, cy, n.tileX, n.tileY) <= radiusTiles,
-  );
+  const targets = creaturesInArea(ctx, spell, tile);
 
   if (targets.length === 0) {
     ctx.addLog({ left: `${ctx.playerDef.name} casts ${spell.name} — no creatures in area`, style: 'miss' });
@@ -250,7 +318,7 @@ function resolveSaveSpell(
     if (dmgRoll && spell.damage) {
       const dmg = success && spell.save.halfOnSuccess ? Math.floor(dmgRoll.total / 2) : success ? 0 : dmgRoll.total;
       ctx.addLog({
-        left: `${target.name} ${success ? 'saves' : 'fails'} — ${dmg} ${spell.damage.type}`,
+        left: `${combatantDisplayName(target, ctx.state.npcs)} ${success ? 'saves' : 'fails'} — ${dmg} ${spell.damage.type}`,
         right: `d20(${roll})+${saveBonus}=${total} vs DC ${dc}`,
         style: success ? 'normal' : 'hit',
       });
@@ -260,7 +328,7 @@ function resolveSaveSpell(
       const cond = !success ? spell.effect.onFail : null;
       if (cond && !target.conditions.includes(cond)) target.conditions.push(cond);
       ctx.addLog({
-        left: `${target.name} ${success ? 'resists' : 'is ' + (cond ?? 'affected')}`,
+        left: `${combatantDisplayName(target, ctx.state.npcs)} ${success ? 'resists' : 'is ' + (cond ?? 'affected')}`,
         right: `d20(${roll})+${saveBonus}=${total} vs DC ${dc}`,
         style: success ? 'normal' : 'status',
       });
@@ -282,6 +350,7 @@ function resolveUtilitySpell(ctx: GameContext, spell: SpellDef): void {
       }
       s.player.mageArmor = true;
       applyEquipment(ctx.playerDef, s.player.equippedSlots, ctx.defs.equipment, true);
+      s.player.ac = ctx.playerDef.ac;
       ctx.addLog({ left: `${ctx.playerDef.name} casts Mage Armor — AC ${ctx.playerDef.ac} for 8 hours`, style: 'status' });
       break;
     case 'detect-magic':
@@ -332,14 +401,9 @@ function maybeAggroOnCast(
       .map((id) => s.npcs.find((n) => n.id === id))
       .filter((n): n is NpcState => !!n && n.hp > 0 && n.disposition !== 'ally');
   } else if (spell.save) {
-    const sizeFeet = spell.area?.sizeFeet ?? 5;
-    const radiusTiles = Math.max(1, Math.ceil(sizeFeet / 5));
-    const cx = spell.range === 'self' ? s.player.tileX : (tile?.x ?? s.player.tileX);
-    const cy = spell.range === 'self' ? s.player.tileY : (tile?.y ?? s.player.tileY);
-    affected = s.npcs.filter((n) =>
-      n.hp > 0 && n.disposition !== 'ally'
-      && chebyshev(cx, cy, n.tileX, n.tileY) <= radiusTiles,
-    );
+    // For aggro-trigger purposes we still filter to non-allies — allies in the
+    // area take damage in the resolver but don't influence faction aggro.
+    affected = creaturesInArea(ctx, spell, tile).filter((n) => n.disposition !== 'ally');
   }
 
   if (affected.length === 0) return [];
@@ -367,11 +431,26 @@ export function doCastSpell(
   slotLevel: number,
   targetIds: string[] | undefined,
   tile: { x: number; y: number } | undefined,
+  asRitual: boolean,
   events: GameEvent[],
 ): void {
-  if (!canCastSpell(ctx, spellId)) return;
   const spell = ctx.defs.spells.find((sp) => sp.id === spellId);
   if (!spell) return;
+
+  // Ritual casting has its own eligibility rules: spell must have the Ritual
+  // tag, must be known (spellbook OR cantrip — cantrips can't really be cast
+  // as rituals but we don't gate on level here), and it can only happen
+  // outside combat (10-minute fictional cast). It does NOT require the spell
+  // be prepared, and it does NOT consume a slot.
+  if (asRitual) {
+    if (!spell.ritual) { ctx.addLog({ left: `${spell.name} cannot be cast as a ritual`, style: 'miss' }); return; }
+    if (ctx.state.phase !== 'exploring') { ctx.addLog({ left: `Ritual casting requires 10 minutes — not possible in combat`, style: 'miss' }); return; }
+    const known = ctx.playerDef.defaultSpellbookIds?.includes(spellId)
+      ?? ctx.playerDef.defaultCantripIds?.includes(spellId);
+    if (!known) { ctx.addLog({ left: `${spell.name} is not in your spellbook`, style: 'miss' }); return; }
+  } else if (!canCastSpell(ctx, spellId)) {
+    return;
+  }
 
   // ── Pre-cast validation — bail BEFORE consuming any slot/action ───────────
   // For attack-roll spells, resolve target and range up front; for AOE spells
@@ -402,7 +481,7 @@ export function doCastSpell(
   // rolls and area effects see them as valid hostiles.
   maybeAggroOnCast(ctx, spell, targetIds, tile, events);
 
-  consumeCastingResources(ctx, spell, slotLevel);
+  consumeCastingResources(ctx, spell, slotLevel, asRitual);
 
   // Concentration: a new concentration spell drops any previous one first.
   if (spell.concentration) startConcentration(ctx, spell.id);
@@ -422,31 +501,6 @@ export function doCastSpell(
 // Export labels useful for the UI.
 export function spellLabel(spell: SpellDef): string {
   return spell.level === 0 ? `${spell.name} (cantrip)` : `${spell.name} (L${spell.level})`;
-}
-
-/**
- * Reaction trigger for Shield. Returns true if Shield was cast (the hit
- * should be re-evaluated against AC + 5). Auto-casts when the spell is
- * known, an L1 slot is available, the player's reaction is free, and AC + 5
- * would convert the triggering attack from a hit to a miss.
- */
-export function tryReactiveShield(ctx: GameContext, attackTotal: number, isCrit: boolean): boolean {
-  const s = ctx.state;
-  // Critical hits ignore Shield's AC bonus per SRD (nat 20 hits regardless).
-  if (isCrit) return false;
-  if (s.player.reactionUsed) return false;
-  if ((s.player.spellSlots[0] ?? 0) <= 0) return false;
-  const knowsShield = s.player.preparedSpellIds.includes('shield')
-    || ctx.playerDef.defaultSpellbookIds?.includes('shield');
-  if (!knowsShield) return false;
-  // Only cast if it would actually matter — AC + 5 must beat the attack total.
-  if (attackTotal >= ctx.playerDef.ac + 5) return false;
-
-  // Consume slot + reaction; log the cast.
-  s.player.spellSlots[0] -= 1;
-  s.player.reactionUsed = true;
-  ctx.addLog({ left: `⚡ ${ctx.playerDef.name} casts Shield (reaction) — +5 AC until next turn`, style: 'status' });
-  return true;
 }
 
 // Expose a simple "log opener" for narrative DM hooks if needed later.

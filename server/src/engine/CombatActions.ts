@@ -298,3 +298,41 @@ export function doPlayerOpportunityAttack(ctx: GameContext, npc: NpcState): void
   ctx.applyMasteryConditions(npc, vexApplied, slowApplied);
   if (npc.hp <= 0) ctx.killWithReward(npc, targetDef, `☠ ${npc.name} slain by Opportunity Attack!`, false);
 }
+
+/**
+ * Generic NPC-vs-NPC Opportunity Attack. Used for both directions:
+ *   • Ally OAs an enemy that moves out of the ally's reach
+ *   • Enemy OAs an ally that moves out of the enemy's reach
+ *
+ * Caller is responsible for eligibility gating (reaction available, visibility,
+ * incapacitation, reach transition). This helper just resolves the attack and
+ * marks the reaction consumed.
+ */
+export function doNpcOpportunityAttack(
+  ctx: GameContext,
+  attacker: NpcState,
+  target: NpcState,
+  attackerDisplayName: string,
+  targetDisplayName: string,
+): void {
+  const attackerDef = ctx.resolveMonsterDef(attacker.defId);
+  const targetDef = ctx.resolveMonsterDef(target.defId);
+  if (!attackerDef || !targetDef) return;
+  const meleeAtk = attackerDef.attacks.find((a) => a.attackType === 'melee' || a.attackType === 'both');
+  if (!meleeAtk) return;
+  attacker.reactionUsed = true;
+
+  const dist = chebyshev(attacker.tileX, attacker.tileY, target.tileX, target.tileY);
+  const targetDodging = target.conditions.includes('dodging');
+  const withDisadvantage = targetDodging || (target.conditions.includes('prone') && dist > 1);
+  const withAdvantage = target.conditions.includes('prone') && dist <= 1;
+  const { damage, isHit, isCrit, logs } = enemyAttack(meleeAtk, targetDef.ac, withAdvantage, withDisadvantage);
+  ctx.addLogs([{ left: `⚡ ${attackerDisplayName} makes an Opportunity Attack on ${targetDisplayName}!`, style: 'header' }, ...logs]);
+  if (isHit) {
+    const { finalDamage, log: resistLog } = ctx.resistMod(damage, meleeAtk.damageType, targetDef, target.name);
+    if (resistLog) ctx.addLog(resistLog);
+    target.hp = Math.max(0, target.hp - finalDamage);
+    if (target.hp <= 0) ctx.killWithReward(target, targetDef, `☠ ${target.name} slain by Opportunity Attack!`, false);
+  }
+  void isCrit;
+}

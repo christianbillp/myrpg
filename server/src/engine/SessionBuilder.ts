@@ -124,6 +124,7 @@ export function buildSessionState(
     exhaustionLevel: 0,
     conditions: [] as string[],
     equippedSlotLabels: { armor: null, weapon: null, shield: null },
+    ac: playerDef.ac,
     spellSlots: req.resumeSpellSlots ?? [...(playerDef.defaultSpellSlots ?? [])],
     preparedSpellIds: req.resumePreparedSpellIds ?? [...(playerDef.defaultPreparedSpellIds ?? [])],
     concentratingOn: req.resumeConcentratingOn ?? null,
@@ -196,6 +197,7 @@ export function buildSessionState(
       canDodge: false, canDisengage: false, canShortRest: false,
       castableSpellIds: [],
     },
+    pendingReaction: null,
   };
 
   return state;

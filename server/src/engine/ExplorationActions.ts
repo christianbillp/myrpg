@@ -4,7 +4,7 @@ import { drinkPotion } from './CombatSystem.js';
 import { doEnemyOpportunityAttack as caDoEnemyOA } from './CombatActions.js';
 import { doStartCombat as cfDoStartCombat } from './CombatFlow.js';
 import { chebyshev } from './EnemyAI.js';
-import { isIncapacitated } from './ConditionSystem.js';
+import { isIncapacitated, isVisible } from './ConditionSystem.js';
 import { d, d20, mod } from './Dice.js';
 import { canShortRest as guardCanShortRest } from './ActionGuards.js';
 
@@ -31,8 +31,11 @@ export function doMove(ctx: GameContext, dx: number, dy: number, events: GameEve
 
   if (s.phase === 'player_turn') {
     s.player.movesLeft--;
-    if (!s.player.conditions.includes('disengaged')) {
-      for (const npc of s.npcs.filter((n) => n.disposition === 'enemy' && n.hp > 0 && !n.reactionUsed)) {
+    // OA gate (SRD): the reactor must see the moving creature. If the player is
+    // hidden or invisible, no enemy can OA them; if the enemy is incapacitated
+    // or already burned its reaction this round, it can't react either.
+    if (!s.player.conditions.includes('disengaged') && isVisible(s.player.conditions)) {
+      for (const npc of s.npcs.filter((n) => n.disposition === 'enemy' && n.hp > 0 && !n.reactionUsed && !isIncapacitated(n.conditions))) {
         if (chebyshev(oldX, oldY, npc.tileX, npc.tileY) <= 1 &&
             chebyshev(nx, ny, npc.tileX, npc.tileY) > 1) {
           caDoEnemyOA(ctx, npc, events);

@@ -421,6 +421,9 @@ async function loadWorldState(): Promise<{
       shieldId: null,
     },
     resources: charSave.resources ?? {},
+    // Recomputed by GameEngine constructor's `applyEquipment` pass — initial
+    // value just has to be present and type-correct.
+    ac: 10,
     reactionUsed: false,
     freeObjectInteractionUsed: false,
     initiativeRoll: 0,
