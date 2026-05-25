@@ -644,7 +644,7 @@ export class HUD {
       const stroke   = chip.isActive ? '#55aa66' : '#334455';
       const textCol  = chip.isActive ? '#ffffff'  : '#778899';
       const opacity  = chip.isDead ? '0.3' : '1';
-      const display  = chip.label ? `${chip.label} · ${chip.name}` : chip.name;
+      const display  = chip.label ? `${chip.name} (${chip.label})` : chip.name;
       return `
         <div style="position:absolute;left:${x}px;top:${(BAR_H - CHIP_H) / 2}px;
           width:${CHIP_W}px;height:${CHIP_H}px;background:${fillBg};

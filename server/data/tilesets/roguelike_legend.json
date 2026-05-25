@@ -1,0 +1,124 @@
+{
+  "notes": "AI-facing tile legend for the roguelike tileset. Generate a map as a Tiled tile layer: an object with \"type\": \"tilelayer\", a \"name\", integer \"width\" and \"height\", and a flat \"data\" array of length width*height. Each entry in \"data\" is the GID (global tile id) of a tile defined below (use the id shown as each tile's key, e.g. 1493 for grass). GIDs assume the tileset is referenced at firstgid: 1 (the only configuration this codebase uses); if a future map ever loads the tileset at a different firstgid, the keys below must be offset accordingly. The array is row-major: the first \"width\" entries are the top row, left to right, then the next row, and so on. Only use ids listed below; do not invent ids. Maps may have two stacked tile layers: a \"ground\" layer (one of the \"layer\": \"ground\" tiles below per cell) and an optional \"object\" layer (one of the \"layer\": \"object\" tiles per cell, or 0 for empty) drawn on top. \"passable\" is authoritative for reachability/validation — a cell is passable iff both its ground tile and its object tile (if any) are passable. Impassable terrain (water, chasm) can be crossed by placing wood_planks over it.",
+  "tiles": {
+    "1": {
+      "name": "water",
+      "passable": false,
+      "layer": "ground",
+      "description": "Flat turquoise shallow water. Blocks movement unless bridged or forded.",
+      "tags": ["water", "liquid", "outdoor", "fill"]
+    },
+    "121": {
+      "name": "stone_floor",
+      "passable": true,
+      "layer": "ground",
+      "description": "Pale grey flagstone floor with faint grid lines. Default walkable floor for dungeon interiors.",
+      "tags": ["stone", "floor", "dungeon", "indoor", "fill"]
+    },
+    "123": {
+      "name": "wood_floor",
+      "passable": true,
+      "layer": "ground",
+      "description": "Warm wooden plank floor. Default walkable floor for taverns and wooden interiors.",
+      "tags": ["wood", "floor", "tavern", "indoor", "fill"]
+    },
+    "148": {
+      "name": "door",
+      "passable": true,
+      "layer": "object",
+      "description": "Heavy stone/metal door set into a wall. Passable opening that connects rooms; place over a stone_wall tile so the wall is replaced by the doorway at this cell.",
+      "tags": ["door", "dungeon", "indoor", "entrance"]
+    },
+    "256": {
+      "name": "bar_counter",
+      "passable": false,
+      "layer": "object",
+      "description": "Bar counter front (drawn along the lower edge of the tile). Blocks movement; line up several to form the tavern bar.",
+      "tags": ["counter", "bar", "furniture", "tavern", "indoor"]
+    },
+    "287": {
+      "name": "chasm",
+      "passable": false,
+      "layer": "ground",
+      "description": "Empty black tile representing a void or chasm. Blocks movement; can be bridged with wood_planks to cross.",
+      "tags": ["void", "chasm", "pit", "hazard"]
+    },
+    "306": {
+      "name": "chair_left",
+      "passable": true,
+      "layer": "object",
+      "description": "Wooden chair facing left. Seat for a patron; passable so a character can occupy the square. Place beside a table on its right side.",
+      "tags": ["chair", "seat", "furniture", "tavern", "indoor"]
+    },
+    "307": {
+      "name": "chair_right",
+      "passable": true,
+      "layer": "object",
+      "description": "Wooden chair facing right. Seat for a patron; passable so a character can occupy the square. Place beside a table on its left side.",
+      "tags": ["chair", "seat", "furniture", "tavern", "indoor"]
+    },
+    "365": {
+      "name": "table",
+      "passable": false,
+      "layer": "object",
+      "description": "Small round wooden pedestal table. Blocks movement; place on a floor tile and seat chairs around it.",
+      "tags": ["table", "furniture", "tavern", "indoor"]
+    },
+    "527": {
+      "name": "tree_round",
+      "passable": false,
+      "layer": "object",
+      "description": "Round-canopy broadleaf green tree. Placed on top of a ground tile. Good for scattered woodland.",
+      "tags": ["tree", "broadleaf", "forest", "nature"]
+    },
+    "530": {
+      "name": "pine_tree",
+      "passable": false,
+      "layer": "object",
+      "description": "Pointed green conifer / pine tree. Placed on top of a ground tile. Good for dense forest edges.",
+      "tags": ["tree", "conifer", "forest", "nature"]
+    },
+    "534": {
+      "name": "bush",
+      "passable": true,
+      "layer": "object",
+      "description": "Small green shrub / bush. Low decoration, does not block movement. Placed on top of a ground tile.",
+      "tags": ["bush", "shrub", "forest", "nature", "decoration"]
+    },
+    "579": {
+      "name": "dirt_road",
+      "passable": true,
+      "layer": "ground",
+      "description": "Tan packed-earth dirt, used for paths and roads. Has a soft lighter edge.",
+      "tags": ["path", "road", "outdoor", "fill"]
+    },
+    "942": {
+      "name": "stone_wall",
+      "passable": false,
+      "layer": "ground",
+      "description": "Solid grey stone wall block. Blocks movement and sight; forms the walls and edges of dungeon rooms and corridors.",
+      "tags": ["stone", "wall", "dungeon", "indoor", "barrier"]
+    },
+    "985": {
+      "name": "wood_wall",
+      "passable": false,
+      "layer": "ground",
+      "description": "Light wooden plank wall. Blocks movement and sight; forms the walls of tavern and indoor wooden rooms.",
+      "tags": ["wood", "wall", "tavern", "indoor", "barrier"]
+    },
+    "1005": {
+      "name": "wood_planks",
+      "passable": true,
+      "layer": "ground",
+      "description": "Horizontal wooden planking. Used as a bridge deck or wooden floor; lay across water to make a passable crossing.",
+      "tags": ["wood", "bridge", "floor", "crossing"]
+    },
+    "1493": {
+      "name": "grass",
+      "passable": true,
+      "layer": "ground",
+      "description": "Solid medium-green grass. Default outdoor ground fill.",
+      "tags": ["nature", "outdoor", "fill"]
+    }
+  }
+}

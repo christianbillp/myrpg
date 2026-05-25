@@ -1,5 +1,6 @@
 import {
   NpcState, MonsterDef, NPCDef, ItemDef, MapItemState, SecretState, SecretDef, GameMap,
+  StartingZonesLayer,
 } from './types.js';
 import { shuffle } from './MapUtils.js';
 import { chebyshev } from './EnemyAI.js';
@@ -7,15 +8,27 @@ import { chebyshev } from './EnemyAI.js';
 export type Zone = [number, number][]; // [tileX, tileY] pairs, already filtered to passable tiles
 export type ZoneMap = Map<string, Zone>;
 
-export function parseStartingZones(rows: string[], map: GameMap): ZoneMap {
+// Fixed implicit spawn-zone tileset. The encounter JSONs reference these GIDs
+// directly; the legacy ASCII letters (P/A/N/E) are preserved as ZoneMap keys
+// so SessionBuilder's `zoneMap.get('P')` lookups don't need to change.
+const GID_TO_ZONE_KEY: Record<number, string> = {
+  1: 'P', // player spawn
+  2: 'A', // ally spawn
+  3: 'N', // neutral NPC spawn
+  4: 'E', // enemy spawn
+};
+
+export function parseStartingZones(layer: StartingZonesLayer, map: GameMap): ZoneMap {
   const result: ZoneMap = new Map();
-  for (let r = 0; r < rows.length; r++) {
-    for (let c = 0; c < rows[r].length; c++) {
-      const ch = rows[r][c];
-      if (ch === '.' || ch === '#' || ch === ' ') continue;
-      if (!map.passable[r]?.[c]) continue;
-      if (!result.has(ch)) result.set(ch, []);
-      result.get(ch)!.push([c, r]);
+  for (let y = 0; y < layer.height; y++) {
+    for (let x = 0; x < layer.width; x++) {
+      const gid = layer.data[y * layer.width + x];
+      if (!gid) continue;
+      const key = GID_TO_ZONE_KEY[gid];
+      if (!key) continue;
+      if (!map.passable[y]?.[x]) continue;
+      if (!result.has(key)) result.set(key, []);
+      result.get(key)!.push([x, y]);
     }
   }
   return result;

@@ -1,9 +1,15 @@
 import Phaser from "phaser";
 import { PlayerDef } from "../data/player";
+import { SavedMapDef } from "../net/types";
 import { gameClient } from "../net/GameClient";
 import { ConnectionMonitor } from "../net/ConnectionMonitor";
 
 const API_URL = "http://localhost:3000";
+
+/** Stable Phaser texture key for a server-served tileset image URL. */
+export function tilesetTextureKey(imageUrl: string): string {
+  return `tileset:${imageUrl}`;
+}
 const ABILITIES = ["str", "dex", "con", "int", "wis", "cha"] as const;
 const abilityMod = (score: number) => Math.floor((score - 10) / 2);
 
@@ -51,6 +57,33 @@ export class BootScene extends Phaser.Scene {
       this.registry.set("species",            this.cache.json.get("species"));
       this.registry.set("maps",               this.cache.json.get("maps"));
       this.registry.set("encounters",          this.cache.json.get("encounters"));
+
+      // Queue every unique tileset image as a Phaser spritesheet, then run
+      // the loader a second time and wait for completion before transitioning.
+      const maps = this.cache.json.get("maps") as SavedMapDef[];
+      const queued = new Set<string>();
+      for (const map of maps ?? []) {
+        for (const ts of map.tilesets ?? []) {
+          const key = tilesetTextureKey(ts.imageUrl);
+          if (queued.has(key)) continue;
+          queued.add(key);
+          this.load.spritesheet(key, `${API_URL}${ts.imageUrl}`, {
+            frameWidth: ts.tilewidth,
+            frameHeight: ts.tileheight,
+            margin: ts.margin,
+            spacing: ts.spacing,
+          });
+        }
+      }
+      if (queued.size > 0) {
+        await new Promise<void>((resolve, reject) => {
+          this.load.once("complete", resolve);
+          this.load.once("loaderror", (file: { key: string; url: string }) =>
+            reject(new Error(`Failed to load tileset ${file.key} (${file.url})`)),
+          );
+          this.load.start();
+        });
+      }
 
       const world = await gameClient.loadWorld();
       if (world) {

@@ -1,6 +1,7 @@
 import {
   GameState, GameMap, GameDefs, EquipmentSlots, NpcState, MapItemState,
-  SecretState, QuestState, NpcPersona, CreateSessionRequest,
+  SecretState, QuestState, NpcPersona, CreateSessionRequest, EncounterTileProperty,
+  TileLegend,
 } from './types.js';
 import type { EncounterContext } from '../encounterService.js';
 import { generateMap } from './MapGenerator.js';
@@ -10,6 +11,59 @@ import {
   spawnEnemies, spawnItems, spawnNpc, spawnSecrets,
 } from './SpawnHelpers.js';
 
+/** The shape stored in `defs.maps[i]` — pure geometry, no semantics.
+ *  Identical to SavedMapDef (shared); aliased here for engine-side clarity. */
+export type SavedMapRecord = import('./types.js').SavedMapDef;
+
+/**
+ * Resolve the passability of a single GID against (1) the encounter's explicit
+ * tileProperties, (2) the tileset legend, and (3) a default of `false`
+ * (impassable). Encounter overrides win over the legend.
+ */
+function resolveGidPassable(
+  gid: number,
+  byGid: Map<number, EncounterTileProperty>,
+  legend: TileLegend,
+): boolean {
+  if (gid === 0) return true; // empty object-layer cell — no obstacle here.
+  const explicit = byGid.get(gid);
+  if (explicit?.passable !== undefined) return explicit.passable;
+  const legendEntry = legend.tiles[String(gid)];
+  if (legendEntry) return legendEntry.passable;
+  return false;
+}
+
+/**
+ * Combine a saved map's GID grid(s) with the encounter's per-GID tile
+ * properties and the tileset legend to produce the engine's `GameMap` (with
+ * passability resolved). A cell is passable iff the ground GID is passable
+ * AND any object GID at that cell is also passable.
+ */
+function buildGameMapFromSaved(
+  saved: SavedMapRecord,
+  tileProperties: EncounterTileProperty[] | undefined,
+  legend: TileLegend,
+): GameMap {
+  const byGid = new Map<number, EncounterTileProperty>();
+  for (const tp of tileProperties ?? []) byGid.set(tp.gid, tp);
+  const passable: boolean[][] = saved.gidGrid.map((row, y) =>
+    row.map((groundGid, x) => {
+      if (!resolveGidPassable(groundGid, byGid, legend)) return false;
+      const objectGid = saved.objectGidGrid?.[y]?.[x] ?? 0;
+      return resolveGidPassable(objectGid, byGid, legend);
+    }),
+  );
+  return {
+    cols: saved.cols,
+    rows: saved.rows,
+    passable,
+    // Carry rendering info through to the client.
+    gidGrid: saved.gidGrid,
+    objectGidGrid: saved.objectGidGrid,
+    tilesets: saved.tilesets,
+  };
+}
+
 /**
  * Build a fresh GameState from an encounter request. Pure: does not mutate
  * any input. The returned state is ready to hand to a new GameEngine.
@@ -18,12 +72,14 @@ export function buildSessionState(
   sessionId: string,
   req: CreateSessionRequest & { encounterContext: EncounterContext },
   defs: GameDefs,
-  savedMap?: GameMap,
+  savedMap?: SavedMapRecord,
 ): GameState {
   const playerDef = defs.playerDefs.find((p) => p.id === req.playerDefId);
   if (!playerDef) throw new Error(`Unknown playerDefId: ${req.playerDefId}`);
 
-  const map: GameMap = savedMap ?? (req.mapType === 'rooms' ? generateRoomsMap() : generateMap());
+  const map: GameMap = savedMap
+    ? buildGameMapFromSaved(savedMap, req.tileProperties, defs.tileLegend)
+    : (req.mapType === 'rooms' ? generateRoomsMap() : generateMap());
 
   const equippedSlots: EquipmentSlots = req.resumeEquippedSlots ?? { ...playerDef.defaultEquipment };
   const inventoryIds: string[] = req.resumeInventoryIds ?? [...(playerDef.defaultInventoryIds ?? [])];

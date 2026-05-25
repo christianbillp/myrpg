@@ -75,6 +75,7 @@ const defs: GameDefs = {
   feats: [],
   backgrounds: [],
   species: [],
+  tileLegend: { notes: "", tiles: {} },
 };
 
 async function loadDefs(): Promise<void> {
@@ -92,12 +93,7 @@ async function loadDefs(): Promise<void> {
     readDir<GameDefs["monsters"][0]>(join(DATA_DIR, "monsters")),
     readDir<GameDefs["npcs"][0]>(join(DATA_DIR, "npcs")),
     readDir<GameDefs["equipment"][0]>(join(DATA_DIR, "equipment")),
-    readDir<{
-      id: string;
-      name: string;
-      mapdescription: string;
-      rows: string[];
-    }>(join(DATA_DIR, "maps")),
+    readDir<TiledMapFile>(join(DATA_DIR, "maps")),
     readDir<GameDefs["feats"][0]>(join(DATA_DIR, "feats")),
     readDir<GameDefs["backgrounds"][0]>(join(DATA_DIR, "backgrounds")),
     readDir<GameDefs["species"][0]>(join(DATA_DIR, "species")),
@@ -114,14 +110,172 @@ async function loadDefs(): Promise<void> {
     applyFeats(p, defs.feats);
     applyEquipment(p, p.defaultEquipment, defs.equipment);
   }
-  defs.maps = rawMaps.map(({ id, name, mapdescription, rows }) => ({
-    id,
-    name,
-    mapdescription,
-    cols: rows[0]?.length ?? 0,
-    rows: rows.length,
-    passable: rows.map((r) => [...r].map((c) => c === ".")),
-  }));
+  defs.maps = await Promise.all(rawMaps.map(loadTiledMap));
+  defs.tileLegend = await loadTileLegends();
+}
+
+/**
+ * Load and merge every `*_legend.json` file under server/data/tilesets/ into a
+ * single GID-keyed lookup. Used by SessionBuilder as a passability fallback
+ * when an encounter omits a GID from its `tileProperties`.
+ */
+async function loadTileLegends(): Promise<GameDefs["tileLegend"]> {
+  const files = await readdir(TILESETS_DIR);
+  const legendFiles = files.filter((f) => f.endsWith("_legend.json"));
+  const merged: GameDefs["tileLegend"] = { notes: "", tiles: {} };
+  for (const file of legendFiles) {
+    const raw = JSON.parse(await readFile(join(TILESETS_DIR, file), "utf-8")) as GameDefs["tileLegend"];
+    if (raw.notes && !merged.notes) merged.notes = raw.notes;
+    Object.assign(merged.tiles, raw.tiles);
+  }
+  return merged;
+}
+
+// ── Tiled-compatible map format ───────────────────────────────────────────────
+//
+// Each map JSON is a stripped-down Tiled JSON export:
+//   - `width`, `height`: grid dimensions in tiles
+//   - `tilesets[]`: tile palette. Each tile has an `id` (tileset-local); a
+//     tile's GID = `firstgid + id`. GID 0 means empty / no tile. Maps carry
+//     NO semantics on tiles — passability/cover/etc. belong to encounters.
+//   - `layers[]`: tile layers. Each layer has a flat `data: number[]` of GIDs,
+//     row-major (length = width × height). Reads naturally row-by-row when
+//     hand-formatted with one row per source line.
+//
+// The engine still needs a `passable: boolean[][]` to do movement and pathing,
+// but that grid is built at session-create time by combining the map's
+// GID grid with the encounter's `tileProperties` declarations.
+
+interface TiledTileDef { id: number }
+
+// A tileset can be either inline (with `tiles`, `image` etc.) or an external
+// reference (`source: "../tilesets/xxx.tsj"`) that the loader must resolve.
+interface TiledTilesetInline {
+  firstgid: number;
+  name?: string;
+  image?: string;
+  imagewidth?: number;
+  imageheight?: number;
+  tilewidth?: number;
+  tileheight?: number;
+  spacing?: number;
+  margin?: number;
+  columns?: number;
+  tilecount?: number;
+  tiles?: TiledTileDef[];
+}
+interface TiledTilesetExternal { firstgid: number; source: string }
+type TiledTileset = TiledTilesetInline | TiledTilesetExternal;
+
+interface TiledLayer { type: "tilelayer"; name: string; width: number; height: number; data: number[] }
+interface TiledMapFile {
+  id: string;
+  name: string;
+  mapdescription: string;
+  width: number;
+  height: number;
+  tilesets: TiledTileset[];
+  layers: TiledLayer[];
+}
+
+// Tileset metadata surfaced to the client so it can preload the image and
+// slice it correctly. The `imageUrl` is a relative URL the server serves
+// from /tilesets/<filename> (see the static route below).
+interface ClientTilesetInfo {
+  firstgid: number;
+  name: string;
+  imageUrl: string;
+  imagewidth: number;
+  imageheight: number;
+  tilewidth: number;
+  tileheight: number;
+  spacing: number;
+  margin: number;
+  columns: number;
+}
+
+const TILESETS_DIR = join(DATA_DIR, "tilesets");
+
+/**
+ * Resolve an inline-or-external tileset entry to the merged inline form,
+ * reading the external file from server/data/tilesets/ when needed.
+ */
+async function resolveTileset(ts: TiledTileset): Promise<TiledTilesetInline> {
+  if ("source" in ts) {
+    // Tiled writes `source` as a path relative to the map file. Our maps live
+    // in server/data/maps/ and reference ../tilesets/xxx.tsj, so we resolve
+    // against the maps directory.
+    const basename = ts.source.split("/").pop() ?? ts.source;
+    const filepath = join(TILESETS_DIR, basename);
+    const raw = JSON.parse(await readFile(filepath, "utf-8")) as TiledTilesetInline;
+    return { ...raw, firstgid: ts.firstgid };
+  }
+  return ts;
+}
+
+async function loadTiledMap(file: TiledMapFile) {
+  // Ground layer: required. Prefer a layer literally named "terrain"; fall back
+  // to the first tile layer.
+  const terrain = file.layers.find((l) => l.name === "terrain")
+    ?? file.layers.find((l) => l.type === "tilelayer");
+  if (!terrain) throw new Error(`Map ${file.id} has no tile layer`);
+  if (terrain.data.length !== file.width * file.height) {
+    throw new Error(`Map ${file.id}: layer "${terrain.name}" data length ${terrain.data.length} ≠ ${file.width}×${file.height}`);
+  }
+
+  // Object layer: optional. By convention named "objects"; we also accept any
+  // additional tile layer that isn't the ground layer.
+  const objects = file.layers.find((l) => l !== terrain && l.type === "tilelayer" && (l.name === "objects" || l.name === "object"))
+    ?? file.layers.find((l) => l !== terrain && l.type === "tilelayer");
+  if (objects && objects.data.length !== file.width * file.height) {
+    throw new Error(`Map ${file.id}: layer "${objects.name}" data length ${objects.data.length} ≠ ${file.width}×${file.height}`);
+  }
+
+  // Promote each flat row-major GID array to a 2D grid for convenient access.
+  const toGrid = (data: number[]): number[][] => {
+    const grid: number[][] = [];
+    for (let y = 0; y < file.height; y++) {
+      const row: number[] = [];
+      for (let x = 0; x < file.width; x++) row.push(data[y * file.width + x]);
+      grid.push(row);
+    }
+    return grid;
+  };
+  const gidGrid = toGrid(terrain.data);
+  const objectGidGrid = objects ? toGrid(objects.data) : undefined;
+
+  // Resolve external tilesets and produce client-facing metadata for each one.
+  const tilesetInfo: ClientTilesetInfo[] = [];
+  for (const ts of file.tilesets) {
+    const inline = await resolveTileset(ts);
+    if (!inline.image || !inline.imagewidth || !inline.imageheight || !inline.tilewidth || !inline.tileheight || !inline.columns) {
+      console.warn(`Map ${file.id}: tileset has incomplete image metadata; skipping`);
+      continue;
+    }
+    tilesetInfo.push({
+      firstgid: inline.firstgid,
+      name: inline.name ?? "default",
+      imageUrl: `/tilesets/${inline.image.split("/").pop()}`,
+      imagewidth: inline.imagewidth,
+      imageheight: inline.imageheight,
+      tilewidth: inline.tilewidth,
+      tileheight: inline.tileheight,
+      spacing: inline.spacing ?? 0,
+      margin: inline.margin ?? 0,
+      columns: inline.columns,
+    });
+  }
+
+  return {
+    id: file.id,
+    name: file.name,
+    mapdescription: file.mapdescription,
+    cols: file.width,
+    rows: file.height,
+    gidGrid,
+    objectGidGrid,
+    tilesets: tilesetInfo,
+  };
 }
 
 // ── Server setup ───────────────────────────────────────────────────────────────
@@ -142,6 +296,25 @@ server.get("/species", async () => defs.species);
 server.get("/encounters", async () => readDir(join(DATA_DIR, "encounters")));
 server.get("/maps", async () => defs.maps);
 server.get("/health", async () => ({ ok: true }));
+
+// Static tileset images. Whitelisted by filename pattern so this can't be
+// turned into a directory traversal. Currently only `.png` is served from
+// the canonical tilesets directory.
+server.get<{ Params: { filename: string } }>(
+  "/tilesets/:filename",
+  async (req, reply) => {
+    const { filename } = req.params;
+    if (!/^[A-Za-z0-9_-]+\.png$/.test(filename)) {
+      return reply.code(400).send({ error: "invalid tileset filename" });
+    }
+    try {
+      const data = await readFile(join(TILESETS_DIR, filename));
+      return reply.type("image/png").send(data);
+    } catch {
+      return reply.code(404).send({ error: "tileset not found" });
+    }
+  },
+);
 
 // ── Save routes (unchanged) ────────────────────────────────────────────────────
 

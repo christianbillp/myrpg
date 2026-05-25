@@ -265,14 +265,109 @@ export interface QuestDef {
   rewardXp: number; rewardGp: number;
 }
 
-// Map definition as served by the API (client receives processed boolean grid).
+/**
+ * Tileset metadata surfaced to the client so it can preload the atlas and
+ * slice the spritesheet correctly. `imageUrl` is server-relative
+ * (e.g. "/tilesets/roguelike.png"). Tile frame = `gid - firstgid`.
+ */
+export interface MapTilesetInfo {
+  firstgid: number;
+  name: string;
+  imageUrl: string;
+  imagewidth: number;
+  imageheight: number;
+  tilewidth: number;
+  tileheight: number;
+  spacing: number;
+  margin: number;
+  columns: number;
+}
+
+// Map definition as served by the API. Maps are pure geometry now:
+// they carry the GID grid(s) plus identity/dimensions/description, with NO
+// tile semantics. Whether a tile is passable, difficult, trapped, etc. is
+// declared per-encounter via EncounterDef.tileProperties.
+//
+// Maps may carry a second optional object layer drawn on top of the ground
+// layer (doors, trees, furniture, etc.). A GID of 0 in the object layer means
+// "no object on this cell". A cell is passable iff its ground GID is passable
+// AND its object GID (if non-zero) is also passable.
 export interface SavedMapDef {
   id: string;
   name: string;
   mapdescription: string;
   cols: number;
   rows: number;
-  passable: boolean[][];
+  /** Row-major 2D grid of GIDs from the map's ground layer. */
+  gidGrid: number[][];
+  /** Row-major 2D grid of GIDs from the map's optional object layer. 0 = empty. */
+  objectGidGrid?: number[][];
+  /** Tileset metadata for client-side rendering. */
+  tilesets: MapTilesetInfo[];
+}
+
+/**
+ * Per-GID tile semantics declared by an encounter. Each entry describes how
+ * the encounter wants a particular tile from the referenced map to behave
+ * during this scenario. Encounters MAY reuse the same map with different
+ * properties (e.g. one runs a bridge with broken walls passable, another
+ * keeps them solid).
+ *
+ * Lookup priority for a tile's `passable` flag:
+ *   1. Encounter's tileProperties (this type) — explicit override.
+ *   2. The matching entry in the tileset legend (`TileLegend`).
+ *   3. Default `false` (impassable).
+ */
+export interface EncounterTileProperty {
+  gid: number;
+  passable?: boolean;
+  // Future, currently parsed-but-unused:
+  // difficult?: boolean;     // costs 2 ft of movement per ft (US-044)
+  // cover?: 'half' | 'three-quarters' | 'total';  // US-045
+  // trapped?: { dc: number; damageDice: number; damageSides: number; damageType: string };
+}
+
+/**
+ * AI-facing tile legend loaded from server/data/tilesets/*_legend.json. The
+ * legend describes each tile's semantics for both AI authoring (so an LLM can
+ * generate maps) and as a passability fallback for encounters that don't
+ * declare every GID in their `tileProperties`.
+ *
+ * Legend keys are GIDs assuming the tileset is referenced at `firstgid: 1`.
+ * If a map ever loads the tileset at a different firstgid, the keys must be
+ * offset accordingly.
+ */
+export interface TileLegendEntry {
+  name: string;
+  passable: boolean;
+  /** Which layer this tile belongs on. `"ground"` is drawn first; `"object"` is overlaid on top. */
+  layer: 'ground' | 'object';
+  description: string;
+  tags: string[];
+}
+export interface TileLegend {
+  notes: string;
+  /** Map of GID string -> legend entry. */
+  tiles: Record<string, TileLegendEntry>;
+}
+
+/**
+ * Per-encounter spawn-zone overlay in a Tiled-compatible tile-layer shape.
+ * `data` is a flat row-major array of GIDs of length `width × height`.
+ *
+ * GID encoding (fixed, implicit "spawn zones" tileset):
+ *   0 = no spawn here (default)
+ *   1 = player spawn       (was 'P' in the old ASCII overlay)
+ *   2 = ally spawn         (was 'A')
+ *   3 = neutral NPC spawn  (was 'N')
+ *   4 = enemy spawn        (was 'E')
+ *
+ * Only passable map tiles are eligible for spawning regardless of zone GID.
+ */
+export interface StartingZonesLayer {
+  width: number;
+  height: number;
+  data: number[];
 }
 
 // Encounter card definition (the JSON files in server/data/encounters/).
@@ -286,7 +381,13 @@ export interface EncounterDef {
   allyIds?: string[];
   customIntroduction?: string;
   customContext?: string;
-  startingZones?: string[];
+  /**
+   * Per-GID semantics for the referenced map's tiles in this encounter.
+   * Required to make any tile of the map passable; tiles without a matching
+   * entry are treated as impassable by SessionBuilder.
+   */
+  tileProperties?: EncounterTileProperty[];
+  startingZones?: StartingZonesLayer;
 }
 
 // ── Combat log ───────────────────────────────────────────────────────────────
@@ -400,6 +501,12 @@ export interface GameMap {
   passable: boolean[][];
   cols: number;
   rows: number;
+  /** Ground-layer tile GIDs for rendering. Optional: procedural maps may omit. */
+  gidGrid?: number[][];
+  /** Object-layer tile GIDs (drawn over the ground layer). 0 = empty cell. */
+  objectGidGrid?: number[][];
+  /** Tileset metadata for rendering. Optional: procedural maps may omit. */
+  tilesets?: MapTilesetInfo[];
 }
 
 export interface NpcPersona { id: string; name: string; persona: string; }
@@ -491,7 +598,8 @@ export interface CreateSessionRequest {
   allyIds?: string[];
   customIntroduction?: string;
   customContext?: string;
-  startingZones?: string[];
+  tileProperties?: EncounterTileProperty[];
+  startingZones?: StartingZonesLayer;
   resumeHp?: number;
   resumeXp?: number;
   resumeGold?: number;

@@ -1,4 +1,5 @@
 import Phaser from "phaser";
+import { tilesetTextureKey } from "./BootScene";
 import { Player } from "../entities/Player";
 import { NpcToken } from "../entities/NpcToken";
 import { MapItem } from "../entities/MapItem";
@@ -21,6 +22,7 @@ import type { ChatMessage } from "../ui/AIDMOverlay";
 
 const GAME_W = PLAYER_PANEL_WIDTH + GRID_COLS * TILE_SIZE + TARGET_PANEL_WIDTH;
 const GAME_H = GRID_ROWS * TILE_SIZE + HUD_HEIGHT;
+const MAP_TILE_ALPHA = 0.7;
 
 export class GameScene extends Phaser.Scene {
   private playerDef!: PlayerDef;
@@ -511,15 +513,53 @@ export class GameScene extends Phaser.Scene {
 
   // ── Map drawing ───────────────────────────────────────────────────────────
 
-  private drawMapTiles(map: GameMap): Phaser.GameObjects.Graphics {
-    const g = this.add.graphics();
-    for (let row = 0; row < map.rows; row++) {
-      for (let col = 0; col < map.cols; col++) {
-        g.fillStyle(map.passable[row][col] ? 0x16213e : 0x05080f);
-        g.fillRect(col * TILE_SIZE + 1, row * TILE_SIZE + 1, TILE_SIZE - 2, TILE_SIZE - 2);
+  /**
+   * Render the tile layer(s). If the map carries Tiled tileset metadata
+   * (`gidGrid` + `tilesets`), each GID is looked up in the matching tileset
+   * and drawn from the preloaded spritesheet — ground layer first, then the
+   * optional object layer on top. Procedural maps with no tileset info fall
+   * back to a simple coloured fill per tile.
+   */
+  private drawMapTiles(map: GameMap): Phaser.GameObjects.Container {
+    const container = this.add.container();
+    if (map.gidGrid && map.tilesets && map.tilesets.length > 0) {
+      // Sort tilesets by descending firstgid so the lookup picks the highest
+      // firstgid ≤ gid (Tiled's standard scheme for multi-tileset maps).
+      const tilesets = [...map.tilesets].sort((a, b) => b.firstgid - a.firstgid);
+      const drawGrid = (grid: number[][]): void => {
+        for (let row = 0; row < map.rows; row++) {
+          for (let col = 0; col < map.cols; col++) {
+            const gid = grid[row][col];
+            if (!gid) continue;
+            const ts = tilesets.find((t) => gid >= t.firstgid);
+            if (!ts) continue;
+            const frame = gid - ts.firstgid;
+            const sprite = this.add.image(
+              col * TILE_SIZE + TILE_SIZE / 2,
+              row * TILE_SIZE + TILE_SIZE / 2,
+              tilesetTextureKey(ts.imageUrl),
+              frame,
+            );
+            sprite.setDisplaySize(TILE_SIZE, TILE_SIZE);
+            sprite.setAlpha(MAP_TILE_ALPHA);
+            container.add(sprite);
+          }
+        }
+      };
+      drawGrid(map.gidGrid);
+      if (map.objectGidGrid) drawGrid(map.objectGidGrid);
+    } else {
+      // Fallback (procedural maps): solid-fill rectangles like before.
+      const g = this.add.graphics();
+      for (let row = 0; row < map.rows; row++) {
+        for (let col = 0; col < map.cols; col++) {
+          g.fillStyle(map.passable[row][col] ? 0x16213e : 0x05080f);
+          g.fillRect(col * TILE_SIZE + 1, row * TILE_SIZE + 1, TILE_SIZE - 2, TILE_SIZE - 2);
+        }
       }
+      container.add(g);
     }
-    return g;
+    return container;
   }
 
   private drawHighlights(state: GameState): void {

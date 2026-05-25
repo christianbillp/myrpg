@@ -1,3 +1,5 @@
+import type { StartingZonesLayer } from './engine/types.js';
+
 export type EncounterType = 'simple_combat' | 'social_interaction' | 'exploration';
 export type QuestGoalType = 'kill' | 'collect' | 'explore' | 'talk';
 
@@ -10,7 +12,7 @@ export interface EncounterContext {
   quests: QuestDef[];
   npcIds?: string[];
   allyIds?: string[];
-  startingZones?: string[];
+  startingZones?: StartingZonesLayer;
 }
 
 export type SecretReward =
@@ -42,7 +44,7 @@ export interface EncounterStartRequest {
   allyIds?: string[];
   customIntroduction?: string;
   customContext?: string;
-  startingZones?: string[];
+  startingZones?: StartingZonesLayer;
 }
 
 const SECRET_POOL: SecretDef[] = [

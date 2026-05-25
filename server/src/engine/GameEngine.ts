@@ -3,7 +3,7 @@ import {
   PlayerDef, MonsterDef,
   NpcState, Disposition,
   QuestGoalType, LogEntry, GameDefs,
-  CreateSessionRequest, GameMap,
+  CreateSessionRequest,
 } from './types.js';
 import { advanceQuest as questAdvance, completeQuest as questComplete } from './QuestSystem.js';
 import type { EncounterContext } from '../encounterService.js';
@@ -32,7 +32,7 @@ import {
   doSearch as exDoSearch, doShortRest as exDoShortRest, doUsePotion as exDoUsePotion,
 } from './ExplorationActions.js';
 import { doEquip as ivDoEquip, doUnequip as ivDoUnequip } from './InventoryActions.js';
-import { buildSessionState } from './SessionBuilder.js';
+import { buildSessionState, SavedMapRecord } from './SessionBuilder.js';
 import { WeaponDef } from './types.js';
 
 export interface ActionResult {
@@ -559,7 +559,7 @@ export class GameEngine {
     sessionId: string,
     req: CreateSessionRequest & { encounterContext: EncounterContext },
     defs: GameDefs,
-    savedMap?: GameMap,
+    savedMap?: SavedMapRecord,
   ): GameEngine {
     const state = buildSessionState(sessionId, req, defs, savedMap);
     // The constructor clones playerDef internally to avoid mutating shared defs.

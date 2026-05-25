@@ -346,6 +346,7 @@ export class EncounterSetupScene extends Phaser.Scene {
         allyIds: enc.allyIds,
         customIntroduction: enc.customIntroduction,
         customContext: enc.customContext,
+        tileProperties: enc.tileProperties,
         startingZones: enc.startingZones,
         resumeHp:            save?.hp,
         resumeXp:            save?.xp,

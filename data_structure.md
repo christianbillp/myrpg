@@ -13,7 +13,8 @@ server/data/
 ├── npcs/               # Named NPCs — identity + persona layered over a monster stat block
 ├── encounters/         # A flavored combination of a map and one or more NPCs
 ├── saves/              # Runtime save files (written by the server, not hand-authored)
-└── species/            # SRD player species (Dragonborn, Dwarf, Elf, …)
+├── species/            # SRD player species (Dragonborn, Dwarf, Elf, …)
+└── tilesets/           # Shared tile palettes (image + .tsj + AI-facing legend)
 ```
 
 ---
@@ -353,27 +354,183 @@ All other trait effects are stored for future engine use and have no current mec
 
 ---
 
+## tilesets/
+
+Shared tile palettes. Three kinds of files live here:
+
+| File | Purpose |
+|---|---|
+| `{name}.png` | Tile atlas image. Served by the server at `GET /tilesets/{name}.png`; loaded by `BootScene` as a Phaser spritesheet sliced by the matching `.tsj`'s `tilewidth/tileheight/spacing/margin`. |
+| `{name}.tsj` | Tiled external tileset (JSON): the canonical record of the atlas's geometry (image filename, image/tile dimensions, spacing, margin, column count, tile count). Referenced from a map file via `tilesets[].source: "../tilesets/{name}.tsj"`. See the [tilesets section under maps/](#tilesets) for the field list. |
+| `{name}_legend.json` | AI-facing tile legend: a per-GID dictionary of what each tile means semantically. Used in two ways: (1) as input to AI map-authoring prompts so an LLM can pick tile ids by intent, and (2) by the server as a passability **fallback** when an encounter's `tileProperties` doesn't declare a given GID. |
+
+### Tile legend file
+
+| Field | Type | Notes |
+|---|---|---|
+| `notes` | string | Free-form authoring notes for an AI generator. Should explain the Tiled tile-layer shape, name the firstgid convention used by the keys, and call out the multi-layer (ground + object) model. |
+| `tiles` | object | Map of GID (as string) → tile entry. **Keys are GIDs**, not tileset-local ids — they assume the tileset is referenced at `firstgid: 1`. If a future map ever loads the tileset at a different firstgid the keys must be offset accordingly. |
+
+Each tile entry:
+
+| Field | Type | Notes |
+|---|---|---|
+| `name` | string | Short identifier, e.g. `"grass"`, `"chair_right"`. |
+| `passable` | boolean | Engine-authoritative default. Encounter `tileProperties` can override; if neither declares a value the engine defaults to impassable. |
+| `layer` | string | `"ground"` or `"object"`. Tells map authors which tile layer the entry belongs on. Ground tiles are drawn first; object tiles overlay them. |
+| `description` | string | Visual / authoring description. Surfaced to AI map generators. |
+| `tags` | string[] | Free-form classification tags, e.g. `["wood", "bridge", "floor"]`. |
+
+The server loads every `*_legend.json` file at startup and merges them into a single GID → entry map under `defs.tileLegend`. New tilesets are added by dropping in `{name}.png`, `{name}.tsj`, and `{name}_legend.json` together — no engine code changes required.
+
+---
+
 ## maps/
 
-Hand-crafted encounter maps stored as ASCII grids. The server pre-processes each map into a `passable` boolean grid at startup.
+Hand-crafted encounter maps stored as **Tiled-compatible JSON** (a stripped-down subset of the format that Tiled's "Save As JSON" export produces). Maps are pure geometry — they carry the tile-GID grid, the tile palette as graphical references, and identifying metadata. They do **not** declare what tiles mean (passable, difficult terrain, trapped, cover, …). That's the encounter's job: each encounter declares, via `tileProperties`, how the GIDs in its referenced map behave for that scenario. This separation means the same map can be reused across encounters with very different mechanics (a peaceful crossing today, a flooded crossing with broken parapets next week — same `bridge.json`).
+
+The server loads each map at startup and stores the raw GID grid(s) — a required ground layer plus an optional object layer drawn on top. The combined `passable: boolean[][]` is built per-session from `map.gidGrid + map.objectGidGrid + encounter.tileProperties + tileset legend` (see [encounters/](#encounters), [tilesets/](#tilesets-1), and [`SessionBuilder.buildGameMapFromSaved`](../server/src/engine/SessionBuilder.ts)).
 
 ### Fields
 
 | Field | Type | Notes |
 |---|---|---|
-| `id` | string | Unique key. Referenced by `premade-encounters` `mapId`. |
+| `id` | string | Unique key. Referenced by `encounters.mapId`. |
 | `name` | string | Display name shown in the UI. |
 | `mapdescription` | string | Prose description of the map layout, surfaced to the AIDM for spatial context. |
-| `rows` | string[] | ASCII grid. Each string is one row. All strings must be the same length. |
+| `width` | integer | Grid width in tiles (Tiled convention). |
+| `height` | integer | Grid height in tiles. |
+| `tilesets` | object[] | Tile palette(s). See below. |
+| `layers` | object[] | Tile layers. See below. |
 
-### Tile legend
+### Tilesets
 
-| Character | Meaning |
-|---|---|
-| `#` | Wall — impassable |
-| `.` | Floor — passable |
+A tileset is a palette of tiles. Each tile has an id local to the tileset; its **GID** (used in layer data) is `firstgid + id`. The first tileset typically has `firstgid: 1` (GID 0 is reserved for "empty").
 
-The map `cols` and `rows` dimensions are derived from the grid at load time.
+A tileset entry in `map.tilesets` is one of two shapes — **embedded** (palette defined inline) or **external** (palette stored in a separate `.tsj` file and referenced by path). External is the recommended shape: it lets several maps share one palette without duplication, and it's what Tiled writes by default.
+
+#### External tileset reference (in the map file)
+
+| Field | Type | Notes |
+|---|---|---|
+| `firstgid` | integer | GID assigned to the tileset's tile 0. Subsequent tiles get sequential GIDs. |
+| `source` | string | Path to a `.tsj` file relative to the map file, e.g. `"../tilesets/roguelike.tsj"`. Resolved by the server at load time; the resolved tileset is inlined into the response served to the client under `GameMap.tilesets`. |
+
+#### Embedded tileset (or the contents of an external `.tsj` file)
+
+| Field | Type | Notes |
+|---|---|---|
+| `firstgid` | integer | *(map file only — not part of the standalone `.tsj`.)* |
+| `name` | string | Display name (informational only). |
+| `image` | string | *(optional — only present for image-based tilesets.)* Image filename relative to the tileset file, e.g. `"roguelike.png"`. The server serves the file at `GET /tilesets/{filename}` and rewrites this field to an absolute URL (`imageUrl: "/tilesets/{filename}"`) in `GameMap.tilesets[]` so the client can load it as a Phaser spritesheet. |
+| `imagewidth` | integer | *(image tilesets only)* Pixel width of the source image. |
+| `imageheight` | integer | *(image tilesets only)* Pixel height of the source image. |
+| `tilewidth` | integer | *(image tilesets only)* Pixel width of one tile. |
+| `tileheight` | integer | *(image tilesets only)* Pixel height of one tile. |
+| `spacing` | integer | *(image tilesets only — default `0`)* Pixel gap between tiles in the atlas. |
+| `margin` | integer | *(image tilesets only — default `0`)* Pixel border around the entire atlas. |
+| `columns` | integer | *(image tilesets only)* Number of tile columns in the atlas. |
+| `tilecount` | integer | *(image tilesets only)* Total number of tiles in the atlas. |
+| `tiles` | object[] | *(optional)* Per-tile metadata: `{ id: integer }`. May carry Tiled-style fields like `image`, `properties` etc.; the loader ignores all of them. **No semantic fields on tiles.** Whether GID N is passable, difficult, or trapped is declared per-encounter, not here. |
+
+Image-based tilesets render through the Phaser side: `BootScene` queues every unique tileset image as a spritesheet keyed by `tilesetTextureKey(imageUrl)`, and `GameScene.drawMapTiles` draws each tile as `this.add.image(..., key, frame)` where `frame = gid − firstgid`, applying `MAP_TILE_ALPHA = 0.7` so the dark scene background bleeds through to darken the overall map. Multi-layer maps draw the ground layer first then the object layer on top. Maps without an image tileset (e.g. procedurally generated ones) fall back to coloured fills.
+
+### Layers
+
+A map may carry up to two tile layers, drawn bottom-up:
+
+1. **Ground layer** — required. Found by name `"terrain"`, or as the first tile layer if no such name exists. Every cell must reference a valid GID (no `0` gaps).
+2. **Object layer** — optional. Found by name `"objects"` (or `"object"`), or as a second tile layer of any name. Drawn on top of the ground layer. A GID of `0` means "no object on this cell" — the ground tile shows through.
+
+A cell's effective passability is `groundPassable AND objectPassable` — i.e. an impassable object (e.g. a tree, a door's wall before the door is placed) blocks even a passable ground tile, while an empty object cell (`0`) doesn't change the ground's verdict.
+
+| Field | Type | Notes |
+|---|---|---|
+| `type` | string | Must be `"tilelayer"`. (Tiled also supports `"objectgroup"`, `"imagelayer"`; we ignore those for now.) |
+| `name` | string | Layer name. The loader looks for `"terrain"` for the ground layer and `"objects"`/`"object"` for the optional object layer; both fall back to position-based detection if not named. |
+| `width` | integer | Should match the map `width`. |
+| `height` | integer | Should match the map `height`. |
+| `data` | integer[] | Flat row-major array of **GIDs**, length = `width × height`. Index `y * width + x` gives the GID at tile `(x, y)`. A GID of `0` means "empty" — only valid in an object layer. |
+
+When hand-authoring a map JSON, format the `data` array with one row of GIDs per source line — that keeps the visual shape of the map readable in code review, while staying byte-compatible with what Tiled exports.
+
+### Minimal example — embedded palette (no image)
+
+```json
+{
+  "id": "tiny",
+  "name": "Tiny Room",
+  "mapdescription": "Four walls, one floor tile.",
+  "width": 3,
+  "height": 3,
+  "tilesets": [{
+    "firstgid": 1,
+    "name": "default",
+    "tiles": [
+      { "id": 0 },
+      { "id": 1 }
+    ]
+  }],
+  "layers": [{
+    "type": "tilelayer",
+    "name": "terrain",
+    "width": 3,
+    "height": 3,
+    "data": [
+      2, 2, 2,
+      2, 1, 2,
+      2, 2, 2
+    ]
+  }]
+}
+```
+
+GID `1` = first palette tile (typically floor in this codebase by convention; consumer encounters decide), GID `2` = second palette tile (typically wall).
+
+### Minimal example — external image tileset
+
+A map referencing a shared Kenney-style tileset (`server/data/tilesets/roguelike.tsj`):
+
+```json
+{
+  "id": "bridge",
+  "name": "Narrow Bridge",
+  "mapdescription": "A weathered stone bridge spans a dark gorge.",
+  "width": 26,
+  "height": 12,
+  "tilesets": [{
+    "firstgid": 1,
+    "source": "../tilesets/roguelike.tsj"
+  }],
+  "layers": [{
+    "type": "tilelayer",
+    "name": "terrain",
+    "width": 26,
+    "height": 12,
+    "data": [ /* row-major GIDs */ ]
+  }]
+}
+```
+
+The standalone `roguelike.tsj` file lives in `server/data/tilesets/` next to its PNG:
+
+```json
+{
+  "name": "roguelike",
+  "image": "roguelike.png",
+  "imagewidth": 968,
+  "imageheight": 526,
+  "tilewidth": 16,
+  "tileheight": 16,
+  "spacing": 1,
+  "margin": 0,
+  "columns": 57,
+  "tilecount": 1767,
+  "tiles": []
+}
+```
+
+The image is served at `GET /tilesets/roguelike.png` (the route whitelists `.png` filenames in `server/data/tilesets/`). The client loads it as a Phaser spritesheet and slices it by `tilewidth/tileheight/spacing/margin` to look up frames by `gid − firstgid`.
 
 ---
 
@@ -394,28 +551,56 @@ A flavored combination of a map and one or more NPCs, with optional AIDM instruc
 | `allyIds` | string[] | *(optional)* `id` values from `npcs/` to spawn with **ally** disposition near the player. |
 | `customIntroduction` | string | *(optional)* Replaces the auto-generated introduction shown in the Introduction Overlay at encounter start. |
 | `customContext` | string | *(optional)* Replaces the auto-generated AIDM context string. Use this to give the AIDM specific instructions about the scenario, the NPCs, and what mechanics to use. |
-| `startingZones` | string[] | *(optional)* Spawn zone grid — same dimensions as the map `rows`. See below. |
+| `tileProperties` | object[] | Per-GID semantics for the referenced map's tiles **in this encounter**. See below. Required to make any tile passable. |
+| `startingZones` | object | *(optional)* Tiled-style tile layer marking spawn regions for the player, allies, neutral NPCs, and enemies. Same dimensions as the referenced map. See below. |
+
+### tileProperties
+
+Each entry maps one of the map's GIDs to the semantic properties that GID should carry during this encounter. The engine's only currently-honoured property is `passable`; future SRD features (difficult terrain US-044, cover US-045, traps) will add more fields without changing the file shape.
+
+| Field | Type | Notes |
+|---|---|---|
+| `gid` | integer | GID from the referenced map's terrain layer (= the map's `firstgid + tile.id`). |
+| `passable` | boolean | *(default: `false`)* Whether creatures can walk onto a tile of this GID. |
+
+**Lookup order for a GID's `passable`:**
+
+1. The encounter's own `tileProperties` entry — explicit override.
+2. The tileset's legend file (see [tilesets/](#tilesets-1)) — sensible default for tiles the encounter didn't customise.
+3. `false` (impassable) — final fallback when neither source declares a value.
+
+So encounters only need to list GIDs whose meaning differs from the legend (e.g. an "underground passage" scenario marks GID 287 / chasm as `passable: true`); a GID that matches the legend default can be omitted.
+
+Because semantics live here and not in the map, the same `bridge.json` can be reused across encounters with different tile meanings — a broken-wall scenario could mark GID 2 (normally a wall) as `passable: true`, while a flooded scenario could leave it solid.
 
 ### startingZones
 
-When provided, `startingZones` is an ASCII grid the same width and height as the referenced map. Each character assigns a spawn region:
+When provided, `startingZones` is a Tiled-compatible tile layer with a fixed implicit "spawn zones" tileset — same shape and conventions as a [map tile layer](#maps), but the tileset GID semantics are hardcoded into the engine instead of declared in JSON:
 
-| Character | Spawn region |
+| Field | Type | Notes |
+|---|---|---|
+| `width` | integer | Should match the map `width`. |
+| `height` | integer | Should match the map `height`. |
+| `data` | integer[] | Flat row-major array of zone GIDs, length = `width × height`. |
+
+**Zone GIDs:**
+
+| GID | Spawn region |
 |---|---|
-| `P` | Player starting zone |
-| `A` | Ally starting zone |
-| `N` | Neutral NPC starting zone |
-| `E` | Enemy starting zone |
-| `#` `.` ` ` | Undesignated — no spawning |
+| `0` | No spawn here (default) |
+| `1` | Player starting zone |
+| `2` | Ally starting zone |
+| `3` | Neutral NPC starting zone |
+| `4` | Enemy starting zone |
 
-Only passable tiles (`.` in the map) are eligible for spawning regardless of the zone label. If no zone is defined for a role, the server falls back to default placement rules (player in the left third of the map, enemies at least 5 tiles away, etc.).
+Only passable map tiles are eligible for spawning regardless of zone GID. If no zone is defined for a role, the server falls back to default placement rules (player in the left third of the map, enemies at least 5 tiles away, etc.). Format the `data` array with one row per source line to keep the spawn-zone shape eyeball-readable in code review.
 
 ### Example — `encounters/bridge_standoff.json`
 
 ```json
 {
   "id": "bridge_standoff",
-  "title": "Bridge Toll",
+  "encounterTitle": "Bridge Toll",
   "description": "A pair of bandits blocks a narrow stone bridge...",
   "encounterTypes": ["social_interaction"],
   "mapId": "bridge",
@@ -423,12 +608,24 @@ Only passable tiles (`.` in the map) are eligible for spawning regardless of the
   "allyIds": ["frightened_traveller"],
   "customIntroduction": "You and a nervous traveller stand at the near end...",
   "customContext": "Two bandits block the bridge. If the player refuses to pay, call set_disposition on both...",
-  "startingZones": [
-    "##########################",
-    "#.......##########.......#",
-    "#PPPPPP.............NNNNN#",
-    ...
-  ]
+  "startingZones": {
+    "width": 26,
+    "height": 12,
+    "data": [
+      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+      0, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 3, 3, 3, 3, 3, 0,
+      0, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 3, 3, 3, 3, 3, 0,
+      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+    ]
+  }
 }
 ```
 

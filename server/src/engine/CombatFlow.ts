@@ -380,7 +380,6 @@ function runSingleAllyTurn(ctx: GameContext, ally: NpcState, events: GameEvent[]
         const { finalDamage, log: resistLog } = ctx.resistMod(result.damage, meleeAtk?.damageType ?? '', targetDef, target.name);
         if (resistLog) ctx.addLog(resistLog);
         target.hp = Math.max(0, target.hp - finalDamage);
-        if (target.hp > 0) ctx.addLog({ left: `${target.name} HP: ${target.hp}/${target.maxHp}`, style: 'status' });
         if (target.hp <= 0) ctx.killWithReward(target, targetDef, `☠ ${target.name} is slain!`);
       }
     }

@@ -89,7 +89,6 @@ export function doAttack(ctx: GameContext, targetId: string | undefined, events:
   const { finalDamage, log: resistLog } = ctx.resistMod(damage, atk.damageType, targetDef, target.name);
   if (resistLog) ctx.addLog(resistLog);
   target.hp = Math.max(0, target.hp - finalDamage);
-  if (target.hp > 0) ctx.addLog({ left: `${target.name} HP: ${target.hp}/${target.maxHp}`, style: 'status' });
   ctx.applyMasteryConditions(target, vexApplied, slowApplied);
 
   // SRD ammunition recovery: per-shot 50% chance the ammo lands recoverable on
@@ -209,7 +208,6 @@ function executeThrowOnTarget(
   const { finalDamage, log: resistLog } = ctx.resistMod(damage, attack.damageType, targetDef, target.name);
   if (resistLog) ctx.addLog(resistLog);
   target.hp = Math.max(0, target.hp - finalDamage);
-  if (target.hp > 0) ctx.addLog({ left: `${target.name} HP: ${target.hp}/${target.maxHp}`, style: 'status' });
   ctx.applyMasteryConditions(target, vexApplied, slowApplied);
   if (target.hp <= 0) ctx.killWithReward(target, targetDef, `☠ ${target.name} is slain!`);
 }
@@ -308,7 +306,6 @@ export function doPlayerOpportunityAttack(ctx: GameContext, npc: NpcState): void
   const { finalDamage, log: oaResistLog } = ctx.resistMod(damage, ctx.playerDef.mainAttack.damageType, targetDef, npc.name);
   if (oaResistLog) ctx.addLog(oaResistLog);
   npc.hp = Math.max(0, npc.hp - finalDamage);
-  if (npc.hp > 0) ctx.addLog({ left: `${npc.name} HP: ${npc.hp}/${npc.maxHp}`, style: 'status' });
   ctx.applyMasteryConditions(npc, vexApplied, slowApplied);
   if (npc.hp <= 0) ctx.killWithReward(npc, targetDef, `☠ ${npc.name} slain by Opportunity Attack!`, false);
 }
