@@ -30,15 +30,13 @@ Defined in `client/src/ui/PlayerPanel.ts`. HTML DOM panel; **open by default** (
 | ------------------ | -------------------------------------------------------------------------------------------------------- |
 | **Name Header**    | Player name (in class colour) and species/class/level line                                               |
 | **HP Bar**         | Colour-coded health bar: green > 50 %, orange > 25 %, red ≤ 25 %                                         |
-| **HP Text**        | Numeric HP — "current / max"                                                                             |
-| **Combat Stats**   | AC, Speed, Proficiency bonus, Initiative bonus                                                           |
-| **Ability Scores** | All six scores (STR DEX CON INT WIS CHA) with modifiers                                                  |
-| **XP Display**     | Current experience points                                                                                |
-| **Concentration Chip** | Single-line indicator just below XP, visible only while the player is concentrating on a spell. Format: "🌀 Concentrating: <Spell Name>". Cleared when concentration breaks (failed CON save on damage, replaced by a new concentration spell, or incapacitation). |
+| **HP Text**        | Numeric HP — "current / max". AC, ability scores, saving throws, XP, gold, and other static stats live in the Character Sheet overlay (Character tab); the Player Panel keeps only at-a-glance combat state. |
+| **Spell Slots**    | One-line summary of remaining spell slots per level (e.g. "Slots: L1 2/2"). Visible only when the character knows at least one spell slot tier. |
 | **Feature Resource Chips** | One-line summary of class-feature resource pools (e.g. "Second Wind: 2/2"). Visible when the character knows at least one feature with a `resourceLabel` and a non-`unlimited` resource. Each feature's template is rendered with `{remaining}`/`{max}` placeholders. Multiple chips join with " · ". |
-| **Quests**         | Section below XP listing quests assigned at encounter start. Each quest shows "· Title  N/M" while in progress and "✓ Title" when complete. "None" when no quests are active for the current encounter type. |
-| **Action Buttons** | Context-sensitive combat buttons shown above INVENTORY/SEARCH (see below)                                |
-| **INVENTORY**      | Button at the bottom of the panel; always visible when the panel is open. Opens the Inventory Overlay.   |
+| **Concentration Chip** | Single-line indicator visible only while the player is concentrating on a spell. Format: "🌀 Concentrating: <Spell Name>". Cleared when concentration breaks (failed CON save on damage, replaced by a new concentration spell, or incapacitation). |
+| **Quests**         | Section listing quests assigned at encounter start. Each quest shows "· Title  N/M" while in progress and "✓ Title" when complete. "None" when no quests are active for the current encounter type. |
+| **Action Buttons** | Context-sensitive combat buttons shown above CHARACTER/SEARCH (see below)                                |
+| **CHARACTER**      | Button at the bottom of the panel; always visible when the panel is open. Opens the Character Sheet Overlay (tabs: Character / Inventory / Spells). |
 | **SEARCH**         | Button at the bottom of the panel; visible only during an Exploration encounter with secrets remaining. Rolls Wisdom (Perception) to detect a secret on an adjacent tile. |
 | **END TURN**       | Button at the bottom of the panel; visible only during `player_turn`. Ends the player's turn and passes initiative to the enemies. |
 | **LEAVE ENCOUNTER**| Button at the very bottom of the panel; always visible. Triggers auto-save and returns to the Encounter Setup screen. |
@@ -157,16 +155,13 @@ Defined in `client/src/ui/StorylogOverlay.ts`. Standalone HTML overlay (no `Base
 
 ---
 
-### Inventory Overlay
+### Character Sheet Overlay
 
-Defined in `client/src/ui/InventoryOverlay.ts`. HTML DOM overlay; opened via the INVENTORY button in the Player Panel.
+Defined in `client/src/ui/CharacterSheetOverlay.ts`. HTML DOM overlay; opened via the CHARACTER button in the Player Panel. 580 × 480 px panel with a tab bar at the top and content area below. State updates trigger a live rebuild (server `state_update` → `OverlayManager.refreshCharacterSheetIfOpen`) so equip / cast / damage feedback is reflected without reopening.
 
-| Component            | Description                                                               |
-| -------------------- | ------------------------------------------------------------------------- |
-| **Equipment Slots**  | Three rows: Armor, Weapon, Offhand (shield). Each shows the equipped item name and an UNEQUIP button |
-| **Stats Bar**        | AC, current GP, and main attack summary shown at the bottom of the overlay |
-| **Carried Items List** | Scrollable list of unequipped inventory items. Identical items are grouped with a ×N count. Three categories rendered in order: **equippable** (with EQUIP button), **consumables** (with USE button), then **ammunition** (display-only AMMO badge — fired implicitly by ranged ATTACK). |
-| **Equip Button**     | Shown on equippable items; moves the item into the appropriate slot. **Armor cannot be equipped or unequipped during combat** (SRD: donning takes 1–10 minutes); the engine refuses with an in-fiction log line. Weapons and shields use SRD's one-free-object-interaction-per-turn rule — the first swap during `player_turn` is free; a second swap costs the Utilize action and consumes the player's Action. |
-| **Use Button**       | Shown on consumables; dimmed when the Bonus Action has already been spent |
-| **Ammo Badge**       | Static "AMMO" label shown on ammunition rows (arrows, bolts, etc.). Ammunition is not used directly — it's consumed automatically when the ATTACK button fires a ranged weapon. |
-| **Scroll Bar**       | Thumb on right edge; mouse-wheel scrollable when content overflows        |
+| Tab           | Visibility                                                                | Contents                                                                                                                                                                                                                                                            |
+| ------------- | ------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Character** | Always                                                                    | Identity header (color swatch + name + species/class/level); five-cell stat strip (HP, AC, Speed, Initiative, Proficiency); six-cell ability score grid with modifiers; saving throws with proficiency dots; resources line (XP, gold, passive perception) and concentration chip when a spell is being concentrated on. |
+| **Inventory** | Always (default tab)                                                      | Three equipment slot cards (Armor / Weapon / Offhand) with UNEQUIP buttons; scrollable carried-items list rendering four categories in order — equippable (EQUIP button), consumables (USE button, dimmed when Bonus Action spent), ammunition (AMMO badge), gear (GEAR badge); stats bar at the bottom with AC / GP / main attack summary. Carries forward all rules from the pre-tab inventory panel: armor blocked from equip/unequip during combat (SRD donning time); weapon/shield first swap is free, second costs the Utilize Action. |
+| **Spells**    | Caster only (`PlayerDef.spellcastingAbility` set)                         | Three-cell header (Spell Save DC / Spell Attack Bonus / per-level slot pool `L1 N/M`); three sections — Cantrips (always known), Prepared (currently castable), and Spellbook · Unprepared (known but not prepared this rest). Each spell row shows the name, a short mechanical summary (damage dice, save ability+DC, area / range, Concentration tag), and the level tag (`cantrip` / `L1`). |
+| **Close (×)** | Top-right corner; closes the overlay (Backdrop click also closes).        |                                                                                                                                                                                                                                                                     |

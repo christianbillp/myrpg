@@ -770,7 +770,7 @@ There are two save files per session:
 
 ### Character save — `saves/{characterId}.json`
 
-Stores the persistent player state that carries across encounters.
+Stores the persistent player state that carries across encounters. Written after every action; deleted via `DELETE /save/:characterId`. The read route `GET /save/:characterId` returns `null` when the file is missing (rather than fabricating a default), so the encounter-setup UI can distinguish "no save exists" from "fresh save" and reset the card accordingly.
 
 | Field | Type | Notes |
 |---|---|---|

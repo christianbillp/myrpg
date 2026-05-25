@@ -499,7 +499,7 @@ async function ensureSaveExists(characterId: string): Promise<void> {
 }
 
 server.get("/save/:characterId", async (req) =>
-  readSave((req.params as { characterId: string }).characterId),
+  readSaveIfExists((req.params as { characterId: string }).characterId),
 );
 server.post("/save/:characterId", async (req, reply) => {
   await writeSave(

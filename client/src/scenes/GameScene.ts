@@ -98,6 +98,7 @@ export class GameScene extends Phaser.Scene {
       onUnequip:   (slot) => gameClient.sendAction({ type: "unequip", slot }),
       onUsePotion: () => gameClient.sendAction({ type: "usePotion" }),
       getItems:    () => this.registry.get("equipment") as ItemDef[],
+      getSpells:   () => (this.registry.get("spells") ?? []) as SpellDef[],
     });
     if (this.pendingIsResume) this.overlays.markResumed();
 
@@ -180,6 +181,7 @@ export class GameScene extends Phaser.Scene {
     this.reconcileSelection(state);
 
     this.overlays.showIntroIfNeeded(state);
+    this.overlays.refreshCharacterSheetIfOpen(state);
 
     this.updateHUD(state);
   }
@@ -385,7 +387,7 @@ export class GameScene extends Phaser.Scene {
 
   private buildHUD(): void {
     this.playerPanel = new PlayerPanel(this.uiScale, this.playerDef, {
-      onOpenInventory:  () => { if (this.gameState) this.overlays.openInventory(this.gameState); },
+      onOpenCharacterSheet: () => { if (this.gameState) this.overlays.openCharacterSheet(this.gameState); },
       onSearch:         () => gameClient.sendAction({ type: "search" }),
       onAttack:         () => gameClient.sendAction({ type: "attack", targetId: this.gameState?.selectedTargetId ?? undefined }),
       onThrow:          (itemId) => gameClient.sendAction({ type: "throw", itemId, targetId: this.gameState?.selectedTargetId ?? undefined }),
@@ -575,7 +577,6 @@ export class GameScene extends Phaser.Scene {
     this.playerPanel.refresh(
       state.player.hp,
       this.playerDef.maxHp,
-      state.player.xp,
       quests,
       showSearch,
     );

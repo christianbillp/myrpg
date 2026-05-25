@@ -59,7 +59,7 @@ export interface PlayerPanelActionState {
 }
 
 export interface PlayerPanelCallbacks {
-  onOpenInventory: () => void;
+  onOpenCharacterSheet: () => void;
   onSearch: () => void;
   onAttack: () => void;
   onThrow: (itemId: string) => void;
@@ -80,11 +80,6 @@ function hpColor(pct: number): string {
   return pct > 0.5 ? '#27ae60' : pct > 0.25 ? '#f39c12' : '#e74c3c';
 }
 
-function statMod(v: number): string {
-  const m = Math.floor((v - 10) / 2);
-  return (m >= 0 ? '+' : '') + m;
-}
-
 function escHtml(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
@@ -93,8 +88,6 @@ export class PlayerPanel {
   private readonly el: HTMLDivElement;
   private readonly hpFill: HTMLElement;
   private readonly hpText: HTMLElement;
-  private readonly statsEl: HTMLElement;
-  private readonly xpEl: HTMLElement;
   private readonly slotsEl: HTMLElement;
   private readonly featureChipsEl: HTMLElement;
   private readonly concentrationEl: HTMLElement;
@@ -118,12 +111,6 @@ export class PlayerPanel {
     this.callbacks = callbacks;
 
     const colorHex = '#' + def.color.toString(16).padStart(6, '0');
-    const abilities = (['STR', 'DEX', 'CON', 'INT', 'WIS', 'CHA'] as const)
-      .map((n, i) => {
-        const val = [def.str, def.dex, def.con, def.int, def.wis, def.cha][i];
-        return `${n}  ${String(val).padStart(2)}  (${statMod(val)})`;
-      })
-      .join('\n');
 
     const savedWidth = parseInt(localStorage.getItem(PANEL_WIDTH_KEY) ?? '', 10);
     const initWidth = savedWidth >= PANEL_MIN_WIDTH ? savedWidth : PLAYER_PANEL_WIDTH;
@@ -149,13 +136,6 @@ export class PlayerPanel {
       <div style="padding:2px 12px;font-size:10px;color:#cccccc;" data-hp-text></div>
       <div class="gui-sep"></div>
 
-      <div style="padding:4px 12px;font-size:10px;color:#aabbcc;line-height:1.8;white-space:pre;" data-stats></div>
-      <div class="gui-sep"></div>
-
-      <div style="padding:4px 12px;font-size:10px;color:#99aabb;line-height:1.8;white-space:pre;">${abilities}</div>
-      <div class="gui-sep"></div>
-
-      <div style="padding:4px 12px;font-size:10px;color:#aabbcc;" data-xp></div>
       <div style="padding:2px 12px;font-size:10px;color:#8eb8e0;display:none;" data-slots></div>
       <div style="padding:2px 12px;font-size:10px;color:#a8c8e8;display:none;line-height:1.6;" data-feature-chips></div>
       <div style="padding:2px 12px;font-size:10px;color:#b8a8e8;display:none;" data-concentration></div>
@@ -170,15 +150,13 @@ export class PlayerPanel {
         <button class="gui-btn" style="background:#3a1a1a;" data-leave-enc>LEAVE ENCOUNTER</button>
         <button class="gui-btn" style="background:#3a3020;display:none;" data-end-turn>END TURN</button>
         <button class="gui-btn" style="background:#1a2a3a;display:none;" data-search>SEARCH</button>
-        <button class="gui-btn" style="background:#0a1a2a;" data-inventory>INVENTORY</button>
+        <button class="gui-btn" style="background:#0a1a2a;" data-charsheet>CHARACTER</button>
       </div>
     `;
 
     const ref = (attr: string) => this.el.querySelector(`[data-${attr}]`) as HTMLElement;
     this.hpFill    = ref('hp-fill');
     this.hpText    = ref('hp-text');
-    this.statsEl   = ref('stats');
-    this.xpEl      = ref('xp');
     this.slotsEl   = ref('slots');
     this.featureChipsEl = ref('feature-chips');
     this.concentrationEl = ref('concentration');
@@ -187,12 +165,10 @@ export class PlayerPanel {
     this.searchBtn  = ref('search')   as HTMLButtonElement;
     this.endTurnBtn = ref('end-turn') as HTMLButtonElement;
 
-    (ref('inventory') as HTMLButtonElement).onclick = () => callbacks.onOpenInventory();
+    (ref('charsheet') as HTMLButtonElement).onclick = () => callbacks.onOpenCharacterSheet();
     (ref('leave-enc') as HTMLButtonElement).onclick = () => callbacks.onLeaveEncounter();
     this.endTurnBtn.onclick = () => callbacks.onEndTurn();
     this.searchBtn.onclick  = () => callbacks.onSearch();
-
-    this.updateCombatStats();
 
     this.el.appendChild(this.buildResizeHandle());
 
@@ -202,17 +178,6 @@ export class PlayerPanel {
     this.offResize = scale.onChange(place);
   }
 
-  private updateCombatStats(): void {
-    const def = this.playerDef;
-    const initBonus = Math.floor((def.dex - 10) / 2);
-    const sign = initBonus >= 0 ? '+' : '';
-    this.statsEl.textContent = [
-      `AC     ${def.ac}`,
-      `Speed  ${def.speed} ft`,
-      `Prof   +${def.proficiencyBonus}`,
-      `Init   ${sign}${initBonus}`,
-    ].join('\n');
-  }
 
   show(): void {
     this.visible = true;
@@ -266,13 +231,11 @@ export class PlayerPanel {
     return handle;
   }
 
-  refresh(hp: number, maxHp: number, xp: number, quests: QuestDisplay[] = [], showSearch = false): void {
+  refresh(hp: number, maxHp: number, quests: QuestDisplay[] = [], showSearch = false): void {
     const pct = maxHp > 0 ? hp / maxHp : 0;
     this.hpFill.style.width = `${Math.floor(pct * 100)}%`;
     this.hpFill.style.background = hpColor(pct);
     this.hpText.textContent = `${hp} / ${maxHp}`;
-    this.xpEl.textContent = `XP  ${xp}`;
-    this.updateCombatStats();
 
     this.questsEl.textContent = quests.length === 0
       ? 'None'

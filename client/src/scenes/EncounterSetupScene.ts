@@ -19,15 +19,17 @@ const W = PLAYER_PANEL_WIDTH + GRID_COLS * TILE_SIZE + TARGET_PANEL_WIDTH;
 const H = GRID_ROWS * TILE_SIZE + HUD_HEIGHT;
 const DPR = window.devicePixelRatio;
 
-const CHAR_DIVIDER_X = 640;
+const CHAR_DIVIDER_X = 920;
 const CHAR1_CX = 155;
 const CHAR2_CX = 460;
+const CHAR3_CX = 765;
+const CHAR_CXS = [CHAR1_CX, CHAR2_CX, CHAR3_CX];
 const CONTENT_CY = Math.round(80 + (H - 80 - 100) / 2);
 
-const ENC_CARD_W = 480;
+const ENC_CARD_W = 360;
 const ENC_CARD_H = 155;
-const ENC_COL1_CX = 920;
-const ENC_COL2_CX = 1420;
+const ENC_COL1_CX = 1120;
+const ENC_COL2_CX = 1500;
 
 
 const LAST_CHAR_KEY = 'myrpg_last_character';
@@ -108,7 +110,8 @@ export class EncounterSetupScene extends Phaser.Scene {
     }).setOrigin(0.5, 0);
 
     this.characters.forEach((char, i) => {
-      this.buildCharCard(char, i === 0 ? CHAR1_CX : CHAR2_CX, CONTENT_CY);
+      const cx = CHAR_CXS[i] ?? CHAR_CXS[CHAR_CXS.length - 1];
+      this.buildCharCard(char, cx, CONTENT_CY);
     });
 
     const encPositions: [number, number][] = [
@@ -132,18 +135,38 @@ export class EncounterSetupScene extends Phaser.Scene {
       if (def) this.selectChar(def);
     }
 
-    // Sync all characters from server to pick up encounterLog and storylog
+    // Sync all characters from server. Server is the source of truth — if
+    // the save file no longer exists (e.g. it was deleted on disk between
+    // sessions), clear the stale localStorage entry so the card stops
+    // showing "saved" HP/XP/GP that no longer reflect reality.
     for (const char of this.characters) {
       gameClient.loadSave(char.id).then((data) => {
-        if (!data) return;
+        if (!this.scene.isActive()) return;
+        if (!data) {
+          this.clearStaleLocalSave(char);
+          return;
+        }
         const save = data as LocalSave;
         localStorage.setItem(saveKey(char.id), JSON.stringify(save));
-        if (this.scene.isActive()) {
-          this.allSaves.set(char.id, save);
-          this.updateSaveDisplay(char, save);
-        }
+        this.allSaves.set(char.id, save);
+        this.updateSaveDisplay(char, save);
       }).catch(() => {});
     }
+  }
+
+  /** Server reports no save for this character — purge the stale local mirror. */
+  private clearStaleLocalSave(def: PlayerDef): void {
+    localStorage.removeItem(saveKey(def.id));
+    this.allSaves.delete(def.id);
+    if (this.selectedPlayer?.id === def.id) this.selectedSave = null;
+    const display = this.saveDisplays.get(def.id);
+    if (!display) return;
+    display.infoText.setText("No save data").setColor("#445566");
+    display.equippedText.setText("");
+    display.deleteBg.disableInteractive().setStrokeStyle(1, 0x222222).setAlpha(0.3);
+    display.deleteLabel.setColor("#445566").setAlpha(0.3);
+    display.storylogBg.disableInteractive().setStrokeStyle(1, 0x222222).setAlpha(0.3);
+    display.storylogLabel.setColor("#445566").setAlpha(0.3);
   }
 
   private updateSaveDisplay(def: PlayerDef, save: LocalSave): void {

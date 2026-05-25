@@ -1,8 +1,8 @@
 import { PlayerDef } from "../data/player";
 import { ItemDef, EquipmentDef } from "../data/equipment";
-import { InventoryOverlay } from "../ui/InventoryOverlay";
+import { CharacterSheetOverlay, CharacterSheetInputs } from "../ui/CharacterSheetOverlay";
 import { IntroductionOverlay } from "../ui/IntroductionOverlay";
-import { GameState } from "../net/types";
+import type { GameState, SpellDef } from "../net/types";
 import { UIScale } from "../ui/UIScale";
 
 export interface OverlayCallbacks {
@@ -10,6 +10,7 @@ export interface OverlayCallbacks {
   onUnequip: (slot: "armor" | "weapon" | "shield") => void;
   onUsePotion: () => void;
   getItems: () => ItemDef[];
+  getSpells: () => SpellDef[];
 }
 
 export class OverlayManager {
@@ -18,7 +19,7 @@ export class OverlayManager {
   private readonly callbacks: OverlayCallbacks;
 
   private introOverlay: IntroductionOverlay | null = null;
-  private inventoryOverlay: InventoryOverlay | null = null;
+  private characterSheet: CharacterSheetOverlay | null = null;
   private introShown = false;
 
   constructor(scale: UIScale, playerDef: PlayerDef, callbacks: OverlayCallbacks) {
@@ -28,12 +29,12 @@ export class OverlayManager {
   }
 
   get isAnyOpen(): boolean {
-    return !!(this.introOverlay || this.inventoryOverlay);
+    return !!(this.introOverlay || this.characterSheet);
   }
 
   reset(): void {
     this.introOverlay = null;
-    this.inventoryOverlay = null;
+    this.characterSheet = null;
     this.introShown = false;
   }
 
@@ -53,8 +54,24 @@ export class OverlayManager {
     );
   }
 
-  openInventory(state: GameState): void {
-    if (this.inventoryOverlay) return;
+  openCharacterSheet(state: GameState): void {
+    if (this.characterSheet) return;
+    const inputs = this.buildInputs(state);
+    this.characterSheet = new CharacterSheetOverlay(this.scale, inputs, {
+      onEquip:   (slot, itemId) => this.callbacks.onEquip(slot, itemId),
+      onUnequip: (slot)         => this.callbacks.onUnequip(slot),
+      onUse:     (_itemId)      => this.callbacks.onUsePotion(),
+      onClose:   ()             => { this.characterSheet = null; },
+    });
+  }
+
+  /** Rebuild the active sheet against the latest state when a server update arrives. */
+  refreshCharacterSheetIfOpen(state: GameState): void {
+    if (!this.characterSheet) return;
+    this.characterSheet.rebuild(this.buildInputs(state));
+  }
+
+  private buildInputs(state: GameState): CharacterSheetInputs {
     const allItems = this.callbacks.getItems();
     const byId = Object.fromEntries(allItems.map(i => [i.id, i]));
     const inventory = state.player.inventoryIds.map(id => byId[id]).filter(Boolean) as ItemDef[];
@@ -65,21 +82,22 @@ export class OverlayManager {
     if (weaponId && byId[weaponId]) equippedItems.weapon = byId[weaponId] as EquipmentDef;
     if (shieldId && byId[shieldId]) equippedItems.shield = byId[shieldId] as EquipmentDef;
 
-    const canUse = state.phase === "exploring"
+    const canUseConsumable = state.phase === "exploring"
       || (state.phase === "player_turn" && !state.player.bonusActionUsed);
 
-    this.inventoryOverlay = new InventoryOverlay(
-      this.scale,
-      this.playerDef,
+    const allSpells = this.callbacks.getSpells();
+    const concSpell = state.player.concentratingOn
+      ? allSpells.find((sp) => sp.id === state.player.concentratingOn)
+      : null;
+
+    return {
+      playerDef: this.playerDef,
+      state: state.player,
       equippedItems,
-      state.player.equippedSlotLabels,
       inventory,
-      state.player.gold,
-      canUse,
-      (slot, itemId) => { this.callbacks.onEquip(slot, itemId); this.inventoryOverlay = null; },
-      (slot)         => { this.callbacks.onUnequip(slot); this.inventoryOverlay = null; },
-      (_itemId)      => { this.callbacks.onUsePotion(); this.inventoryOverlay = null; },
-      ()             => { this.inventoryOverlay = null; },
-    );
+      canUseConsumable,
+      allSpells,
+      concentratingOnName: concSpell?.name ?? null,
+    };
   }
 }
