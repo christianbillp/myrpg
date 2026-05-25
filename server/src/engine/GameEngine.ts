@@ -24,7 +24,7 @@ import {
 import {
   doAttack as caDoAttack, throwItem as caThrowItem,
   doHide as caDoHide, doDash as caDoDash, doDodge as caDoDodge,
-  doDisengage as caDoDisengage, doSecondWind as caDoSecondWind,
+  doDisengage as caDoDisengage,
   doPlayerOpportunityAttack as caDoPlayerOA,
 } from './CombatActions.js';
 import {
@@ -32,6 +32,9 @@ import {
   doSearch as exDoSearch, doShortRest as exDoShortRest, doUsePotion as exDoUsePotion,
 } from './ExplorationActions.js';
 import { doEquip as ivDoEquip, doUnequip as ivDoUnequip } from './InventoryActions.js';
+import { doCastSpell as spDoCastSpell } from './SpellSystem.js';
+import { maybeBreakConcentration } from './ConcentrationSystem.js';
+import { doUseFeature } from './FeatureRegistry.js';
 import { buildSessionState, SavedMapRecord } from './SessionBuilder.js';
 import { WeaponDef } from './types.js';
 
@@ -58,7 +61,7 @@ export class GameEngine {
       ...defs,
       playerDefs: defs.playerDefs.map((p) => p.id === this.playerDef.id ? this.playerDef : p),
     };
-    applyEquipment(this.playerDef, state.player.equippedSlots, this.defs.equipment);
+    applyEquipment(this.playerDef, state.player.equippedSlots, this.defs.equipment, state.player.mageArmor);
     state.player.equippedSlotLabels = computeEquippedSlotLabels(this.playerDef, state.player.equippedSlots, this.defs.equipment);
 
     for (const npc of state.npcs) npc.inventoryIds ??= [];
@@ -99,6 +102,7 @@ export class GameEngine {
 
   getState(): GameState { this.computeAvailableActions(); return this.state; }
   getMonsterDef(defId: string): MonsterDef | undefined { return this.resolveMonsterDef(defId); }
+  getSpellDef(spellId: string) { return this.defs.spells.find((sp) => sp.id === spellId); }
   getAIDMTools() { return buildAIDMTools(); }
   getItemIds(): string[] { return this.defs.equipment.map((i) => i.id); }
   getMonsterIds(): string[] { return this.defs.monsters.map((m) => m.id); }
@@ -123,8 +127,11 @@ export class GameEngine {
         if (s.phase === 'exploring' || s.phase === 'player_turn')
           events.push(...caThrowItem(this.ctx, action.itemId, action.targetId));
         break;
+      case 'castSpell':
+        spDoCastSpell(this.ctx, action.spellId, action.slotLevel, action.targetIds, action.tile, events);
+        break;
       case 'hide':         caDoHide(this.ctx); break;
-      case 'secondWind':   caDoSecondWind(this.ctx); break;
+      case 'useFeature':   doUseFeature(this.ctx, action.featureId, { targetId: action.targetId, tile: action.tile }, events); break;
       case 'dash':         caDoDash(this.ctx); break;
       case 'dodge':        caDoDodge(this.ctx); break;
       case 'disengage':    caDoDisengage(this.ctx); break;
@@ -315,6 +322,12 @@ export class GameEngine {
     return caThrowItem(this.ctx, itemId, targetId);
   }
 
+  castSpell(spellId: string, slotLevel: number, targetIds?: string[], tile?: { x: number; y: number }): GameEvent[] {
+    const events: GameEvent[] = [];
+    spDoCastSpell(this.ctx, spellId, slotLevel, targetIds, tile, events);
+    return events;
+  }
+
   completeQuest(questId: string): GameEvent[] {
     this.addLogs(questComplete(this.state, questId));
     return [];
@@ -449,6 +462,8 @@ export class GameEngine {
     const hpBefore = s.player.hp;
     s.player.hp = Math.max(0, hpBefore - damage);
     this.addLog({ left: `${this.playerDef.name} HP: ${s.player.hp}/${this.playerDef.maxHp}`, style: 'status' });
+    // Concentration save: any damage while concentrating triggers a CON save.
+    if (s.player.concentratingOn) maybeBreakConcentration(this.ctx, damage);
     if (s.player.hp > 0) return;
     s.player.conditions = s.player.conditions.filter((c) => c !== 'hidden');
     const leftover = damage - hpBefore;
@@ -524,11 +539,12 @@ export class GameEngine {
       canAttack: Guard.canAttackTarget(this.ctx),
       throwableItemIds,
       canHide: Guard.canHide(this.ctx),
-      canSecondWind: Guard.canSecondWind(this.ctx),
+      usableFeatureIds: Guard.usableFeatureIds(this.ctx),
       canDash: Guard.canDash(this.ctx),
       canDodge: Guard.canDodge(this.ctx),
       canDisengage: Guard.canDisengage(this.ctx),
       canShortRest: Guard.canShortRest(this.ctx),
+      castableSpellIds: Guard.castableSpellIds(this.ctx),
     };
   }
 

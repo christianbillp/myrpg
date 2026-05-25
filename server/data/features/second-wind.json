@@ -1,0 +1,15 @@
+{
+  "id": "second-wind",
+  "name": "Second Wind",
+  "classId": "fighter",
+  "minLevel": 1,
+  "description": "Bonus Action. You expend a use and roll 1d10, regaining a number of Hit Points equal to the roll plus your Fighter level. Refilled on a Long Rest; one use returns on a Short Rest.",
+  "cost": { "kind": "bonus-action" },
+  "resource": { "kind": "uses-per-long-rest", "max": 2 },
+  "ui": {
+    "buttonLabel": "SECOND WIND",
+    "buttonColor": "#1a3a5a",
+    "resourceLabel": "Second Wind: {remaining}/{max}"
+  },
+  "handler": "second-wind"
+}

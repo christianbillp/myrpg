@@ -63,7 +63,7 @@ The dynamic CURRENT STATE lives in the user message and is intentionally uncache
 Every user message is prefixed with a `[CURRENT STATE]` block that the engine builds fresh from `GameState`. It includes:
 
 - Map name, phase, and encounter types
-- Player tile, HP, gold, inventory, equipped items, and explicit action-economy fields: `Action: AVAILABLE`/`USED`, `Bonus: AVAILABLE`/`USED`, `N moves left`, `Second Wind ×N`, `HIDDEN`
+- Player tile, HP, gold, inventory, equipped items, and explicit action-economy fields: `Action: AVAILABLE`/`USED`, `Bonus: AVAILABLE`/`USED`, `N moves left`, `HIDDEN`. Class-feature resource pools appear as `{feature-id} ×N` chips (e.g. `second-wind ×2`) — one chip per non-empty entry in `PlayerState.resources`. Caster characters additionally show `Slots L1:n[,L2:n…]`, `Concentrating: <spellId>` while a concentration spell is active, and a `Prepared spells: [ids]` line beneath the equipped slots.
 - All combatants (enemies and allies) with HP, tile, disposition, conditions
 - Neutral NPCs with tile, including revealed names if any (see [`reveal_npc_name`](#reveal_npc_name))
 - A separate **CORPSES** section listing dead NPCs (searchable but cannot act)
@@ -315,6 +315,21 @@ Throws an item at a target, consuming an action if in `player_turn`. Proper thro
 
 Attacking a neutral NPC with `throw_item` turns them hostile.
 
+#### `cast_spell`
+
+Cast a spell from the player's known cantrip list or prepared spell list. Routes through the server's generic spell resolver: attack-roll spells (Fire Bolt, Ray of Frost, Magic Missile) consume the Action and an L1+ slot (if leveled), roll vs target AC, deal damage; save-based AOE spells (Burning Hands, Sleep) ask each creature in the area to save; utility spells (Mage Armor, Detect Magic) apply lasting effects. Cantrips spend no slot; levelled spells spend one slot of `spell.level`. Action economy is enforced server-side — if the player's Action is already spent, action-cost spells are refused.
+
+**Use this tool, NOT `request_attack_roll` + `adjust_npc_hp`, to cast a player spell.** Faking a cast bypasses slot tracking, concentration, and action economy.
+
+| Parameter    | Type    | Required | Notes                                                        |
+| ------------ | ------- | -------- | ------------------------------------------------------------ |
+| `spell_id`   | string  | yes      | Spell id from the player's prepared/cantrip list shown in CURRENT STATE (e.g. `"fire-bolt"`, `"magic-missile"`). |
+| `target_id`  | string  | no       | Entity reference (`"enemy_A"` / `"ally_A"` / `"npc_[id]"`). Omit for self/AOE spells. |
+| `slot_level` | integer | no       | Defaults to `spell.level`. Upcasting (higher than base) is supported for levelled spells. |
+| `reason`     | string  | yes      |                                                              |
+
+Casting an aggressive spell (one with `attack`, `damage`, or a harmful `save`) at a non-ally NPC during `exploring` turns the target hostile, runs faction aggro, and triggers combat — same behaviour as `throw_item` and direct attacks.
+
 ---
 
 ### Combat
@@ -522,10 +537,10 @@ Resource consumption:
 
 | Activity | Cost |
 |----------|------|
-| `attack`, `throw_item`, `dash`, `dodge`, `disengage`, cast a spell, study, influence, utilize | Action |
+| `attack`, `throw_item`, `cast_spell` (action-time spell), `dash`, `dodge`, `disengage`, study, influence, utilize | Action |
 | Hide — Level 1 Rogue (no Cunning Action yet) | Action |
 | Hide — Level 2+ Rogue (Cunning Action unlocked) | Bonus Action |
-| Second Wind, drink potion in combat | Bonus Action |
+| `cast_spell` (bonus-action-time spell), drink potion in combat, class features whose `cost.kind` is `bonus-action` (e.g. Second Wind) | Bonus Action |
 | First weapon/shield equip or unequip this turn | Free (one free object interaction per turn) |
 | Second weapon/shield equip or unequip this turn | Action (Utilize) |
 | Armor equip or unequip during combat | **Blocked** (SRD donning is 1–10 minutes) |
@@ -595,8 +610,11 @@ For all other tools (`reveal_npc_name`, `set_disposition`, `award_gold`, …) th
 | `server/src/engine/ConditionSystem.ts` | Condition constants and predicate functions |
 | `server/src/engine/CombatSystem.ts` | Roll functions: `rollSkillCheck`, `rollSavingThrow`, `rollPlayerAttackVsAc`, `rollNpcAttackVsAc`, `rollOneInitiative` |
 | `server/src/engine/CombatFlow.ts` | Per-combatant Initiative rolling with Surprise/Invisible modifiers; sort + dispatch via `advanceTurn`; turn transitions; emits the `── Aldric's turn ──` boundary marker |
-| `server/src/engine/ActionGuards.ts` | Per-action eligibility gates (`canAttackTarget`, `canHide`, `canShortRest`, `canSpendAction`, `canSpendBonusAction`, `playerAttackReachTiles`, `hasCunningAction`) consulted by both `computeAvailableActions` and the server-side action handlers |
+| `server/src/engine/ActionGuards.ts` | Per-action eligibility gates (`canAttackTarget`, `canHide`, `canShortRest`, `canSpendAction`, `canSpendBonusAction`, `playerAttackReachTiles`, `hasCunningAction`, `canCastSpell`, `castableSpellIds`, `canUseFeature`, `usableFeatureIds`) consulted by both `computeAvailableActions` and the server-side action handlers |
 | `server/src/engine/InventoryActions.ts` | Equip/unequip with SRD action-economy gating (armor blocked in combat; weapon/shield uses free object interaction + Utilize) |
+| `server/src/engine/SpellSystem.ts` | Generic spell resolver — branches on `SpellDef` shape (`attack` / `auto-hit` / `save` / utility); applies damage through `resistMod`; reactive Shield via `tryReactiveShield`; aggro-on-cast for exploring-phase casts |
+| `server/src/engine/ConcentrationSystem.ts` | Concentration tracking — `startConcentration`, `endConcentration`, CON-save-on-damage via `maybeBreakConcentration`; per-spell on-end cleanup (e.g. Sleep clears Incapacitated / Unconscious) |
+| `server/src/engine/FeatureRegistry.ts` | Class-feature dispatcher + handler registry. `doUseFeature` validates eligibility and runs the handler registered for `FeatureDef.handler`; one handler per feature (e.g. `'second-wind'`) consumes the resource and applies the effect |
 | `server/src/sessions.ts` | Per-session storage: sliding-window history, full archive, AIDM mutex, WebSocket push |
 | `server/src/index.ts` | `/game/session/:id/aidm` route — mutex acquire, stream wiring, persistence |
 

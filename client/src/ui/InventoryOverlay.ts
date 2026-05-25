@@ -97,6 +97,7 @@ export class InventoryOverlay extends BaseOverlay {
     const equippable  = inventory.filter(isEquipmentDef);
     const consumables = inventory.filter((i) => i.type === "consumable");
     const ammunition  = inventory.filter((i) => i.type === "ammunition");
+    const gear        = inventory.filter((i) => i.type === "gear");
 
     const eqGroups: { item: EquipmentDef; count: number }[] = [];
     equippable.forEach((item) => {
@@ -157,7 +158,21 @@ export class InventoryOverlay extends BaseOverlay {
         <span style="font-size:9px;color:#445566;width:72px;text-align:center;">AMMO</span>
       </div>`).join('');
 
-    const emptyCarried = eqGroups.length === 0 && Object.keys(cGroups).length === 0 && Object.keys(aGroups).length === 0
+    // Gear rows — stacked, display-only flavour/lore items (no action button).
+    const gGroups: Record<string, { name: string; count: number }> = {};
+    gear.forEach((g) => {
+      if (!gGroups[g.id]) gGroups[g.id] = { name: g.name, count: 0 };
+      gGroups[g.id].count++;
+    });
+    const gRows = Object.entries(gGroups).map(([_id, { name, count }]) => `
+      <div style="display:flex;align-items:center;justify-content:space-between;height:24px;padding:0 2px;">
+        <span style="font-size:11px;color:#778899;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;margin-right:8px;">
+          ${escHtml(name)}${count > 1 ? ' ×' + count : ''}
+        </span>
+        <span style="font-size:9px;color:#445566;width:72px;text-align:center;">GEAR</span>
+      </div>`).join('');
+
+    const emptyCarried = eqGroups.length === 0 && Object.keys(cGroups).length === 0 && Object.keys(aGroups).length === 0 && Object.keys(gGroups).length === 0
       ? `<div style="font-size:11px;color:#334455;padding:8px 2px;">No items carried.</div>`
       : '';
 
@@ -176,7 +191,7 @@ export class InventoryOverlay extends BaseOverlay {
         <div style="height:1px;background:${DIM};margin:6px 0;"></div>
         <div style="font-size:10px;color:#556677;margin-bottom:4px;">CARRIED</div>
         <div style="flex:1;overflow-y:auto;scrollbar-width:thin;scrollbar-color:${ACCENT} transparent;min-height:0;" data-carry-area>
-          ${eqRows}${cRows}${aRows}${emptyCarried}
+          ${eqRows}${cRows}${aRows}${gRows}${emptyCarried}
         </div>
 
         <div style="height:1px;background:${DIM};margin:6px 0;"></div>

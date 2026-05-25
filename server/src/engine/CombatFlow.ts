@@ -3,7 +3,8 @@ import type { GameContext } from './GameContext.js';
 import { rollOneInitiative, rollDeathSave } from './CombatSystem.js';
 import { runEnemyTurn, runAllyTurn, chebyshev } from './EnemyAI.js';
 import { isIncapacitated, hasSpeedZero, proneStandCost, TURN_CONDITIONS } from './ConditionSystem.js';
-import { mod } from './Dice.js';
+import { mod, d20 as d20Local } from './Dice.js';
+import { tryReactiveShield } from './SpellSystem.js';
 
 // ── Combat lifecycle ────────────────────────────────────────────────────────
 
@@ -82,7 +83,7 @@ export function doStartCombat(ctx: GameContext, events: GameEvent[]): void {
     npc.initiativeRoll = init.total;
     const note = surprised ? ' [SURPRISED]' : invisible ? ' [INVISIBLE]' : '';
     logs.push({
-      left: `${npc.name} rolls Initiative${note}`,
+      left: `${combatantDisplayName(npc, s.npcs)} rolls Initiative${note}`,
       right: `${init.rollStr}=${init.total}`,
       style: surprised ? 'miss' : 'normal',
     });
@@ -100,7 +101,14 @@ export function doStartCombat(ctx: GameContext, events: GameEvent[]): void {
   s.turnOrderIds = slots.map((s) => s.id);
   ctx.addLogs(logs);
 
-  ctx.addLog({ left: `Turn order: ${slots.map((sl) => sl.id === 'player' ? ctx.playerDef.name : (s.npcs.find((n) => n.id === sl.id)?.name ?? sl.id)).join(' → ')}`, style: 'normal' });
+  ctx.addLog({
+    left: `Turn order: ${slots.map((sl) => {
+      if (sl.id === 'player') return ctx.playerDef.name;
+      const n = s.npcs.find((nn) => nn.id === sl.id);
+      return n ? combatantDisplayName(n, s.npcs) : sl.id;
+    }).join(' → ')}`,
+    style: 'normal',
+  });
 
   // ── Start the first combatant's turn ────────────────────────────────────
   s.activeNpcIndex = -1;
@@ -316,7 +324,17 @@ function runSingleEnemyTurn(ctx: GameContext, npc: NpcState, events: GameEvent[]
 
   ctx.addLogs(result.logs);
 
-  if (result.attacked && result.isHit) {
+  // Shield reaction: if the hit lands by ≤5, the player can react with Shield
+  // to convert it to a miss. Auto-cast when the spell is known and a slot is free.
+  let shieldNegated = false;
+  if (result.attacked && result.isHit && !result.isCrit) {
+    if (tryReactiveShield(ctx, result.attackTotal, result.isCrit)) {
+      shieldNegated = true;
+      ctx.addLog({ left: `The attack glances off the magical barrier — miss`, style: 'miss' });
+    }
+  }
+
+  if (result.attacked && result.isHit && !shieldNegated) {
     if (s.player.hp <= 0) {
       const adjacentToPlayer = chebyshev(result.finalTileX, result.finalTileY, s.player.tileX, s.player.tileY) <= 1;
       const effectivelyCrit = result.isCrit || adjacentToPlayer;
@@ -337,6 +355,36 @@ function runSingleEnemyTurn(ctx: GameContext, npc: NpcState, events: GameEvent[]
     }
   }
   s.player.conditions = s.player.conditions.filter((c) => c !== 'hidden');
+
+  // Sleep re-save: per SRD, the Incapacitated condition from Sleep ends at the
+  // end of the target's next turn, at which point they re-save vs the original
+  // DC. Success ends the spell on this target; failure replaces Incapacitated
+  // with Unconscious for the spell's duration.
+  if (s.player.concentratingOn === 'sleep' && (npc.conditions.includes('incapacitated') || npc.conditions.includes('unconscious'))) {
+    const def = ctx.resolveMonsterDef(npc.defId);
+    if (def) {
+      const dc = 8 + ctx.playerDef.proficiencyBonus + (
+        ctx.playerDef.spellcastingAbility ? mod(ctx.playerDef[ctx.playerDef.spellcastingAbility]) : 0
+      );
+      const saveMod = (def.savingThrows && def.savingThrows['wis'] !== undefined)
+        ? def.savingThrows['wis']
+        : mod(def.wis);
+      const roll = d20Local();
+      const total = roll + saveMod;
+      const success = total >= dc;
+      ctx.addLog({
+        left: `${npc.name} ${success ? 'shakes off Sleep' : 'sinks deeper into Sleep'}`,
+        right: `WIS d20(${roll})+${saveMod}=${total} vs DC ${dc}`,
+        style: success ? 'status' : 'miss',
+      });
+      if (success) {
+        npc.conditions = npc.conditions.filter((c) => c !== 'incapacitated' && c !== 'unconscious');
+      } else if (npc.conditions.includes('incapacitated') && !npc.conditions.includes('unconscious')) {
+        npc.conditions = npc.conditions.filter((c) => c !== 'incapacitated');
+        npc.conditions.push('unconscious');
+      }
+    }
+  }
 }
 
 function runSingleAllyTurn(ctx: GameContext, ally: NpcState, events: GameEvent[]): void {

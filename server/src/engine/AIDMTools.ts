@@ -122,6 +122,11 @@ function buildToolList() { return [
     input_schema: { type: 'object' as const, properties: { item_id: { type: 'string' }, target: { type: 'string' }, reason: { type: 'string' } }, required: ['item_id', 'reason'] },
   },
   {
+    name: 'cast_spell',
+    description: 'Cast a player spell from the player\'s known/prepared list. Drives the generic spell resolver: attack-roll spells (Fire Bolt, Ray of Frost, Magic Missile) consume the Action and an L1+ slot (if leveled), roll vs target AC, deal damage; save-based AOE spells (Burning Hands, Sleep) ask each creature in the area to save; utility spells (Mage Armor, Detect Magic) apply lasting effects. Cantrips spend no slot; levelled spells spend one slot of `spell.level`. Action economy is enforced — if the player\'s Action is already spent, action-cost spells are refused. target_id uses entity ref format ("enemy_A", "ally_A", "npc_[id]"); omit for self/AOE spells. slot_level defaults to spell.level; upcasting (slot_level > spell.level) is supported for levelled spells.',
+    input_schema: { type: 'object' as const, properties: { spell_id: { type: 'string' }, target_id: { type: 'string' }, slot_level: { type: 'integer' }, reason: { type: 'string' } }, required: ['spell_id', 'reason'] },
+  },
+  {
     name: 'request_saving_throw',
     description: 'Ask the player to make a saving throw. The server rolls d20 + the relevant saving throw modifier automatically. Active conditions are applied: paralyzed/unconscious auto-fail Str/Dex saves; Dodge grants advantage on Dex saves; restrained imposes disadvantage on Dex saves. Use ability names: "str", "dex", "con", "int", "wis", "cha". Set DC using SRD guidelines: Very Easy 5, Easy 10, Medium 15, Hard 20, Very Hard 25.',
     input_schema: { type: 'object' as const, properties: { ability: { type: 'string' }, dc: { type: 'integer' }, reason: { type: 'string' } }, required: ['ability', 'dc', 'reason'] },
@@ -385,6 +390,42 @@ export function applyAIDMTool(
         .slice(logBefore)
         .filter((e) => !SIDE_EFFECT_PREFIXES.some((p) => e.left.startsWith(p)));
       toolResultContent = newEntries.map((e) => e.right ? `${e.left} [${e.right}]` : e.left).join(' | ') || 'Throw resolved.';
+      break;
+    }
+    case 'cast_spell': {
+      const stateBeforeCast = engine.getState();
+      const spellId = input['spell_id'] as string;
+      const targetId = input['target_id'] as string | undefined;
+      const slotLevelInput = input['slot_level'] as number | undefined;
+      const spell = engine.getSpellDef(spellId);
+      if (!spell) { toolResultContent = `Unknown spell id "${spellId}".`; break; }
+      // Action-economy pre-check so the player isn't surprised by a refused cast.
+      if (stateBeforeCast.phase === 'player_turn'
+          && spell.castingTime === 'action'
+          && stateBeforeCast.player.actionUsed) {
+        toolResultContent = `Action already spent this turn — ${spell.name} not cast. Inform the player their action is used.`;
+        break;
+      }
+      // Resolve target entity ref → npc id (matching throw_item conventions).
+      let targetIds: string[] | undefined;
+      if (targetId) {
+        const npc = stateBeforeCast.npcs.find((n) => {
+          if (targetId.startsWith('enemy_')) return n.combatLabel === targetId.slice(6) && n.disposition === 'enemy';
+          if (targetId.startsWith('ally_'))  return n.combatLabel === targetId.slice(5) && n.disposition === 'ally';
+          if (targetId.startsWith('npc_'))   return n.id === targetId.slice(4);
+          return n.id === targetId;
+        });
+        if (!npc) { toolResultContent = `cast_spell: target "${targetId}" not found.`; break; }
+        targetIds = [npc.id];
+      }
+      const slotLevel = slotLevelInput ?? spell.level;
+      const logBefore = stateBeforeCast.combatLog.length;
+      events = engine.castSpell(spellId, slotLevel, targetIds);
+      const SIDE_EFFECT_PREFIXES = ['Quest complete:', 'Total XP:', '──'];
+      const newEntries = engine.getState().combatLog
+        .slice(logBefore)
+        .filter((e) => !SIDE_EFFECT_PREFIXES.some((p) => e.left.startsWith(p)));
+      toolResultContent = newEntries.map((e) => e.right ? `${e.left} [${e.right}]` : e.left).join(' | ') || `${spell.name} resolved.`;
       break;
     }
     case 'request_ability_check': {

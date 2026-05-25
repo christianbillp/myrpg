@@ -17,7 +17,7 @@ import { PlayerDef } from "../data/player";
 import { MonsterDef, NPCDef } from "../data/monsters";
 import { ItemDef } from "../data/equipment";
 import { gameClient } from "../net/GameClient";
-import type { GameState, GameEvent, GameMap } from "../net/types";
+import type { GameState, GameEvent, GameMap, SpellDef, FeatureDef } from "../net/types";
 import type { ChatMessage } from "../ui/AIDMOverlay";
 
 const GAME_W = PLAYER_PANEL_WIDTH + GRID_COLS * TILE_SIZE + TARGET_PANEL_WIDTH;
@@ -389,10 +389,11 @@ export class GameScene extends Phaser.Scene {
       onSearch:         () => gameClient.sendAction({ type: "search" }),
       onAttack:         () => gameClient.sendAction({ type: "attack", targetId: this.gameState?.selectedTargetId ?? undefined }),
       onThrow:          (itemId) => gameClient.sendAction({ type: "throw", itemId, targetId: this.gameState?.selectedTargetId ?? undefined }),
+      onCast:           (spellId) => this.castSpell(spellId),
       onDash:           () => gameClient.sendAction({ type: "dash" }),
       onDodge:          () => gameClient.sendAction({ type: "dodge" }),
       onDisengage:      () => gameClient.sendAction({ type: "disengage" }),
-      onSecondWind:     () => gameClient.sendAction({ type: "secondWind" }),
+      onUseFeature:     (featureId) => gameClient.sendAction({ type: "useFeature", featureId }),
       onHide:           () => gameClient.sendAction({ type: "hide" }),
       onDeathSave:      () => gameClient.sendAction({ type: "rollDeathSave" }),
       onShortRest:      () => gameClient.sendAction({ type: "shortRest" }),
@@ -466,9 +467,69 @@ export class GameScene extends Phaser.Scene {
 
   private buildActionState(state: GameState): PlayerPanelActionState {
     const allItems = this.registry.get('equipment') as ItemDef[];
+    const allSpells = (this.registry.get('spells') ?? []) as SpellDef[];
     const weaponId = state.player.equippedSlots.weaponId;
     const weapon = weaponId ? allItems.find(i => i.id === weaponId) : undefined;
     const mainAttackName = weapon?.name ?? 'Unarmed Strike';
+
+    // Build castable spell info — cantrips + prepared, then filter to castableSpellIds.
+    const knownIds = new Set<string>([
+      ...(this.playerDef.defaultCantripIds ?? []),
+      ...state.player.preparedSpellIds,
+    ]);
+    const castableSet = new Set(state.availableActions.castableSpellIds);
+    const dc = 8 + this.playerDef.proficiencyBonus + Math.floor(((this.playerDef.spellcastingAbility ? this.playerDef[this.playerDef.spellcastingAbility] : 10) - 10) / 2);
+    const castableSpells = allSpells
+      .filter(sp => knownIds.has(sp.id))
+      .map(sp => {
+        const bits: string[] = [];
+        if (sp.damage) bits.push(`${sp.damage.dice}d${sp.damage.sides}${sp.damage.bonus ? '+' + sp.damage.bonus : ''} ${sp.damage.type}`);
+        if (sp.attack === 'ranged-spell' || sp.attack === 'melee-spell') bits.push(`spell atk`);
+        if (sp.attack === 'auto-hit' && sp.darts) bits.push(`${sp.darts} darts`);
+        if (sp.save) bits.push(`${sp.save.ability.toUpperCase()} save DC ${dc}`);
+        if (sp.area) bits.push(`${sp.area.sizeFeet}-ft ${sp.area.shape}`);
+        else if (sp.rangeFeet > 0) bits.push(`${sp.rangeFeet} ft`);
+        return {
+          id: sp.id, name: sp.name, level: sp.level,
+          castingTime: sp.castingTime, range: sp.range,
+          detail: bits.join(' · '),
+        };
+      })
+      // Order: castable first (so they appear at the top of the picker), cantrips before levelled
+      .sort((a, b) => {
+        const aCastable = castableSet.has(a.id) ? 0 : 1;
+        const bCastable = castableSet.has(b.id) ? 0 : 1;
+        if (aCastable !== bCastable) return aCastable - bCastable;
+        return a.level - b.level;
+      });
+
+    const concSpell = state.player.concentratingOn
+      ? allSpells.find(sp => sp.id === state.player.concentratingOn)
+      : null;
+
+    // Class features the character knows — map each to a panel-ready display
+    // record. Hides features without a button (passive / attack-time).
+    const allFeatures = (this.registry.get('features') ?? []) as FeatureDef[];
+    const knownFeatureIds = this.playerDef.defaultFeatureIds ?? [];
+    const features = knownFeatureIds
+      .map((id) => allFeatures.find((f) => f.id === id))
+      .filter((f): f is FeatureDef => !!f)
+      .map((f) => {
+        const remaining = state.player.resources[f.id] ?? 0;
+        const max = f.resource?.max ?? 0;
+        const tmpl = f.ui?.resourceLabel;
+        const chip = tmpl && f.resource && f.resource.kind !== 'unlimited'
+          ? tmpl.replace('{remaining}', String(remaining)).replace('{max}', String(max))
+          : null;
+        return {
+          id: f.id,
+          name: f.name,
+          buttonLabel: f.ui?.buttonLabel ?? '',
+          buttonColor: f.ui?.buttonColor ?? '#1a3a5a',
+          resourceChipText: chip,
+        };
+      });
+
     return {
       mode:            state.phase,
       actionUsed:      state.player.actionUsed,
@@ -481,7 +542,25 @@ export class GameScene extends Phaser.Scene {
         .map(i => ({ id: i.id, name: i.name })),
       availableActions: state.availableActions,
       mainAttackName,
+      castableSpells,
+      spellSlots:        state.player.spellSlots,
+      concentratingOn:   state.player.concentratingOn,
+      concentratingOnName: concSpell?.name ?? null,
+      features,
     };
+  }
+
+  private castSpell(spellId: string): void {
+    // Single-target spells: send the currently selected target's id (if any).
+    // AOE/self spells: omit target — server resolves based on player tile.
+    const allSpells = (this.registry.get('spells') ?? []) as SpellDef[];
+    const spell = allSpells.find(sp => sp.id === spellId);
+    if (!spell) return;
+    const slotLevel = spell.level === 0 ? 0 : spell.level;
+    const targetIds: string[] | undefined = (spell.attack === 'ranged-spell' || spell.attack === 'melee-spell' || spell.attack === 'auto-hit')
+      ? (this.gameState?.selectedTargetId ? [this.gameState.selectedTargetId] : undefined)
+      : undefined;
+    gameClient.sendAction({ type: "castSpell", spellId, slotLevel, targetIds });
   }
 
   private updateHUD(state: GameState): void {

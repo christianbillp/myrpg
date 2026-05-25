@@ -37,7 +37,6 @@
     "stealth": 7,
     "survival": 2
   },
-  "secondWindMaxUses": 0,
   "hitDieType": 8,
   "sneakAttackDice": 1,
   "color": 10181046,
@@ -48,5 +47,6 @@
     "shieldId": null
   },
   "defaultInventoryIds": ["dagger", "dagger", "dagger", "dagger", "shortsword", "arrow", "arrow", "arrow", "arrow", "arrow", "arrow", "arrow", "arrow", "arrow", "arrow", "arrow", "arrow", "arrow", "arrow", "arrow", "arrow", "arrow", "arrow", "arrow", "arrow"],
+  "defaultGold": 24,
   "description": "Raised in a border woodland traded between two lords who never thought to ask the elves. She learned early that information and silence outvalue swords. Wry, observant, privately principled — she'll pick a pocket but never break a promise."
 }

@@ -98,10 +98,18 @@ export function buildSessionState(
     tileX: pX, tileY: pY,
     hp: req.resumeHp ?? playerDef.maxHp,
     xp: req.resumeXp ?? playerDef.xp,
-    gold: req.resumeGold ?? 0,
+    gold: req.resumeGold ?? playerDef.defaultGold ?? 0,
     inventoryIds,
     equippedSlots,
-    secondWindUses: req.resumeSecondWindUses ?? playerDef.secondWindMaxUses,
+    // Initialise per-feature resource pools: resume value wins; otherwise
+    // each known feature with a non-unlimited resource starts at `max` (Long
+    // Rest equivalent, since a new encounter == new day in our model).
+    resources: req.resumeResources ?? Object.fromEntries(
+      (playerDef.defaultFeatureIds ?? [])
+        .map((fid) => defs.features.find((f) => f.id === fid))
+        .filter((f): f is NonNullable<typeof f> => !!f && !!f.resource && f.resource.kind !== 'unlimited')
+        .map((f) => [f.id, f.resource!.max] as const),
+    ),
     actionUsed: false,
     bonusActionUsed: false,
     reactionUsed: false,
@@ -116,6 +124,10 @@ export function buildSessionState(
     exhaustionLevel: 0,
     conditions: [] as string[],
     equippedSlotLabels: { armor: null, weapon: null, shield: null },
+    spellSlots: req.resumeSpellSlots ?? [...(playerDef.defaultSpellSlots ?? [])],
+    preparedSpellIds: req.resumePreparedSpellIds ?? [...(playerDef.defaultPreparedSpellIds ?? [])],
+    concentratingOn: req.resumeConcentratingOn ?? null,
+    mageArmor: req.resumeMageArmor ?? false,
   };
 
   const isCombat = req.encounterTypes.includes('simple_combat');
@@ -180,8 +192,9 @@ export function buildSessionState(
     npcPersonas,
     availableActions: {
       canAttack: false, throwableItemIds: [],
-      canHide: false, canSecondWind: false, canDash: false,
+      canHide: false, usableFeatureIds: [], canDash: false,
       canDodge: false, canDisengage: false, canShortRest: false,
+      castableSpellIds: [],
     },
   };
 

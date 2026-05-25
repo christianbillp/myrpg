@@ -50,13 +50,55 @@ export function canHide(ctx: GameContext): boolean {
   return hasCunningAction(ctx) ? canSpendBonusAction(ctx) : canSpendAction(ctx);
 }
 
-/** Can the player spend Second Wind right now? */
-export function canSecondWind(ctx: GameContext): boolean {
-  const p = ctx.state.player;
-  return canSpendBonusAction(ctx)
-    && ctx.playerDef.secondWindMaxUses > 0
-    && p.secondWindUses > 0
-    && p.hp < ctx.playerDef.maxHp;
+/**
+ * Can the player use the given class feature right now?
+ *
+ * Eligibility chain:
+ *   1. The character must know the feature (its id appears in `defaultFeatureIds`).
+ *   2. The feature must have enough of its resource remaining (or be `unlimited`).
+ *   3. Action economy must match the feature's `cost` (reactions are handled
+ *      separately by the resolvers that trigger them, never via this guard).
+ *   4. Feature-specific situational checks (e.g. Second Wind requires below-max HP)
+ *      — kept short here; complex preconditions belong in the handler.
+ */
+export function canUseFeature(ctx: GameContext, featureId: string): boolean {
+  const s = ctx.state;
+  const knowsIt = ctx.playerDef.defaultFeatureIds?.includes(featureId);
+  if (!knowsIt) return false;
+  if (isIncapacitated(s.player.conditions)) return false;
+  const feat = ctx.defs.features.find((f) => f.id === featureId);
+  if (!feat) return false;
+
+  // Resource pool gate.
+  if (feat.resource && feat.resource.kind !== 'unlimited') {
+    const remaining = s.player.resources[featureId] ?? 0;
+    if (remaining <= 0) return false;
+  }
+
+  // Action-economy gate.
+  switch (feat.cost.kind) {
+    case 'action':       if (!canSpendAction(ctx)) return false; break;
+    case 'bonus-action': if (!canSpendBonusAction(ctx)) return false; break;
+    case 'reaction':     return false;  // Reactive features fire from resolvers, not from this guard.
+    case 'free':
+    case 'attack-time':
+    case 'passive':      /* no economy cost */ break;
+  }
+
+  // Feature-specific situational rules (kept minimal; per-feature exotica
+  // belong in the handler, not here — this is just so the UI can grey out the
+  // button when there's literally no point in clicking it).
+  if (featureId === 'second-wind') {
+    if (s.player.hp >= ctx.playerDef.maxHp) return false;
+  }
+
+  return true;
+}
+
+/** All feature ids the character can use right now — used to populate the UI. */
+export function usableFeatureIds(ctx: GameContext): string[] {
+  const ids = ctx.playerDef.defaultFeatureIds ?? [];
+  return ids.filter((id) => canUseFeature(ctx, id));
 }
 
 /** Can the player Dash this turn? */
@@ -117,4 +159,61 @@ export function canAttackTarget(ctx: GameContext, targetId?: string): boolean {
 
   if (s.phase === 'exploring') return true;
   return canSpendAction(ctx);
+}
+
+// ── Spellcasting guards ─────────────────────────────────────────────────────
+
+/**
+ * Can the player cast the given spell right now, given the spell's casting
+ * time, the player's available actions/reactions, and the slot pool? This is
+ * the pure-eligibility check — target/range validation is the resolver's job.
+ */
+export function canCastSpell(ctx: GameContext, spellId: string): boolean {
+  const s = ctx.state;
+  if (!ctx.playerDef.spellcastingAbility) return false;
+  if (isIncapacitated(s.player.conditions)) return false;
+
+  const spell = ctx.defs.spells.find((sp) => sp.id === spellId);
+  if (!spell) return false;
+
+  // Spell must be known: a cantrip the character knows, or a currently-prepared L1+ spell.
+  const known = spell.level === 0
+    ? ctx.playerDef.defaultCantripIds?.includes(spellId)
+    : s.player.preparedSpellIds.includes(spellId);
+  if (!known) return false;
+
+  // Slot pool — cantrips skip this entirely.
+  if (spell.level > 0) {
+    const slot = s.player.spellSlots[spell.level - 1] ?? 0;
+    if (slot <= 0) return false;
+  }
+
+  // Action economy gated by castingTime.
+  switch (spell.castingTime) {
+    case 'action':
+      if (s.phase === 'exploring') return true;
+      return canSpendAction(ctx);
+    case 'bonus-action':
+      return canSpendBonusAction(ctx);
+    case 'reaction':
+      // Reactions are interrupt-only — not directly castable from the player UI.
+      // They fire automatically through resolver paths (Shield on hit, Feather Fall on fall).
+      return false;
+    default:
+      // Ritual or longer casting times: exploring-only out-of-combat utility.
+      return s.phase === 'exploring';
+  }
+}
+
+/** Compute the full list of spell ids the player can cast right now. Used for UI. */
+export function castableSpellIds(ctx: GameContext): string[] {
+  if (!ctx.playerDef.spellcastingAbility) return [];
+  const ids: string[] = [];
+  for (const id of ctx.playerDef.defaultCantripIds ?? []) {
+    if (canCastSpell(ctx, id)) ids.push(id);
+  }
+  for (const id of ctx.state.player.preparedSpellIds) {
+    if (canCastSpell(ctx, id)) ids.push(id);
+  }
+  return ids;
 }

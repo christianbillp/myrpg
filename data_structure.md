@@ -14,6 +14,8 @@ server/data/
 ├── encounters/         # A flavored combination of a map and one or more NPCs
 ├── saves/              # Runtime save files (written by the server, not hand-authored)
 ├── species/            # SRD player species (Dragonborn, Dwarf, Elf, …)
+├── spells/             # SRD spells (cantrips + level 1+)
+├── features/           # Class features (Second Wind, Rage, Sneak Attack, …)
 └── tilesets/           # Shared tile palettes (image + .tsj + AI-facing legend)
 ```
 
@@ -45,13 +47,19 @@ One file per playable character. Defines identity, ability scores, class feature
 | `proficiencyBonus` | number | Added to attack rolls and proficient skill/save checks. |
 | `savingThrowProficiencies` | string[] | Ability names this class is proficient in, e.g. `["str","con"]`. Saving throw totals are computed at runtime. |
 | `skills` | object | All 18 SRD skills keyed by camelCase name. Each value is the **pre-computed total modifier** (ability mod ± proficiency). |
-| `secondWindMaxUses` | number | Fighter Second Wind charges per encounter. `0` for non-Fighters. |
+| `defaultFeatureIds` | string[] | *(optional)* Ids of class features this character knows (e.g. `["second-wind"]` for a Fighter). At session start, each listed feature seeds a resource pool in `PlayerState.resources` from its `resource.max`. See [`features/`](#features-1). |
 | `hitDieType` | number | Die size for Hit Dice: `10` (Fighter), `8` (Rogue). |
 | `sneakAttackDice` | number | Number of d6 Sneak Attack dice. `0` for non-Rogues. |
 | `color` | number | Token colour as a decimal integer (RGB hex, e.g. `5227511` = `#4FB8F7`). |
 | `xp` | number | Always `0` — live XP is tracked in the save file. |
 | `defaultEquipment` | object | Starting equipped gear: `{ armorId, weaponId, shieldId }`. Each value is an item `id` or `null`. |
 | `defaultInventoryIds` | string[] | Starting carried items by item `id`. Repeat the same id to create a stack, e.g. `["javelin","javelin","javelin"]`. |
+| `defaultGold` | number | *(optional, default `0`)* Starting gold pieces the character spawns with on a fresh encounter (typically the sum of class + background starting GP). Resumed sessions use the saved gold value instead. |
+| `spellcastingAbility` | string | *(optional, caster-only)* `"int"` / `"wis"` / `"cha"`. Drives spell save DC (= 8 + PB + ability mod), spell attack bonus (= PB + ability mod), and concentration CON save proficiency. Absent for non-casters. |
+| `defaultCantripIds` | string[] | *(optional, caster-only)* Always-known cantrip ids from `spells/`. Cantrips don't consume slots and aren't part of the prepared list. |
+| `defaultSpellbookIds` | string[] | *(optional, wizard-style)* Full known spell list. A subset is "prepared" at any moment. |
+| `defaultPreparedSpellIds` | string[] | *(optional, caster-only)* Subset of `defaultSpellbookIds` (or fixed-list classes) currently castable. Wizards mutate this on Long Rest. |
+| `defaultSpellSlots` | number[] | *(optional, caster-only)* Starting slot pool by level − 1, e.g. `[2]` = 2 × L1 slots, no higher. Refilled on Long Rest. |
 | `description` | string | Character backstory. Surfaced to the AIDM as persona context. |
 
 **Fields computed at runtime (absent from JSON):**
@@ -82,7 +90,7 @@ One file per playable character. Defines identity, ability scores, class feature
   "proficiencyBonus": 2,
   "savingThrowProficiencies": ["str", "con"],
   "skills": { "athletics": 5, "perception": 2, ... },
-  "secondWindMaxUses": 2,
+  "defaultFeatureIds": ["second-wind"],
   "hitDieType": 10,
   "sneakAttackDice": 0,
   "color": 5227511,
@@ -282,6 +290,20 @@ Stackable inventory item consumed automatically per ranged shot. Distinct from `
 
 ---
 
+### type: `"gear"`
+
+Catch-all for non-functional inventory items — class artifacts (a wizard's spellbook), holy symbols, tools, books, lore objects. Rendered in the Inventory Overlay under a `GEAR` badge with no action button (cannot be equipped, used, or consumed). Stackable by `id` like consumables and ammunition.
+
+| Field | Type | Notes |
+|---|---|---|
+| `id` | string | Unique key, e.g. `"spellbook"`. |
+| `name` | string | Display name. |
+| `type` | string | `"gear"` |
+| `description` | string? | Flavour text — shown only via tooltips/AIDM context, not in the inventory list. |
+| `cost` | number? | Gold piece value. |
+
+---
+
 ## feats/
 
 One file per SRD feat. Feats are loaded at startup, served via `GET /feats`, and cached in the client registry. `applyFeats` reads a character's `featIds` list, looks up each feat, and writes mechanical flags onto `PlayerDef`.
@@ -351,6 +373,115 @@ One file per SRD species. Species are loaded at startup, served via `GET /specie
 | `lineageChoice.options[].level1.speedBonus` | Added to base `speed` by `applySpecies` when the character's `speciesLineage` matches the option id. |
 
 All other trait effects are stored for future engine use and have no current mechanical impact.
+
+---
+
+## spells/
+
+One file per SRD spell, served via `GET /spells` (TBD — currently consumed only as design data; the engine has no spellcasting system yet). Files use kebab-case ids matching the SRD spell name (e.g. `magic-missile.json`, `ray-of-frost.json`).
+
+Each spell carries SRD metadata (level, school, classes, casting time, range, components, duration) plus optional mechanical fields the engine can consume when spellcasting lands (attack roll vs save, damage dice, area shape). Narrative effects live in `description`.
+
+### Fields
+
+| Field | Type | Notes |
+|---|---|---|
+| `id` | string | Unique key (kebab-case). |
+| `name` | string | Display name. |
+| `level` | integer | `0` for cantrip, `1`–`9` for levelled spells. |
+| `school` | string | Lowercase school name: `abjuration`, `conjuration`, `divination`, `enchantment`, `evocation`, `illusion`, `necromancy`, `transmutation`. |
+| `classes` | string[] | SRD class lists the spell belongs to, lowercase. |
+| `castingTime` | string | `"action"`, `"bonus-action"`, `"reaction"`, or a longer string (e.g. `"1 minute"`). |
+| `castingTimeTrigger` | string? | *(reactions only)* The trigger condition. |
+| `range` | string | Human-readable SRD range string. |
+| `rangeFeet` | integer | Numeric range in feet (`0` for self/touch). |
+| `components` | object | `{ verbal: boolean, somatic: boolean, material: string \| null }`. |
+| `duration` | string | Human-readable SRD duration string. |
+| `durationRounds` | integer? | Duration in 6-second rounds (omit for instantaneous). |
+| `concentration` | boolean | True if the spell requires Concentration. |
+| `ritual` | boolean | True if the spell has the Ritual tag. |
+| `attack` | string? | `"ranged-spell"`, `"melee-spell"`, or `"auto-hit"` (Magic Missile). Omit for save-based or no-roll spells. |
+| `save` | object? | `{ ability: 'str'\|'dex'\|'con'\|'int'\|'wis'\|'cha', halfOnSuccess: boolean }`. |
+| `damage` | object? | `{ dice: int, sides: int, bonus?: int, type: string }`. |
+| `area` | object? | `{ shape: 'cone'\|'sphere'\|'cube'\|'line', sizeFeet: int }`. |
+| `darts` | integer? | *(Magic Missile-style)* Number of guaranteed-hit projectiles. |
+| `rider` | string? | One-line secondary effect on hit (e.g. Ray of Frost's slow rider). |
+| `effect` | object? | Free-form condition outcome, e.g. `{ onFail: "incapacitated", onSecondFail: "unconscious" }` for Sleep. |
+| `description` | string | The full SRD spell text — used by the AIDM for ruling and shown to the player. |
+| `scaling` | string? | "Cantrip Upgrade" or "Using a Higher-Level Spell Slot" text. |
+
+### Example — `spells/fire-bolt.json`
+
+```json
+{
+  "id": "fire-bolt",
+  "name": "Fire Bolt",
+  "level": 0,
+  "school": "evocation",
+  "classes": ["sorcerer", "wizard"],
+  "castingTime": "action",
+  "range": "120 feet",
+  "rangeFeet": 120,
+  "components": { "verbal": true, "somatic": true, "material": null },
+  "duration": "instantaneous",
+  "concentration": false,
+  "ritual": false,
+  "attack": "ranged-spell",
+  "damage": { "dice": 1, "sides": 10, "type": "fire" },
+  "description": "You hurl a mote of fire at a creature or an object within range. Make a ranged spell attack against the target. On a hit, the target takes 1d10 Fire damage...",
+  "scaling": "The damage increases by 1d10 when you reach levels 5 (2d10), 11 (3d10), and 17 (4d10)."
+}
+```
+
+---
+
+## features/
+
+Class abilities authored as data + handler. Each file describes a single feature; characters list the features they know via `defaultFeatureIds`. At session start the engine initializes one resource pool per feature with `resource.kind !== 'unlimited'` into `PlayerState.resources[featureId]`, and the [`FeatureRegistry`](../server/src/engine/FeatureRegistry.ts) maps `handler` ids to the TypeScript functions that resolve the mechanical effect.
+
+The shape mirrors `spells/`: data describes WHAT and WHEN; code describes HOW. New class abilities are added by dropping a JSON file here and (if non-passive) registering a handler.
+
+### Fields
+
+| Field | Type | Notes |
+|---|---|---|
+| `id` | string | Unique key (kebab-case). |
+| `name` | string | Display name. |
+| `classId` | string | Owning class id, lowercase (e.g. `"fighter"`, `"rogue"`). Display-only for now. |
+| `minLevel` | integer | Class level required to know this feature. |
+| `description` | string | SRD prose for the feature. |
+| `cost` | object | `{ kind: 'action' \| 'bonus-action' \| 'reaction' \| 'free' \| 'attack-time' \| 'passive', trigger?: string }`. `attack-time` modifiers (Sneak Attack, Smite) fire inside the attack resolver; `passive` features have no button and no runtime effect dispatcher. |
+| `resource` | object? | `{ kind: 'uses-per-long-rest' \| 'uses-per-short-rest' \| 'pool' \| 'unlimited', max: integer }`. Omit when the feature has no resource pool. |
+| `ui` | object? | UI hints — `{ buttonLabel?, buttonColor?, resourceLabel? }`. `resourceLabel` is a template using `{remaining}` and `{max}` placeholders, e.g. `"Second Wind: {remaining}/{max}"`. Features without a `buttonLabel` aren't rendered as buttons (passive / attack-time features). |
+| `handler` | string? | Key into the server's `FeatureRegistry`. Omit for data-only features (Unarmored Defense applied at character load, Expertise as a skill modifier, etc.). |
+
+### Example — `features/second-wind.json`
+
+```json
+{
+  "id": "second-wind",
+  "name": "Second Wind",
+  "classId": "fighter",
+  "minLevel": 1,
+  "description": "Bonus Action. Roll 1d10 and regain HP equal to the roll plus your Fighter level. Refilled on a Long Rest; one use returns on a Short Rest.",
+  "cost": { "kind": "bonus-action" },
+  "resource": { "kind": "uses-per-long-rest", "max": 2 },
+  "ui": {
+    "buttonLabel": "SECOND WIND",
+    "buttonColor": "#1a3a5a",
+    "resourceLabel": "Second Wind: {remaining}/{max}"
+  },
+  "handler": "second-wind"
+}
+```
+
+### Lifecycle
+
+1. **Load**: server reads `features/*.json` at startup; the array is surfaced to the client via `GET /features`.
+2. **Session start**: `SessionBuilder` iterates the player's `defaultFeatureIds`, looks up each feature, and seeds `PlayerState.resources[featureId] = feature.resource.max` (skipping `unlimited` resources).
+3. **UI**: `AvailableActions.usableFeatureIds` is computed each tick by `canUseFeature` (knows-the-feature ✕ resource remaining ✕ action-economy ✕ feature-specific gates). The Player Panel iterates the character's known features and renders one button per feature with a `buttonLabel`, plus one resource chip per feature with a `resourceLabel`.
+4. **Use**: client sends `{ type: 'useFeature', featureId }`; server dispatches to `doUseFeature` → handler in the registry, which consumes the resource, spends the action/bonus-action, and applies the effect.
+5. **Persistence**: `PlayerState.resources` is written to `CharSave.resources` on every action and reloaded on resume. A Long Rest (= new encounter) refills any `uses-per-long-rest` pool by re-running the SessionBuilder seeding.
 
 ---
 
@@ -648,8 +779,10 @@ Stores the persistent player state that carries across encounters.
 | `xp` | number | Total experience points earned. |
 | `gold` | number | Gold pieces carried. |
 | `inventoryIds` | string[] | Item `id` values currently in inventory. Repeated entries represent stacks. |
-| `secondWindUses` | number | Remaining Second Wind charges this encounter. |
+| `resources` | object | *(optional)* Per-feature resource pools (e.g. `{ "second-wind": 2 }`). Keyed by feature id. Refilled to `feature.resource.max` on Long Rest (= new encounter) when a fresh session seeds from `defaultFeatureIds`. |
 | `equippedSlots` | object | `{ armorId, weaponId, shieldId }` — currently equipped items. |
+| `spellSlots` | number[] | *(optional, caster-only)* Current remaining spell slots by level − 1. Carries across encounters; refilled on Long Rest (= new encounter). |
+| `preparedSpellIds` | string[] | *(optional, caster-only)* Currently prepared spells. Mutable on Long Rest. |
 | `encounterLog` | object[] | *(optional)* Raw record of every completed encounter, newest first. Each entry contains `id`, `timestamp`, `description`, `encounterTitle`, `xpGained`, `goldGained`, `outcome`, and `lines` (ordered log lines of type `combat`, `dm_player`, or `dm_reply`). Written when a session ends via `DELETE /game/session/:id`. |
 | `storylog` | object[] | *(optional)* AI-generated narrative entries keyed by `encounterId`. Each entry contains `encounterId` and `narrative` (prose string). Generated on demand by `POST /save/:characterId/storylog` via `server/src/storylog.ts` using Claude Sonnet; only missing entries are generated — existing entries are never overwritten unless `?rewrite=true` is passed. |
 

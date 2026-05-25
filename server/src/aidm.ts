@@ -34,6 +34,7 @@ TOOL INVARIANTS (these hold even in dev mode):
   • reveal_npc_name must be called BEFORE narrating an NPC's name; otherwise the game world doesn't register it.
   • complete_quest automatically awards XP/GP. Don't also call award_xp for the same quest.
   • throw_item consumes the player's Action during player_turn. Check the "Action: USED/AVAILABLE" flag in CURRENT STATE.
+  • cast_spell is the ONLY way to cast a player spell. It consumes the proper Action / Bonus Action, decrements the matching spell slot for L1+ spells, applies damage / saves / conditions via the spell's JSON definition, and handles concentration. Do not simulate a spell cast with request_attack_roll + adjust_npc_hp — that bypasses slot tracking and action economy.
   • Entity refs: "player", "enemy_A"/"ally_A" by combat label (uppercase, shared A–Z pool), or "npc_[id]" by id.`;
   }
 
@@ -52,6 +53,7 @@ If a tool changes something the player can perceive, the reply must reflect it. 
 
 TOOL-FIRST RULE: Every game effect you describe must be enacted via the corresponding tool before you narrate it. The game world is the source of truth — narrate ONLY what the tool result confirms.
   • Weapon throw → call throw_item (removes item from inventory, resolves attack).
+  • Spell cast (player) → call cast_spell with the spell id from the player's prepared/cantrip list shown in CURRENT STATE. Routes through the engine resolver: consumes Action / Bonus Action per the spell's casting time, decrements the matching spell slot for L1+ spells, applies damage / saves / conditions. NEVER simulate a spell cast with request_attack_roll + adjust_npc_hp — it bypasses slot tracking and action economy.
   • Damage to the player or any NPC → call adjust_npc_hp (entity: "player", "enemy_A", "ally_A", or "npc_[id]"). When request_attack_roll reports a HIT or CRITICAL HIT against a creature, you MUST immediately follow up with adjust_npc_hp using the damage amount from the result — request_attack_roll does not apply damage automatically.
   • ANY creature movement on the map — the player, an ally, a neutral NPC, an enemy — must be enacted with move_entity BEFORE you narrate it. This covers walking across a bridge, stepping aside, crossing a room, fleeing a few tiles, climbing onto something, repositioning to safety, going to investigate something, taking cover, joining the player, peeling off — anything that changes a token's tile. The player can see the token; narrating "she crosses the bridge" without calling move_entity leaves a token frozen mid-scene and breaks immersion immediately. If the destination is off the current map (an NPC leaves the encounter entirely), use despawn_npc instead. If no tool can place them where the fiction requires, change the fiction — don't lie about the token.
   • Gold gained or spent → call award_gold (negative amount for spending). Never narrate a gold transaction without the tool confirming it.
@@ -107,12 +109,19 @@ function buildStateMessage(engine: GameEngine): string {
   // Explicit AVAILABLE/USED rather than absence-implies-available — the model
   // hallucinates "you already acted" otherwise, pattern-matching on conversation
   // history. Showing the resource state as a literal field removes ambiguity.
+  const slotsLine = p.spellSlots.length > 0
+    ? p.spellSlots.map((n, i) => n > 0 ? `L${i + 1}:${n}` : '').filter(Boolean).join(',')
+    : '';
   const flags = [
     p.conditions.includes('hidden') ? 'HIDDEN' : '',
     s.phase === 'player_turn' ? `Action: ${p.actionUsed ? 'USED' : 'AVAILABLE'}` : '',
     s.phase === 'player_turn' ? `Bonus: ${p.bonusActionUsed ? 'USED' : 'AVAILABLE'}` : '',
     s.phase === 'player_turn' ? `${p.movesLeft} moves left` : '',
-    p.secondWindUses > 0 ? `Second Wind ×${p.secondWindUses}` : '',
+    ...Object.entries(p.resources)
+      .filter(([, n]) => n > 0)
+      .map(([id, n]) => `${id} ×${n}`),
+    slotsLine ? `Slots ${slotsLine}` : '',
+    p.concentratingOn ? `Concentrating: ${p.concentratingOn}` : '',
   ].filter(Boolean).join(' · ');
 
   const focusLine = s.selectedTargetId
@@ -184,6 +193,7 @@ CONTEXT: ${s.encounterContext}
 PLAYER: tile (${p.tileX},${p.tileY}) · HP ${p.hp} · ${p.gold} GP · ${flags || 'no flags'}
   Inventory: ${p.inventoryIds.join(', ') || 'empty'}
   Equipped: armor=${p.equippedSlots.armorId ?? 'none'} weapon=${p.equippedSlots.weaponId ?? 'none'} shield=${p.equippedSlots.shieldId ?? 'none'}
+  ${p.preparedSpellIds.length > 0 ? `Prepared spells: ${p.preparedSpellIds.join(', ')}` : ''}
   ${focusLine}
 
 COMBATANTS (enemies & allies):

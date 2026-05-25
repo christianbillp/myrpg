@@ -1,0 +1,16 @@
+{
+  "id": "quarterstaff",
+  "name": "Quarterstaff",
+  "type": "weapon",
+  "statKey": "str",
+  "damageDice": 1,
+  "damageSides": 6,
+  "damageType": "bludgeoning",
+  "mastery": "topple",
+  "finesse": false,
+  "twoHanded": false,
+  "thrown": false,
+  "throwNormal": 0,
+  "throwLong": 0,
+  "cost": 0
+}

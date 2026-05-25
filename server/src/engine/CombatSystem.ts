@@ -179,7 +179,7 @@ export function enemyAttack(
   playerAc: number,
   withAdvantage: boolean,
   withDisadvantage = false,
-): { damage: number; isHit: boolean; isCrit: boolean; logs: LogEntry[] } {
+): { damage: number; isHit: boolean; isCrit: boolean; attackTotal: number; naturalRoll: number; logs: LogEntry[] } {
   const logs: LogEntry[] = [];
   const effAdv = withAdvantage && !withDisadvantage;
   const effDis = withDisadvantage && !withAdvantage;
@@ -214,7 +214,7 @@ export function enemyAttack(
     logs.push({ left: `Miss with ${attack.name}`, right: atkPart, style: 'miss' });
   }
 
-  return { damage, isHit, isCrit, logs };
+  return { damage, isHit, isCrit, attackTotal, naturalRoll, logs };
 }
 
 export function tryNimbleEscape(

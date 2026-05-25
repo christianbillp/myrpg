@@ -1,0 +1,19 @@
+{
+  "id": "magic-missile",
+  "name": "Magic Missile",
+  "level": 1,
+  "school": "evocation",
+  "classes": ["sorcerer", "wizard"],
+  "castingTime": "action",
+  "range": "120 feet",
+  "rangeFeet": 120,
+  "components": { "verbal": true, "somatic": true, "material": null },
+  "duration": "instantaneous",
+  "concentration": false,
+  "ritual": false,
+  "attack": "auto-hit",
+  "damage": { "dice": 1, "sides": 4, "bonus": 1, "type": "force" },
+  "darts": 3,
+  "description": "You create three glowing darts of magical force. Each dart strikes a creature of your choice that you can see within range. A dart deals 1d4 + 1 Force damage to its target. The darts all strike simultaneously, and you can direct them to hit one creature or several.",
+  "scaling": "The spell creates one more dart for each spell slot level above 1."
+}

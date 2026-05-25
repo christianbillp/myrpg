@@ -37,7 +37,7 @@ interface LocalSave {
   playerDefId: string;
   hp: number; xp: number; gold: number;
   inventoryIds: string[];
-  secondWindUses: number;
+  resources?: Record<string, number>;
   equippedSlots?: EquipmentSlots;
   encounterLog?: EncounterRecord[];
   storylog?: StorylogEntry[];
@@ -353,7 +353,7 @@ export class EncounterSetupScene extends Phaser.Scene {
         resumeGold:          save?.gold,
         resumeInventoryIds:  save?.inventoryIds,
         resumeEquippedSlots: save?.equippedSlots,
-        resumeSecondWindUses: save?.secondWindUses,
+        resumeResources:     save?.resources,
       }).then((initialState: GameState) => {
         this.scene.start("GameScene", { sessionId: initialState.sessionId, playerDef: player });
       }).catch((err: unknown) => {

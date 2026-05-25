@@ -1,0 +1,16 @@
+{
+  "id": "prestidigitation",
+  "name": "Prestidigitation",
+  "level": 0,
+  "school": "transmutation",
+  "classes": ["bard", "sorcerer", "warlock", "wizard"],
+  "castingTime": "action",
+  "range": "10 feet",
+  "rangeFeet": 10,
+  "components": { "verbal": true, "somatic": true, "material": null },
+  "duration": "up to 1 hour",
+  "durationRounds": 600,
+  "concentration": false,
+  "ritual": false,
+  "description": "You create a magical effect within range. Choose the effect from the options below. If you cast this spell multiple times, you can have up to three of its non-instantaneous effects active at a time. Sensory Effect: an instantaneous, harmless sensory effect — sparks, wind, faint musical notes, an odd odor. Fire Play: instantaneously light or snuff out a candle, torch, or small campfire. Clean or Soil: clean or soil an object no larger than 1 cubic foot. Minor Sensation: chill, warm, or flavor up to 1 cubic foot of nonliving material for 1 hour. Magic Mark: a color, small mark, or symbol appears on an object or surface for 1 hour. Minor Creation: a nonmagical trinket or illusory image that fits in your hand; lasts until the end of your next turn; deals no damage and has no monetary worth."
+}

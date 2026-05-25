@@ -1,0 +1,7 @@
+{
+  "id": "spellbook",
+  "name": "Spellbook",
+  "type": "gear",
+  "description": "A Tiny tome weighing 3 lb with 100 pages, readable only by you or someone casting Identify. Contains the wizard spells you know; copying a new spell into the book takes 2 hours and costs 50 GP per spell level.",
+  "cost": 0
+}

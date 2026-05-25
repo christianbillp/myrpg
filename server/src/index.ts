@@ -75,6 +75,8 @@ const defs: GameDefs = {
   feats: [],
   backgrounds: [],
   species: [],
+  spells: [],
+  features: [],
   tileLegend: { notes: "", tiles: {} },
 };
 
@@ -88,6 +90,8 @@ async function loadDefs(): Promise<void> {
     feats,
     backgrounds,
     species,
+    spells,
+    features,
   ] = await Promise.all([
     readDir<GameDefs["playerDefs"][0]>(join(DATA_DIR, "characters")),
     readDir<GameDefs["monsters"][0]>(join(DATA_DIR, "monsters")),
@@ -97,6 +101,8 @@ async function loadDefs(): Promise<void> {
     readDir<GameDefs["feats"][0]>(join(DATA_DIR, "feats")),
     readDir<GameDefs["backgrounds"][0]>(join(DATA_DIR, "backgrounds")),
     readDir<GameDefs["species"][0]>(join(DATA_DIR, "species")),
+    readDir<GameDefs["spells"][0]>(join(DATA_DIR, "spells")),
+    readDir<GameDefs["features"][0]>(join(DATA_DIR, "features")),
   ]);
   defs.playerDefs = playerDefs;
   defs.monsters = monsters;
@@ -105,6 +111,8 @@ async function loadDefs(): Promise<void> {
   defs.feats = feats;
   defs.backgrounds = backgrounds;
   defs.species = species;
+  defs.spells = spells;
+  defs.features = features;
   for (const p of defs.playerDefs) {
     applySpecies(p, defs.species);
     applyFeats(p, defs.feats);
@@ -293,6 +301,8 @@ server.get("/equipment", async () => defs.equipment);
 server.get("/feats", async () => defs.feats);
 server.get("/backgrounds", async () => defs.backgrounds);
 server.get("/species", async () => defs.species);
+server.get("/spells", async () => defs.spells);
+server.get("/features", async () => defs.features);
 server.get("/encounters", async () => readDir(join(DATA_DIR, "encounters")));
 server.get("/maps", async () => defs.maps);
 server.get("/health", async () => ({ ok: true }));
@@ -353,8 +363,11 @@ interface CharSave {
   xp: number;
   gold: number;
   inventoryIds: string[];
-  secondWindUses: number;
   equippedSlots?: EquipmentSlots;
+  spellSlots?: number[];
+  preparedSpellIds?: string[];
+  /** Per-feature resource pools (Second Wind uses, Rage uses, Channel Divinity, …). */
+  resources?: Record<string, number>;
   encounterLog?: EncounterRecord[];
   storylog?: StorylogEntry[];
 }
@@ -370,7 +383,9 @@ async function saveWorldState(
     gold: _gold,
     inventoryIds: _inv,
     equippedSlots: _eq,
-    secondWindUses: _sw,
+    resources: _r,
+    spellSlots: _ss,
+    preparedSpellIds: _ps,
     ...sessionPlayer
   } = state.player;
   const worldSave: WorldSave = { ...state, player: sessionPlayer, aidmHistory };
@@ -405,7 +420,7 @@ async function loadWorldState(): Promise<{
       weaponId: null,
       shieldId: null,
     },
-    secondWindUses: charSave.secondWindUses,
+    resources: charSave.resources ?? {},
     reactionUsed: false,
     freeObjectInteractionUsed: false,
     initiativeRoll: 0,
@@ -415,6 +430,10 @@ async function loadWorldState(): Promise<{
     exhaustionLevel: 0,
     conditions: [],
     equippedSlotLabels: { armor: null, weapon: null, shield: null },
+    spellSlots: charSave.spellSlots ?? [],
+    preparedSpellIds: charSave.preparedSpellIds ?? [],
+    concentratingOn: null,
+    mageArmor: false,
   };
   const aidmHistory = worldSave.aidmHistory ?? [];
   return { state: { ...worldSave, player: fullPlayer }, aidmHistory };
@@ -452,10 +471,17 @@ async function defaultSave(characterId: string): Promise<unknown> {
   return {
     playerDefId: char?.id ?? characterId,
     hp: char?.maxHp ?? 1,
-    xp: 0,
-    gold: 0,
-    inventoryIds: [],
-    secondWindUses: char?.secondWindMaxUses ?? 0,
+    xp: char?.xp ?? 0,
+    gold: char?.defaultGold ?? 0,
+    inventoryIds: [...(char?.defaultInventoryIds ?? [])],
+    resources: Object.fromEntries(
+      (char?.defaultFeatureIds ?? [])
+        .map((fid) => defs.features.find((f) => f.id === fid))
+        .filter((f): f is NonNullable<typeof f> => !!f && !!f.resource && f.resource.kind !== 'unlimited')
+        .map((f) => [f.id, f.resource!.max] as const),
+    ),
+    spellSlots: [...(char?.defaultSpellSlots ?? [])],
+    preparedSpellIds: [...(char?.defaultPreparedSpellIds ?? [])],
   };
 }
 
@@ -613,8 +639,10 @@ server.post("/game/session/:id/action", async (req, reply) => {
     xp: player.xp,
     gold: player.gold,
     inventoryIds: player.inventoryIds,
-    secondWindUses: player.secondWindUses,
+    resources: player.resources,
     equippedSlots: player.equippedSlots,
+    spellSlots: player.spellSlots,
+    preparedSpellIds: player.preparedSpellIds,
   });
 
   pushStateUpdate(id, events, state);

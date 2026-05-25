@@ -37,7 +37,7 @@
     "stealth": 2,
     "survival": 2
   },
-  "secondWindMaxUses": 2,
+  "defaultFeatureIds": ["second-wind"],
   "hitDieType": 10,
   "sneakAttackDice": 0,
   "color": 5227511,
@@ -48,5 +48,6 @@
     "shieldId": null
   },
   "defaultInventoryIds": ["flail", "javelin", "javelin", "javelin", "javelin", "javelin", "javelin", "javelin", "javelin"],
+  "defaultGold": 4,
   "description": "A former city watchman who left after witnessing corruption he couldn't abide. Blunt, dependable, and slow to trust — but fiercely loyal once earned. He leads from the front and speaks plainly. Rarely the first to talk, always the last to leave."
 }

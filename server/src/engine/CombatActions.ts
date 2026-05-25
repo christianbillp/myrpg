@@ -11,7 +11,7 @@ import { chebyshev } from './EnemyAI.js';
 import { makePlayerAttack } from './EquipmentSystem.js';
 import {
   canSpendAction, canDash as guardCanDash, canDodge as guardCanDodge,
-  canDisengage as guardCanDisengage, canHide as guardCanHide, canSecondWind as guardCanSecondWind,
+  canDisengage as guardCanDisengage, canHide as guardCanHide,
   canAttackTarget, playerAttackReachTiles, hasCunningAction,
 } from './ActionGuards.js';
 
@@ -265,17 +265,6 @@ export function doDisengage(ctx: GameContext): void {
   s.player.conditions.push('disengaged');
   s.player.actionUsed = true;
   ctx.addLog({ left: `${ctx.playerDef.name} Disengages — no Opportunity Attacks this turn`, style: 'status' });
-}
-
-export function doSecondWind(ctx: GameContext): void {
-  const s = ctx.state;
-  if (!guardCanSecondWind(ctx)) return;
-  const { healed, logs } = playerSecondWind(ctx.playerDef.level);
-  const before = s.player.hp;
-  s.player.hp = Math.min(ctx.playerDef.maxHp, s.player.hp + healed);
-  s.player.secondWindUses--;
-  ctx.addLogs([...logs, { left: `HP: ${before} → ${s.player.hp}/${ctx.playerDef.maxHp} (${s.player.secondWindUses} uses left)`, style: 'status' }]);
-  s.player.bonusActionUsed = true;
 }
 
 export function doEnemyOpportunityAttack(ctx: GameContext, npc: NpcState, events: GameEvent[]): void {

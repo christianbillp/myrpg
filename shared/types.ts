@@ -131,7 +131,8 @@ export interface PlayerDef {
   skills: Record<string, number>;
   savingThrowProficiencies: string[];
   savingThrows: Record<string, number>;
-  secondWindMaxUses: number;
+  /** Ids of class features this character knows (e.g. `["second-wind"]` for Fighter L1). Features grant resource pools, action buttons, and effect handlers — see `features/`. */
+  defaultFeatureIds?: string[];
   hitDieType: number;
   sneakAttackDice: number;
   speed: number;
@@ -141,6 +142,19 @@ export interface PlayerDef {
   fightingStyleDefense: boolean;
   defaultEquipment: EquipmentSlots;
   defaultInventoryIds: string[];
+  /** Starting gold this character spawns with (per class + background bundle). Defaults to 0 when omitted. */
+  defaultGold?: number;
+  // ── Spellcasting (optional — omit for non-casters) ──────────────────────────
+  /** INT / WIS / CHA. Drives spell save DC, attack bonus, and damage-mod adds. */
+  spellcastingAbility?: SpellcastingAbility;
+  /** Always-known cantrips (level 0 spells). Cantrips are not prepared and do not consume slots. */
+  defaultCantripIds?: string[];
+  /** Full known list (wizard's spellbook). Subset is "prepared" at any time. */
+  defaultSpellbookIds?: string[];
+  /** Subset of `defaultSpellbookIds` (or fixed-list classes) currently castable. */
+  defaultPreparedSpellIds?: string[];
+  /** Starting spell slots, indexed by `spell.level − 1`. e.g. `[2]` = 2 × L1, no higher slots. */
+  defaultSpellSlots?: number[];
   mainAttack: PlayerAttack;
   description?: string;
 }
@@ -242,8 +256,123 @@ export interface AmmunitionDef {
   cost?: number;
 }
 
+// Gear is a catch-all for non-functional inventory items — class artifacts
+// like a wizard's spellbook, holy symbols, tools, books, etc. They appear in
+// the inventory as flavour/lore objects with no UI action button. Distinct
+// from ammunition (which is auto-consumed) and consumables (which have USE).
+export interface GearDef {
+  id: string; name: string; type: 'gear';
+  description?: string;
+  cost?: number;
+}
+
 export type EquipmentDef = ArmorDef | ShieldDef | WeaponDef;
-export type ItemDef = ConsumableDef | AmmunitionDef | EquipmentDef;
+export type ItemDef = ConsumableDef | AmmunitionDef | EquipmentDef | GearDef;
+
+// ── Class features (Rage, Second Wind, Channel Divinity, …) ─────────────────
+//
+// Features are class abilities described as data + handler. Each character
+// references a set of feature ids via `defaultFeatureIds`; at session start
+// the engine initializes any pooled resources from the feature definitions.
+// A FeatureRegistry on the server maps `handler` ids to TypeScript functions
+// that execute the mechanical effect.
+
+export type FeatureCostKind = 'action' | 'bonus-action' | 'reaction' | 'free' | 'attack-time' | 'passive';
+
+export interface FeatureCost {
+  kind: FeatureCostKind;
+  /** Free-form trigger description for reactive features (e.g. "when hit by an attack roll"). */
+  trigger?: string;
+}
+
+/**
+ * Resource pool consumed by the feature. `max` is the starting / refilled value;
+ * `kind` determines when it refills:
+ *   - 'uses-per-long-rest'  : refilled on Long Rest (new encounter)
+ *   - 'uses-per-short-rest' : refilled on Short Rest
+ *   - 'pool'                : like uses-per-long-rest but the amount can vary (e.g. Lay on Hands)
+ *   - 'unlimited'           : no resource (button always usable subject to action economy)
+ */
+export type FeatureResourceKind = 'uses-per-long-rest' | 'uses-per-short-rest' | 'pool' | 'unlimited';
+
+export interface FeatureResource {
+  kind: FeatureResourceKind;
+  /** The starting / refill value. Constant for L1 features; future fields can compute from level. */
+  max: number;
+}
+
+export interface FeatureUI {
+  /** Display label on the action button. Omit for passive/attack-time features (no button). */
+  buttonLabel?: string;
+  /** Button background colour. Defaults to a class-button blue if omitted. */
+  buttonColor?: string;
+  /** Optional template for the resource chip in the Player Panel: "{name}: {remaining}/{max}". Use `{remaining}` and `{max}` placeholders. */
+  resourceLabel?: string;
+}
+
+export interface FeatureDef {
+  id: string;
+  name: string;
+  /** Class this feature belongs to (e.g. "fighter"). Display-only — no class registry yet. */
+  classId: string;
+  /** Minimum class level required for the character to know this feature. */
+  minLevel: number;
+  description: string;
+  cost: FeatureCost;
+  resource?: FeatureResource;
+  ui?: FeatureUI;
+  /**
+   * Mechanic-handler key, looked up in the server-side FeatureRegistry. When
+   * omitted, the feature is "data-only" — passive, ambient, or applied at
+   * character-load (Unarmored Defense, Expertise, etc.).
+   */
+  handler?: string;
+}
+
+// ── Spell definitions ─────────────────────────────────────────────────────────
+
+export type SpellSchool = 'abjuration' | 'conjuration' | 'divination' | 'enchantment'
+                        | 'evocation' | 'illusion' | 'necromancy' | 'transmutation';
+
+export type SpellcastingAbility = 'int' | 'wis' | 'cha';
+
+export interface SpellComponents {
+  verbal: boolean;
+  somatic: boolean;
+  material: string | null;
+}
+
+export interface SpellAttackOnly { kind: 'ranged-spell' | 'melee-spell' | 'auto-hit'; }
+export interface SpellSave { ability: 'str' | 'dex' | 'con' | 'int' | 'wis' | 'cha'; halfOnSuccess: boolean; }
+export interface SpellDamage { dice: number; sides: number; bonus?: number; type: string; }
+export interface SpellArea { shape: 'cone' | 'sphere' | 'cube' | 'line'; sizeFeet: number; }
+export interface SpellEffect { onFail?: string; onSecondFail?: string; }
+
+export interface SpellDef {
+  id: string;
+  name: string;
+  level: number;                   // 0 = cantrip
+  school: SpellSchool;
+  classes: string[];
+  castingTime: string;             // human-readable
+  castingTimeTrigger?: string;     // reactions only
+  range: string;                   // human-readable
+  rangeFeet: number;               // 0 = self/touch
+  components: SpellComponents;
+  duration: string;
+  durationRounds?: number;
+  concentration: boolean;
+  ritual: boolean;
+  attack?: 'ranged-spell' | 'melee-spell' | 'auto-hit';
+  save?: SpellSave;
+  damage?: SpellDamage;
+  area?: SpellArea;
+  darts?: number;                  // Magic Missile: guaranteed-hit projectile count
+  rider?: string;                  // narrative one-line secondary effect on hit
+  effect?: SpellEffect;            // condition outcomes (Sleep)
+  description: string;
+  scaling?: string;
+}
 
 // ── Encounter / quest types ──────────────────────────────────────────────────
 
@@ -415,7 +544,8 @@ export interface PlayerState {
   gold: number;
   inventoryIds: string[];
   equippedSlots: EquipmentSlots;
-  secondWindUses: number;
+  /** Per-feature resource pools, keyed by feature id (Second Wind, Rage, Channel Divinity, …). Initialised from `FeatureDef.resource.max` on session start; decremented by feature handlers. */
+  resources: Record<string, number>;
   actionUsed: boolean;
   bonusActionUsed: boolean;
   reactionUsed: boolean;
@@ -436,17 +566,29 @@ export interface PlayerState {
   exhaustionLevel: number;
   conditions: string[];
   equippedSlotLabels: { armor: string | null; weapon: string | null; shield: string | null };
+  // ── Spellcasting runtime state ───────────────────────────────────────────
+  /** Currently remaining spell slots, indexed by `spell.level − 1`. Empty array for non-casters. */
+  spellSlots: number[];
+  /** Currently prepared spell ids (mutable across Long Rests). */
+  preparedSpellIds: string[];
+  /** Spell currently concentrated on, or null. Cleared by damage CON save, casting another concentration spell, or incapacitation. */
+  concentratingOn: string | null;
+  /** Flag set by Mage Armor — `applyEquipment`-equivalent uses base AC 13 + DEX while no armor is worn. */
+  mageArmor: boolean;
 }
 
 export interface AvailableActions {
   canAttack: boolean;
   throwableItemIds: string[];
   canHide: boolean;
-  canSecondWind: boolean;
+  /** Class-feature ids the player can use *right now* (action economy + remaining resource + class-level gating). */
+  usableFeatureIds: string[];
   canDash: boolean;
   canDodge: boolean;
   canDisengage: boolean;
   canShortRest: boolean;
+  /** Subset of `preparedSpellIds` + known cantrips that the player can cast *right now* given action economy and slot pool. Empty when the player isn't a caster or no spell is castable. */
+  castableSpellIds: string[];
 }
 
 // Unified NPC state — covers neutral social NPCs, allied combatants, and enemies.
@@ -547,8 +689,9 @@ export type PlayerAction =
   | { type: 'moveTo'; tileX: number; tileY: number }
   | { type: 'attack'; targetId?: string }
   | { type: 'throw'; itemId: string; targetId?: string }
+  | { type: 'castSpell'; spellId: string; slotLevel: number; targetIds?: string[]; tile?: { x: number; y: number } }
   | { type: 'hide' }
-  | { type: 'secondWind' }
+  | { type: 'useFeature'; featureId: string; targetId?: string; tile?: { x: number; y: number } }
   | { type: 'dash' }
   | { type: 'dodge' }
   | { type: 'disengage' }
@@ -605,7 +748,11 @@ export interface CreateSessionRequest {
   resumeGold?: number;
   resumeInventoryIds?: string[];
   resumeEquippedSlots?: EquipmentSlots;
-  resumeSecondWindUses?: number;
+  resumeResources?: Record<string, number>;
+  resumeSpellSlots?: number[];
+  resumePreparedSpellIds?: string[];
+  resumeConcentratingOn?: string | null;
+  resumeMageArmor?: boolean;
 }
 
 export interface CreateSessionResponse {

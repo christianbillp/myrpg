@@ -17,6 +17,26 @@ export interface QuestDisplay {
   completed: boolean;
 }
 
+export interface PlayerPanelSpell {
+  id: string;
+  name: string;
+  level: number;
+  castingTime: string;
+  range: string;
+  /** Short mechanical summary, e.g. "1d10 fire · ranged spell" or "DEX save DC 13 · 3d6 fire · 15-ft cone". */
+  detail: string;
+}
+
+/** Display info for a class feature button + resource chip. */
+export interface PlayerPanelFeature {
+  id: string;
+  name: string;
+  buttonLabel: string;
+  buttonColor: string;
+  /** Computed label for the resource chip, e.g. "Second Wind: 2/2". null when no chip. */
+  resourceChipText: string | null;
+}
+
 export interface PlayerPanelActionState {
   mode: CombatMode;
   actionUsed: boolean;
@@ -26,6 +46,16 @@ export interface PlayerPanelActionState {
   throwableItems: Array<{ id: string; name: string }>;
   availableActions: AvailableActions;
   mainAttackName: string;
+  /** Subset of known/prepared spells the player can cast right now (full metadata + label). */
+  castableSpells: PlayerPanelSpell[];
+  /** Currently remaining spell slots indexed by level − 1. */
+  spellSlots: number[];
+  /** Spell id currently being concentrated on, or null. */
+  concentratingOn: string | null;
+  /** Display name of the concentrated spell (for the chip), or null. */
+  concentratingOnName: string | null;
+  /** Class features this character knows — used to render class-specific buttons + resource chips. */
+  features: PlayerPanelFeature[];
 }
 
 export interface PlayerPanelCallbacks {
@@ -33,10 +63,11 @@ export interface PlayerPanelCallbacks {
   onSearch: () => void;
   onAttack: () => void;
   onThrow: (itemId: string) => void;
+  onCast: (spellId: string) => void;
+  onUseFeature: (featureId: string) => void;
   onDash: () => void;
   onDodge: () => void;
   onDisengage: () => void;
-  onSecondWind: () => void;
   onHide: () => void;
   onDeathSave: () => void;
   onShortRest: () => void;
@@ -64,6 +95,9 @@ export class PlayerPanel {
   private readonly hpText: HTMLElement;
   private readonly statsEl: HTMLElement;
   private readonly xpEl: HTMLElement;
+  private readonly slotsEl: HTMLElement;
+  private readonly featureChipsEl: HTMLElement;
+  private readonly concentrationEl: HTMLElement;
   private readonly questsEl: HTMLElement;
   private readonly actionArea: HTMLElement;
   private readonly searchBtn: HTMLButtonElement;
@@ -72,6 +106,7 @@ export class PlayerPanel {
 
   private visible = true;
   private pickerOpen = false;
+  private spellPickerOpen = false;
   private lastActionState: PlayerPanelActionState | null = null;
   private readonly callbacks: PlayerPanelCallbacks;
   private readonly playerDef: PlayerDef;
@@ -121,6 +156,9 @@ export class PlayerPanel {
       <div class="gui-sep"></div>
 
       <div style="padding:4px 12px;font-size:10px;color:#aabbcc;" data-xp></div>
+      <div style="padding:2px 12px;font-size:10px;color:#8eb8e0;display:none;" data-slots></div>
+      <div style="padding:2px 12px;font-size:10px;color:#a8c8e8;display:none;line-height:1.6;" data-feature-chips></div>
+      <div style="padding:2px 12px;font-size:10px;color:#b8a8e8;display:none;" data-concentration></div>
       <div class="gui-sep" style="margin-top:2px;"></div>
       <div class="gui-label">QUESTS</div>
       <div style="padding:2px 12px;font-size:10px;color:#aabbcc;line-height:1.8;white-space:pre-wrap;" data-quests></div>
@@ -141,6 +179,9 @@ export class PlayerPanel {
     this.hpText    = ref('hp-text');
     this.statsEl   = ref('stats');
     this.xpEl      = ref('xp');
+    this.slotsEl   = ref('slots');
+    this.featureChipsEl = ref('feature-chips');
+    this.concentrationEl = ref('concentration');
     this.questsEl  = ref('quests');
     this.actionArea = ref('actions');
     this.searchBtn  = ref('search')   as HTMLButtonElement;
@@ -244,15 +285,53 @@ export class PlayerPanel {
     this.lastActionState = state;
     this.actionArea.innerHTML = '';
     this.endTurnBtn.style.display = state.mode === 'player_turn' ? 'block' : 'none';
+
+    // Spell slots: show "current/max" per slot level when the character has any.
+    const maxSlots = this.playerDef.defaultSpellSlots ?? [];
+    if (maxSlots.length > 0) {
+      const parts: string[] = [];
+      for (let i = 0; i < maxSlots.length; i++) {
+        if (maxSlots[i] > 0) parts.push(`L${i + 1} ${state.spellSlots[i] ?? 0}/${maxSlots[i]}`);
+      }
+      this.slotsEl.style.display = parts.length > 0 ? 'block' : 'none';
+      this.slotsEl.textContent = `Slots: ${parts.join(' · ')}`;
+    } else {
+      this.slotsEl.style.display = 'none';
+    }
+
+    // Class-feature resource chips (Second Wind 2/2, Rage 2/2, Channel Divinity 1/2, …).
+    const chips = state.features
+      .map((f) => f.resourceChipText)
+      .filter((s): s is string => !!s);
+    if (chips.length > 0) {
+      this.featureChipsEl.style.display = 'block';
+      this.featureChipsEl.textContent = chips.join(' · ');
+    } else {
+      this.featureChipsEl.style.display = 'none';
+    }
+
+    // Concentration chip: visible only while concentrating; show spell name.
+    if (state.concentratingOn && state.concentratingOnName) {
+      this.concentrationEl.style.display = 'block';
+      this.concentrationEl.textContent = `🌀 Concentrating: ${state.concentratingOnName}`;
+    } else {
+      this.concentrationEl.style.display = 'none';
+    }
+
     if (!this.visible) return;
 
     if (this.pickerOpen) {
       this.renderPicker();
       return;
     }
+    if (this.spellPickerOpen) {
+      this.renderSpellPicker();
+      return;
+    }
 
     const { mode, actionUsed, bonusActionUsed, movesLeft, moveMode, availableActions: aa } = state;
     const btn = (label: string, bg: string, onClick: () => void) => this.makeBtn(label, bg, onClick);
+    const canCastAny = aa.castableSpellIds.length > 0;
 
     if (mode === 'exploring') {
       const atkEl = this.makeTwoLineBtn('ATTACK', state.mainAttackName, '#1a4a1e', aa.canAttack ? this.callbacks.onAttack : () => {});
@@ -262,6 +341,12 @@ export class PlayerPanel {
       const throwExEl = this.makeBtn('THROW', '#1a4a1e', state.throwableItems.length > 0 ? () => { this.pickerOpen = true; this.refreshActions(state); } : () => {});
       throwExEl.disabled = state.throwableItems.length === 0;
       this.actionArea.prepend(throwExEl);
+
+      if (state.castableSpells.length > 0 || state.spellSlots.length > 0) {
+        const castEl = this.makeBtn('CAST', '#1a4a1e', canCastAny ? () => { this.spellPickerOpen = true; this.refreshActions(state); } : () => {});
+        castEl.disabled = !canCastAny;
+        this.actionArea.prepend(castEl);
+      }
 
       if (aa.canShortRest)
         this.actionArea.prepend(btn('SHORT REST', '#1a2a3a', this.callbacks.onShortRest));
@@ -284,6 +369,12 @@ export class PlayerPanel {
       throwEl.disabled = actionUsed || state.throwableItems.length === 0;
       this.actionArea.prepend(throwEl);
 
+      if (state.castableSpells.length > 0 || state.spellSlots.length > 0) {
+        const castEl = this.makeBtn('CAST', '#1a4a1e', canCastAny ? () => { this.spellPickerOpen = true; this.refreshActions(state); } : () => {});
+        castEl.disabled = !canCastAny;
+        this.actionArea.prepend(castEl);
+      }
+
       const disEl = this.makeBtn('DISENGAGE', GREEN, this.callbacks.onDisengage);
       disEl.disabled = actionUsed;
       this.actionArea.prepend(disEl);
@@ -296,9 +387,16 @@ export class PlayerPanel {
       dashEl.disabled = actionUsed;
       this.actionArea.prepend(dashEl);
 
-      const swEl = this.makeBtn('SECOND WIND', '#1a3a5a', this.callbacks.onSecondWind);
-      swEl.disabled = bonusActionUsed || !aa.canSecondWind;
-      this.actionArea.prepend(swEl);
+      // Class-specific features — iterate the character's known features and
+      // render one button per feature that has a button UI. The server's
+      // `usableFeatureIds` decides which are clickable; the rest grey out.
+      const usable = new Set(aa.usableFeatureIds);
+      for (const feat of state.features) {
+        if (!feat.buttonLabel) continue;
+        const featEl = this.makeBtn(feat.buttonLabel, feat.buttonColor, () => this.callbacks.onUseFeature(feat.id));
+        featEl.disabled = !usable.has(feat.id);
+        this.actionArea.prepend(featEl);
+      }
 
       if (aa.canHide) this.actionArea.prepend(btn('HIDE', '#1a3a1a', this.callbacks.onHide));
 
@@ -322,6 +420,28 @@ export class PlayerPanel {
     }
     this.actionArea.prepend(this.makeBtn('↩ CANCEL', '#2a1a1a', () => {
       this.pickerOpen = false;
+      if (this.lastActionState) this.refreshActions(this.lastActionState);
+    }));
+  }
+
+  private renderSpellPicker(): void {
+    const state = this.lastActionState!;
+    const castableIds = new Set(state.availableActions.castableSpellIds);
+    // Sort: cantrips first, then by level. Render up to MAX_PICKER_SLOTS.
+    const spells = state.castableSpells
+      .filter((sp) => castableIds.has(sp.id))
+      .slice(0, MAX_PICKER_SLOTS);
+
+    for (const sp of [...spells].reverse()) {
+      const tag = sp.level === 0 ? 'cantrip' : `L${sp.level}`;
+      this.actionArea.prepend(this.makeTwoLineBtn(`${sp.name} · ${tag}`, sp.detail, '#1e1a4a', () => {
+        this.spellPickerOpen = false;
+        this.callbacks.onCast(sp.id);
+        if (this.lastActionState) this.refreshActions(this.lastActionState);
+      }));
+    }
+    this.actionArea.prepend(this.makeBtn('↩ CANCEL', '#2a1a1a', () => {
+      this.spellPickerOpen = false;
       if (this.lastActionState) this.refreshActions(this.lastActionState);
     }));
   }

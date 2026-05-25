@@ -1,0 +1,73 @@
+// Class-feature handler registry.
+//
+// Each entry maps a FeatureDef.handler string to a function that resolves the
+// mechanical effect of using that feature (consume resource, apply effect,
+// update state, log narrative). New class features are added by:
+//   1. Authoring `server/data/features/{id}.json` (data shape — see SpellDef
+//      sibling).
+//   2. Registering a handler here keyed on the JSON's `handler` field.
+//
+// Resource consumption is the handler's responsibility — the dispatcher
+// (`doUseFeature` below) only validates eligibility via `canUseFeature`.
+//
+// Reactive features (Shield, Uncanny Dodge) don't go through this dispatcher;
+// they fire from inside the relevant resolver (CombatFlow, etc.). The registry
+// still owns their resource bookkeeping when applicable.
+
+import type { GameContext } from './GameContext.js';
+import type { GameEvent } from './types.js';
+import { canUseFeature } from './ActionGuards.js';
+import { playerSecondWind } from './CombatSystem.js';
+
+export interface FeatureUseAction {
+  targetId?: string;
+  tile?: { x: number; y: number };
+}
+
+export type FeatureHandler = (
+  ctx: GameContext,
+  featureId: string,
+  action: FeatureUseAction,
+  events: GameEvent[],
+) => void;
+
+const handlers: Record<string, FeatureHandler> = {};
+
+export function registerFeatureHandler(id: string, fn: FeatureHandler): void {
+  handlers[id] = fn;
+}
+
+/**
+ * Dispatcher entry point — used by `GameEngine.useFeature`. Validates with
+ * the shared `canUseFeature` guard (so the UI and the server agree on what's
+ * legal), then runs the registered handler. Unknown / handler-less features
+ * silently no-op.
+ */
+export function doUseFeature(
+  ctx: GameContext,
+  featureId: string,
+  action: FeatureUseAction,
+  events: GameEvent[],
+): void {
+  if (!canUseFeature(ctx, featureId)) return;
+  const feat = ctx.defs.features.find((f) => f.id === featureId);
+  if (!feat?.handler) return;
+  const fn = handlers[feat.handler];
+  if (!fn) return;
+  fn(ctx, featureId, action, events);
+}
+
+// ── Handlers ────────────────────────────────────────────────────────────────
+
+registerFeatureHandler('second-wind', (ctx, featureId) => {
+  const s = ctx.state;
+  const { healed, logs } = playerSecondWind(ctx.playerDef.level);
+  const before = s.player.hp;
+  s.player.hp = Math.min(ctx.playerDef.maxHp, s.player.hp + healed);
+  s.player.resources[featureId] = Math.max(0, (s.player.resources[featureId] ?? 0) - 1);
+  ctx.addLogs([
+    ...logs,
+    { left: `HP: ${before} → ${s.player.hp}/${ctx.playerDef.maxHp} (${s.player.resources[featureId]} uses left)`, style: 'status' },
+  ]);
+  s.player.bonusActionUsed = true;
+});
