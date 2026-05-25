@@ -3,6 +3,9 @@ import { tryNimbleEscape, enemyAttack } from './CombatSystem.js';
 import { isIncapacitated, hasAttackDisadvantage, hasAttackAdvantage, hasSpeedZero, proneStandCost } from './ConditionSystem.js';
 
 export interface EnemyTurnConfig {
+  /** Pre-disambiguated display name (e.g. "Bridge Bandit (A)" when there are
+   *  multiple Bridge Bandits in the encounter). Caller's responsibility. */
+  displayName: string;
   playerTileX: number;
   playerTileY: number;
   playerAc: number;
@@ -30,6 +33,8 @@ export interface EnemyTurnResult {
 }
 
 export interface AllyTurnConfig {
+  /** Pre-disambiguated display name; same convention as EnemyTurnConfig. */
+  displayName: string;
   enemyTargets: Array<{ id: string; tileX: number; tileY: number; ac: number }>;
   passable: boolean[][];
   mapCols: number;
@@ -58,13 +63,13 @@ export function runEnemyTurn(
   def: MonsterDef,
   config: EnemyTurnConfig,
 ): EnemyTurnResult {
-  const logs: LogEntry[] = [{ left: `${enemy.name}'s turn`, style: 'header' }];
+  const logs: LogEntry[] = [{ left: `${config.displayName}'s turn`, style: 'header' }];
   const events: GameEvent[] = [];
   let { tileX, tileY } = enemy;
   let enemyHidden = enemy.conditions.includes('hidden');
 
   if (isIncapacitated(enemy.conditions)) {
-    logs.push({ left: `${enemy.name} is incapacitated`, style: 'status' });
+    logs.push({ left: `${config.displayName} is incapacitated`, style: 'status' });
     return { damage: 0, isHit: false, isCrit: false, attacked: false, logs, events, finalTileX: tileX, finalTileY: tileY, hidden: enemyHidden };
   }
 
@@ -97,13 +102,13 @@ export function runEnemyTurn(
 
   const dist = chebyshev(tileX, tileY, config.playerTileX, config.playerTileY);
   if (dist > 1) {
-    logs.push({ left: `${enemy.name} is out of reach`, style: 'normal' });
+    logs.push({ left: `${config.displayName} is out of reach`, style: 'normal' });
     return { damage: 0, isHit: false, isCrit: false, attacked: false, logs, events, finalTileX: tileX, finalTileY: tileY, hidden: enemyHidden };
   }
 
   const meleeAttack = def.attacks.find((a) => a.attackType === 'melee' || a.attackType === 'both');
   if (!meleeAttack) {
-    logs.push({ left: `${enemy.name} has no attack`, style: 'normal' });
+    logs.push({ left: `${config.displayName} has no attack`, style: 'normal' });
     return { damage: 0, isHit: false, isCrit: false, attacked: false, logs, events, finalTileX: tileX, finalTileY: tileY, hidden: enemyHidden };
   }
 
@@ -121,12 +126,12 @@ export function runAllyTurn(
   def: MonsterDef,
   config: AllyTurnConfig,
 ): AllyTurnResult {
-  const logs: LogEntry[] = [{ left: `${ally.name}'s turn (ally)`, style: 'header' }];
+  const logs: LogEntry[] = [{ left: `${config.displayName}'s turn (ally)`, style: 'header' }];
   const events: GameEvent[] = [];
   let { tileX, tileY } = ally;
 
   if (config.enemyTargets.length === 0) {
-    logs.push({ left: `${ally.name} stands ready`, style: 'normal' });
+    logs.push({ left: `${config.displayName} stands ready`, style: 'normal' });
     return { attackedTargetId: null, damage: 0, isHit: false, isCrit: false, attacked: false, logs, events, finalTileX: tileX, finalTileY: tileY };
   }
 
@@ -156,13 +161,13 @@ export function runAllyTurn(
 
   const dist = chebyshev(tileX, tileY, nearest.tileX, nearest.tileY);
   if (dist > 1) {
-    logs.push({ left: `${ally.name} moves but cannot reach the enemy`, style: 'normal' });
+    logs.push({ left: `${config.displayName} moves but cannot reach the enemy`, style: 'normal' });
     return { attackedTargetId: null, damage: 0, isHit: false, isCrit: false, attacked: false, logs, events, finalTileX: tileX, finalTileY: tileY };
   }
 
   const meleeAttack = def.attacks.find((a) => a.attackType === 'melee' || a.attackType === 'both');
   if (!meleeAttack) {
-    logs.push({ left: `${ally.name} has no melee attack`, style: 'normal' });
+    logs.push({ left: `${config.displayName} has no melee attack`, style: 'normal' });
     return { attackedTargetId: null, damage: 0, isHit: false, isCrit: false, attacked: false, logs, events, finalTileX: tileX, finalTileY: tileY };
   }
 

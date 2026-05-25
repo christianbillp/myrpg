@@ -471,17 +471,18 @@ export class GameEngine {
     dying.inventoryIds = [];
     dying.isActive = false;
     dying.conditions = dying.conditions.filter((c) => c !== 'hidden');
-    s.turnOrderIds = s.turnOrderIds.filter((tid) => tid !== id);
+    // NOTE: do NOT remove from turnOrderIds. The advance loop in CombatFlow
+    // skips any combatant whose hp <= 0; mutating the array mid-iteration
+    // would shift indices and could cause a still-alive combatant to skip
+    // their turn.
     this.advanceQuest('kill');
     this.autoEndCombatIfNoEnemies();
   }
 
-  private killWithReward(npc: NpcState, def: MonsterDef, killMessage: string, includeTotal = true): void {
+  private killWithReward(npc: NpcState, def: MonsterDef, killMessage: string, _includeTotal = true): void {
     const s = this.state;
     s.player.xp += def.xp;
-    const logs: LogEntry[] = [{ left: `${killMessage} +${def.xp} XP`, style: 'kill' }];
-    if (includeTotal) logs.push({ left: `Total XP: ${s.player.xp}`, style: 'status' });
-    this.addLogs(logs);
+    this.addLog({ left: `${killMessage} +${def.xp} XP`, style: 'kill' });
     this.killNpc(npc.id);
   }
 

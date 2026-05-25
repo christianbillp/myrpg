@@ -7,26 +7,38 @@ function rollDice(count: number, sides: number): { total: number; rolls: number[
   return { total: rolls.reduce((a, b) => a + b, 0), rolls };
 }
 
-export function rollInitiative(
-  player: PlayerDef,
-  enemy: MonsterDef,
-  enemyDisplayName: string,
-): { playerFirst: boolean; logs: LogEntry[] } {
-  const pRoll = d20(), eRoll = d20();
-  const pMod = mod(player.dex), eMod = enemy.initiativeBonus;
-  const pTotal = pRoll + pMod, eTotal = eRoll + eMod;
-  const playerFirst = pTotal >= eTotal;
-  return {
-    playerFirst,
-    logs: [
-      { left: '⚔ Combat begins', style: 'header' },
-      {
-        left: playerFirst ? `${player.name} acts first` : `${enemyDisplayName} acts first`,
-        right: `${player.name} d20(${pRoll})+${pMod}=${pTotal} · ${enemyDisplayName} d20(${eRoll})+${eMod}=${eTotal}`,
-        style: 'normal',
-      },
-    ],
-  };
+/**
+ * Roll one combatant's Initiative.
+ * SRD ([Playing_The_Game §Initiative], [Rules Glossary §Surprise]):
+ *   - Surprised → Disadvantage on the roll.
+ *   - Invisible → Advantage on the roll.
+ *   - Incapacitated → Disadvantage (Surprised condition implication).
+ * Both can apply; they cancel per the standard Advantage/Disadvantage rule.
+ */
+export function rollOneInitiative(
+  modifier: number,
+  surprised: boolean,
+  invisible: boolean,
+): { roll: number; total: number; rollStr: string } {
+  const wantAdv = invisible;
+  const wantDis = surprised;
+  const effAdv = wantAdv && !wantDis;
+  const effDis = wantDis && !wantAdv;
+  let roll: number, rollStr: string;
+  if (effAdv) {
+    const r = rollAdvantage();
+    roll = r.result;
+    rollStr = `adv(${r.rolls[0]},${r.rolls[1]}→${roll})`;
+  } else if (effDis) {
+    const r = rollDisadvantage();
+    roll = r.result;
+    rollStr = `dis(${r.rolls[0]},${r.rolls[1]}→${roll})`;
+  } else {
+    roll = d20();
+    rollStr = `d20(${roll})`;
+  }
+  const sign = modifier >= 0 ? '+' : '';
+  return { roll, total: roll + modifier, rollStr: `${rollStr}${sign}${modifier}` };
 }
 
 function resolvePlayerAttack(
@@ -81,7 +93,7 @@ function resolvePlayerAttack(
     damage = diceTot + statMod + sneakTot;
     const sneakPart = sneakTot > 0 ? ` + sneak[${sneakRolls.join(',')}]=${sneakTot}` : '';
     const dicePart = `2×${attack.damageDice}d${attack.damageSides}[${diceRolls.join(',')}]+${statMod}${sneakPart}`;
-    logs.push({ left: `⚡ Critical hit — ${damage} ${attack.damageType}`, right: `${atkPart} · ${dicePart}`, style: 'crit' });
+    logs.push({ left: `⚡ Critical hit with ${attack.name} — ${damage} ${attack.damageType}`, right: `${atkPart} · ${dicePart}`, style: 'crit' });
     vexApplied = attack.vex || attack.sap;
     slowApplied = attack.slow;
 
@@ -106,7 +118,7 @@ function resolvePlayerAttack(
     const sneakRightPart = sneakTot > 0 ? ` + sneak[${sneakRolls.join(',')}]=${sneakTot}` : '';
     const savPart = attack.savageAttacker ? ' Savage' : '';
     const dicePart = `${attack.damageDice}d${attack.damageSides}[${diceRolls.join(',')}]+${statMod}${savPart}${sneakRightPart}`;
-    logs.push({ left: `Hit — ${damage} ${attack.damageType}${sneakSuffix}`, right: `${atkPart} · ${dicePart}`, style: 'hit' });
+    logs.push({ left: `Hit with ${attack.name} — ${damage} ${attack.damageType}${sneakSuffix}`, right: `${atkPart} · ${dicePart}`, style: 'hit' });
     vexApplied = attack.vex || attack.sap;
     slowApplied = attack.slow;
 
@@ -114,10 +126,10 @@ function resolvePlayerAttack(
     if (attack.graze) {
       damage = Math.max(0, statMod);
       logs.push(damage > 0
-        ? { left: `Graze — ${damage} ${attack.damageType}`, right: atkPart, style: 'miss' }
-        : { left: 'Miss', right: atkPart, style: 'miss' });
+        ? { left: `Graze with ${attack.name} — ${damage} ${attack.damageType}`, right: atkPart, style: 'miss' }
+        : { left: `Miss with ${attack.name}`, right: atkPart, style: 'miss' });
     } else {
-      logs.push({ left: 'Miss', right: atkPart, style: 'miss' });
+      logs.push({ left: `Miss with ${attack.name}`, right: atkPart, style: 'miss' });
     }
   }
 
@@ -196,10 +208,10 @@ export function enemyAttack(
     const diceLabel = isCrit ? `2×${attack.damageDice}d${attack.damageSides}` : `${attack.damageDice}d${attack.damageSides}`;
     const dicePart = `${diceLabel}[${diceRolls.join(',')}]+${attack.damageBonus}`;
     logs.push(isCrit
-      ? { left: `⚡ Critical hit — ${damage} ${attack.damageType}`, right: `${atkPart} · ${dicePart}`, style: 'crit' }
-      : { left: `Hit — ${damage} ${attack.damageType}`, right: `${atkPart} · ${dicePart}`, style: 'hit' });
+      ? { left: `⚡ Critical hit with ${attack.name} — ${damage} ${attack.damageType}`, right: `${atkPart} · ${dicePart}`, style: 'crit' }
+      : { left: `Hit with ${attack.name} — ${damage} ${attack.damageType}`, right: `${atkPart} · ${dicePart}`, style: 'hit' });
   } else {
-    logs.push({ left: 'Miss', right: atkPart, style: 'miss' });
+    logs.push({ left: `Miss with ${attack.name}`, right: atkPart, style: 'miss' });
   }
 
   return { damage, isHit, isCrit, logs };

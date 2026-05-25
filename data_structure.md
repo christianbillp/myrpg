@@ -198,7 +198,14 @@ Equipped in the `weapon` slot. `applyEquipment` derives the character's `mainAtt
 | `thrown` | boolean | Whether this weapon can be thrown using its own stats. Improvised throws (non-thrown items) deal 1d4 bludgeoning at 20/60 ft. |
 | `throwNormal` | number | Normal thrown range in feet. `0` when `thrown` is `false`. |
 | `throwLong` | number | Maximum thrown range in feet. `0` when `thrown` is `false`. |
+| `rangeNormal` | number? | *(ranged weapons)* Normal ranged attack range in feet. Absence/0 = melee weapon. Beyond this range imposes Disadvantage. |
+| `rangeLong` | number? | *(ranged weapons)* Maximum ranged attack range in feet. Beyond this distance the player cannot fire. |
+| `ammunitionType` | string? | *(ranged weapons)* Canonical key for the ammo item id consumed per shot, e.g. `"arrow"`, `"bolt"`, `"bullet"`, `"needle"`. Each attack consumes one matching item from inventory. |
+| `loading` | boolean? | *(ranged weapons)* SRD Loading property. When `true`, only one shot per Action/Bonus Action/Reaction regardless of Extra Attack count. (Field is wired but not enforced until Extra Attack ships — no current Level 1 character has it.) |
+| `heavy` | boolean? | *(ranged weapons)* SRD Heavy property. When `true`, DEX < 13 imposes Disadvantage on ranged attack rolls. |
 | `cost` | number | Gold piece value. |
+
+A weapon is **ranged** iff `rangeNormal > 0`. Ranged player attacks are dispatched through the same ATTACK button as melee — the engine routes via `mainAttack.rangeNormal` and consumes ammunition from inventory. After every shot, there is a **50% chance per shot** that the arrow/bolt lands on the target's tile as a `mapItem` and can be picked up by walking onto it.
 
 ---
 
@@ -257,6 +264,20 @@ Used from inventory. Currently only Health Potions are implemented.
 | `healDice` | number | Number of healing dice. |
 | `healSides` | number | Die size for healing roll. |
 | `healBonus` | number | Flat bonus added to healing. |
+
+---
+
+### type: `"ammunition"`
+
+Stackable inventory item consumed automatically per ranged shot. Distinct from `consumable` so the Inventory Overlay can render it in its own section (no USE button — fired implicitly by the ATTACK action when a ranged weapon is equipped). Arrows recovered from the battlefield (the 50% per-shot recovery rule) are placed on the map as `mapItems` referencing this item by `id`.
+
+| Field | Type | Notes |
+|---|---|---|
+| `id` | string | Unique key, e.g. `"arrow"`. |
+| `name` | string | Display name. |
+| `type` | string | `"ammunition"` |
+| `ammunitionType` | string | Canonical key matched against `WeaponDef.ammunitionType`. A bow with `ammunitionType: "arrow"` consumes inventory items whose id is `"arrow"`. |
+| `cost` | number? | Gold piece value. |
 
 ---
 
@@ -449,6 +470,11 @@ Key runtime fields of note:
 | `npcs[].combatPassive` | *(optional)* When `true`, the ally skips their combat turn (set via the `set_npc_passive` AIDM tool). Used when the player instructs an ally to stand down. Reversed by calling the tool with `passive: false`. |
 | `npcs[].inventoryIds` | Items held by each NPC (string `id` values from `equipment/`). Populated when a thrown item hits the creature; each item is moved to `mapItems` at the creature's tile when it dies, making it recoverable. |
 | `npcs[].hp` | When `hp` reaches 0 the NPC is treated as a corpse: it remains in the `npcs` array, stays on the map at 40% opacity, and is excluded from combat turns, movement AI, ability check triggers, and all AIDM state sections except CORPSES. `inventoryIds` is cleared and `isActive` is set to `false` on death. |
+| `npcs[].initiativeRoll` | *(optional)* The combatant's d20 + initiativeBonus total for the current combat. Set at `doStartCombat` (with Disadvantage if Surprised, Advantage if Invisible). Cleared on `endCombat`. Used as the sort key for `turnOrderIds`. |
+| `player.initiativeRoll` | Same idea for the player: d20 + DEX mod, set at combat start, cleared at combat end. |
+| `player.freeObjectInteractionUsed` | SRD "one free object interaction per turn" tracker. Set when the player equips/unequips a weapon or shield during `player_turn`. Reset by `enterPlayerTurn`. Once set, a second swap that turn requires the Utilize action and consumes `actionUsed`. |
+| `turnOrderIds` | Initiative-sorted list of combatant ids: `'player'` plus each NPC `id`. Sort key is `initiativeRoll` (descending), tiebreak by DEX mod / `initiativeBonus`. Iterated by `advanceTurn`; dead combatants are skipped at iteration time (entries are NOT removed when a combatant dies — removing them mid-iteration would shift indices). |
+| `activeNpcIndex` | Index into `turnOrderIds` pointing at the combatant currently taking their turn. The HUD turn-order bar reads `turnOrderIds` and highlights the chip whose corresponding combatant has `isActive === true` (NPCs) or whose entry is `'player'` and `phase === 'player_turn'` / `'death_saves'`. |
 | `aidmHistory` | The **sliding-window** AIDM conversation persisted into `world.json` (serialised from server session memory). Bounded to ~20 verbatim messages plus an optional leading `[SUMMARY OF EARLIER TURNS]` assistant message that collapses anything older. `[CURRENT STATE]` prefixes are stripped from historical user messages before each API call so the model always reasons from the current injected state, not stale snapshots. The `GET /world` response surfaces this under the `dmHistory` field for client-side display. |
 
 ### Session-only AIDM state (in-memory)

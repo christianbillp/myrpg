@@ -234,6 +234,8 @@ async function loadWorldState(): Promise<{
     },
     secondWindUses: charSave.secondWindUses,
     reactionUsed: false,
+    freeObjectInteractionUsed: false,
+    initiativeRoll: 0,
     hitDiceUsed: 0,
     tempHp: 0,
     heroicInspiration: false,

@@ -1,0 +1,7 @@
+{
+  "id": "arrow",
+  "name": "Arrow",
+  "type": "ammunition",
+  "ammunitionType": "arrow",
+  "cost": 0
+}

@@ -89,12 +89,25 @@ function escHtml(s: string): string {
 function isDmRoll(content: string): boolean { return content.startsWith(ROLL_PREFIX); }
 function isDmRollSuccess(content: string): boolean { return /SUCCESS/.test(content); }
 
+export interface TurnOrderChip {
+  /** Display label inside the chip — combat label letter for NPCs, '' for player. */
+  label: string;
+  /** Display name — player name or NPC's revealed/known name. */
+  name: string;
+  /** Token colour. */
+  color: number;
+  /** Currently taking their turn. */
+  isActive: boolean;
+  /** Dead — dimmed in the bar. */
+  isDead: boolean;
+}
+
 export interface HUDState {
   mode: CombatMode;
   playerDef: PlayerDef;
   playerHp: number;
-  activeNpc: NpcToken | null;
-  combatNpcs: NpcToken[];
+  /** Initiative-ordered chips for the turn-order bar; empty when not in combat. */
+  turnOrderChips: TurnOrderChip[];
   combatLog: LogEntry[];
   selectedNpcName: string | null;
 }
@@ -613,19 +626,11 @@ export class HUD {
   }
 
   private refreshTurnOrder(state: HUDState): void {
-    const inCombat = state.mode !== 'exploring' && state.combatNpcs.length > 0;
+    const inCombat = state.mode !== 'exploring' && state.turnOrderChips.length > 0;
     this.turnOrderEl.style.display = inCombat ? 'flex' : 'none';
     if (!inCombat) return;
 
-    const chips = [
-      { label: '',   name: state.playerDef.name,  color: state.playerDef.color,
-        isActive: state.mode === 'player_turn' || state.mode === 'death_saves',
-        isDead: state.playerHp <= 0 },
-      ...state.combatNpcs.map(n => ({
-        label: n.combatLabel, name: n.def.name, color: n.def.color,
-        isActive: state.activeNpc === n, isDead: n.isDead(),
-      })),
-    ];
+    const chips = state.turnOrderChips;
 
     const totalW = chips.length * CHIP_W + (chips.length - 1) * CHIP_GAP;
     this.turnOrderWidth = totalW;

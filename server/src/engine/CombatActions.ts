@@ -12,11 +12,14 @@ import { makePlayerAttack } from './EquipmentSystem.js';
 import {
   canSpendAction, canDash as guardCanDash, canDodge as guardCanDodge,
   canDisengage as guardCanDisengage, canHide as guardCanHide, canSecondWind as guardCanSecondWind,
-  canAttackTarget,
+  canAttackTarget, playerAttackReachTiles, hasCunningAction,
 } from './ActionGuards.js';
 
 export function doAttack(ctx: GameContext, targetId: string | undefined, events: GameEvent[]): void {
   const s = ctx.state;
+  const atk = ctx.playerDef.mainAttack;
+  const isRangedWeapon = !!atk.rangeNormal && atk.rangeNormal > 0;
+  const reachTiles = playerAttackReachTiles(ctx);
 
   if (s.phase === 'exploring') {
     if (!canAttackTarget(ctx, targetId)) return;
@@ -31,11 +34,13 @@ export function doAttack(ctx: GameContext, targetId: string | undefined, events:
 
   if (!canSpendAction(ctx)) return;
 
-  const isAdjacent = (n: NpcState) =>
-    n.disposition === 'enemy' && n.hp > 0 && chebyshev(s.player.tileX, s.player.tileY, n.tileX, n.tileY) <= 1;
+  // Pick the target: prefer the explicit targetId; otherwise nearest hostile in reach.
+  const inReach = (n: NpcState): boolean =>
+    n.disposition === 'enemy' && n.hp > 0
+    && chebyshev(s.player.tileX, s.player.tileY, n.tileX, n.tileY) <= reachTiles;
 
-  let target = targetId ? (s.npcs.find((n) => n.id === targetId && isAdjacent(n)) ?? null) : null;
-  if (!target) target = s.npcs.find(isAdjacent) ?? null;
+  let target = targetId ? (s.npcs.find((n) => n.id === targetId && inReach(n)) ?? null) : null;
+  if (!target) target = s.npcs.find(inReach) ?? null;
   if (!target) return;
 
   const targetDef = ctx.resolveMonsterDef(target.defId);
@@ -43,18 +48,64 @@ export function doAttack(ctx: GameContext, targetId: string | undefined, events:
 
   const dist = chebyshev(s.player.tileX, s.player.tileY, target.tileX, target.tileY);
   const playerHidden = s.player.conditions.includes('hidden');
+
+  // Ranged-specific Disadvantage sources, layered onto the existing ones.
+  let rangedDisadvantage = false;
+  if (isRangedWeapon) {
+    // Ammo gate.
+    const ammoIdx = atk.ammunitionType ? s.player.inventoryIds.indexOf(atk.ammunitionType) : -1;
+    if (atk.ammunitionType && ammoIdx === -1) {
+      ctx.addLog({ left: `${ctx.playerDef.name} has no ${atk.ammunitionType}s — cannot fire`, style: 'miss' });
+      return;
+    }
+    // Beyond normal range = Disadvantage (already gated against long range by canAttackTarget).
+    const normalTiles = Math.floor((atk.rangeNormal ?? 0) / 5);
+    if (dist > normalTiles) rangedDisadvantage = true;
+    // Heavy ranged weapon with DEX < 13 = Disadvantage (SRD).
+    if (atk.heavy && ctx.playerDef.dex < 13) rangedDisadvantage = true;
+    // Adjacent enemy (other than the target) imposes Disadvantage on ranged attacks.
+    const adjacentEnemy = s.npcs.some((n) =>
+      n.disposition === 'enemy' && n.hp > 0 && n !== target
+      && chebyshev(s.player.tileX, s.player.tileY, n.tileX, n.tileY) <= 1
+      && !n.conditions.includes('incapacitated'),
+    );
+    if (adjacentEnemy) rangedDisadvantage = true;
+    // Consume one ammunition; remember the tile we'd potentially recover from.
+    if (ammoIdx !== -1) s.player.inventoryIds.splice(ammoIdx, 1);
+  }
+
   const withAdvantage = playerHidden || hasAttackAdvantage(s.player.conditions) || grantsAdvantageAgainst(target.conditions, dist);
-  const withDisadvantage = hasAttackDisadvantage(s.player.conditions) || grantsDisadvantageAgainst(target.conditions, dist);
+  const withDisadvantage = hasAttackDisadvantage(s.player.conditions) || grantsDisadvantageAgainst(target.conditions, dist) || rangedDisadvantage;
   const autoCrit = isAutoCrit(target.conditions, dist);
-  const { damage, logs, vexApplied, slowApplied } = playerMeleeAttack(ctx.playerDef, targetDef, withAdvantage, withDisadvantage, autoCrit, playerHidden);
+  const { damage, isHit, logs, vexApplied, slowApplied } = playerThrowAttack(
+    ctx.playerDef, atk, targetDef, withAdvantage, withDisadvantage, ctx.playerDef.proficiencyBonus, autoCrit, playerHidden,
+  );
   s.player.conditions = s.player.conditions.filter((c) => c !== 'hidden');
+  // Use playerThrowAttack as a generic "attack with this PlayerAttack" — it's
+  // the only resolver that returns isHit. For melee, it's equivalent to
+  // playerMeleeAttack which simply delegates to the same shared resolver.
   ctx.addLogs(logs);
 
-  const { finalDamage, log: resistLog } = ctx.resistMod(damage, ctx.playerDef.mainAttack.damageType, targetDef, target.name);
+  const { finalDamage, log: resistLog } = ctx.resistMod(damage, atk.damageType, targetDef, target.name);
   if (resistLog) ctx.addLog(resistLog);
   target.hp = Math.max(0, target.hp - finalDamage);
-  ctx.addLog({ left: `${target.name} HP: ${target.hp}/${target.maxHp}`, style: 'status' });
+  if (target.hp > 0) ctx.addLog({ left: `${target.name} HP: ${target.hp}/${target.maxHp}`, style: 'status' });
   ctx.applyMasteryConditions(target, vexApplied, slowApplied);
+
+  // SRD ammunition recovery: per-shot 50% chance the ammo lands recoverable on
+  // the target's tile (or where the target was before it died). Hits embed the
+  // arrow in the target; misses skip into the dirt nearby — same odds for our
+  // model. Only applies to ranged attacks that consumed ammo.
+  if (isRangedWeapon && atk.ammunitionType && Math.random() < 0.5) {
+    s.mapItems.push({
+      id: ctx.uid(),
+      defId: atk.ammunitionType,
+      tileX: target.tileX,
+      tileY: target.tileY,
+    });
+  }
+  void isHit;
+
   if (target.hp <= 0) ctx.killWithReward(target, targetDef, `☠ ${target.name} is slain!`);
 
   s.player.actionUsed = true;
@@ -158,7 +209,7 @@ function executeThrowOnTarget(
   const { finalDamage, log: resistLog } = ctx.resistMod(damage, attack.damageType, targetDef, target.name);
   if (resistLog) ctx.addLog(resistLog);
   target.hp = Math.max(0, target.hp - finalDamage);
-  ctx.addLog({ left: `${target.name} HP: ${target.hp}/${target.maxHp}`, style: 'status' });
+  if (target.hp > 0) ctx.addLog({ left: `${target.name} HP: ${target.hp}/${target.maxHp}`, style: 'status' });
   ctx.applyMasteryConditions(target, vexApplied, slowApplied);
   if (target.hp <= 0) ctx.killWithReward(target, targetDef, `☠ ${target.name} is slain!`);
 }
@@ -166,8 +217,18 @@ function executeThrowOnTarget(
 export function doHide(ctx: GameContext): void {
   const s = ctx.state;
   if (!guardCanHide(ctx)) return;
-  const living = s.npcs.filter((n) => n.disposition === 'enemy' && n.hp > 0);
-  const maxPP = Math.max(...living.map((n) => ctx.resolveMonsterDef(n.defId)?.passivePerception ?? 10));
+  // Stealth check is opposed by the highest Passive Perception that could spot
+  // the player: any non-ally, non-dead, non-incapacitated NPC. Neutral NPCs
+  // count (you can hide from a bandit who hasn't decided to fight yet).
+  // Empty-list fallback uses the SRD default Passive Perception of 10.
+  const observers = s.npcs.filter((n) =>
+    n.disposition !== 'ally'
+    && n.hp > 0
+    && !n.conditions.includes('incapacitated')
+    && !n.conditions.includes('unconscious'),
+  );
+  const passivePerceptions = observers.map((n) => ctx.resolveMonsterDef(n.defId)?.passivePerception ?? 10);
+  const maxPP = passivePerceptions.length > 0 ? Math.max(...passivePerceptions) : 10;
   const { hidden, logs } = playerHide(ctx.playerDef, maxPP);
   if (hidden) {
     if (!s.player.conditions.includes('hidden')) s.player.conditions.push('hidden');
@@ -175,7 +236,12 @@ export function doHide(ctx: GameContext): void {
     s.player.conditions = s.player.conditions.filter((c) => c !== 'hidden');
   }
   ctx.addLogs(logs);
-  s.player.bonusActionUsed = true;
+  // Action economy only applies in combat. During exploring, hiding is free —
+  // it's the Sneak Attack opener that triggers combat with Advantage.
+  if (s.phase === 'player_turn') {
+    if (hasCunningAction(ctx)) s.player.bonusActionUsed = true;
+    else s.player.actionUsed = true;
+  }
 }
 
 export function doDash(ctx: GameContext): void {
@@ -242,7 +308,7 @@ export function doPlayerOpportunityAttack(ctx: GameContext, npc: NpcState): void
   const { finalDamage, log: oaResistLog } = ctx.resistMod(damage, ctx.playerDef.mainAttack.damageType, targetDef, npc.name);
   if (oaResistLog) ctx.addLog(oaResistLog);
   npc.hp = Math.max(0, npc.hp - finalDamage);
-  ctx.addLog({ left: `${npc.name} HP: ${npc.hp}/${npc.maxHp}`, style: 'status' });
+  if (npc.hp > 0) ctx.addLog({ left: `${npc.name} HP: ${npc.hp}/${npc.maxHp}`, style: 'status' });
   ctx.applyMasteryConditions(npc, vexApplied, slowApplied);
   if (npc.hp <= 0) ctx.killWithReward(npc, targetDef, `☠ ${npc.name} slain by Opportunity Attack!`, false);
 }

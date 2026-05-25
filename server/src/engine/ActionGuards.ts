@@ -27,13 +27,27 @@ export function hasLivingEnemies(ctx: GameContext): boolean {
   return ctx.state.npcs.some((n) => n.disposition === 'enemy' && n.hp > 0);
 }
 
-/** Can the player Hide via Cunning Action (Rogue)? */
+/**
+ * True when the player has Cunning Action (Rogue level 2+): Hide is a Bonus Action.
+ * Before level 2, a Rogue still has Hide available but it costs the full Action.
+ */
+export function hasCunningAction(ctx: GameContext): boolean {
+  return ctx.playerDef.sneakAttackDice > 0 && ctx.playerDef.level >= 2;
+}
+
+/** Can the player Hide right now? Cost depends on phase + Cunning Action. */
 export function canHide(ctx: GameContext): boolean {
-  const p = ctx.state.player;
-  return canSpendBonusAction(ctx)
-    && ctx.playerDef.sneakAttackDice > 0
-    && !p.conditions.includes('hidden')
-    && hasLivingEnemies(ctx);
+  const s = ctx.state;
+  if (ctx.playerDef.sneakAttackDice <= 0) return false;             // UI currently Rogue-only
+  if (s.player.conditions.includes('hidden')) return false;
+  // Exploring: no action economy and no enemy gate — the player can hide
+  // proactively, e.g. to set up a Sneak Attack opener against currently-
+  // neutral NPCs (bandits, etc.) before turning them hostile.
+  if (s.phase === 'exploring') return true;
+  if (s.phase !== 'player_turn') return false;
+  // In combat: must have something to hide from, and pay the right resource.
+  if (!hasLivingEnemies(ctx)) return false;
+  return hasCunningAction(ctx) ? canSpendBonusAction(ctx) : canSpendAction(ctx);
 }
 
 /** Can the player spend Second Wind right now? */
@@ -67,9 +81,23 @@ export function canShortRest(ctx: GameContext): boolean {
 }
 
 /**
+ * Maximum tile distance at which the player's equipped weapon can attack:
+ *   - melee weapon → 1 tile (5 ft reach)
+ *   - ranged weapon → floor(rangeLong / 5) tiles
+ *   - thrown attacks are NOT considered here (they use the THROW button / tool)
+ */
+export function playerAttackReachTiles(ctx: GameContext): number {
+  const atk = ctx.playerDef.mainAttack;
+  if (atk.rangeLong && atk.rangeLong > 0) return Math.floor(atk.rangeLong / 5);
+  return 1;
+}
+
+/**
  * Can the player attack the given target (or, if none, the currently selected target)?
  * In `exploring` phase, this triggers combat — no action-economy check applies.
- * In `player_turn`, the player must have an Action available and be adjacent.
+ * In `player_turn`, the player must have an Action available and the target must
+ * be within the equipped weapon's reach. Ranged weapons must also have ammunition
+ * remaining in inventory.
  */
 export function canAttackTarget(ctx: GameContext, targetId?: string): boolean {
   const s = ctx.state;
@@ -77,8 +105,16 @@ export function canAttackTarget(ctx: GameContext, targetId?: string): boolean {
   if (!id) return false;
   const target = s.npcs.find((n) => n.id === id && n.hp > 0 && n.disposition !== 'ally');
   if (!target) return false;
-  const adjacent = chebyshev(s.player.tileX, s.player.tileY, target.tileX, target.tileY) <= 1;
-  if (!adjacent) return false;
+  const dist = chebyshev(s.player.tileX, s.player.tileY, target.tileX, target.tileY);
+  const reach = playerAttackReachTiles(ctx);
+  if (dist > reach) return false;
+
+  const atk = ctx.playerDef.mainAttack;
+  if (atk.ammunitionType) {
+    const hasAmmo = s.player.inventoryIds.some((id) => id === atk.ammunitionType);
+    if (!hasAmmo) return false;
+  }
+
   if (s.phase === 'exploring') return true;
   return canSpendAction(ctx);
 }

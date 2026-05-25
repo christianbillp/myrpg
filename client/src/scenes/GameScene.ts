@@ -422,22 +422,41 @@ export class GameScene extends Phaser.Scene {
   }
 
   private buildHUDState(state: GameState): HUDState {
-    const activeNpcState = state.npcs.find(n => n.isActive);
-    const activeNpc = activeNpcState ? (this.npcTokens.get(activeNpcState.id) ?? null) : null;
-    const combatNpcs = state.npcs
-      .filter(n => n.disposition !== "neutral" && n.hp > 0)
-      .map(n => this.npcTokens.get(n.id))
-      .filter((n): n is NpcToken => n !== undefined);
     const selectedNpcName = state.selectedTargetId
       ? (() => { const n = state.npcs.find(n => n.id === state.selectedTargetId); return n ? (n.revealedName ?? n.name) : null; })()
       : null;
+
+    // Build initiative-ordered turn-order chips directly from turnOrderIds.
+    // Falls back to a simple player-first list when combat hasn't begun.
+    const turnOrderChips = state.turnOrderIds.length > 0
+      ? state.turnOrderIds.flatMap((id) => {
+          if (id === 'player') {
+            return [{
+              label: '',
+              name: this.playerDef.name,
+              color: this.playerDef.color,
+              isActive: state.phase === 'player_turn' || state.phase === 'death_saves',
+              isDead: state.player.hp <= 0,
+            }];
+          }
+          const npc = state.npcs.find(n => n.id === id);
+          if (!npc) return [];
+          const def = this.resolveMonsterDef(npc.defId);
+          return [{
+            label: npc.combatLabel,
+            name: npc.revealedName ?? def.name,
+            color: def.color,
+            isActive: !!npc.isActive,
+            isDead: npc.hp <= 0,
+          }];
+        })
+      : [];
 
     return {
       mode:      state.phase,
       playerDef: this.playerDef,
       playerHp:  state.player.hp,
-      activeNpc,
-      combatNpcs,
+      turnOrderChips,
       combatLog: state.combatLog,
       selectedNpcName,
     };
@@ -445,6 +464,9 @@ export class GameScene extends Phaser.Scene {
 
   private buildActionState(state: GameState): PlayerPanelActionState {
     const allItems = this.registry.get('equipment') as ItemDef[];
+    const weaponId = state.player.equippedSlots.weaponId;
+    const weapon = weaponId ? allItems.find(i => i.id === weaponId) : undefined;
+    const mainAttackName = weapon?.name ?? 'Unarmed Strike';
     return {
       mode:            state.phase,
       actionUsed:      state.player.actionUsed,
@@ -456,6 +478,7 @@ export class GameScene extends Phaser.Scene {
         .filter((i): i is ItemDef => i !== undefined)
         .map(i => ({ id: i.id, name: i.name })),
       availableActions: state.availableActions,
+      mainAttackName,
     };
   }
 

@@ -56,6 +56,7 @@ export class TargetPanel {
       height: ${this.panelHeight}px;
       background: #080810;
       border-left: 2px solid #334455;
+      border-bottom: 2px solid #334455;
       color: #aabbcc;
       z-index: 10;
       display: none;
@@ -104,7 +105,7 @@ export class TargetPanel {
       const btn = document.createElement('button');
       btn.className = 'gui-btn-ghost';
       btn.textContent = '[DEV] LOG';
-      btn.style.cssText = 'position:absolute;bottom:18px;right:10px;font-size:9px;padding:2px 6px;';
+      btn.style.cssText = 'position:absolute;bottom:18px;left:50%;transform:translateX(-50%);font-size:9px;padding:2px 6px;';
       btn.addEventListener('click', () => console.log('[TargetPanel]', { def: this.currentDef, npcState: this.currentNpcState }));
       this.el.appendChild(btn);
     }
@@ -201,7 +202,6 @@ export class TargetPanel {
       height: 8px;
       cursor: row-resize;
       z-index: 20;
-      background: linear-gradient(transparent 3px, #334455 3px, #334455 4px, transparent 4px);
     `;
     handle.title = 'Drag to resize height';
 

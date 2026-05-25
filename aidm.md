@@ -520,11 +520,16 @@ CURRENT STATE shows action-economy resources as explicit literal fields, not by 
 
 Resource consumption:
 
-| Activity                                                                                      | Cost                                              |
-| --------------------------------------------------------------------------------------------- | ------------------------------------------------- |
-| `attack`, `throw_item`, `dash`, `dodge`, `disengage`, cast a spell, study, influence, utilize | Action                                            |
-| Second Wind, Hide (Cunning Action), drink potion in combat                                    | Bonus Action                                      |
-| Movement                                                                                      | Drawn from `movesLeft` (1 tile per 5 ft of speed) |
+| Activity | Cost |
+|----------|------|
+| `attack`, `throw_item`, `dash`, `dodge`, `disengage`, cast a spell, study, influence, utilize | Action |
+| Hide — Level 1 Rogue (no Cunning Action yet) | Action |
+| Hide — Level 2+ Rogue (Cunning Action unlocked) | Bonus Action |
+| Second Wind, drink potion in combat | Bonus Action |
+| First weapon/shield equip or unequip this turn | Free (one free object interaction per turn) |
+| Second weapon/shield equip or unequip this turn | Action (Utilize) |
+| Armor equip or unequip during combat | **Blocked** (SRD donning is 1–10 minutes) |
+| Movement | Drawn from `movesLeft` (1 tile per 5 ft of speed) |
 
 When the player requests something the current flags forbid, the AIDM must state explicitly which resource is spent and what remains — vague deflection ("press your advantage and wait") is forbidden. Examples:
 
@@ -588,8 +593,10 @@ For all other tools (`reveal_npc_name`, `set_disposition`, `award_gold`, …) th
 | `server/src/engine/AIDMTools.ts` | Tool schema definitions (`buildAIDMTools`), `applyAIDMTool` switch, per-turn guards (`resetTurnGuards` — quest/XP double-credit detection) |
 | `server/src/engine/GameEngine.ts` | Engine methods called by `applyAIDMTool` |
 | `server/src/engine/ConditionSystem.ts` | Condition constants and predicate functions |
-| `server/src/engine/CombatSystem.ts` | Roll functions: `rollSkillCheck`, `rollSavingThrow`, `rollPlayerAttackVsAc`, `rollNpcAttackVsAc` |
-| `server/src/engine/CombatFlow.ts` | Turn transitions; emits the `── Aldric's turn ──` boundary marker |
+| `server/src/engine/CombatSystem.ts` | Roll functions: `rollSkillCheck`, `rollSavingThrow`, `rollPlayerAttackVsAc`, `rollNpcAttackVsAc`, `rollOneInitiative` |
+| `server/src/engine/CombatFlow.ts` | Per-combatant Initiative rolling with Surprise/Invisible modifiers; sort + dispatch via `advanceTurn`; turn transitions; emits the `── Aldric's turn ──` boundary marker |
+| `server/src/engine/ActionGuards.ts` | Per-action eligibility gates (`canAttackTarget`, `canHide`, `canShortRest`, `canSpendAction`, `canSpendBonusAction`, `playerAttackReachTiles`, `hasCunningAction`) consulted by both `computeAvailableActions` and the server-side action handlers |
+| `server/src/engine/InventoryActions.ts` | Equip/unequip with SRD action-economy gating (armor blocked in combat; weapon/shield uses free object interaction + Utilize) |
 | `server/src/sessions.ts` | Per-session storage: sliding-window history, full archive, AIDM mutex, WebSocket push |
 | `server/src/index.ts` | `/game/session/:id/aidm` route — mutex acquire, stream wiring, persistence |
 

@@ -12,5 +12,10 @@
   "thrown": false,
   "throwNormal": 0,
   "throwLong": 0,
+  "rangeNormal": 80,
+  "rangeLong": 320,
+  "ammunitionType": "arrow",
+  "loading": false,
+  "heavy": false,
   "cost": 25
 }

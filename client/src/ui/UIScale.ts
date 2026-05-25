@@ -16,7 +16,7 @@ export function injectGameUIStyles(): void {
     .gui-sep {
       height: 1px;
       background: #334455;
-      margin: 0 8px;
+      margin: 0 12px;
       flex-shrink: 0;
     }
     .gui-label {

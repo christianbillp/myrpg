@@ -24,6 +24,7 @@ export function computeAC(
 export function makePlayerAttack(playerDef: PlayerDef, weapon: WeaponDef): PlayerAttack {
   let statKey: 'str' | 'dex' = weapon.statKey;
   if (weapon.finesse) statKey = mod(playerDef.dex) >= mod(playerDef.str) ? 'dex' : 'str';
+  const isRanged = !!weapon.rangeNormal && weapon.rangeNormal > 0;
   return {
     name: weapon.name,
     statKey,
@@ -35,6 +36,11 @@ export function makePlayerAttack(playerDef: PlayerDef, weapon: WeaponDef): Playe
     vex: weapon.mastery === 'vex',
     sap: weapon.mastery === 'sap',
     slow: weapon.mastery === 'slow',
+    rangeNormal: isRanged ? weapon.rangeNormal : undefined,
+    rangeLong:   isRanged ? weapon.rangeLong : undefined,
+    ammunitionType: isRanged ? weapon.ammunitionType : undefined,
+    loading: isRanged ? !!weapon.loading : undefined,
+    heavy:   isRanged ? !!weapon.heavy : undefined,
   };
 }
 

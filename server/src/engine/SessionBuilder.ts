@@ -49,6 +49,8 @@ export function buildSessionState(
     actionUsed: false,
     bonusActionUsed: false,
     reactionUsed: false,
+    freeObjectInteractionUsed: false,
+    initiativeRoll: 0,
     movesLeft: 0,
     deathSaveSuccesses: 0,
     deathSaveFailures: 0,

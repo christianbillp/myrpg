@@ -98,6 +98,14 @@ export interface PlayerAttack {
   vex: boolean;
   sap: boolean;
   slow: boolean;
+  // Ranged-weapon fields. Absence of rangeNormal means melee (5 ft / 1 tile reach).
+  // For ranged weapons, rangeNormal/rangeLong are in feet (1 tile = 5 ft); beyond
+  // normal range imposes Disadvantage, beyond long range cannot fire.
+  rangeNormal?: number;
+  rangeLong?: number;
+  ammunitionType?: string;  // e.g. "arrow", "bolt" — consumed from inventory per shot
+  loading?: boolean;        // SRD Loading property — one shot per Action/Bonus/Reaction
+  heavy?: boolean;          // SRD Heavy property — DEX < 13 imposes Disadvantage on ranged
 }
 
 export interface EquipmentSlots {
@@ -217,11 +225,25 @@ export interface WeaponDef {
   mastery: WeaponMastery | string | null;
   finesse: boolean; twoHanded: boolean;
   thrown: boolean; throwNormal: number; throwLong: number;
+  // Ranged-weapon fields (omit / 0 / false for melee weapons).
+  rangeNormal?: number;       // feet — normal ranged range
+  rangeLong?: number;         // feet — maximum ranged range
+  ammunitionType?: string;    // e.g. "arrow", "bolt", "bullet", "needle"
+  loading?: boolean;          // one shot per Action/Bonus/Reaction
+  heavy?: boolean;            // Disadvantage on ranged attacks if DEX < 13
+  cost?: number;
+}
+
+// Ammunition is its own equipment subtype so it's distinct from health potions
+// (consumables) but still represented as inventory items (stackable by id).
+export interface AmmunitionDef {
+  id: string; name: string; type: 'ammunition';
+  ammunitionType: string;  // canonical key matching WeaponDef.ammunitionType
   cost?: number;
 }
 
 export type EquipmentDef = ArmorDef | ShieldDef | WeaponDef;
-export type ItemDef = ConsumableDef | EquipmentDef;
+export type ItemDef = ConsumableDef | AmmunitionDef | EquipmentDef;
 
 // ── Encounter / quest types ──────────────────────────────────────────────────
 
@@ -296,6 +318,14 @@ export interface PlayerState {
   actionUsed: boolean;
   bonusActionUsed: boolean;
   reactionUsed: boolean;
+  // SRD "free object interaction" — one per turn, used implicitly when drawing
+  // a sword as part of the Attack action OR explicitly when equip/unequip is
+  // invoked during player_turn. A second equip/unequip in the same turn
+  // requires the Utilize action and consumes actionUsed.
+  freeObjectInteractionUsed: boolean;
+  // Initiative roll total for the current combat (d20 + DEX mod, with optional
+  // Advantage/Disadvantage from surprise/invisibility). Cleared when combat ends.
+  initiativeRoll: number;
   movesLeft: number;
   deathSaveSuccesses: number;
   deathSaveFailures: number;
@@ -337,6 +367,9 @@ export interface NpcState {
   reactionUsed: boolean;
   conditions: string[];
   inventoryIds: string[];
+  // Initiative roll total for the current combat (d20 + initiativeBonus, with
+  // optional Disadvantage if Surprised). Cleared when combat ends.
+  initiativeRoll?: number;
 }
 
 export interface MapItemState {

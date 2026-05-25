@@ -1,14 +1,19 @@
 import { GameEvent, NpcState, LogEntry, CombatMode } from './types.js';
 import type { GameContext } from './GameContext.js';
-import { rollInitiative, rollDeathSave } from './CombatSystem.js';
+import { rollOneInitiative, rollDeathSave } from './CombatSystem.js';
 import { runEnemyTurn, runAllyTurn, chebyshev } from './EnemyAI.js';
 import { isIncapacitated, hasSpeedZero, proneStandCost, TURN_CONDITIONS } from './ConditionSystem.js';
+import { mod } from './Dice.js';
+
+// ── Combat lifecycle ────────────────────────────────────────────────────────
 
 export function endCombat(ctx: GameContext): GameEvent[] {
   const s = ctx.state;
   s.phase = 'exploring';
   s.npcs = s.npcs.filter((n) => n.disposition !== 'enemy' || n.hp === 0);
   s.npcs.filter((n) => n.disposition === 'ally' && n.hp > 0).forEach((n) => { n.disposition = 'neutral'; });
+  s.npcs.forEach((n) => { n.initiativeRoll = undefined; n.isActive = false; });
+  s.player.initiativeRoll = 0;
   s.activeNpcIndex = 0;
   s.turnOrderIds = [];
   s.player.conditions = s.player.conditions.filter((c) => c !== 'hidden');
@@ -30,35 +35,131 @@ export function triggerCombat(ctx: GameContext): GameEvent[] {
   return events;
 }
 
+/**
+ * Start combat: detect surprised combatants, roll Initiative for everyone,
+ * sort turnOrderIds by descending Initiative, and dispatch the first turn.
+ *
+ * Surprise (SRD): any enemy who didn't know combat was starting has
+ * Disadvantage on Initiative. Heuristically we say: an enemy is Surprised iff
+ * the player was Hidden at the moment combat triggered (i.e. attacked from
+ * stealth or hidden movement that crossed the trigger range). Allies and the
+ * player are never Surprised in player-initiated combat.
+ */
 export function doStartCombat(ctx: GameContext, events: GameEvent[]): void {
   const s = ctx.state;
   const enemies = s.npcs.filter((n) => n.disposition === 'enemy' && n.hp > 0);
-  const firstEnemyDef = enemies[0] ? ctx.resolveMonsterDef(enemies[0].defId) : undefined;
-  if (!firstEnemyDef) return;
+  if (enemies.length === 0) return;
 
-  s.player.conditions = s.player.conditions.filter((c) => c !== 'hidden');
+  // Read playerWasHidden BUT keep the condition active. A hidden opener should
+  // grant Advantage on the very first attack (which is what triggered combat
+  // in many cases). The attack resolver clears `hidden` as part of normal
+  // post-attack cleanup, so we don't strip it here.
+  const playerWasHidden = s.player.conditions.includes('hidden');
   s.player.deathSaveSuccesses = 0;
   s.player.deathSaveFailures = 0;
-  s.activeNpcIndex = 0;
+
   const combatNpcs = s.npcs.filter((n) => n.disposition !== 'neutral' && n.hp > 0);
   for (const npc of combatNpcs.filter((n) => !n.combatLabel)) ctx.assignCombatLabel(npc);
-  s.turnOrderIds = ['player', ...combatNpcs.map((n) => n.id)];
 
-  const { playerFirst, logs } = rollInitiative(ctx.playerDef, firstEnemyDef, enemies[0].name);
+  // ── Roll Initiative for every combatant ─────────────────────────────────
+  const logs: LogEntry[] = [{ left: '⚔ Combat begins', style: 'header' }];
+
+  const playerInit = rollOneInitiative(mod(ctx.playerDef.dex), /*surprised*/false, /*invisible*/false);
+  s.player.initiativeRoll = playerInit.total;
+  logs.push({
+    left: `${ctx.playerDef.name} rolls Initiative`,
+    right: `${playerInit.rollStr}=${playerInit.total}`,
+    style: 'normal',
+  });
+
+  for (const npc of combatNpcs) {
+    const def = ctx.resolveMonsterDef(npc.defId);
+    if (!def) continue;
+    const isEnemy = npc.disposition === 'enemy';
+    const surprised = isEnemy && playerWasHidden;
+    const invisible = npc.conditions.includes('invisible');
+    const init = rollOneInitiative(def.initiativeBonus, surprised, invisible);
+    npc.initiativeRoll = init.total;
+    const note = surprised ? ' [SURPRISED]' : invisible ? ' [INVISIBLE]' : '';
+    logs.push({
+      left: `${npc.name} rolls Initiative${note}`,
+      right: `${init.rollStr}=${init.total}`,
+      style: surprised ? 'miss' : 'normal',
+    });
+  }
+
+  // ── Build sorted turn order ─────────────────────────────────────────────
+  type Slot = { id: string; total: number; tiebreak: number };
+  const slots: Slot[] = [];
+  slots.push({ id: 'player', total: s.player.initiativeRoll, tiebreak: mod(ctx.playerDef.dex) });
+  for (const npc of combatNpcs) {
+    const def = ctx.resolveMonsterDef(npc.defId);
+    slots.push({ id: npc.id, total: npc.initiativeRoll ?? 0, tiebreak: def?.initiativeBonus ?? 0 });
+  }
+  slots.sort((a, b) => (b.total - a.total) || (b.tiebreak - a.tiebreak));
+  s.turnOrderIds = slots.map((s) => s.id);
   ctx.addLogs(logs);
 
-  if (playerFirst) {
-    enterPlayerTurn(ctx);
-  } else {
-    enterEnemyPhase(ctx, events);
+  ctx.addLog({ left: `Turn order: ${slots.map((sl) => sl.id === 'player' ? ctx.playerDef.name : (s.npcs.find((n) => n.id === sl.id)?.name ?? sl.id)).join(' → ')}`, style: 'normal' });
+
+  // ── Start the first combatant's turn ────────────────────────────────────
+  s.activeNpcIndex = -1;
+  advanceTurn(ctx, events);
+}
+
+/**
+ * Advance to the next combatant in turnOrderIds and resolve their turn.
+ * If the next combatant is the player, sets phase='player_turn' and returns
+ * (waits for player input). If it's an NPC, runs their AI and then recurses
+ * to the next combatant. Skips dead combatants entirely.
+ */
+export function advanceTurn(ctx: GameContext, events: GameEvent[]): void {
+  const s = ctx.state;
+  if (s.phase === 'defeat' || s.phase === 'death_saves') return;
+  if (s.turnOrderIds.length === 0) return;
+
+  // Auto-end if all enemies are down before we tick further.
+  if (!s.npcs.some((n) => n.disposition === 'enemy' && n.hp > 0)) {
+    endCombat(ctx);
+    return;
+  }
+
+  // Find the next live combatant.
+  for (let step = 0; step < s.turnOrderIds.length + 1; step++) {
+    s.activeNpcIndex = (s.activeNpcIndex + 1) % s.turnOrderIds.length;
+    const id = s.turnOrderIds[s.activeNpcIndex];
+    if (id === 'player') {
+      // The player always gets a turn (even at 0 HP — that's the death save).
+      enterPlayerTurn(ctx);
+      return;
+    }
+    const npc = s.npcs.find((n) => n.id === id);
+    if (!npc || npc.hp <= 0) continue;
+    // Mark this NPC as active and run their turn.
+    s.npcs.forEach((n) => { n.isActive = false; });
+    npc.isActive = true;
+    s.phase = 'enemy_turn';
+    if (npc.disposition === 'enemy') {
+      runSingleEnemyTurn(ctx, npc, events);
+    } else if (npc.disposition === 'ally') {
+      runSingleAllyTurn(ctx, npc, events);
+    }
+    npc.isActive = false;
+    // Recurse to the next combatant unless something during the NPC's turn
+    // changed phase (defeat / death_saves / exploring after auto-end).
+    // Read through `as string` to defeat TS narrowing from the earlier
+    // s.phase = 'enemy_turn' assignment — the NPC turn can mutate phase.
+    const newPhase = s.phase as string;
+    if (newPhase === 'defeat' || newPhase === 'death_saves' || newPhase === 'exploring') return;
+    return advanceTurn(ctx, events);
   }
 }
 
 export function enterPlayerTurn(ctx: GameContext): void {
   const s = ctx.state;
   const wasPlayerTurn = s.phase === 'player_turn';
-  s.phase = 'player_turn';
-  s.activeNpcIndex = 0;
+  // If the player is unconscious, their "turn" is rolling a death save.
+  s.phase = s.player.hp <= 0 ? 'death_saves' : 'player_turn';
   s.npcs.filter((n) => n.disposition !== 'neutral' && n.hp > 0).forEach((n) => {
     n.isActive = false;
     n.reactionUsed = false;
@@ -67,8 +168,9 @@ export function enterPlayerTurn(ctx: GameContext): void {
   s.player.actionUsed = false;
   s.player.bonusActionUsed = false;
   s.player.reactionUsed = false;
+  s.player.freeObjectInteractionUsed = false;
   s.player.conditions = s.player.conditions.filter((c) => !TURN_CONDITIONS.includes(c));
-  if (hasSpeedZero(s.player.conditions)) {
+  if (hasSpeedZero(s.player.conditions) || s.player.hp <= 0) {
     s.player.movesLeft = 0;
   } else {
     const tileSpeed = ctx.playerDef.speed / 5;
@@ -76,12 +178,28 @@ export function enterPlayerTurn(ctx: GameContext): void {
     s.player.movesLeft = Math.max(0, tileSpeed - standCost);
     if (standCost > 0) s.player.conditions = s.player.conditions.filter((c) => c !== 'prone');
   }
-  // Mark the turn boundary in the log so the AIDM (and players reading the
-  // combat log) can see clearly that resources have reset for a new round.
-  if (!wasPlayerTurn) {
+  if (!wasPlayerTurn && s.phase === 'player_turn') {
     ctx.addLog({ left: `── ${ctx.playerDef.name}'s turn — Action & Bonus refreshed ──`, style: 'header' });
   }
 }
+
+/**
+ * Player presses End Turn. Hand off to the next combatant in the initiative
+ * order via advanceTurn.
+ */
+export function endPlayerTurn(ctx: GameContext, events: GameEvent[]): void {
+  advanceTurn(ctx, events);
+}
+
+/**
+ * Backwards-compat wrapper used in a few code paths (e.g. death-save resolution
+ * legacy fallback). Now just advances to the next combatant.
+ */
+export function enterEnemyPhase(ctx: GameContext, events: GameEvent[]): void {
+  advanceTurn(ctx, events);
+}
+
+// ── Death saves ─────────────────────────────────────────────────────────────
 
 export function doRollDeathSave(ctx: GameContext, events: GameEvent[]): void {
   const s = ctx.state;
@@ -127,45 +245,29 @@ export function doRollDeathSave(ctx: GameContext, events: GameEvent[]): void {
   ctx.addLogs(logs);
 
   if (nextPhase === 'player_turn') {
+    // nat20 or stabilize-on-3rd-success: wake up and take what remains of this turn.
     s.player.movesLeft = ctx.playerDef.speed / 5;
     s.phase = 'player_turn';
   } else if (nextPhase === 'enemy_turn') {
-    enterEnemyPhase(ctx, events);
+    // Advance to the next combatant in initiative order.
+    advanceTurn(ctx, events);
   } else {
     s.phase = nextPhase;
   }
 }
 
-export function enterEnemyPhase(ctx: GameContext, events: GameEvent[]): void {
-  const s = ctx.state;
-  s.phase = 'enemy_turn';
-  s.activeNpcIndex = 0;
-  runAllNpcCombatTurns(ctx, events);
-}
+// ── Per-NPC turn execution ────────────────────────────────────────────────
 
-function runAllNpcCombatTurns(ctx: GameContext, events: GameEvent[]): void {
-  const s = ctx.state;
-
-  for (const npc of s.npcs.filter((n) => n.disposition === 'enemy' && n.hp > 0)) {
-    if (s.phase === 'defeat') break;
-    npc.isActive = true;
-    runSingleEnemyTurn(ctx, npc, events);
-  }
-
-  if (s.phase !== 'defeat' && s.phase !== 'death_saves') {
-    for (const ally of s.npcs.filter((n) => n.disposition === 'ally' && n.hp > 0)) {
-      ally.isActive = true;
-      runSingleAllyTurn(ctx, ally, events);
-    }
-  }
-
-  if (s.phase !== 'defeat' && s.phase !== 'death_saves') {
-    if (s.npcs.filter((n) => n.disposition === 'enemy' && n.hp > 0).length === 0) {
-      s.phase = 'exploring';
-    } else {
-      enterPlayerTurn(ctx);
-    }
-  }
+/**
+ * Returns the display name to use in turn-bar / combat-log lines for the given
+ * NPC: bare name when unique, "Name (Label)" when more than one NPC in the
+ * current encounter shares the same base name and the NPC has a combat label.
+ */
+function combatantDisplayName(npc: NpcState, allNpcs: NpcState[]): string {
+  const base = npc.revealedName ?? npc.name;
+  const duplicates = allNpcs.filter((n) => (n.revealedName ?? n.name) === base && n.disposition !== 'neutral').length;
+  if (duplicates > 1 && npc.combatLabel) return `${base} (${npc.combatLabel})`;
+  return base;
 }
 
 function runSingleEnemyTurn(ctx: GameContext, npc: NpcState, events: GameEvent[]): void {
@@ -180,6 +282,7 @@ function runSingleEnemyTurn(ctx: GameContext, npc: NpcState, events: GameEvent[]
   const startedAdjacentToPlayer = chebyshev(npc.tileX, npc.tileY, s.player.tileX, s.player.tileY) <= 1;
 
   const result = runEnemyTurn(npc, def, {
+    displayName: combatantDisplayName(npc, s.npcs),
     playerTileX: s.player.tileX,
     playerTileY: s.player.tileY,
     playerAc: ctx.playerDef.ac,
@@ -234,14 +337,13 @@ function runSingleEnemyTurn(ctx: GameContext, npc: NpcState, events: GameEvent[]
     }
   }
   s.player.conditions = s.player.conditions.filter((c) => c !== 'hidden');
-  npc.isActive = false;
 }
 
 function runSingleAllyTurn(ctx: GameContext, ally: NpcState, events: GameEvent[]): void {
-  if (ally.combatPassive) { ally.isActive = false; return; }
+  if (ally.combatPassive) return;
   const s = ctx.state;
   const def = ctx.resolveMonsterDef(ally.defId);
-  if (!def) { ally.isActive = false; return; }
+  if (!def) return;
 
   const enemyTargets = s.npcs
     .filter((n) => n.disposition === 'enemy' && n.hp > 0)
@@ -256,6 +358,7 @@ function runSingleAllyTurn(ctx: GameContext, ally: NpcState, events: GameEvent[]
   ];
 
   const result = runAllyTurn(ally, def, {
+    displayName: combatantDisplayName(ally, s.npcs),
     enemyTargets,
     passable: s.map.passable,
     mapCols: s.map.cols,
@@ -277,11 +380,9 @@ function runSingleAllyTurn(ctx: GameContext, ally: NpcState, events: GameEvent[]
         const { finalDamage, log: resistLog } = ctx.resistMod(result.damage, meleeAtk?.damageType ?? '', targetDef, target.name);
         if (resistLog) ctx.addLog(resistLog);
         target.hp = Math.max(0, target.hp - finalDamage);
-        ctx.addLog({ left: `${target.name} HP: ${target.hp}/${target.maxHp}`, style: 'status' });
+        if (target.hp > 0) ctx.addLog({ left: `${target.name} HP: ${target.hp}/${target.maxHp}`, style: 'status' });
         if (target.hp <= 0) ctx.killWithReward(target, targetDef, `☠ ${target.name} is slain!`);
       }
     }
   }
-
-  ally.isActive = false;
 }

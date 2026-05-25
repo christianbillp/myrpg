@@ -25,6 +25,7 @@ export interface PlayerPanelActionState {
   moveMode: boolean;
   throwableItems: Array<{ id: string; name: string }>;
   availableActions: AvailableActions;
+  mainAttackName: string;
 }
 
 export interface PlayerPanelCallbacks {
@@ -51,6 +52,10 @@ function hpColor(pct: number): string {
 function statMod(v: number): string {
   const m = Math.floor((v - 10) / 2);
   return (m >= 0 ? '+' : '') + m;
+}
+
+function escHtml(s: string): string {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
 export class PlayerPanel {
@@ -250,7 +255,7 @@ export class PlayerPanel {
     const btn = (label: string, bg: string, onClick: () => void) => this.makeBtn(label, bg, onClick);
 
     if (mode === 'exploring') {
-      const atkEl = this.makeBtn('ATTACK', '#1a4a1e', aa.canAttack ? this.callbacks.onAttack : () => {});
+      const atkEl = this.makeTwoLineBtn('ATTACK', state.mainAttackName, '#1a4a1e', aa.canAttack ? this.callbacks.onAttack : () => {});
       atkEl.disabled = !aa.canAttack;
       this.actionArea.prepend(atkEl);
 
@@ -261,14 +266,18 @@ export class PlayerPanel {
       if (aa.canShortRest)
         this.actionArea.prepend(btn('SHORT REST', '#1a2a3a', this.callbacks.onShortRest));
 
+      // Hide is available during exploring too — lets a Rogue set up a Sneak
+      // Attack opener that triggers combat with Advantage on the first roll.
+      if (aa.canHide) this.actionArea.prepend(btn('HIDE', '#1a3a1a', this.callbacks.onHide));
+
       const moveExEl = this.makeBtn('MOVE', moveMode ? '#5a4800' : '#3a3000', this.callbacks.onToggleMoveMode);
       this.actionArea.appendChild(moveExEl);
 
     } else if (mode === 'player_turn') {
       const GREEN = '#1a4a1e';
 
-      const atkEl = this.makeBtn('ATTACK', GREEN, aa.canAttack ? this.callbacks.onAttack : () => {});
-      atkEl.disabled = actionUsed;
+      const atkEl = this.makeTwoLineBtn('ATTACK', state.mainAttackName, GREEN, aa.canAttack ? this.callbacks.onAttack : () => {});
+      atkEl.disabled = !aa.canAttack;
       this.actionArea.prepend(atkEl);
 
       const throwEl = this.makeBtn('THROW', GREEN, !actionUsed && state.throwableItems.length > 0 ? () => { this.pickerOpen = true; this.refreshActions(state); } : () => {});
@@ -324,6 +333,25 @@ export class PlayerPanel {
     b.style.background = bg;
     b.style.fontSize = fontSize;
     b.style.marginBottom = '0';
+    b.onclick = onClick;
+    return b;
+  }
+
+  /**
+   * Two-line button: primary label on top, smaller subtitle in parentheses below.
+   * Used for ATTACK so the player sees which weapon will resolve the swing.
+   */
+  private makeTwoLineBtn(label: string, subtitle: string, bg: string, onClick: () => void): HTMLButtonElement {
+    const b = document.createElement('button');
+    b.className = 'gui-btn';
+    b.style.background = bg;
+    b.style.fontSize = '11px';
+    b.style.marginBottom = '0';
+    b.style.height = '42px';
+    b.style.whiteSpace = 'normal';
+    b.style.lineHeight = '1.2';
+    b.style.padding = '4px 0';
+    b.innerHTML = `${escHtml(label)}<br><span style="font-size:9px;color:#bbccdd;opacity:0.85;">(${escHtml(subtitle)})</span>`;
     b.onclick = onClick;
     return b;
   }
