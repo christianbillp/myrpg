@@ -19,6 +19,7 @@ import { ItemDef } from "../data/equipment";
 import { gameClient } from "../net/GameClient";
 import type { GameState, GameEvent, GameMap, SpellDef, FeatureDef } from "../net/types";
 import type { ChatMessage } from "../ui/AIDMOverlay";
+import { DevMode } from "../devMode";
 
 const GAME_W = PLAYER_PANEL_WIDTH + GRID_COLS * TILE_SIZE + TARGET_PANEL_WIDTH;
 const GAME_H = GRID_ROWS * TILE_SIZE + HUD_HEIGHT;
@@ -453,7 +454,17 @@ export class GameScene extends Phaser.Scene {
     });
     this.targetPanel = new TargetPanel(this.uiScale);
     this.hud = new HUD(this.uiScale, {
-      onSendAIDM:        (msg, persona) => gameClient.sendAIDMMessage(msg, persona),
+      // When the DM is disabled (DevMode.disableAIDM), short-circuit with a
+      // canned silent reply instead of hitting the server. The encounter still
+      // plays end-to-end on the deterministic layer alone (US-068 criterion).
+      onSendAIDM: (msg, persona) => {
+        if (DevMode.disableAIDM) {
+          this.hud.aidmStart();
+          this.hud.aidmDone('(The Dungeon Master is silent. The world responds only to your actions.)', []);
+          return Promise.resolve({ reply: '', rollResults: [] });
+        }
+        return gameClient.sendAIDMMessage(msg, persona);
+      },
       onDisableKeyboard: () => this.input.keyboard?.disableGlobalCapture(),
       onEnableKeyboard:  () => this.input.keyboard?.enableGlobalCapture(),
     });

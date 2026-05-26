@@ -166,6 +166,21 @@ function buildToolList() { return [
     description: 'Search the full, unsummarized conversation archive for past content matching a keyword or phrase. Use this when the sliding-window history doesn\'t contain enough detail — e.g. to look up an NPC\'s previous statements, a quest hook the player mentioned long ago, or any earlier exchange. Returns up to 8 matching message snippets (player and DM lines) with rough turn indices. The query is a case-insensitive substring match.',
     input_schema: { type: 'object' as const, properties: { query: { type: 'string' }, reason: { type: 'string' } }, required: ['query', 'reason'] },
   },
+  {
+    name: 'adjust_faction_standing',
+    description: 'Adjust the player\'s standing with a faction by `delta` (positive = better, negative = worse). Standings are clamped to [-100, +100]. Use when an action durably shifts how a faction views the player — saving a faction member, betraying them, completing a faction quest, etc. The faction id is a free-form string; encounter authors and AIDM should use stable short ids ("bridge_bandits", "town_guard"). Surfaced to future turns in CURRENT STATE.',
+    input_schema: { type: 'object' as const, properties: { faction_id: { type: 'string' }, delta: { type: 'integer' }, reason: { type: 'string' } }, required: ['faction_id', 'delta', 'reason'] },
+  },
+  {
+    name: 'create_rumor',
+    description: 'Record a significant world event into long-term world memory. Use when something happens that NPCs in this world would plausibly hear about and reference later — a public defeat, a saved village, a treaty signed. The `id` is a stable short slug used by triggers; `text` is the human-readable summary the DM can reference; `salience` is 1–10 (default 5) where 10 = "everyone is talking about it." Idempotent: a second call with the same id is ignored.',
+    input_schema: { type: 'object' as const, properties: { id: { type: 'string' }, text: { type: 'string' }, salience: { type: 'integer' }, reason: { type: 'string' } }, required: ['id', 'text', 'reason'] },
+  },
+  {
+    name: 'set_world_flag',
+    description: 'Write a value to `GameState.worldFlags[name]`. Use when a narrative resolution needs to influence encounter triggers — e.g. the player pays a toll and a "toll_paid" flag should prevent an ambush trigger from firing later. Values are booleans, numbers, or short strings. Triggers read these via `flag_set` / `flag_unset` / `flag_equals` guards. The flag is persisted with the world save.',
+    input_schema: { type: 'object' as const, properties: { name: { type: 'string' }, value: { }, reason: { type: 'string' } }, required: ['name', 'value', 'reason'] },
+  },
 ]; }
 
 // Tracks quests force-completed within a single AIDM turn so that subsequent
@@ -516,6 +531,40 @@ export function applyAIDMTool(
       toolResultContent = hits.length === 0
         ? `No archived messages match "${query}".`
         : `Found ${hits.length} match${hits.length === 1 ? '' : 'es'} for "${query}" (newest first):\n${hits.join('\n---\n')}`;
+      break;
+    }
+    case 'adjust_faction_standing': {
+      const factionId = String(input['faction_id'] ?? '').trim();
+      const delta = Number(input['delta']) || 0;
+      if (!factionId) { toolResultContent = 'adjust_faction_standing requires a non-empty faction_id.'; break; }
+      const before = engine.getFactionStanding(factionId);
+      engine.adjustFactionStanding(factionId, delta);
+      const after = engine.getFactionStanding(factionId);
+      toolResultContent = `Faction "${factionId}" standing: ${before} → ${after} (Δ ${delta >= 0 ? '+' : ''}${delta}).`;
+      break;
+    }
+    case 'create_rumor': {
+      const id = String(input['id'] ?? '').trim();
+      const text = String(input['text'] ?? '').trim();
+      const salience = Number(input['salience']) || 5;
+      if (!id || !text) { toolResultContent = 'create_rumor requires both id and text.'; break; }
+      const added = engine.recordRumor(id, text, salience);
+      toolResultContent = added
+        ? `Rumor "${id}" recorded (salience ${salience}). The world now remembers this.`
+        : `Rumor "${id}" already exists — no change.`;
+      break;
+    }
+    case 'set_world_flag': {
+      const name = String(input['name'] ?? '').trim();
+      const rawValue = input['value'];
+      if (!name) { toolResultContent = 'set_world_flag requires a non-empty name.'; break; }
+      // Only booleans, numbers, and strings are persistable as WorldFlagValue.
+      if (typeof rawValue !== 'boolean' && typeof rawValue !== 'number' && typeof rawValue !== 'string') {
+        toolResultContent = 'set_world_flag value must be a boolean, number, or string.';
+        break;
+      }
+      engine.setWorldFlag(name, rawValue);
+      toolResultContent = `World flag "${name}" set to ${JSON.stringify(rawValue)}.`;
       break;
     }
   }

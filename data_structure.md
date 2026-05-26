@@ -729,40 +729,69 @@ Only passable map tiles are eligible for spawning regardless of zone GID. If no 
 
 ### triggers
 
-Authored scripted events evaluated server-side at well-defined hook points. Each trigger marries a `condition` (when does this fire?) to a list of `actions` (what happens?). Triggers are the deterministic counterpart to AIDM-driven scenes — once authored, they fire reliably regardless of LLM behaviour.
+Authored scripted events evaluated server-side via the engine event bus. Each trigger is a `WHEN <event> IF <guards> THEN <effects>` rule. Triggers are the deterministic counterpart to AIDM-driven scenes — once authored, they fire reliably regardless of LLM behaviour. Implementation lives in `server/src/engine/TriggerSystem.ts`; the bus in `server/src/engine/EventBus.ts`.
 
 **Trigger entry:**
 
 | Field | Type | Notes |
 |---|---|---|
 | `id` | string | Unique within the encounter. Used as the dedupe key in `GameState.firedTriggerIds`. |
-| `condition` | object | One of the condition shapes below. |
-| `actions` | object[] | Ordered list of action shapes; all actions of a fired trigger run sequentially. |
-| `once` | boolean | *(default `true`)* When `true`, the trigger fires at most once per session (persisted across save/load via `firedTriggerIds`). When `false`, it re-fires on every condition match. |
+| `when` | object | A `WhenClause` — the event that wakes the trigger (see below). |
+| `if` | object[] | *(optional)* List of `TriggerGuard` predicates. **All** must hold for the trigger to fire (logical AND). |
+| `then` | object[] | Ordered list of `TriggerAction` effects; run sequentially when the trigger fires. |
+| `once` | boolean | *(default `true`)* When `true`, the trigger fires at most once per session (persisted via `firedTriggerIds`). When `false`, it re-fires on every match. |
 
-**Conditions:**
+**WHEN clauses** — `event` is the discriminator; remaining fields are per-event filters (omitted = "any"):
 
-| `type` | Fields | Hook | Fires when |
+| `event` | Filter fields | Published by | Fires when |
 |---|---|---|---|
-| `enter_area` | `x, y, w, h` | `doMove` | Player steps onto any tile in the rectangle `[x, x+w) × [y, y+h)`. |
-| `enter_tile` | `x, y` | `doMove` | Player steps onto the exact tile. |
-| `npc_killed` | `defId` | `killNpc` | Any NPC with the matching `defId` reaches 0 HP. |
-| `item_picked_up` | `defId` | `checkItemPickup` | The player picks up an item with the matching equipment `defId`. |
+| `player_moved` | `in_area?: {x,y,w,h}`, `tile?: {x,y}` | `ExplorationActions.doMove` | Player steps onto a tile matching the filter. |
+| `npc_killed` | `defId?` | `GameEngine.killNpc` | An NPC with the matching `defId` reaches 0 HP. |
+| `item_picked_up` | `defId?` | `ExplorationActions.checkItemPickup` | The player picks up an item with the matching equipment `defId`. |
+| `turn_started` | `combatantId?` (`'player'` or NPC id) | `CombatFlow.enterPlayerTurn` / `runSingleEnemyTurn` / `runSingleAllyTurn` | A combatant's turn begins. |
+| `turn_ended` | `combatantId?` | `CombatFlow.endPlayerTurn` / end of `runSingleEnemyTurn` / `runSingleAllyTurn` | A combatant's turn ends. |
+| `combat_started` | — | `CombatFlow.doStartCombat` | Initiative has been rolled. |
+| `combat_ended` | — | `CombatFlow.endCombat` | All enemies down or `end_combat` AIDM tool fired. |
+| `damage_dealt` | `target?` | `GameEngine.applyDamageToPlayer` + `ThresholdPublisher.publishNpcDamage` | An entity took damage. |
+| `hp_threshold_crossed` | `target?`, `ratio?`, `direction?` | `ThresholdPublisher.publishHpThresholdCrossings` | An entity's HP/maxHp ratio crossed 0.75, 0.5, or 0.25 (in either direction). |
+| `faction_changed` | `factionId?` | TriggerSystem `adjustFactionStanding` | A faction standing was adjusted (and actually changed). |
+| `custom` | `name` | Trigger-authored via `emit_event`; Director-emitted (`director_offer_help`, `director_apply_pressure`) | A previously fired event published this name. |
 
-**Actions:**
+**IF guards** — short-circuit predicates over world state:
+
+| `type` | Fields | Holds when |
+|---|---|---|
+| `flag_set` | `name` | `GameState.worldFlags[name]` is defined. |
+| `flag_unset` | `name` | `GameState.worldFlags[name]` is `undefined`. |
+| `flag_equals` | `name`, `value` | The flag's current value `===` the supplied value. |
+| `hp_below` | `ratio` | `player.hp / playerDef.maxHp < ratio`. |
+| `enemies_alive` | `op`, `count` | Number of living enemies satisfies the comparison (`lt` / `le` / `eq` / `ge` / `gt`). |
+| `allies_alive` | `op`, `count` | Number of living allies satisfies the comparison. |
+| `phase` | `in: CombatMode[]` | The session phase is one of the listed values. |
+| `faction_standing` | `factionId`, `op`, `value` | Player's standing with the faction satisfies the comparison (unknown faction → 0). |
+
+**THEN actions:**
 
 | `type` | Fields | Effect |
 |---|---|---|
 | `spawn_enemy_near_player` | `monsterId`, `minDist?` (default 3), `maxDist?` (default 8) | Spawns an enemy on a free tile at Chebyshev distance `[minDist, maxDist]` from the player. No-ops if no tile is free in range. |
-| `spawn_enemy_at` | `monsterId`, `x`, `y` | Spawns an enemy at the given tile; falls back to the nearest free tile (within 6 tiles) if the target is occupied / impassable. |
+| `spawn_enemy_at` | `monsterId`, `x`, `y` | Spawns at the given tile; falls back to the nearest free tile (within 6 tiles) if the target is occupied / impassable. |
 | `show_log` | `message` | Pushes a `header`-styled line into the Combat Log. |
-| `send_aidm_message` | `message` | Appends to `GameState.pendingAidmEvents`; surfaced to the next AIDM turn under the `SCRIPTED EVENTS` block in CURRENT STATE, then cleared after the reply. Use this when the engine action needs DM narration to land. |
+| `send_aidm_message` | `message` | Appends to `GameState.pendingAidmEvents`; surfaced to the next AIDM turn under `SCRIPTED EVENTS`, then cleared. No-op when the DM is disabled (`DevMode.disableAIDM`). |
+| `narrate` | `narrationId` | Picks a canned variant from `server/data/narration/{narrationId}.json` and pushes it as a header-styled log line. The picker avoids the last-used variant per id (tracked in `narrationLastUsed`). |
+| `set_flag` | `name`, `value: number\|string\|boolean` | Writes `GameState.worldFlags[name]` and publishes a `flag_set` event so other triggers can fan out. |
+| `apply_condition_to_player` | `condition` | Adds a condition to the player (idempotent). Future scope: arbitrary target selectors. |
+| `emit_event` | `name`, `payload?` | Publishes a `custom` event on the bus, letting one trigger cascade into others. Restricted to `custom` events — engine-canonical events (`npc_killed`, `damage_dealt`, …) cannot be forged from authored JSON. |
+| `adjust_faction_standing` | `factionId`, `delta` | Adds `delta` to the player's standing with the faction (clamped to [−100, +100]); publishes `faction_changed`. |
+| `record_rumor` | `id`, `text`, `salience?` (default 5) | Records a rumor into `GameState.rumors` (idempotent by `id`); publishes `rumor_propagated`. |
+| `set_disposition_by_def_id` | `defId`, `disposition` (`ally\|neutral\|enemy`) | Updates every living NPC matching `defId` to the given disposition. Auto-aggros faction-mates when `enemy`. Pair with `trigger_combat` to turn a peaceful encounter hostile. |
+| `trigger_combat` | — | Starts combat when the engine is in the `exploring` phase and at least one enemy is alive. Idempotent. |
 
-Hook order matters in a few places worth knowing:
+**Hook ordering** is load-bearing in a few places:
 
-- `player_moved` triggers are evaluated **before** the combat-start proximity check, so an `enter_area` trigger that spawns enemies near the player kicks off combat on the same tile entry.
-- `npc_killed` triggers are evaluated **before** `autoEndCombatIfNoEnemies`, so a kill-triggered reinforcement spawn prevents combat from ending.
-- `item_picked_up` triggers fire **after** the item is moved into the player's inventory and quest progress is advanced.
+- `player_moved` is published **before** the combat-start proximity check, so an `enter_area` trigger that spawns enemies near the player kicks off combat on the same tile entry.
+- `npc_killed` is published **before** `autoEndCombatIfNoEnemies`, so a kill-triggered reinforcement spawn prevents combat from ending.
+- `set_flag` publishes `flag_set` synchronously, so a trigger keyed on a flag the same trigger sets will not re-fire itself (its own `firedTriggerIds` entry is already pending).
 
 **Example — guard-room ambush in `encounters/dungeon_delve.json`:**
 
@@ -770,16 +799,48 @@ Hook order matters in a few places worth knowing:
 "triggers": [
   {
     "id": "guardroom_ambush",
-    "condition": { "type": "enter_area", "x": 3, "y": 12, "w": 6, "h": 3 },
-    "actions": [
-      { "type": "show_log", "message": "⚔ Bones scrape against stone — skeletal figures rise from the rubble!" },
+    "when": { "event": "player_moved", "in_area": { "x": 3, "y": 12, "w": 6, "h": 3 } },
+    "if": [
+      { "type": "flag_unset", "name": "guardroom_cleared" }
+    ],
+    "then": [
+      { "type": "narrate", "narrationId": "skeleton_rises" },
       { "type": "spawn_enemy_near_player", "monsterId": "skeleton", "minDist": 2, "maxDist": 4 },
       { "type": "spawn_enemy_near_player", "monsterId": "skeleton", "minDist": 2, "maxDist": 4 },
+      { "type": "set_flag", "name": "guardroom_seen", "value": true },
       { "type": "send_aidm_message", "message": "Two skeletons rise from the rubble of the guard room and lurch toward the party." }
     ],
     "once": true
   }
 ]
+```
+
+---
+
+## narration/
+
+Canned-text variants for narratable engine moments. The `narrate(narrationId)` trigger action picks one per fire, avoiding the previously-used variant when more than one exists — so deterministic scenes feel different across plays without invoking the generative DM. Read by `NarrationSystem.pickNarrationVariant` and tracked in `GameState.narrationLastUsed`.
+
+### Fields
+
+| Field | Type | Notes |
+|---|---|---|
+| `id` | string | Unique key — matches the `narrationId` referenced from trigger `narrate` actions. |
+| `variants` | string[] | One or more candidate strings. Each fire picks an index from those NOT used last time (or the single entry if `variants.length === 1`). |
+| `weights` | number[] | *(optional)* Parallel array to `variants` giving per-variant relative weights. When omitted, picks are uniform; when present, picks roulette-wheel sample with the weights, scoped to the eligible (non-last-used) subset. |
+
+### Example — `narration/skeleton_rises.json`
+
+```json
+{
+  "id": "skeleton_rises",
+  "variants": [
+    "Bones scrape against stone — skeletal figures haul themselves up from the rubble, jaws clattering in unison.",
+    "The pile of bones in the corner shifts. Yellowed ribs and skulls knit together, eye-sockets fixing on the party.",
+    "A dry rattle echoes off the chamber walls. Two skeletons rise from the debris, blades scraping free of dust.",
+    "Old marrow cracks. Two skeletons unfold from beneath the rubble like grim pages opening, hollow-eyed and slow."
+  ]
+}
 ```
 
 ### Example — `encounters/bridge_standoff.json`
@@ -866,6 +927,11 @@ Key runtime fields of note:
 | `triggers` | *(top-level on `GameState`)* Authored encounter triggers seeded from `EncounterDef.triggers` at session creation. Static across the session — never mutated at runtime. |
 | `firedTriggerIds` | *(top-level on `GameState`)* String ids of triggers that have already fired. Consulted by `TriggerSystem.evaluateTriggers` to enforce `once: true` semantics. Persisted in `world.json` so one-shot triggers stay one-shot across save/load. |
 | `pendingAidmEvents` | *(top-level on `GameState`)* Scripted-event lines queued by `send_aidm_message` trigger actions. Rendered into the next AIDM CURRENT STATE block under `SCRIPTED EVENTS`, then cleared after the AIDM reply lands. |
+| `worldFlags` | *(top-level on `GameState`)* `Record<string, number\|string\|boolean>` written by `set_flag` trigger actions and read by `flag_set` / `flag_unset` / `flag_equals` guards. Persisted with the world save so authored scripts can branch on history across save/load. |
+| `narrationLastUsed` | *(top-level on `GameState`)* Per-`narrationId` last-picked variant index. Used by `NarrationSystem.pickNarrationVariant` to avoid back-to-back repeats. Persisted so reloads don't reset anti-repeat memory mid-encounter. |
+| `factionStandings` | *(top-level on `GameState`)* `Record<string, number>` of player reputation with each faction (−100..+100). Written by the `adjust_faction_standing` AIDM tool and trigger action; read by the `faction_standing` guard. Unknown factions default to 0. |
+| `rumors` | *(top-level on `GameState`)* `Rumor[]` of significant world events the world "remembers." Each entry has `id` (stable dedupe key), `text`, `salience` (1–10), `recordedAt` (Date.now). Surfaced to the DM in CURRENT STATE under the `RUMORS` block; appended idempotently by the `create_rumor` AIDM tool and `record_rumor` trigger action. |
+| `worldFlags['director:*']` | *(reserved key prefix)* The Director (`Director.ts`) tracks per-encounter round counts and "already-fired" flags under reserved keys (`director:round`, `director:assist_fired`, `director:pressure_fired`). Reset at every `combat_started`. Triggers can safely set their own `worldFlags` outside this prefix. |
 | `aidmHistory` | The **sliding-window** AIDM conversation persisted into `world.json` (serialised from server session memory). Bounded to ~20 verbatim messages plus an optional leading `[SUMMARY OF EARLIER TURNS]` assistant message that collapses anything older. `[CURRENT STATE]` prefixes are stripped from historical user messages before each API call so the model always reasons from the current injected state, not stale snapshots. The `GET /world` response surfaces this under the `dmHistory` field for client-side display. |
 
 ### Session-only AIDM state (in-memory)

@@ -7,7 +7,6 @@ import { chebyshev } from './EnemyAI.js';
 import { isIncapacitated, isVisible } from './ConditionSystem.js';
 import { d, d20, mod } from './Dice.js';
 import { canShortRest as guardCanShortRest } from './ActionGuards.js';
-import { evaluateTriggers } from './TriggerSystem.js';
 
 export function doMove(ctx: GameContext, dx: number, dy: number, events: GameEvent[]): void {
   const s = ctx.state;
@@ -48,11 +47,10 @@ export function doMove(ctx: GameContext, dx: number, dy: number, events: GameEve
     checkItemPickup(ctx);
   }
 
-  // Encounter triggers fire on every player tile change — during exploration
-  // AND on each step of a combat-turn move. Evaluate BEFORE the combat-start
-  // proximity check so a trigger that spawns enemies near the player can kick
+  // Publish player_moved on the bus BEFORE the combat-start proximity check
+  // so an enter_area trigger that spawns enemies near the player can kick
   // off combat on the same tile entry.
-  evaluateTriggers(ctx, { kind: 'player_moved', x: nx, y: ny });
+  ctx.publish({ type: 'player_moved', x: nx, y: ny });
 
   if (s.phase === 'exploring') checkCombatTrigger(ctx, events);
 }
@@ -109,7 +107,7 @@ function checkItemPickup(ctx: GameContext): void {
   }
   s.mapItems.splice(idx, 1);
   ctx.advanceQuest('collect');
-  evaluateTriggers(ctx, { kind: 'item_picked_up', defId: item.defId });
+  ctx.publish({ type: 'item_picked_up', defId: item.defId });
 }
 
 function checkCombatTrigger(ctx: GameContext, events: GameEvent[]): void {

@@ -5,6 +5,8 @@ import { runEnemyTurn, runAllyTurn, chebyshev } from './EnemyAI.js';
 import { isIncapacitated, isVisible, hasSpeedZero, proneStandCost, TURN_CONDITIONS } from './ConditionSystem.js';
 import { mod, d20 as d20Local } from './Dice.js';
 import { doNpcOpportunityAttack } from './CombatActions.js';
+import { publishNpcDamage } from './ThresholdPublisher.js';
+import { chooseNpcBehavior, fleeFromThreat } from './NpcBrain.js';
 
 // ── Combat lifecycle ────────────────────────────────────────────────────────
 
@@ -18,6 +20,7 @@ export function endCombat(ctx: GameContext): GameEvent[] {
   s.activeNpcIndex = 0;
   s.turnOrderIds = [];
   s.player.conditions = s.player.conditions.filter((c) => c !== 'hidden');
+  ctx.publish({ type: 'combat_ended' });
   return [];
 }
 
@@ -110,6 +113,8 @@ export function doStartCombat(ctx: GameContext, events: GameEvent[]): void {
     style: 'normal',
   });
 
+  ctx.publish({ type: 'combat_started' });
+
   // ── Start the first combatant's turn ────────────────────────────────────
   s.activeNpcIndex = -1;
   advanceTurn(ctx, events);
@@ -195,6 +200,7 @@ export function enterPlayerTurn(ctx: GameContext): void {
   }
   if (!wasPlayerTurn && s.phase === 'player_turn') {
     ctx.addLog({ left: `── ${ctx.playerDef.name}'s turn — Action & Bonus refreshed ──`, style: 'header' });
+    ctx.publish({ type: 'turn_started', combatantId: 'player' });
   }
 }
 
@@ -203,6 +209,7 @@ export function enterPlayerTurn(ctx: GameContext): void {
  * order via advanceTurn.
  */
 export function endPlayerTurn(ctx: GameContext, events: GameEvent[]): void {
+  ctx.publish({ type: 'turn_ended', combatantId: 'player' });
   advanceTurn(ctx, events);
 }
 
@@ -291,6 +298,27 @@ function runSingleEnemyTurn(ctx: GameContext, npc: NpcState, events: GameEvent[]
   if (!def) { npc.isActive = false; return; }
   // Per SRD: a creature's Reaction refreshes at the start of its own turn.
   npc.reactionUsed = false;
+  ctx.publish({ type: 'turn_started', combatantId: npc.id });
+
+  // ── NpcBrain — decide behavior ─────────────────────────────────────────
+  const behavior = chooseNpcBehavior(ctx, npc, def);
+  if (behavior === 'hold') {
+    ctx.addLog({ left: `${combatantDisplayName(npc, s.npcs)} holds its ground`, style: 'status' });
+    finalizeNpcTurn(ctx, npc);
+    ctx.publish({ type: 'turn_ended', combatantId: npc.id });
+    return;
+  }
+  if (behavior === 'flee') {
+    const flee = fleeFromThreat(ctx, npc, def, s.player.tileX, s.player.tileY);
+    for (const step of flee.pathTaken) events.push({ type: 'entity_move', entityId: npc.id, toX: step.x, toY: step.y });
+    npc.tileX = flee.finalTileX;
+    npc.tileY = flee.finalTileY;
+    ctx.addLog({ left: `${combatantDisplayName(npc, s.npcs)} breaks and flees!`, style: 'status' });
+    finalizeNpcTurn(ctx, npc);
+    ctx.publish({ type: 'turn_ended', combatantId: npc.id });
+    return;
+  }
+  // behavior === 'attack' — fall through to the existing AI loop.
 
   const occupied: [number, number][] = s.npcs
     .filter((n) => n !== npc && n.hp > 0)
@@ -400,6 +428,7 @@ function runSingleEnemyTurn(ctx: GameContext, npc: NpcState, events: GameEvent[]
     applyEnemyHitToPlayer(ctx, npc, result, events);
   }
   finalizeNpcTurn(ctx, npc);
+  ctx.publish({ type: 'turn_ended', combatantId: npc.id });
 }
 
 /** Does the player meet basic reaction eligibility (not used, conscious, not incapacitated)? */
@@ -498,6 +527,32 @@ function runSingleAllyTurn(ctx: GameContext, ally: NpcState, events: GameEvent[]
   if (!def) return;
   // Per SRD: a creature's Reaction refreshes at the start of its own turn.
   ally.reactionUsed = false;
+  ctx.publish({ type: 'turn_started', combatantId: ally.id });
+
+  // Allies use the same NpcBrain — they break and flee under the same
+  // morale model as enemies. Hold and attack share the existing logic.
+  const allyBehavior = chooseNpcBehavior(ctx, ally, def);
+  if (allyBehavior === 'flee') {
+    // Threat = nearest hostile.
+    const enemies = s.npcs.filter((n) => n.disposition === 'enemy' && n.hp > 0);
+    if (enemies.length > 0) {
+      const nearest = enemies.reduce((a, b) =>
+        chebyshev(ally.tileX, ally.tileY, a.tileX, a.tileY) <= chebyshev(ally.tileX, ally.tileY, b.tileX, b.tileY) ? a : b,
+      );
+      const flee = fleeFromThreat(ctx, ally, def, nearest.tileX, nearest.tileY);
+      for (const step of flee.pathTaken) events.push({ type: 'entity_move', entityId: ally.id, toX: step.x, toY: step.y });
+      ally.tileX = flee.finalTileX;
+      ally.tileY = flee.finalTileY;
+      ctx.addLog({ left: `${combatantDisplayName(ally, s.npcs)} breaks and flees!`, style: 'status' });
+      ctx.publish({ type: 'turn_ended', combatantId: ally.id });
+      return;
+    }
+  }
+  if (allyBehavior === 'hold') {
+    ctx.addLog({ left: `${combatantDisplayName(ally, s.npcs)} holds position`, style: 'status' });
+    ctx.publish({ type: 'turn_ended', combatantId: ally.id });
+    return;
+  }
 
   const enemyTargets = s.npcs
     .filter((n) => n.disposition === 'enemy' && n.hp > 0)
@@ -554,11 +609,14 @@ function runSingleAllyTurn(ctx: GameContext, ally: NpcState, events: GameEvent[]
         const meleeAtk = def.attacks.find((a) => a.attackType === 'melee' || a.attackType === 'both');
         const { finalDamage, log: resistLog } = ctx.resistMod(result.damage, meleeAtk?.damageType ?? '', targetDef, target.name);
         if (resistLog) ctx.addLog(resistLog);
+        const hpBeforeAlly = target.hp;
         target.hp = Math.max(0, target.hp - finalDamage);
+        publishNpcDamage(ctx, target, hpBeforeAlly, target.hp);
         if (target.hp <= 0) ctx.killWithReward(target, targetDef, `☠ ${target.name} is slain!`);
       }
     }
   }
+  ctx.publish({ type: 'turn_ended', combatantId: ally.id });
 }
 
 /**

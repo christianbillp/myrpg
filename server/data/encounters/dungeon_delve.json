@@ -39,11 +39,15 @@
   "triggers": [
     {
       "id": "guardroom_ambush",
-      "condition": { "type": "enter_area", "x": 3, "y": 12, "w": 6, "h": 3 },
-      "actions": [
-        { "type": "show_log", "message": "⚔ Bones scrape against stone — skeletal figures rise from the rubble!" },
+      "when": { "event": "player_moved", "in_area": { "x": 3, "y": 12, "w": 6, "h": 3 } },
+      "if": [
+        { "type": "flag_unset", "name": "guardroom_cleared" }
+      ],
+      "then": [
+        { "type": "narrate", "narrationId": "skeleton_rises" },
         { "type": "spawn_enemy_near_player", "monsterId": "skeleton", "minDist": 2, "maxDist": 4 },
         { "type": "spawn_enemy_near_player", "monsterId": "skeleton", "minDist": 2, "maxDist": 4 },
+        { "type": "set_flag", "name": "guardroom_seen", "value": true },
         { "type": "send_aidm_message", "message": "Two skeletons rise from the rubble of the guard room and lurch toward the party." }
       ],
       "once": true

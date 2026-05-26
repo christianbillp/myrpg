@@ -526,88 +526,135 @@ export interface EncounterDef {
   triggers?: EncounterTrigger[];
 }
 
-// ── Encounter triggers ───────────────────────────────────────────────────────
+// ── Engine event bus ─────────────────────────────────────────────────────────
 //
-// Data-driven gameplay scripting. Triggers belong to an encounter and are
-// evaluated server-side at well-defined hook points (player movement, NPC
-// death, item pickup). Each fired trigger's id is appended to
-// `GameState.firedTriggerIds` so `once` semantics survive save/load.
+// The deterministic substrate the rest of the living-world layer subscribes
+// to. Engine systems publish events at well-defined moments; TriggerSystem,
+// NPC brains, the Director, and rumor/faction systems all subscribe. The bus
+// is synchronous with priority bands — subscribers run in the publisher's
+// call stack, can mutate state, and may publish further events (bounded by
+// a depth limit in EventBus.ts to catch malformed loops).
 
-export interface EnterAreaCondition {
-  type: 'enter_area';
-  /** Top-left tile of the rectangle (inclusive). */
-  x: number;
-  y: number;
-  /** Width / height in tiles. */
-  w: number;
-  h: number;
-}
+export type EngineEvent =
+  | { type: 'player_moved'; x: number; y: number }
+  | { type: 'npc_killed'; npcId: string; defId: string; killerId?: string }
+  | { type: 'item_picked_up'; defId: string }
+  | { type: 'turn_started'; combatantId: 'player' | string }
+  | { type: 'turn_ended'; combatantId: 'player' | string }
+  | { type: 'combat_started' }
+  | { type: 'combat_ended' }
+  | { type: 'flag_set'; name: string; value: WorldFlagValue }
+  /** Published whenever an entity takes damage. `target` is 'player' or an NPC id. */
+  | { type: 'damage_dealt'; target: 'player' | string; amount: number; sourceId?: string }
+  /** Published once per crossing direction when an entity's HP ratio drops below or rises above a threshold (defaults: 0.5, 0.25). Listeners can author "boss enrages at 50%" triggers without re-checking each turn. */
+  | { type: 'hp_threshold_crossed'; target: 'player' | string; ratio: number; direction: 'below' | 'above' }
+  /** A faction's standing with the player changed. */
+  | { type: 'faction_changed'; factionId: string; oldValue: number; newValue: number }
+  /** A rumor was recorded into world memory. */
+  | { type: 'rumor_propagated'; rumorId: string }
+  /** Trigger-authored custom event. Lets authors chain triggers via `emit_event` without touching engine code. */
+  | { type: 'custom'; name: string; payload?: Record<string, unknown> };
 
-export interface EnterTileCondition {
-  type: 'enter_tile';
-  x: number;
-  y: number;
-}
+export type WorldFlagValue = number | string | boolean;
 
-export interface NpcKilledCondition {
-  type: 'npc_killed';
-  /** Match any NPC whose defId equals this value. */
-  defId: string;
-}
+// ── Encounter triggers (WHEN / IF / THEN) ────────────────────────────────────
+//
+// Authorable rules of the form: WHEN <event matches> IF <world-state guards>
+// THEN <ordered effects>. Triggers belong to an encounter (JSON in
+// server/data/encounters/) and are registered as subscribers on session
+// start. Each fired trigger's id is appended to GameState.firedTriggerIds
+// so once-only semantics survive save/load.
 
-export interface ItemPickedUpCondition {
-  type: 'item_picked_up';
-  /** Match a specific item defId from `equipment/`. */
-  defId: string;
-}
+export type WhenClause =
+  | { event: 'player_moved'; in_area?: { x: number; y: number; w: number; h: number }; tile?: { x: number; y: number } }
+  | { event: 'npc_killed'; defId?: string }
+  | { event: 'item_picked_up'; defId?: string }
+  | { event: 'turn_started'; combatantId?: 'player' | string }
+  | { event: 'turn_ended'; combatantId?: 'player' | string }
+  | { event: 'combat_started' }
+  | { event: 'combat_ended' }
+  | { event: 'damage_dealt'; target?: 'player' | string }
+  | { event: 'hp_threshold_crossed'; target?: 'player' | string; ratio?: number; direction?: 'below' | 'above' }
+  | { event: 'faction_changed'; factionId?: string }
+  | { event: 'custom'; name: string };
 
-export type TriggerCondition =
-  | EnterAreaCondition
-  | EnterTileCondition
-  | NpcKilledCondition
-  | ItemPickedUpCondition;
+export type ComparisonOp = 'lt' | 'le' | 'eq' | 'ge' | 'gt';
 
-export interface SpawnEnemyNearPlayerAction {
-  type: 'spawn_enemy_near_player';
-  monsterId: string;
-  /** Minimum Chebyshev distance from the player; defaults to 3. */
-  minDist?: number;
-  /** Maximum Chebyshev distance from the player; defaults to 8. */
-  maxDist?: number;
-}
-
-export interface SpawnEnemyAtAction {
-  type: 'spawn_enemy_at';
-  monsterId: string;
-  x: number;
-  y: number;
-}
-
-export interface ShowLogAction {
-  type: 'show_log';
-  /** Pushed into the Combat Log as a `header`-styled line. */
-  message: string;
-}
-
-export interface SendAidmMessageAction {
-  type: 'send_aidm_message';
-  /** Queued onto `GameState.pendingAidmEvents` and surfaced to the next AIDM turn under SCRIPTED EVENTS so the DM can incorporate it into the next reply. */
-  message: string;
-}
+export type TriggerGuard =
+  | { type: 'flag_set'; name: string }
+  | { type: 'flag_unset'; name: string }
+  | { type: 'flag_equals'; name: string; value: WorldFlagValue }
+  | { type: 'hp_below'; ratio: number }
+  | { type: 'enemies_alive'; op: ComparisonOp; count: number }
+  | { type: 'allies_alive'; op: ComparisonOp; count: number }
+  | { type: 'phase'; in: CombatMode[] }
+  /** True when the player's standing with `factionId` satisfies the comparison. Unknown factions default to 0. */
+  | { type: 'faction_standing'; factionId: string; op: ComparisonOp; value: number };
 
 export type TriggerAction =
-  | SpawnEnemyNearPlayerAction
-  | SpawnEnemyAtAction
-  | ShowLogAction
-  | SendAidmMessageAction;
+  | { type: 'spawn_enemy_near_player'; monsterId: string; minDist?: number; maxDist?: number }
+  | { type: 'spawn_enemy_at'; monsterId: string; x: number; y: number }
+  | { type: 'show_log'; message: string }
+  | { type: 'send_aidm_message'; message: string }
+  /** Picks a canned variant from `server/data/narration/{narrationId}.json` and pushes it into the Combat Log. The picker avoids repeating the last-used variant per id. */
+  | { type: 'narrate'; narrationId: string }
+  | { type: 'set_flag'; name: string; value: WorldFlagValue }
+  /** Applies a 5e condition to the player. Future scope: arbitrary target selectors. */
+  | { type: 'apply_condition_to_player'; condition: string }
+  /** Re-publishes a custom event on the bus, allowing one trigger to fan out into others. Only `custom` events are allowed — engine-canonical events (`npc_killed`, `damage_dealt`, …) cannot be forged from authored data. */
+  | { type: 'emit_event'; name: string; payload?: Record<string, unknown> }
+  | { type: 'adjust_faction_standing'; factionId: string; delta: number }
+  | { type: 'record_rumor'; id: string; text: string; salience?: number }
+  /** Promotes (or demotes) every NPC currently in the encounter whose `defId` matches. Faction-mates of a newly hostile NPC are auto-aggroed via the existing `aggroFaction` path. Use together with `trigger_combat` to turn a peaceful scene hostile when the player crosses a threshold. */
+  | { type: 'set_disposition_by_def_id'; defId: string; disposition: 'ally' | 'neutral' | 'enemy' }
+  /** Kicks off combat when the engine is in the exploring phase and at least one enemy is alive. Idempotent — no-ops if either precondition fails. */
+  | { type: 'trigger_combat' };
 
 export interface EncounterTrigger {
   /** Unique within the encounter; used as the dedupe key in `firedTriggerIds`. */
   id: string;
-  condition: TriggerCondition;
-  actions: TriggerAction[];
-  /** When omitted or true, the trigger fires at most once per session. When false, it re-fires on every condition match. */
+  /** Event that wakes the trigger. */
+  when: WhenClause;
+  /** Optional list of world-state guards. ALL must hold for the trigger to fire (logical AND). */
+  if?: TriggerGuard[];
+  /** Ordered list of effects to apply when the trigger fires. */
+  then: TriggerAction[];
+  /** When omitted or true, the trigger fires at most once per session. When false, it re-fires on every match. */
   once?: boolean;
+}
+
+// ── Narration variants ───────────────────────────────────────────────────────
+//
+// One JSON file per narratable moment in server/data/narration/. The
+// `narrate(narrationId)` trigger action picks a variant — avoiding the
+// last-used index when more than one exists — so ordinary deterministic
+// prose feels different on each play without invoking the generative DM.
+
+export interface NarrationDef {
+  id: string;
+  variants: string[];
+  /** Optional per-variant weight (parallel array to `variants`). When omitted, picks are uniform. */
+  weights?: number[];
+}
+
+// ── Factions & rumors ────────────────────────────────────────────────────────
+//
+// Factions are referenced by string id on `NpcState.factionId` and tracked
+// as numeric standings on the player. Authors can read standings via the
+// `faction_standing` guard; the AIDM adjusts them via `adjust_faction_standing`.
+// Rumors are timestamped world events recorded into a global memory log so
+// the DM and triggers can reference them later ("the bandit captain heard
+// what you did to her brothers").
+
+export interface Rumor {
+  /** Stable id — used as the dedupe key when authoring triggers off `rumor_propagated`. */
+  id: string;
+  /** Short human-readable text shown to the DM in CURRENT STATE. */
+  text: string;
+  /** 1–10 importance score. Determines whether the DM should reference it in narration. */
+  salience: number;
+  /** Server-relative timestamp (Date.now() at creation). Lets the DM order references chronologically. */
+  recordedAt: number;
 }
 
 // ── Combat log ───────────────────────────────────────────────────────────────
@@ -775,6 +822,14 @@ export interface GameState {
   firedTriggerIds: string[];
   /** Scripted-event lines queued by `send_aidm_message` actions. Surfaced to the next AIDM turn under the SCRIPTED EVENTS block and cleared once consumed. */
   pendingAidmEvents: string[];
+  /** Authored world flags keyed by name. Written by `set_flag` trigger actions, read by `flag_set` / `flag_unset` / `flag_equals` guards. Persisted with the world save. */
+  worldFlags: Record<string, WorldFlagValue>;
+  /** Last variant index picked per `narrationId`. Used by NarrationSystem to avoid back-to-back repeats. */
+  narrationLastUsed: Record<string, number>;
+  /** Player's standing with each faction (−100..+100). Read by `faction_standing` guards; written by `adjust_faction_standing` AIDM tool. Unknown faction → 0. */
+  factionStandings: Record<string, number>;
+  /** World memory log of significant events, recorded by AIDM `create_rumor` tool or trigger `record_rumor` action. Surfaced to the DM in CURRENT STATE. */
+  rumors: Rumor[];
 }
 
 // ── Reaction prompts ─────────────────────────────────────────────────────────

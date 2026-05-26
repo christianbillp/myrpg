@@ -14,6 +14,7 @@ import {
   canDisengage as guardCanDisengage, canHide as guardCanHide,
   canAttackTarget, playerAttackReachTiles, hasCunningAction,
 } from './ActionGuards.js';
+import { publishNpcDamage } from './ThresholdPublisher.js';
 
 export function doAttack(ctx: GameContext, targetId: string | undefined, events: GameEvent[]): void {
   const s = ctx.state;
@@ -88,7 +89,9 @@ export function doAttack(ctx: GameContext, targetId: string | undefined, events:
 
   const { finalDamage, log: resistLog } = ctx.resistMod(damage, atk.damageType, targetDef, target.name);
   if (resistLog) ctx.addLog(resistLog);
+  const hpBeforeAtk = target.hp;
   target.hp = Math.max(0, target.hp - finalDamage);
+  publishNpcDamage(ctx, target, hpBeforeAtk, target.hp);
   ctx.applyMasteryConditions(target, vexApplied, slowApplied);
 
   // SRD ammunition recovery: per-shot 50% chance the ammo lands recoverable on
@@ -207,7 +210,9 @@ function executeThrowOnTarget(
 
   const { finalDamage, log: resistLog } = ctx.resistMod(damage, attack.damageType, targetDef, target.name);
   if (resistLog) ctx.addLog(resistLog);
+  const hpBeforeThr = target.hp;
   target.hp = Math.max(0, target.hp - finalDamage);
+  publishNpcDamage(ctx, target, hpBeforeThr, target.hp);
   ctx.applyMasteryConditions(target, vexApplied, slowApplied);
   if (target.hp <= 0) ctx.killWithReward(target, targetDef, `☠ ${target.name} is slain!`);
 }
@@ -294,7 +299,9 @@ export function doPlayerOpportunityAttack(ctx: GameContext, npc: NpcState): void
   ctx.addLogs([{ left: `⚡ ${ctx.playerDef.name} makes an Opportunity Attack!`, style: 'header' }, ...logs]);
   const { finalDamage, log: oaResistLog } = ctx.resistMod(damage, ctx.playerDef.mainAttack.damageType, targetDef, npc.name);
   if (oaResistLog) ctx.addLog(oaResistLog);
+  const hpBeforeOa = npc.hp;
   npc.hp = Math.max(0, npc.hp - finalDamage);
+  publishNpcDamage(ctx, npc, hpBeforeOa, npc.hp);
   ctx.applyMasteryConditions(npc, vexApplied, slowApplied);
   if (npc.hp <= 0) ctx.killWithReward(npc, targetDef, `☠ ${npc.name} slain by Opportunity Attack!`, false);
 }
@@ -331,7 +338,9 @@ export function doNpcOpportunityAttack(
   if (isHit) {
     const { finalDamage, log: resistLog } = ctx.resistMod(damage, meleeAtk.damageType, targetDef, target.name);
     if (resistLog) ctx.addLog(resistLog);
+    const hpBeforeNpcOa = target.hp;
     target.hp = Math.max(0, target.hp - finalDamage);
+    publishNpcDamage(ctx, target, hpBeforeNpcOa, target.hp);
     if (target.hp <= 0) ctx.killWithReward(target, targetDef, `☠ ${target.name} slain by Opportunity Attack!`, false);
   }
   void isCrit;

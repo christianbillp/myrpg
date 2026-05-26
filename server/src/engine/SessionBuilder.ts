@@ -201,6 +201,10 @@ export function buildSessionState(
     triggers: req.triggers ?? [],
     firedTriggerIds: [],
     pendingAidmEvents: [],
+    worldFlags: {},
+    narrationLastUsed: {},
+    factionStandings: {},
+    rumors: [],
   };
 
   return state;

@@ -14,7 +14,7 @@
     "frightened_traveller"
   ],
   "customIntroduction": "You and a frightened traveller stand at the near end of a narrow stone bridge spanning a dark gorge. Two cloaked figures block the far end — armed, still, and watching. One steps forward and raises a hand. \"Ten gold,\" he growls, \"or you don't cross.\" The traveller edges close beside you and whispers: \"I'm with you — whatever you decide.\"",
-  "customContext": "Encounter: Bridge Toll Standoff. Two bandits are blocking a narrow stone bridge, demanding 10 gold to pass. A frightened traveller stands alongside the player as an ally and will fight with them if combat breaks out. MECHANICS — Before combat: if the player refuses to pay, call set_disposition on both bandit npcs (to \"enemy\"), then trigger_combat. If the player agrees to pay 10 gold, call award_gold with amount -10, keep bandits neutral, and narrate them stepping aside — no combat. During combat: if the player surrenders and offers 20 gold, call award_gold with amount -20, call set_disposition on both bandits to \"neutral\", then call end_combat — the bandits take the money and let everyone pass. Roleplay the bandits as gruff, opportunistic brigands — firm but not fanatical. They want money, not a fight.",
+  "customContext": "Encounter: Bridge Toll Standoff. Two bandits are blocking a narrow stone bridge, demanding 10 gold to pass. A frightened traveller stands alongside the player as an ally and will fight with them if combat breaks out. MECHANICS — Before combat: if the player refuses to pay, call set_disposition on both bandit npcs (to \"enemy\"), then trigger_combat. If the player agrees to pay 10 gold, call award_gold with amount -10, call set_world_flag with name \"bridge_toll_paid\" and value true (this disarms the cross-the-bridge ambush trigger), keep bandits neutral, and narrate them stepping aside — no combat. During combat: if the player surrenders and offers 20 gold, call award_gold with amount -20, call set_world_flag with name \"bridge_toll_paid\" and value true, call set_disposition on both bandits to \"neutral\", then call end_combat — the bandits take the money and let everyone pass. AMBUSH TRIGGER: an encounter trigger (`bridge_crossed_without_paying`) auto-fires if the player walks onto the far half of the bridge while `bridge_toll_paid` is unset — the bandits become hostile and combat starts. Roleplay the bandits as gruff, opportunistic brigands — firm but not fanatical. They want money, not a fight.",
   "startingZones": {
     "width": 26,
     "height": 12,
@@ -32,5 +32,23 @@
         0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
         0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
       ]
-  }
+  },
+  "triggers": [
+    {
+      "id": "bridge_crossed_without_paying",
+      "when": { "event": "player_moved", "in_area": { "x": 13, "y": 5, "w": 5, "h": 2 } },
+      "if": [
+        { "type": "flag_unset", "name": "bridge_toll_paid" },
+        { "type": "phase", "in": ["exploring"] }
+      ],
+      "then": [
+        { "type": "narrate", "narrationId": "bridge_bandits_attack" },
+        { "type": "set_disposition_by_def_id", "defId": "bridge_bandit", "disposition": "enemy" },
+        { "type": "trigger_combat" },
+        { "type": "set_flag", "name": "bridge_crossed_hostile", "value": true },
+        { "type": "send_aidm_message", "message": "The player tried to walk past the bandits without paying. Both bandits draw weapons and combat begins." }
+      ],
+      "once": true
+    }
+  ]
 }

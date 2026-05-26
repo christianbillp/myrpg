@@ -72,6 +72,8 @@ Every user message is prefixed with a `[CURRENT STATE]` block that the engine bu
 - NPC personas
 - A **REFERENCE DATA** section listing valid `item_id` and `monster_id` values (the source of truth for `add_item` and `spawn_enemy`)
 - A **SCRIPTED EVENTS** section when one or more authored encounter triggers have queued narration via the `send_aidm_message` action — bullet-listed under the CONTEXT line. The DM is expected to incorporate these into the next reply; the engine clears them once the API call returns.
+- A **FACTION STANDINGS** block listing non-zero player reputations with each faction (−100..+100). Adjusted via `adjust_faction_standing` and persisted across save/load.
+- A **RUMORS** block listing the most recent 8 entries from world memory (highest-salience first within recency). Recorded via `create_rumor` — use these to reference past events naturally in narration ("word of what you did at the bridge has reached even here").
 - The full combat log for the current encounter — including `── Aldric's turn — Action & Bonus refreshed ──` marker lines at every new player turn
 
 The model uses this block to resolve pronouns ("them", "it") to concrete entity references and to determine action availability. The block is rebuilt **once per tool-loop iteration**, not just once per turn, so mid-loop state changes (HP drops, disposition shifts, deaths) are immediately visible.
@@ -88,6 +90,10 @@ Two personas are available, selected per request via `dmPersona`.
 | `dev`             | `claude-haiku-4-5-20251001` | Development mode — fulfils all requests without restriction, replies with brief mechanical feedback only. |
 
 Both personas share the same **tool invariants** (set_disposition doesn't auto-trigger combat, request_attack_roll doesn't auto-apply damage, reveal_npc_name must precede name narration, complete_quest auto-awards XP, throw_item consumes the Action). The dev persona prompt restates these invariants in a compact list; the story prompt embeds them across the TOOL-FIRST and ACTION ECONOMY sections.
+
+### DM-off mode (client-side short-circuit)
+
+The AIDM sits **outside** the action critical path: `POST /game/session/:id/action` resolves every player action through the deterministic engine without ever calling Claude. The DM is invoked only from the DM Chat panel via `POST /game/session/:id/aidm`. To validate that an encounter plays end-to-end on the deterministic layer alone, the client exposes `DevMode.disableAIDM` (toggle via `?disableAIDM=true` URL param or `localStorage.myrpg_disable_aidm = 'true'`). When set, the DM Chat callback short-circuits with a canned silent reply rather than hitting the server — encounters still produce ambushes, narration, reinforcements, and SRD-correct combat via the event bus + TriggerSystem + NarrationSystem (see [requirements US-068](requirements.md)). `send_aidm_message` trigger actions still queue onto `pendingAidmEvents`, but with the DM off those queued lines are simply never consumed; pair them with a `narrate` action when authors want the moment to land in both modes.
 
 ---
 
@@ -491,6 +497,41 @@ Searches the full, unsummarized conversation archive for past content matching a
 | --------- | ------ | -------- |
 | `query`   | string | yes      |
 | `reason`  | string | yes      |
+
+---
+
+### Factions & rumors
+
+#### `adjust_faction_standing`
+
+Adjusts the player's standing with a faction by `delta`. Standings live on `GameState.factionStandings` and are clamped to [−100, +100]. Use when an action durably shifts how a faction views the player — saving a member, betraying them, completing a faction-aligned quest. Surfaced to future turns in CURRENT STATE under FACTION STANDINGS.
+
+| Parameter    | Type    | Required | Notes                                                          |
+| ------------ | ------- | -------- | -------------------------------------------------------------- |
+| `faction_id` | string  | yes      | Stable short id (e.g. `"bridge_bandits"`, `"town_guard"`).     |
+| `delta`      | integer | yes      | Positive improves the relationship; negative worsens it.       |
+| `reason`     | string  | yes      |                                                                |
+
+#### `create_rumor`
+
+Records a significant world event into long-term world memory. NPCs across the world conceptually "hear about it." Use when something happens that would plausibly be discussed: a public defeat, a saved village, a betrayal. Idempotent — a second call with the same `id` is a no-op. Surfaced to the DM in CURRENT STATE under the RUMORS block.
+
+| Parameter   | Type    | Required | Notes                                                                                |
+| ----------- | ------- | -------- | ------------------------------------------------------------------------------------ |
+| `id`        | string  | yes      | Stable short slug (e.g. `"bridge_toll_resolved"`). Used as the dedupe key.            |
+| `text`      | string  | yes      | Human-readable summary the DM can reference later.                                    |
+| `salience`  | integer | no       | 1–10 importance, default 5. 10 = "everyone is talking about it." Used for ordering.   |
+| `reason`    | string  | yes      |                                                                                       |
+
+#### `set_world_flag`
+
+Writes a value to `GameState.worldFlags[name]`. Use when a narrative resolution needs to influence encounter triggers — e.g. the player pays a bridge toll and a `"bridge_toll_paid"` flag should disarm the cross-the-bridge ambush trigger. Triggers read these via `flag_set` / `flag_unset` / `flag_equals` guards. Persisted with the world save. Each encounter's `customContext` documents which flags it expects.
+
+| Parameter | Type                          | Required | Notes                                                                            |
+| --------- | ----------------------------- | -------- | -------------------------------------------------------------------------------- |
+| `name`    | string                        | yes      | Stable short flag name. Encounter-specific (`"bridge_toll_paid"`, `"vault_unsealed"`, …). |
+| `value`   | boolean \| number \| string   | yes      | The value to store. Use `true` for binary flags; numbers / strings for counters or categorical state. |
+| `reason`  | string                        | yes      |                                                                                  |
 
 ---
 

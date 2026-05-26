@@ -37,7 +37,10 @@ import { doCastSpell as spDoCastSpell } from './SpellSystem.js';
 import { maybeBreakConcentration } from './ConcentrationSystem.js';
 import { doUseFeature } from './FeatureRegistry.js';
 import { buildSessionState, SavedMapRecord } from './SessionBuilder.js';
-import { evaluateTriggers } from './TriggerSystem.js';
+import { registerTriggers, adjustFactionStanding, recordRumor } from './TriggerSystem.js';
+import { registerDirector } from './Director.js';
+import { EventBus } from './EventBus.js';
+import { publishHpThresholdCrossings } from './ThresholdPublisher.js';
 import { WeaponDef } from './types.js';
 
 export interface ActionResult {
@@ -52,9 +55,11 @@ export class GameEngine {
   private defs: GameDefs;
   private playerDef: PlayerDef;
   private ctx: GameContext;
+  private bus: EventBus;
 
   constructor(state: GameState, defs: GameDefs) {
     this.state = state;
+    this.bus = new EventBus();
     // Clone the player def so per-session equipment mutations never leak into the
     // shared GameDefs (which is reused across every session in the process).
     const sharedDef = defs.playerDefs.find((p) => p.id === state.player.defId)!;
@@ -77,6 +82,12 @@ export class GameEngine {
     }
 
     this.ctx = this.buildCtx();
+    // Register engine-level subscribers AFTER ctx is built so they can
+    // publish further events during their handlers. Director runs at higher
+    // priority than triggers (50 vs -10) so directorial decisions arrive
+    // before authored reactions to the same event.
+    registerDirector(this.ctx);
+    registerTriggers(this.ctx);
   }
 
   private buildCtx(): GameContext {
@@ -102,6 +113,8 @@ export class GameEngine {
       doPlayerOpportunityAttack: (npc) => caDoPlayerOA(this.ctx, npc),
       spawnEnemyNearPlayer: (id, mn, mx) => this.spawnEnemyNearPlayer(id, mn, mx),
       spawnEnemyAt: (id, tx, ty) => this.spawnEnemyAt(id, tx, ty),
+      bus: this.bus,
+      publish: (event) => this.bus.publish(event),
     };
   }
 
@@ -350,6 +363,23 @@ export class GameEngine {
   endCombat(): GameEvent[] { return cfEndCombat(this.ctx); }
   triggerCombat(): GameEvent[] { return cfTriggerCombat(this.ctx); }
 
+  // ── Faction & rumor surfaces (AIDM-tool wiring) ────────────────────────────
+  getFactionStanding(factionId: string): number {
+    return this.state.factionStandings[factionId] ?? 0;
+  }
+  adjustFactionStanding(factionId: string, delta: number): void {
+    adjustFactionStanding(this.ctx, factionId, delta);
+  }
+  recordRumor(id: string, text: string, salience: number): boolean {
+    const had = this.state.rumors.some((r) => r.id === id);
+    recordRumor(this.ctx, id, text, salience);
+    return !had;
+  }
+  setWorldFlag(name: string, value: number | string | boolean): void {
+    this.state.worldFlags[name] = value;
+    this.bus.publish({ type: 'flag_set', name, value });
+  }
+
   throwItem(itemId: string, targetId?: string): GameEvent[] {
     return caThrowItem(this.ctx, itemId, targetId);
   }
@@ -494,6 +524,8 @@ export class GameEngine {
     const hpBefore = s.player.hp;
     s.player.hp = Math.max(0, hpBefore - damage);
     this.addLog({ left: `${this.playerDef.name} HP: ${s.player.hp}/${this.playerDef.maxHp}`, style: 'status' });
+    this.bus.publish({ type: 'damage_dealt', target: 'player', amount: damage });
+    publishHpThresholdCrossings(this.ctx, 'player', hpBefore, s.player.hp, this.playerDef.maxHp);
     // Concentration save: any damage while concentrating triggers a CON save.
     if (s.player.concentratingOn) maybeBreakConcentration(this.ctx, damage);
     if (s.player.hp > 0) return;
@@ -525,7 +557,7 @@ export class GameEngine {
     this.advanceQuest('kill');
     // Fire npc_killed triggers BEFORE autoEndCombatIfNoEnemies so a trigger
     // can spawn reinforcements that prevent combat from auto-ending.
-    evaluateTriggers(this.ctx, { kind: 'npc_killed', npc: dying });
+    this.bus.publish({ type: 'npc_killed', npcId: dying.id, defId: dying.defId });
     this.autoEndCombatIfNoEnemies();
   }
 

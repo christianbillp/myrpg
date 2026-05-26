@@ -2,7 +2,7 @@
 // New types should be added to shared/types.ts, not here.
 export * from '../../../shared/types.js';
 
-import type { PlayerDef, MonsterDef, NPCDef, ItemDef, FeatDef, BackgroundDef, SpeciesDef, SavedMapDef, TileLegend, SpellDef, FeatureDef } from '../../../shared/types.js';
+import type { PlayerDef, MonsterDef, NPCDef, ItemDef, FeatDef, BackgroundDef, SpeciesDef, SavedMapDef, TileLegend, SpellDef, FeatureDef, NarrationDef } from '../../../shared/types.js';
 
 // ── Server-only types ────────────────────────────────────────────────────────
 
@@ -17,6 +17,7 @@ export interface GameDefs {
   species: SpeciesDef[];
   spells: SpellDef[];
   features: FeatureDef[];
+  narration: NarrationDef[];
   /** Merged tile legend(s) from server/data/tilesets/*_legend.json — used as a passability fallback when an encounter omits a GID from its tileProperties. */
   tileLegend: TileLegend;
 }

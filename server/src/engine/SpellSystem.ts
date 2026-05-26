@@ -18,6 +18,7 @@ import { chebyshev } from './EnemyAI.js';
 import { canCastSpell } from './ActionGuards.js';
 import { startConcentration } from './ConcentrationSystem.js';
 import { applyEquipment } from './EquipmentSystem.js';
+import { publishNpcDamage } from './ThresholdPublisher.js';
 import { combatantDisplayName } from './CombatFlow.js';
 
 /** Ability mod for the player's spellcasting ability (defaults to 0 if unset). */
@@ -80,7 +81,9 @@ function applyDamageToNpc(
   if (!def) return;
   const { finalDamage, log: resistLog } = ctx.resistMod(amount, damageType, def, target.name);
   if (resistLog) ctx.addLog(resistLog);
+  const hpBefore = target.hp;
   target.hp = Math.max(0, target.hp - finalDamage);
+  publishNpcDamage(ctx, target, hpBefore, target.hp);
   if (target.hp <= 0) ctx.killWithReward(target, def, `☠ ${combatantDisplayName(target, ctx.state.npcs)} is slain!`);
 }
 

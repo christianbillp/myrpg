@@ -200,8 +200,18 @@ function buildStateMessage(engine: GameEngine): string {
     ? `\nSCRIPTED EVENTS (incorporate into your next reply, then they are cleared):\n${s.pendingAidmEvents.map((m) => `  • ${m}`).join('\n')}\n`
     : '';
 
+  // Faction standings + rumors — long-term world memory. Helps the DM remember
+  // who likes the player and what the world has heard about.
+  const factionLines = Object.entries(s.factionStandings).filter(([, v]) => v !== 0);
+  const factionsBlock = factionLines.length > 0
+    ? `\nFACTION STANDINGS (player's reputation, −100..+100):\n${factionLines.map(([id, v]) => `  ${id}: ${v >= 0 ? '+' : ''}${v}`).join('\n')}\n`
+    : '';
+  const rumorsBlock = s.rumors.length > 0
+    ? `\nRUMORS (world memory, newest first — reference when narratively apt):\n${[...s.rumors].sort((a, b) => b.recordedAt - a.recordedAt).slice(0, 8).map((r) => `  • [${r.id}] (sal ${r.salience}) ${r.text}`).join('\n')}\n`
+    : '';
+
   return `SETTING: ${s.mapName} | PHASE: ${s.phase} | ENCOUNTER: ${s.encounterTypes.join(', ')}
-CONTEXT: ${s.encounterContext}${scriptedEvents}
+CONTEXT: ${s.encounterContext}${scriptedEvents}${factionsBlock}${rumorsBlock}
 
 PLAYER: tile (${p.tileX},${p.tileY}) · HP ${p.hp} · ${p.gold} GP · ${flags || 'no flags'}
   Inventory: ${p.inventoryIds.join(', ') || 'empty'}

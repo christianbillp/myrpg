@@ -77,6 +77,7 @@ const defs: GameDefs = {
   species: [],
   spells: [],
   features: [],
+  narration: [],
   tileLegend: { notes: "", tiles: {} },
 };
 
@@ -92,6 +93,7 @@ async function loadDefs(): Promise<void> {
     species,
     spells,
     features,
+    narration,
   ] = await Promise.all([
     readDir<GameDefs["playerDefs"][0]>(join(DATA_DIR, "characters")),
     readDir<GameDefs["monsters"][0]>(join(DATA_DIR, "monsters")),
@@ -103,7 +105,12 @@ async function loadDefs(): Promise<void> {
     readDir<GameDefs["species"][0]>(join(DATA_DIR, "species")),
     readDir<GameDefs["spells"][0]>(join(DATA_DIR, "spells")),
     readDir<GameDefs["features"][0]>(join(DATA_DIR, "features")),
-  ]);
+    readDir<GameDefs["narration"][0]>(join(DATA_DIR, "narration")),
+  ]) as [
+    GameDefs["playerDefs"], GameDefs["monsters"], GameDefs["npcs"], GameDefs["equipment"],
+    TiledMapFile[], GameDefs["feats"], GameDefs["backgrounds"], GameDefs["species"],
+    GameDefs["spells"], GameDefs["features"], GameDefs["narration"],
+  ];
   defs.playerDefs = playerDefs;
   defs.monsters = monsters;
   defs.npcs = npcs;
@@ -113,6 +120,7 @@ async function loadDefs(): Promise<void> {
   defs.species = species;
   defs.spells = spells;
   defs.features = features;
+  defs.narration = narration;
   for (const p of defs.playerDefs) {
     applySpecies(p, defs.species);
     applyFeats(p, defs.feats);
@@ -439,7 +447,22 @@ async function loadWorldState(): Promise<{
     mageArmor: false,
   };
   const aidmHistory = worldSave.aidmHistory ?? [];
-  return { state: { ...worldSave, player: fullPlayer }, aidmHistory };
+  // Backfill GameState fields added since the save was written. World saves
+  // from before the living-world layer landed lack these — without defaults,
+  // first publish on the bus would crash on undefined.
+  const state: GameState = {
+    ...worldSave,
+    player: fullPlayer,
+    pendingReaction: worldSave.pendingReaction ?? null,
+    triggers: worldSave.triggers ?? [],
+    firedTriggerIds: worldSave.firedTriggerIds ?? [],
+    pendingAidmEvents: worldSave.pendingAidmEvents ?? [],
+    worldFlags: worldSave.worldFlags ?? {},
+    narrationLastUsed: worldSave.narrationLastUsed ?? {},
+    factionStandings: worldSave.factionStandings ?? {},
+    rumors: worldSave.rumors ?? [],
+  };
+  return { state, aidmHistory };
 }
 
 async function deleteWorldSave(): Promise<void> {
