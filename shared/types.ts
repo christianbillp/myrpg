@@ -508,6 +508,18 @@ export interface EncounterDef {
   mapId: string;
   npcIds?: string[];
   allyIds?: string[];
+  /**
+   * Creature def ids spawned as hostile combatants. Each id is resolved
+   * against the NPC roster first, then the monster roster, so encounters
+   * can mix named NPCs (e.g. `bridge_bandit`) and raw monster defs
+   * (`bandit`, `wolf`) freely. Unlike `npcIds`, these spawn regardless of
+   * encounter type and get `disposition: 'enemy'` plus an assigned
+   * combat label. Used by the deterministic compose-encounter flow on
+   * `GenerateSetupScene` so the player's hand-picked enemies appear
+   * exactly as chosen (instead of the legacy random-monster spawn that
+   * keys off `encounterContext.enemyCount`).
+   */
+  enemyIds?: string[];
   customIntroduction?: string;
   customContext?: string;
   /**
@@ -524,6 +536,20 @@ export interface EncounterDef {
    * See `server/src/engine/TriggerSystem.ts` for the runtime evaluator.
    */
   triggers?: EncounterTrigger[];
+  /**
+   * Player-facing one-line objective shown at the top of the Quests panel
+   * ("OBJECTIVE: Defeat the bandits", "OBJECTIVE: Investigate the dungeon").
+   * Optional — when omitted, a default is derived from `encounterTypes` by
+   * `buildEncounter` in `encounterService.ts`.
+   */
+  objective?: string;
+  /**
+   * True when the encounter file was authored by the AI generator (see
+   * `server/src/encounterGenerator.ts`). Renders a `✦ GENERATED` badge on
+   * the Encounter Setup card so the player can distinguish hand-authored
+   * scenarios from one-offs.
+   */
+  generated?: boolean;
 }
 
 // ── Engine event bus ─────────────────────────────────────────────────────────
@@ -587,6 +613,8 @@ export type TriggerGuard =
   | { type: 'hp_below'; ratio: number }
   | { type: 'enemies_alive'; op: ComparisonOp; count: number }
   | { type: 'allies_alive'; op: ComparisonOp; count: number }
+  /** True when the number of living NPCs with the matching `defId` satisfies the comparison. Use to gate ambush triggers on "at least one bandit is still alive" or to detect "the boss is dead" regardless of disposition. */
+  | { type: 'npcs_alive'; defId: string; op: ComparisonOp; count: number }
   | { type: 'phase'; in: CombatMode[] }
   /** True when the player's standing with `factionId` satisfies the comparison. Unknown factions default to 0. */
   | { type: 'faction_standing'; factionId: string; op: ComparisonOp; value: number };
@@ -655,6 +683,67 @@ export interface Rumor {
   salience: number;
   /** Server-relative timestamp (Date.now() at creation). Lets the DM order references chronologically. */
   recordedAt: number;
+}
+
+// ── Adventures ───────────────────────────────────────────────────────────────
+//
+// An adventure is a string of encounters with overarching narrative and
+// cross-chapter state (world flags, faction standings, rumors, DM-summary
+// memory). Each chapter references an existing `EncounterDef`; chapters are
+// linear by default and an optional `unlockedBy` guard lets later chapters
+// gate on world flags for soft branching. Authored in
+// `server/data/adventures/*.json`; the live adventure save for a character
+// lives in `server/data/saves/{characterId}_adventure.json`.
+
+export interface AdventureChapter {
+  /** Unique within the adventure. Used in save files and chapter-advance routes. */
+  id: string;
+  /** Title shown in HUD + setup-screen progress dots. */
+  title: string;
+  /** Encounter id from `server/data/encounters/`. */
+  encounterId: string;
+  /**
+   * Optional guard: if present, the chapter only unlocks when the guard
+   * holds. `flag_set: name` means worldFlags[name] is defined; `flag_equals`
+   * checks value. Lets adventure authors gate chapters on choices in
+   * earlier chapters.
+   */
+  unlockedBy?:
+    | { flag_set: string }
+    | { flag_equals: { name: string; value: WorldFlagValue } };
+  /**
+   * Optional named flag that, when set, marks this chapter complete (in
+   * addition to the default combat-ended detection). Lets exploration /
+   * dialogue chapters define their own completion condition.
+   */
+  completionFlag?: string;
+}
+
+export interface AdventureDef {
+  id: string;
+  title: string;
+  description: string;
+  /** Player-facing prose shown on the adventure card and in the intro overlay before chapter 1. */
+  introduction: string;
+  chapters: AdventureChapter[];
+}
+
+/** Persisted at `server/data/saves/{characterId}_adventure.json`. Holds the cross-chapter state that survives a chapter transition. */
+export interface AdventureSave {
+  characterId: string;
+  adventureId: string;
+  /** Index into `AdventureDef.chapters` for the chapter currently in progress (or just completed). */
+  currentChapterIndex: number;
+  /** Ids of chapters that have been completed. */
+  completedChapterIds: string[];
+  /** Cross-chapter world flags. Seeds `GameState.worldFlags` when each chapter session starts. */
+  worldFlags: Record<string, WorldFlagValue>;
+  /** Cross-chapter faction standings. Seeds `GameState.factionStandings`. */
+  factionStandings: Record<string, number>;
+  /** Cross-chapter rumors. Seeds `GameState.rumors`. */
+  rumors: Rumor[];
+  /** Short DM-authored summaries of completed chapters, surfaced to the AIDM in later chapters under PRIOR CHAPTERS. */
+  priorChapterSummaries: Array<{ chapterId: string; chapterTitle: string; summary: string }>;
 }
 
 // ── Combat log ───────────────────────────────────────────────────────────────
@@ -806,6 +895,8 @@ export interface GameState {
   encounterTypes: EncounterType[];
   mapName: string;
   encounterTitle: string;
+  /** Player-facing one-line goal for this encounter, shown atop the Quests panel. */
+  objective: string;
   quests: QuestState[];
   selectedTargetId: string | null;
   activeNpcIndex: number;
@@ -830,6 +921,23 @@ export interface GameState {
   factionStandings: Record<string, number>;
   /** World memory log of significant events, recorded by AIDM `create_rumor` tool or trigger `record_rumor` action. Surfaced to the DM in CURRENT STATE. */
   rumors: Rumor[];
+  /** Set when the current session is a chapter of an adventure. Drives the END CHAPTER button and the chapter-advance flow. Null for single-encounter sessions. */
+  adventureContext: AdventureSessionContext | null;
+  /** Set true when the active chapter has been resolved (combat-ended or `completionFlag` set). Drives the END CHAPTER button. */
+  chapterComplete: boolean;
+}
+
+export interface AdventureSessionContext {
+  adventureId: string;
+  adventureTitle: string;
+  chapterId: string;
+  chapterTitle: string;
+  chapterIndex: number;
+  totalChapters: number;
+  /** Short summaries of previously completed chapters; surfaced to the AIDM under PRIOR CHAPTERS. Empty for chapter 1. */
+  priorChapterSummaries: Array<{ chapterId: string; chapterTitle: string; summary: string }>;
+  /** Optional named flag that, when set, marks the chapter complete in addition to the default combat-ended detection. Mirrors `AdventureChapter.completionFlag`. */
+  completionFlag?: string;
 }
 
 // ── Reaction prompts ─────────────────────────────────────────────────────────
@@ -929,11 +1037,20 @@ export interface CreateSessionRequest {
   savedMapDescription?: string;
   npcIds?: string[];
   allyIds?: string[];
+  /** Hand-picked hostile creature ids — see EncounterDef.enemyIds. */
+  enemyIds?: string[];
   customIntroduction?: string;
   customContext?: string;
+  customObjective?: string;
   tileProperties?: EncounterTileProperty[];
   startingZones?: StartingZonesLayer;
   triggers?: EncounterTrigger[];
+  /** Seed adventure-scope state on session creation. Set when the new session is a chapter of an in-progress adventure. */
+  adventureSeed?: AdventureSessionContext & {
+    seedWorldFlags?: Record<string, WorldFlagValue>;
+    seedFactionStandings?: Record<string, number>;
+    seedRumors?: Rumor[];
+  };
   resumeHp?: number;
   resumeXp?: number;
   resumeGold?: number;

@@ -38,4 +38,11 @@ export interface GameContext {
   readonly bus: EventBus;
   /** Convenience shorthand for `ctx.bus.publish(event)`. */
   publish(event: EngineEvent): void;
+
+  /**
+   * Removes an NPC from the encounter entirely (not killed — they escaped).
+   * Used when a fleeing creature reaches the map edge. The NPC is filtered
+   * out of `state.npcs`; combat auto-ends if no enemies remain.
+   */
+  removeNpc(id: string): void;
 }

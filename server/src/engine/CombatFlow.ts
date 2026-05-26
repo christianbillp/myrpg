@@ -6,7 +6,7 @@ import { isIncapacitated, isVisible, hasSpeedZero, proneStandCost, TURN_CONDITIO
 import { mod, d20 as d20Local } from './Dice.js';
 import { doNpcOpportunityAttack } from './CombatActions.js';
 import { publishNpcDamage } from './ThresholdPublisher.js';
-import { chooseNpcBehavior, fleeFromThreat } from './NpcBrain.js';
+import { chooseNpcBehavior, fleeFromThreat, isMapEdge } from './NpcBrain.js';
 
 // ── Combat lifecycle ────────────────────────────────────────────────────────
 
@@ -316,6 +316,11 @@ function runSingleEnemyTurn(ctx: GameContext, npc: NpcState, events: GameEvent[]
     ctx.addLog({ left: `${combatantDisplayName(npc, s.npcs)} breaks and flees!`, style: 'status' });
     finalizeNpcTurn(ctx, npc);
     ctx.publish({ type: 'turn_ended', combatantId: npc.id });
+    // Escape off the map edge — the creature leaves the encounter entirely.
+    if (isMapEdge(ctx, npc.tileX, npc.tileY)) {
+      ctx.addLog({ left: `${combatantDisplayName(npc, s.npcs)} escapes off the map edge — gone.`, style: 'status' });
+      ctx.removeNpc(npc.id);
+    }
     return;
   }
   // behavior === 'attack' — fall through to the existing AI loop.
@@ -545,6 +550,10 @@ function runSingleAllyTurn(ctx: GameContext, ally: NpcState, events: GameEvent[]
       ally.tileY = flee.finalTileY;
       ctx.addLog({ left: `${combatantDisplayName(ally, s.npcs)} breaks and flees!`, style: 'status' });
       ctx.publish({ type: 'turn_ended', combatantId: ally.id });
+      if (isMapEdge(ctx, ally.tileX, ally.tileY)) {
+        ctx.addLog({ left: `${combatantDisplayName(ally, s.npcs)} escapes off the map edge — gone.`, style: 'status' });
+        ctx.removeNpc(ally.id);
+      }
       return;
     }
   }

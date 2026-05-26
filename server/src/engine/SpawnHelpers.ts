@@ -120,13 +120,27 @@ export function spawnItems(
 export function spawnNpc(
   out: NpcState[], map: GameMap, npcDefs: NPCDef[], monsters: MonsterDef[],
   defId: string, px: number, py: number,
-  disposition: 'neutral' | 'ally' = 'neutral',
+  disposition: 'neutral' | 'ally' | 'enemy' = 'neutral',
   zone?: Zone,
 ): void {
+  // Resolve the def: NPC roster first (named characters with personas),
+  // then the monster roster (raw creature stats). This lets the
+  // deterministic compose-encounter flow pass monster ids directly into
+  // allyIds / enemyIds without authoring an NPC wrapper for each one.
   const npcDef = npcDefs.find((n) => n.id === defId);
-  if (!npcDef) return;
-  const monsterDef = monsters.find((m) => m.id === npcDef.monsterClass);
-  const maxHp = monsterDef?.maxHp ?? 8;
+  let name: string;
+  let maxHp: number;
+  if (npcDef) {
+    name = npcDef.name;
+    const monsterDef = monsters.find((m) => m.id === npcDef.monsterClass);
+    maxHp = monsterDef?.maxHp ?? 8;
+  } else {
+    const monsterDef = monsters.find((m) => m.id === defId);
+    if (!monsterDef) return;
+    name = monsterDef.name;
+    maxHp = monsterDef.maxHp;
+  }
+
   const occupied = new Set<string>([
     `${px},${py}`,
     ...out.map((n) => `${n.tileX},${n.tileY}`),
@@ -141,6 +155,8 @@ export function spawnNpc(
     for (let r = 0; r < rows; r++)
       for (let c = 0; c < cols; c++) {
         const dist = chebyshev(c, r, px, py);
+        // Distance gate by disposition: allies hug close (1-3 tiles), enemies
+        // start at sniping range (≥5), neutrals likewise stay back.
         const inRange = disposition === 'ally' ? dist >= 1 && dist <= 3 : dist >= 5;
         if (passable[r][c] && inRange && !occupied.has(`${c},${r}`))
           candidates.push([c, r]);
@@ -149,13 +165,21 @@ export function spawnNpc(
 
   if (candidates.length === 0) return;
   const [nx, ny] = candidates[Math.floor(Math.random() * candidates.length)];
+
+  // Enemies need a unique combatLabel ("A", "B", …) for combat-log readability.
+  let combatLabel = '';
+  if (disposition === 'enemy') {
+    const enemyCount = out.filter((n) => n.disposition === 'enemy').length;
+    combatLabel = String.fromCharCode(65 + enemyCount);
+  }
+
   out.push({
-    id: `${defId}_${out.length}`,
+    id: disposition === 'enemy' ? `enemy_${out.filter((n) => n.disposition === 'enemy').length}` : `${defId}_${out.length}`,
     defId,
-    name: npcDef.name,
+    name,
     tileX: nx, tileY: ny,
     disposition, factionId: defId,
-    combatLabel: '',
+    combatLabel,
     hp: maxHp, maxHp,
     isActive: false,
     reactionUsed: false, conditions: [], inventoryIds: [],

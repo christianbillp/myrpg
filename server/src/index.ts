@@ -12,6 +12,8 @@ import { join, dirname } from "path";
 import { fileURLToPath } from "url";
 import { randomUUID } from "crypto";
 import { buildEncounter } from "./encounterService.js";
+import { generateEncounter, generateMap } from "./encounterGenerator.js";
+import { composeMap, type Terrain, type Feature } from "./engine/MapComposer.js";
 import { processAIDMChat, AIDMChatRequest } from "./aidm.js";
 import {
   generateStorylog,
@@ -40,6 +42,7 @@ import {
   tryAcquireAidmLock,
   releaseAidmLock,
   getAidmArchive,
+  findSessionByCharacter,
 } from "./sessions.js";
 import type { AidmMessage } from "./sessions.js";
 import type {
@@ -48,6 +51,11 @@ import type {
   GameState,
   PlayerState,
   EquipmentSlots,
+  AdventureDef,
+  AdventureSave,
+  AdventureSessionContext,
+  WorldFlagValue,
+  Rumor,
 } from "./engine/types.js";
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
@@ -312,6 +320,398 @@ server.get("/species", async () => defs.species);
 server.get("/spells", async () => defs.spells);
 server.get("/features", async () => defs.features);
 server.get("/encounters", async () => readDir(join(DATA_DIR, "encounters")));
+server.get("/adventures", async () => readDir(join(DATA_DIR, "adventures")));
+
+/**
+ * Generate a brand-new encounter (map + EncounterDef) via the AI generator
+ * and persist both files under `server/data/maps/` and `server/data/encounters/`
+ * with `gen_<timestamp>_<slug>` ids. After writing, `loadDefs()` is re-run so
+ * the new map is available for the next session-create. Returns the new
+ * `encounterId` (and `mapId`) on success; 400 with an error string on
+ * validation failure.
+ */
+/**
+ * Compose a map from deterministic toggles (terrain + features) — the
+ * Adjudicator-layer alternative to the AI map generator. Uses the support
+ * primitives in `engine/MapComposer.ts` and writes the result to disk under
+ * the same `gen_<timestamp>_<slug>` namespace so it shows up in the encounter
+ * setup screen alongside AI-generated maps.
+ */
+server.post<{
+  Body: { terrain: Terrain; features: Feature[]; width?: number; height?: number; seed?: number };
+}>("/generate/map/composed", async (req, reply) => {
+  const { terrain, features, width = 30, height = 22, seed } = req.body;
+  if (!terrain || (terrain !== 'grassland' && terrain !== 'forest')) {
+    return reply.code(400).send({ error: "terrain must be 'grassland' or 'forest'" });
+  }
+  try {
+    const composed = composeMap({ width, height, terrain, features: features ?? [], seed });
+    const stamp = Date.now();
+    const slug = composed.name.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 32) || 'map';
+    const mapId = `gen_${stamp}_${slug}`;
+    const hasObjects = composed.objectData.some((g) => g !== 0);
+    const layers: unknown[] = [
+      { type: 'tilelayer', name: 'terrain', width: composed.width, height: composed.height, data: composed.terrainData },
+    ];
+    if (hasObjects) {
+      layers.push({ type: 'tilelayer', name: 'objects', width: composed.width, height: composed.height, data: composed.objectData });
+    }
+    const mapJson = {
+      id: mapId,
+      name: composed.name,
+      mapdescription: composed.description,
+      width: composed.width,
+      height: composed.height,
+      tilesets: [{ firstgid: 1, source: '../tilesets/scribble.tsj' }],
+      layers,
+    };
+    await mkdir(join(DATA_DIR, 'maps'), { recursive: true });
+    await writeFile(join(DATA_DIR, 'maps', `${mapId}.json`), JSON.stringify(mapJson, null, 2));
+    await loadDefs();
+    return reply.send({
+      mapId,
+      width: composed.width,
+      height: composed.height,
+      terrainData: composed.terrainData,
+      objectData: composed.objectData,
+      name: composed.name,
+      description: composed.description,
+    });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error('[generate/map/composed] failed', msg);
+    return reply.code(400).send({ error: msg });
+  }
+});
+
+/**
+ * Compose a full encounter (map + encounter shell) deterministically — no
+ * Claude call. The encounter wrapper is a minimal JSON that references the
+ * freshly composed map: the player spawns on a passable tile, no NPCs or
+ * monsters are placed, and the `customContext` carries whatever description
+ * the player typed so the in-game AIDM can take it from there. Used by the
+ * Deterministic tab on `GenerateSetupScene`.
+ */
+server.post<{
+  Body: {
+    existingMapId?: string;
+    terrain?: Terrain;
+    features?: Feature[];
+    width?: number;
+    height?: number;
+    seed?: number;
+    encounterTypes?: import("./encounterService.js").EncounterType[];
+    description?: string;
+    /** Flat row-major starting zones array (length = w*h). Values 0..4 per
+     * the standard zone encoding (1 = player, 2 = ally, 4 = enemy). When
+     * omitted the server picks the first passable cell as the lone player
+     * zone (fallback path used by older callers / direct API hits). */
+    startingZonesData?: number[];
+    /** Monster def ids spawned as allies (friendly disposition). */
+    allyIds?: string[];
+    /** Monster / NPC def ids spawned as enemies. */
+    enemyIds?: string[];
+  };
+}>("/generate/encounter/composed", async (req, reply) => {
+  const { existingMapId, terrain, features, width = 30, height = 22, seed, encounterTypes, description, startingZonesData, allyIds, enemyIds } = req.body;
+  const types = (encounterTypes && encounterTypes.length > 0)
+    ? encounterTypes
+    : (['exploration'] as import("./encounterService.js").EncounterType[]);
+  const isCombat = types.includes('simple_combat');
+  try {
+    // Resolve the map: either reuse an existing one (gen_* or hand-authored)
+    // or compose a fresh one with the supplied toggles.
+    let mapId: string;
+    let mapWidth: number;
+    let mapHeight: number;
+    let terrainData: number[];
+    let objectData: number[];
+    let mapName: string;
+    let mapDescription: string;
+    let slug: string;
+
+    if (existingMapId) {
+      const existing = defs.maps.find((m) => m.id === existingMapId);
+      if (!existing) {
+        return reply.code(400).send({ error: `Unknown existingMapId "${existingMapId}"` });
+      }
+      mapId = existing.id;
+      mapWidth = existing.cols;
+      mapHeight = existing.rows;
+      // Flatten the loaded grid arrays into row-major flat arrays so we can
+      // re-use the same per-cell logic as the freshly-composed branch.
+      terrainData = existing.gidGrid.flat();
+      objectData = existing.objectGidGrid?.flat() ?? new Array<number>(mapWidth * mapHeight).fill(0);
+      mapName = existing.name ?? mapId;
+      mapDescription = existing.mapdescription ?? "";
+      slug = mapId.replace(/^gen_\d+_/, '').slice(0, 32) || 'scene';
+    } else {
+      if (!terrain || (terrain !== 'grassland' && terrain !== 'forest')) {
+        return reply.code(400).send({ error: "terrain must be 'grassland' or 'forest'" });
+      }
+      const composed = composeMap({ width, height, terrain, features: features ?? [], seed });
+      const stamp = Date.now();
+      slug = composed.name.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 32) || 'scene';
+      mapId = `gen_${stamp}_${slug}`;
+      mapWidth = composed.width;
+      mapHeight = composed.height;
+      terrainData = composed.terrainData;
+      objectData = composed.objectData;
+      mapName = composed.name;
+      mapDescription = composed.description;
+      const hasObjects = composed.objectData.some((g) => g !== 0);
+      const layers: unknown[] = [
+        { type: 'tilelayer', name: 'terrain', width: composed.width, height: composed.height, data: composed.terrainData },
+      ];
+      if (hasObjects) {
+        layers.push({ type: 'tilelayer', name: 'objects', width: composed.width, height: composed.height, data: composed.objectData });
+      }
+      const mapJson = {
+        id: mapId,
+        name: composed.name,
+        mapdescription: composed.description,
+        width: composed.width,
+        height: composed.height,
+        tilesets: [{ firstgid: 1, source: '../tilesets/scribble.tsj' }],
+        layers,
+      };
+      await mkdir(join(DATA_DIR, 'maps'), { recursive: true });
+      await writeFile(join(DATA_DIR, 'maps', `${mapId}.json`), JSON.stringify(mapJson, null, 2));
+    }
+
+    // Build startingZones. If the caller supplied a zone array, validate +
+    // use it as-is; otherwise fall back to the legacy first-passable rule.
+    const cells = mapWidth * mapHeight;
+    let zoneData: number[];
+    if (startingZonesData && startingZonesData.length > 0) {
+      if (startingZonesData.length !== cells) {
+        return reply.code(400).send({ error: `startingZonesData length ${startingZonesData.length} ≠ width*height (${cells})` });
+      }
+      if (!startingZonesData.some((z) => z === 1)) {
+        return reply.code(400).send({ error: "startingZonesData must include at least one player-start (value 1) cell" });
+      }
+      zoneData = startingZonesData;
+    } else {
+      zoneData = new Array<number>(cells).fill(0);
+      const legend = defs.tileLegend.tiles;
+      for (let i = 0; i < terrainData.length; i++) {
+        const gid = terrainData[i] & 0x1fffffff;
+        const objGid = (objectData[i] ?? 0) & 0x1fffffff;
+        const groundPassable = (legend[String(gid)] as { passable?: boolean } | undefined)?.passable === true;
+        const objectPassable = objGid === 0 || (legend[String(objGid)] as { passable?: boolean } | undefined)?.passable === true;
+        if (groundPassable && objectPassable) { zoneData[i] = 1; break; }
+      }
+    }
+
+    // Validate ally/enemy ids against the monster + NPC rosters.
+    const validIds = new Set([...defs.monsters.map((m) => m.id), ...defs.npcs.map((n) => n.id)]);
+    const safeAlly = (allyIds ?? []).filter((id) => validIds.has(id));
+    const safeEnemy = (enemyIds ?? []).filter((id) => validIds.has(id));
+    for (const id of [...(allyIds ?? []), ...(enemyIds ?? [])]) {
+      if (!validIds.has(id)) {
+        return reply.code(400).send({ error: `Unknown creature id "${id}" — not in monsters/ or npcs/` });
+      }
+    }
+
+    const stamp = Date.now();
+    const encounterId = `gen_${stamp}_${slug}`;
+    const encounterJson = {
+      id: encounterId,
+      encounterTitle: mapName,
+      description: mapDescription,
+      encounterTypes: types,
+      mapId,
+      npcIds: [] as string[],     // reserved for neutral NPCs (social encounters)
+      allyIds: safeAlly,
+      enemyIds: safeEnemy,
+      customIntroduction: "",
+      customContext: description?.trim() ?? "",
+      objective: description?.trim() ? description.trim().split(/[.!?]/)[0].slice(0, 80) : (isCombat ? "Survive the encounter." : "Explore the area."),
+      completionFlag: isCombat ? undefined : `${slug}_resolved`,
+      generated: true,
+      startingZones: { width: mapWidth, height: mapHeight, data: zoneData },
+    };
+
+    await mkdir(join(DATA_DIR, 'encounters'), { recursive: true });
+    await writeFile(join(DATA_DIR, 'encounters', `${encounterId}.json`), JSON.stringify(encounterJson, null, 2));
+    await loadDefs();
+    return reply.send({
+      mapId,
+      encounterId,
+      width: mapWidth,
+      height: mapHeight,
+      terrainData,
+      objectData,
+      name: mapName,
+      description: mapDescription,
+    });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error('[generate/encounter/composed] failed', msg);
+    return reply.code(400).send({ error: msg });
+  }
+});
+
+/**
+ * Generate just a map (no encounter wrapper). Used by the GENERATE MAP
+ * iteration flow on `GenerateSetupScene` — the player can preview the
+ * layout and regenerate until satisfied. The map is written to disk
+ * (`server/data/maps/gen_<timestamp>_<slug>.json`) and `loadDefs()` is
+ * re-run so the new map is immediately available for use in custom
+ * encounters. Returns the full map payload so the client can render the
+ * preview without an extra fetch.
+ */
+server.post<{
+  Body: { prompt: string };
+}>("/generate/map", async (req, reply) => {
+  const { prompt } = req.body;
+  if (!prompt || prompt.trim().length < 8) {
+    return reply.code(400).send({ error: "prompt must be at least 8 characters" });
+  }
+  try {
+    const result = await generateMap(anthropic, defs, { prompt });
+    await loadDefs();
+    return reply.send(result);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error("[generate/map] failed", msg);
+    return reply.code(400).send({ error: msg });
+  }
+});
+
+server.post<{
+  Body: { prompt: string; encounterTypes?: import("./encounterService.js").EncounterType[]; playerName?: string; playerClassName?: string };
+}>("/generate/encounter", async (req, reply) => {
+  const { prompt, encounterTypes, playerName, playerClassName } = req.body;
+  if (!prompt || prompt.trim().length < 8) {
+    return reply.code(400).send({ error: "prompt must be at least 8 characters" });
+  }
+  try {
+    const result = await generateEncounter(anthropic, defs, { prompt, encounterTypes, playerName, playerClassName });
+    // Refresh in-memory defs so the new map joins `defs.maps`; encounters are
+    // read from disk on demand by the session-create path so no extra wiring
+    // is needed for them.
+    await loadDefs();
+    return reply.send(result);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error("[generate/encounter] failed", msg);
+    return reply.code(400).send({ error: msg });
+  }
+});
+
+/**
+ * Delete every generated map and encounter — the `gen_*` namespace. Used by
+ * the dev-mode "Delete all generated maps" button on `GenerateSetupScene` so
+ * the maps list doesn't accumulate clutter while iterating on prompts.
+ * Returns the count of files deleted in each namespace.
+ */
+server.delete("/generate/maps/all", async (_req, reply) => {
+  const mapsDir = join(DATA_DIR, "maps");
+  const encDir = join(DATA_DIR, "encounters");
+  let mapsDeleted = 0;
+  let encountersDeleted = 0;
+  try {
+    const mapFiles = await readdir(mapsDir);
+    for (const f of mapFiles) {
+      if (f.startsWith("gen_") && f.endsWith(".json")) {
+        await unlink(join(mapsDir, f));
+        mapsDeleted++;
+      }
+    }
+    const encFiles = await readdir(encDir);
+    for (const f of encFiles) {
+      if (f.startsWith("gen_") && f.endsWith(".json")) {
+        await unlink(join(encDir, f));
+        encountersDeleted++;
+      }
+    }
+    await loadDefs();
+    return reply.send({ mapsDeleted, encountersDeleted });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error("[generate/maps/all] failed", msg);
+    return reply.code(500).send({ error: msg });
+  }
+});
+
+// Adventure routes — see types AdventureDef / AdventureSave in shared/types.ts.
+server.get<{ Params: { characterId: string } }>(
+  "/adventure/:characterId",
+  async (req) => (await readAdventureSave(req.params.characterId)) ?? null,
+);
+
+server.delete<{ Params: { characterId: string } }>(
+  "/adventure/:characterId",
+  async (req, reply) => {
+    await deleteAdventureSave(req.params.characterId);
+    reply.code(204).send();
+  },
+);
+
+server.post<{ Body: { characterId: string; adventureId: string } }>(
+  "/adventure/start",
+  async (req, reply) => {
+    const { characterId, adventureId } = req.body;
+    const adv = await loadAdventureDef(adventureId);
+    if (!adv) return reply.code(404).send({ error: "Unknown adventureId" });
+    let save = await readAdventureSave(characterId);
+    if (!save || save.adventureId !== adventureId) {
+      save = makeAdventureSave(characterId, adventureId);
+      await writeAdventureSave(save);
+    }
+    const result = await startAdventureChapter(characterId, adv, save);
+    if ("error" in result) return reply.code(400).send(result);
+    return reply.send(result);
+  },
+);
+
+server.post<{ Params: { characterId: string } }>(
+  "/adventure/:characterId/advance",
+  async (req, reply) => {
+    const { characterId } = req.params;
+    const save = await readAdventureSave(characterId);
+    if (!save) return reply.code(404).send({ error: "No active adventure for this character" });
+    const adv = await loadAdventureDef(save.adventureId);
+    if (!adv) return reply.code(404).send({ error: "Adventure definition missing" });
+    const chapter = adv.chapters[save.currentChapterIndex];
+    if (!chapter) return reply.code(400).send({ error: "No current chapter" });
+
+    // Pull the AIDM history of the just-completed chapter from the active
+    // session (if still in memory) for summarization, and capture the final
+    // state of cross-chapter fields so they carry forward.
+    const found = findSessionByCharacter(characterId);
+    const aidmHistory = found?.session.aidmHistory ?? [];
+    if (found) {
+      const finishedState = found.session.engine.getState();
+      save.worldFlags = { ...finishedState.worldFlags };
+      save.factionStandings = { ...finishedState.factionStandings };
+      save.rumors = [...finishedState.rumors];
+      deleteSession(found.sessionId);
+    }
+
+    // Summarize + mark complete.
+    const summary = await summarizeChapter(chapter.title, aidmHistory);
+    save.priorChapterSummaries.push({ chapterId: chapter.id, chapterTitle: chapter.title, summary });
+    if (!save.completedChapterIds.includes(chapter.id)) save.completedChapterIds.push(chapter.id);
+    save.currentChapterIndex += 1;
+
+    // Wipe the just-completed world save so resume routing doesn't snap back.
+    await deleteWorldSave();
+
+    if (save.currentChapterIndex >= adv.chapters.length) {
+      // Adventure complete — keep the save around so the client can show a
+      // completion overlay but signal done to the client.
+      await writeAdventureSave(save);
+      return reply.send({ complete: true, save });
+    }
+
+    await writeAdventureSave(save);
+    const result = await startAdventureChapter(characterId, adv, save);
+    if ("error" in result) return reply.code(400).send(result);
+    return reply.send({ complete: false, ...result });
+  },
+);
 server.get("/maps", async () => defs.maps);
 server.get("/health", async () => ({ ok: true }));
 
@@ -342,6 +742,10 @@ import { writeFile, mkdir, unlink, access } from "fs/promises";
 
 function saveFilePath(characterId: string): string {
   return join(SAVES_DIR, `${characterId}.json`);
+}
+
+function adventureSaveFilePath(characterId: string): string {
+  return join(SAVES_DIR, `${characterId}_adventure.json`);
 }
 
 // Persistent player stats live in the character save; the world save only keeps
@@ -461,6 +865,9 @@ async function loadWorldState(): Promise<{
     narrationLastUsed: worldSave.narrationLastUsed ?? {},
     factionStandings: worldSave.factionStandings ?? {},
     rumors: worldSave.rumors ?? [],
+    adventureContext: worldSave.adventureContext ?? null,
+    chapterComplete: worldSave.chapterComplete ?? false,
+    objective: worldSave.objective ?? '',
   };
   return { state, aidmHistory };
 }
@@ -521,6 +928,200 @@ async function ensureSaveExists(characterId: string): Promise<void> {
     await access(saveFilePath(characterId));
   } catch {
     await writeSave(characterId, await defaultSave(characterId));
+  }
+}
+
+// ── Adventure save (cross-chapter state) ───────────────────────────────────
+async function readAdventureSave(characterId: string): Promise<AdventureSave | null> {
+  try {
+    return JSON.parse(await readFile(adventureSaveFilePath(characterId), "utf-8")) as AdventureSave;
+  } catch {
+    return null;
+  }
+}
+
+async function writeAdventureSave(save: AdventureSave): Promise<void> {
+  await mkdir(SAVES_DIR, { recursive: true });
+  await writeFile(adventureSaveFilePath(save.characterId), JSON.stringify(save, null, 2));
+}
+
+async function deleteAdventureSave(characterId: string): Promise<void> {
+  try {
+    await unlink(adventureSaveFilePath(characterId));
+  } catch {
+    /* already gone */
+  }
+}
+
+function buildAdventureSeed(adv: AdventureDef, chapterIndex: number, save: AdventureSave): AdventureSessionContext & {
+  seedWorldFlags?: Record<string, WorldFlagValue>;
+  seedFactionStandings?: Record<string, number>;
+  seedRumors?: Rumor[];
+} {
+  const chapter = adv.chapters[chapterIndex];
+  return {
+    adventureId: adv.id,
+    adventureTitle: adv.title,
+    chapterId: chapter.id,
+    chapterTitle: chapter.title,
+    chapterIndex,
+    totalChapters: adv.chapters.length,
+    completionFlag: chapter.completionFlag,
+    priorChapterSummaries: save.priorChapterSummaries,
+    seedWorldFlags: { ...save.worldFlags },
+    seedFactionStandings: { ...save.factionStandings },
+    seedRumors: [...save.rumors],
+  };
+}
+
+function makeAdventureSave(characterId: string, adventureId: string): AdventureSave {
+  return {
+    characterId,
+    adventureId,
+    currentChapterIndex: 0,
+    completedChapterIds: [],
+    worldFlags: {},
+    factionStandings: {},
+    rumors: [],
+    priorChapterSummaries: [],
+  };
+}
+
+interface EncounterDefJson {
+  id: string;
+  encounterTitle: string;
+  description?: string;
+  encounterTypes: import("./engine/types.js").EncounterType[];
+  mapId: string;
+  npcIds?: string[];
+  allyIds?: string[];
+  customIntroduction?: string;
+  customContext?: string;
+  objective?: string;
+  tileProperties?: import("./engine/types.js").EncounterTileProperty[];
+  startingZones?: import("./engine/types.js").StartingZonesLayer;
+  triggers?: import("./engine/types.js").EncounterTrigger[];
+}
+
+async function loadAdventureDef(adventureId: string): Promise<AdventureDef | null> {
+  const all = await readDir<AdventureDef>(join(DATA_DIR, "adventures"));
+  return all.find((a) => a.id === adventureId) ?? null;
+}
+
+async function loadEncounterDef(encounterId: string): Promise<EncounterDefJson | null> {
+  const all = await readDir<EncounterDefJson>(join(DATA_DIR, "encounters"));
+  return all.find((e) => e.id === encounterId) ?? null;
+}
+
+/**
+ * Build and register a GameEngine for one chapter of an adventure. Reuses the
+ * existing buildEncounter / GameEngine.createSession path; the only addition
+ * is the `adventureSeed` field that carries cross-chapter state (worldFlags,
+ * factionStandings, rumors, prior summaries) into SessionBuilder.
+ */
+async function startAdventureChapter(
+  characterId: string,
+  adv: AdventureDef,
+  save: AdventureSave,
+): Promise<{ sessionId: string; state: GameState } | { error: string }> {
+  const chapter = adv.chapters[save.currentChapterIndex];
+  if (!chapter) return { error: "No chapter at currentChapterIndex" };
+  const playerDef = defs.playerDefs.find((p) => p.id === characterId);
+  if (!playerDef) return { error: "Unknown character" };
+  const encDef = await loadEncounterDef(chapter.encounterId);
+  if (!encDef) return { error: `Unknown encounterId "${chapter.encounterId}"` };
+  const savedMap = defs.maps.find((m) => m.id === encDef.mapId);
+
+  const charSave = await readSaveIfExists(characterId);
+
+  const encounterContext = buildEncounter({
+    encounterTypes: encDef.encounterTypes,
+    mapType: "saved",
+    playerDefId: playerDef.id,
+    playerName: playerDef.name,
+    playerSpeciesName: playerDef.speciesName,
+    playerClassName: playerDef.className,
+    playerLevel: playerDef.level,
+    playerMaxHp: charSave?.hp ?? playerDef.maxHp,
+    playerAc: playerDef.ac,
+    savedMapName: savedMap?.name,
+    savedMapDescription: savedMap?.mapdescription,
+    npcIds: encDef.npcIds,
+    allyIds: encDef.allyIds,
+    customIntroduction: encDef.customIntroduction,
+    customContext: encDef.customContext,
+    customObjective: encDef.objective,
+    startingZones: encDef.startingZones,
+  });
+
+  const adventureSeed = buildAdventureSeed(adv, save.currentChapterIndex, save);
+
+  const sessionId = randomUUID();
+  const req: CreateSessionRequest = {
+    encounterTypes: encDef.encounterTypes,
+    mapType: "saved",
+    playerDefId: playerDef.id,
+    savedMapId: savedMap?.id,
+    encounterTitle: encDef.encounterTitle,
+    savedMapName: savedMap?.name,
+    savedMapDescription: savedMap?.mapdescription,
+    npcIds: encDef.npcIds,
+    allyIds: encDef.allyIds,
+    customIntroduction: encDef.customIntroduction,
+    customContext: encDef.customContext,
+    customObjective: encDef.objective,
+    tileProperties: encDef.tileProperties,
+    startingZones: encDef.startingZones,
+    triggers: encDef.triggers,
+    adventureSeed,
+    resumeHp: charSave?.hp,
+    resumeXp: charSave?.xp,
+    resumeGold: charSave?.gold,
+    resumeInventoryIds: charSave?.inventoryIds,
+    resumeEquippedSlots: charSave?.equippedSlots,
+    resumeResources: charSave?.resources,
+    resumeSpellSlots: charSave?.spellSlots,
+    resumePreparedSpellIds: charSave?.preparedSpellIds,
+  };
+
+  const engine = GameEngine.createSession(sessionId, { ...req, encounterContext }, defs, savedMap);
+  createSession(sessionId, engine);
+  await ensureSaveExists(playerDef.id);
+  return { sessionId, state: engine.getState() };
+}
+
+/**
+ * Generate a short prose summary of a completed chapter from its AIDM history.
+ * Uses Haiku for speed/cost. On failure, falls back to a static placeholder so
+ * the adventure flow never blocks on summarization.
+ */
+async function summarizeChapter(
+  chapterTitle: string,
+  aidmHistory: AidmMessage[],
+): Promise<string> {
+  if (aidmHistory.length === 0) {
+    return `${chapterTitle} was resolved with no recorded dialogue.`;
+  }
+  try {
+    const transcript = aidmHistory
+      .map((m) => {
+        const text = m.role === "user"
+          ? (/\[PLAYER\]\n([\s\S]+)$/.exec(m.content)?.[1]?.trim() ?? m.content)
+          : m.content;
+        return `${m.role.toUpperCase()}: ${text}`;
+      })
+      .join("\n\n");
+    const resp = await anthropic.messages.create({
+      model: "claude-haiku-4-5-20251001",
+      max_tokens: 160,
+      system: "Summarize the following D&D chapter transcript in 2 short sentences for a later chapter's DM context. Focus on outcomes, NPCs involved, and any moral / political choices the player made. Use past tense, third-person. Do not use mechanical numbers.",
+      messages: [{ role: "user", content: transcript.slice(-8000) }],
+    });
+    const block = resp.content.find((b) => b.type === "text");
+    return block && block.type === "text" ? block.text.trim() : `${chapterTitle} resolved.`;
+  } catch (err) {
+    console.warn("[adventure] summarizeChapter failed; using placeholder", err);
+    return `${chapterTitle} resolved.`;
   }
 }
 
@@ -617,6 +1218,7 @@ server.post("/game/session", async (req, reply) => {
     allyIds: body.allyIds,
     customIntroduction: body.customIntroduction,
     customContext: body.customContext,
+    customObjective: body.customObjective,
     startingZones: body.startingZones,
   });
 

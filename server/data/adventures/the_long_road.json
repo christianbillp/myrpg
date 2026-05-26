@@ -1,0 +1,26 @@
+{
+  "id": "the_long_road",
+  "title": "The Long Road",
+  "description": "Word reached the capital of strange happenings to the west — a bandit-held bridge, an ancient dungeon disturbed, a sage who claims to know why. Follow the trail to its source and decide what to do with what you find.",
+  "introduction": "You set out west with little more than your gear and a name on a folded scrap of parchment. Whatever waits at the end of the road, the journey to it begins here — at the bridge.",
+  "chapters": [
+    {
+      "id": "ch1_bridge",
+      "title": "Chapter 1 — The Toll",
+      "encounterId": "bridge_standoff",
+      "completionFlag": "bridge_resolved"
+    },
+    {
+      "id": "ch2_dungeon",
+      "title": "Chapter 2 — Beneath the Stones",
+      "encounterId": "dungeon_delve",
+      "completionFlag": "dungeon_explored"
+    },
+    {
+      "id": "ch3_sage",
+      "title": "Chapter 3 — Counsel",
+      "encounterId": "sages_counsel",
+      "completionFlag": "sage_counsel_received"
+    }
+  ]
+}

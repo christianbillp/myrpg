@@ -10,6 +10,7 @@ import {
   ZoneMap, parseStartingZones, findPlayerSpawn,
   spawnEnemies, spawnItems, spawnNpc, spawnSecrets,
 } from './SpawnHelpers.js';
+import { stripTileFlipBits } from '../../../shared/tileGid.js';
 
 /** The shape stored in `defs.maps[i]` — pure geometry, no semantics.
  *  Identical to SavedMapDef (shared); aliased here for engine-side clarity. */
@@ -21,11 +22,14 @@ export type SavedMapRecord = import('./types.js').SavedMapDef;
  * (impassable). Encounter overrides win over the legend.
  */
 function resolveGidPassable(
-  gid: number,
+  rawGid: number,
   byGid: Map<number, EncounterTileProperty>,
   legend: TileLegend,
 ): boolean {
-  if (gid === 0) return true; // empty object-layer cell — no obstacle here.
+  if (rawGid === 0) return true; // empty object-layer cell — no obstacle here.
+  // Strip Tiled's flip/rotation bits before looking up — orientation never
+  // affects passability, only rendering.
+  const gid = stripTileFlipBits(rawGid);
   const explicit = byGid.get(gid);
   if (explicit?.passable !== undefined) return explicit.passable;
   const legendEntry = legend.tiles[String(gid)];
@@ -140,8 +144,19 @@ export function buildSessionState(
   for (const defId of (req.allyIds ?? req.encounterContext.allyIds ?? [])) {
     spawnNpc(npcs, map, defs.npcs, defs.monsters, defId, player.tileX, player.tileY, 'ally', allyZone);
   }
+  // Hand-picked enemies (deterministic compose-encounter flow). These spawn
+  // regardless of encounter type — the player explicitly chose them, so they
+  // belong in the scene whether or not it was tagged "simple_combat".
+  for (const defId of (req.enemyIds ?? [])) {
+    spawnNpc(npcs, map, defs.npcs, defs.monsters, defId, player.tileX, player.tileY, 'enemy', enemyZone);
+  }
   if (isCombat) {
-    spawnEnemies(npcs, map, defs.monsters, player.tileX, player.tileY, req.encounterContext.enemyCount ?? 2, enemyZone);
+    // Legacy random-roster spawn — only fires if no explicit enemyIds were
+    // given. Otherwise the explicit list above already populated the map and
+    // we'd be doubling up with random extras.
+    if ((req.enemyIds ?? []).length === 0) {
+      spawnEnemies(npcs, map, defs.monsters, player.tileX, player.tileY, req.encounterContext.enemyCount ?? 2, enemyZone);
+    }
     spawnItems(mapItems, map, defs.equipment, player.tileX, player.tileY, npcs);
   }
   if (req.encounterTypes.includes('social_interaction')) {
@@ -184,6 +199,7 @@ export function buildSessionState(
     encounterTypes: req.encounterTypes,
     mapName: req.encounterContext.mapName ?? 'Unknown',
     encounterTitle: req.encounterTitle ?? '',
+    objective: req.encounterContext.objective ?? '',
     quests,
     selectedTargetId: null,
     activeNpcIndex: 0,
@@ -201,10 +217,20 @@ export function buildSessionState(
     triggers: req.triggers ?? [],
     firedTriggerIds: [],
     pendingAidmEvents: [],
-    worldFlags: {},
+    worldFlags: req.adventureSeed?.seedWorldFlags ?? {},
     narrationLastUsed: {},
-    factionStandings: {},
-    rumors: [],
+    factionStandings: req.adventureSeed?.seedFactionStandings ?? {},
+    rumors: req.adventureSeed?.seedRumors ?? [],
+    adventureContext: req.adventureSeed ? {
+      adventureId: req.adventureSeed.adventureId,
+      adventureTitle: req.adventureSeed.adventureTitle,
+      chapterId: req.adventureSeed.chapterId,
+      chapterTitle: req.adventureSeed.chapterTitle,
+      chapterIndex: req.adventureSeed.chapterIndex,
+      totalChapters: req.adventureSeed.totalChapters,
+      priorChapterSummaries: req.adventureSeed.priorChapterSummaries,
+    } : null,
+    chapterComplete: false,
   };
 
   return state;

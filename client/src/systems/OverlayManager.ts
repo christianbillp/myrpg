@@ -3,6 +3,8 @@ import { ItemDef, EquipmentDef } from "../data/equipment";
 import { CharacterSheetOverlay, CharacterSheetInputs } from "../ui/CharacterSheetOverlay";
 import { IntroductionOverlay } from "../ui/IntroductionOverlay";
 import { ReactionPromptOverlay } from "../ui/ReactionPromptOverlay";
+import { ChapterCompleteOverlay } from "../ui/ChapterCompleteOverlay";
+import { NextChapterButton } from "../ui/NextChapterButton";
 import type { GameState, SpellDef, PendingReaction } from "../net/types";
 import { UIScale } from "../ui/UIScale";
 
@@ -18,6 +20,8 @@ export interface OverlayCallbacks {
   onAcceptReaction: () => void;
   /** Player declined / dismissed the reaction prompt — server should skip the deferred effect. */
   onDeclineReaction: () => void;
+  /** Player pressed NEXT CHAPTER on the chapter-complete overlay. */
+  onAdvanceChapter: () => void;
   getItems: () => ItemDef[];
   getSpells: () => SpellDef[];
 }
@@ -30,8 +34,13 @@ export class OverlayManager {
   private introOverlay: IntroductionOverlay | null = null;
   private characterSheet: CharacterSheetOverlay | null = null;
   private reactionPrompt: ReactionPromptOverlay | null = null;
+  private chapterComplete: ChapterCompleteOverlay | null = null;
+  /** Persistent top-center button shown after the chapter-complete overlay is dismissed. */
+  private nextChapterButton: NextChapterButton | null = null;
   /** Tracks which pending-reaction the open prompt is for, so we don't rebuild on every state update. */
   private reactionShownFor: PendingReaction | null = null;
+  /** Tracks which chapter the complete-overlay was shown for, so reopening on every tick is suppressed. */
+  private chapterCompleteShownFor: string | null = null;
   private introShown = false;
 
   constructor(scale: UIScale, playerDef: PlayerDef, callbacks: OverlayCallbacks) {
@@ -41,7 +50,7 @@ export class OverlayManager {
   }
 
   get isAnyOpen(): boolean {
-    return !!(this.introOverlay || this.characterSheet || this.reactionPrompt);
+    return !!(this.introOverlay || this.characterSheet || this.reactionPrompt || this.chapterComplete);
   }
 
   reset(): void {
@@ -49,6 +58,9 @@ export class OverlayManager {
     this.characterSheet = null;
     this.reactionPrompt = null;
     this.reactionShownFor = null;
+    if (this.chapterComplete) { this.chapterComplete.destroy(); this.chapterComplete = null; }
+    if (this.nextChapterButton) { this.nextChapterButton.destroy(); this.nextChapterButton = null; }
+    this.chapterCompleteShownFor = null;
     this.introShown = false;
   }
 
@@ -118,6 +130,57 @@ export class OverlayManager {
     this.reactionPrompt.destroy();
     this.reactionPrompt = null;
     this.reactionShownFor = null;
+  }
+
+  /**
+   * Two-stage flow when a chapter completes:
+   *   1. The first time `state.chapterComplete` is true, open the
+   *      "Wrap Up Loose Ends" overlay. The player can dismiss it (close
+   *      button, X, or backdrop click) and continue exploring.
+   *   2. Once dismissed, render a persistent NEXT CHAPTER button at the
+   *      top-center of the screen. Clicking it fires `onAdvanceChapter`.
+   *
+   * The overlay only opens once per chapter (`chapterCompleteShownFor`
+   * tracks the chapter id). The persistent button stays visible until the
+   * scene resets (next chapter starts or player returns to menu).
+   */
+  syncChapterComplete(state: GameState): void {
+    const ctx = state.adventureContext;
+    if (!ctx || !state.chapterComplete) return;
+    if (this.chapterCompleteShownFor === ctx.chapterId) return;
+    this.chapterCompleteShownFor = ctx.chapterId;
+    const isFinal = ctx.chapterIndex >= ctx.totalChapters - 1;
+    const buttonLabel = isFinal ? "Finish Adventure" : `Next Chapter →`;
+    const advance = () => {
+      this.closeChapterComplete();
+      if (this.nextChapterButton) { this.nextChapterButton.destroy(); this.nextChapterButton = null; }
+      this.callbacks.onAdvanceChapter();
+    };
+    this.chapterComplete = new ChapterCompleteOverlay(
+      this.scale,
+      state.encounterTitle,
+      ctx.chapterIndex,
+      ctx.totalChapters,
+      () => {
+        this.closeChapterComplete();
+        this.showNextChapterButton(buttonLabel);
+      },
+      advance,
+    );
+  }
+
+  private closeChapterComplete(): void {
+    if (!this.chapterComplete) return;
+    this.chapterComplete.destroy();
+    this.chapterComplete = null;
+  }
+
+  private showNextChapterButton(label: string): void {
+    if (this.nextChapterButton) return;
+    this.nextChapterButton = new NextChapterButton(this.scale, label, () => {
+      if (this.nextChapterButton) { this.nextChapterButton.destroy(); this.nextChapterButton = null; }
+      this.callbacks.onAdvanceChapter();
+    });
   }
 
   private buildInputs(state: GameState): CharacterSheetInputs {

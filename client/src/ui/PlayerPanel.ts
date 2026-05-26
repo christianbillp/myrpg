@@ -81,6 +81,7 @@ export class PlayerPanel {
   private readonly featureChipsEl: HTMLElement;
   private readonly concentrationEl: HTMLElement;
   private readonly questsEl: HTMLElement;
+  private readonly objectiveEl: HTMLElement;
   private readonly actionArea: HTMLElement;
   private readonly searchBtn: HTMLButtonElement;
   private readonly endTurnBtn: HTMLButtonElement;
@@ -128,6 +129,8 @@ export class PlayerPanel {
       <div style="padding:2px 12px;font-size:10px;color:#a8c8e8;display:none;line-height:1.6;" data-feature-chips></div>
       <div style="padding:2px 12px;font-size:10px;color:#b8a8e8;display:none;" data-concentration></div>
       <div class="gui-sep" style="margin-top:2px;"></div>
+      <div class="gui-label">OBJECTIVE</div>
+      <div style="padding:2px 12px 6px;font-size:10px;color:#e2b96f;line-height:1.4;" data-objective>—</div>
       <div class="gui-label">QUESTS</div>
       <div style="padding:2px 12px;font-size:10px;color:#aabbcc;line-height:1.8;white-space:pre-wrap;" data-quests></div>
 
@@ -149,6 +152,7 @@ export class PlayerPanel {
     this.featureChipsEl = ref('feature-chips');
     this.concentrationEl = ref('concentration');
     this.questsEl  = ref('quests');
+    this.objectiveEl = ref('objective');
     this.actionArea = ref('actions');
     this.searchBtn  = ref('search')   as HTMLButtonElement;
     this.endTurnBtn = ref('end-turn') as HTMLButtonElement;
@@ -219,11 +223,13 @@ export class PlayerPanel {
     return handle;
   }
 
-  refresh(hp: number, maxHp: number, quests: QuestDisplay[] = [], showSearch = false): void {
+  refresh(hp: number, maxHp: number, quests: QuestDisplay[] = [], showSearch = false, objective = ''): void {
     const pct = maxHp > 0 ? hp / maxHp : 0;
     this.hpFill.style.width = `${Math.floor(pct * 100)}%`;
     this.hpFill.style.background = hpColor(pct);
     this.hpText.textContent = `${hp} / ${maxHp}`;
+
+    this.objectiveEl.textContent = objective || '—';
 
     this.questsEl.textContent = quests.length === 0
       ? 'None'

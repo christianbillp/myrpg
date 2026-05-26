@@ -92,6 +92,14 @@ export function getSession(sessionId: string): Session | undefined {
   return sessions.get(sessionId);
 }
 
+/** Returns the first session belonging to the given character, or undefined. The current server hosts one active session at a time per process, so this is effectively "the active session for this character." */
+export function findSessionByCharacter(characterId: string): { sessionId: string; session: Session } | undefined {
+  for (const [sessionId, session] of sessions) {
+    if (session.engine.getState().player.defId === characterId) return { sessionId, session };
+  }
+  return undefined;
+}
+
 export function getEngine(sessionId: string): GameEngine | undefined {
   return sessions.get(sessionId)?.engine;
 }

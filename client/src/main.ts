@@ -1,6 +1,9 @@
 import Phaser from "phaser";
 import { BootScene } from "./scenes/BootScene";
+import { MainMenuScene } from "./scenes/MainMenuScene";
 import { EncounterSetupScene } from "./scenes/EncounterSetupScene";
+import { AdventureSetupScene } from "./scenes/AdventureSetupScene";
+import { GenerateSetupScene } from "./scenes/GenerateSetupScene";
 import { GameScene } from "./scenes/GameScene";
 import { gameClient } from "./net/GameClient";
 import { ConnectionMonitor } from "./net/ConnectionMonitor";
@@ -25,7 +28,7 @@ function startPhaser(): void {
       mode: Phaser.Scale.FIT,
       autoCenter: Phaser.Scale.CENTER_BOTH,
     },
-    scene: [BootScene, EncounterSetupScene, GameScene],
+    scene: [BootScene, MainMenuScene, EncounterSetupScene, AdventureSetupScene, GenerateSetupScene, GameScene],
   };
   new Phaser.Game(config);
 }

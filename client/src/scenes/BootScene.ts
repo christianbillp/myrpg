@@ -35,6 +35,7 @@ export class BootScene extends Phaser.Scene {
     this.load.json("features",           `${API_URL}/features`);
     this.load.json("maps",               `${API_URL}/maps`);
     this.load.json("encounters",          `${API_URL}/encounters`);
+    this.load.json("adventures",          `${API_URL}/adventures`);
   }
 
   async create(): Promise<void> {
@@ -61,6 +62,7 @@ export class BootScene extends Phaser.Scene {
       this.registry.set("features",           this.cache.json.get("features"));
       this.registry.set("maps",               this.cache.json.get("maps"));
       this.registry.set("encounters",          this.cache.json.get("encounters"));
+      this.registry.set("adventures",          this.cache.json.get("adventures"));
 
       // Queue every unique tileset image as a Phaser spritesheet, then run
       // the loader a second time and wait for completion before transitioning.
@@ -96,7 +98,7 @@ export class BootScene extends Phaser.Scene {
         gameClient.resumeSession(world.sessionId);
         this.scene.start("GameScene", { sessionId: world.sessionId, playerDef, dmHistory: world.dmHistory, isResume: true });
       } else {
-        this.scene.start("EncounterSetupScene");
+        this.scene.start("MainMenuScene");
       }
     } catch {
       ConnectionMonitor.notifyDisconnected();

@@ -9,8 +9,9 @@
   "npcIds": [
     "wanderer"
   ],
+  "objective": "Reach the sage in the northern sanctum and hear them out",
   "customIntroduction": "The ruins stretch out before you under an open sky. Collapsed towers and a crumbling central hall stand between you and the northern sanctum, where a lone figure sits in quiet contemplation. The wandering sage has made camp here, far from prying ears.",
-  "customContext": "Social encounter in an outdoor ruin. The player approaches from the south across open rubble-strewn ground. The sage (wanderer NPC) is seated inside the northern sanctum — a partially intact stone chamber at the far north of the ruins. The setting is isolated and peaceful; no enemies are present. The sage is knowledgeable, enigmatic, and willing to talk, but expects the player to make the journey across the ruins to reach them.",
+  "customContext": "Social encounter in an outdoor ruin. The player approaches from the south across open rubble-strewn ground. The sage (wanderer NPC) is seated inside the northern sanctum — a partially intact stone chamber at the far north of the ruins. The setting is isolated and peaceful; no enemies are present. The sage is knowledgeable, enigmatic, and willing to talk, but expects the player to make the journey across the ruins to reach them. CHAPTER COMPLETION — Once the player has reached the sage and the sage has given them their counsel (a piece of guidance, a riddle answered, a question resolved), call set_world_flag with name \"sage_counsel_received\" and value true to mark the chapter (and the adventure, if this is the final chapter) complete in adventure mode. The conversation can continue afterwards; the flag just signals that the meaningful business of the encounter is done.",
   "startingZones": {
     "width": 30,
     "height": 22,

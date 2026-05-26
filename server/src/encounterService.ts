@@ -10,6 +10,8 @@ export interface EncounterContext {
   enemyCount: number;
   secrets: SecretDef[];
   quests: QuestDef[];
+  /** Player-facing one-line objective for this encounter. Derived from `encounterTypes` when the EncounterDef doesn't set one explicitly. Shown at the top of the Quests section in the Player Panel. */
+  objective: string;
   npcIds?: string[];
   allyIds?: string[];
   startingZones?: StartingZonesLayer;
@@ -44,6 +46,7 @@ export interface EncounterStartRequest {
   allyIds?: string[];
   customIntroduction?: string;
   customContext?: string;
+  customObjective?: string;
   startingZones?: StartingZonesLayer;
 }
 
@@ -87,6 +90,20 @@ const TYPE_CONTEXT: Record<EncounterType, string> = {
   exploration:        'Four hidden secrets on the map, found via Wisdom (Perception) checks.',
 };
 
+const TYPE_OBJECTIVE: Record<EncounterType, string> = {
+  simple_combat:      'Defeat the hostile creatures',
+  social_interaction: 'Speak with the locals and resolve the situation',
+  exploration:        'Search the area for hidden secrets',
+};
+
+function defaultObjective(types: EncounterType[]): string {
+  // Prefer the most "story-shaping" type when an encounter is mixed.
+  if (types.includes('simple_combat')) return TYPE_OBJECTIVE.simple_combat;
+  if (types.includes('social_interaction')) return TYPE_OBJECTIVE.social_interaction;
+  if (types.includes('exploration')) return TYPE_OBJECTIVE.exploration;
+  return 'Complete the encounter';
+}
+
 export function buildEncounter(req: EncounterStartRequest): EncounterContext {
   const mapDescription =
     req.mapType === 'saved' && req.savedMapDescription ? req.savedMapDescription
@@ -114,6 +131,8 @@ export function buildEncounter(req: EncounterStartRequest): EncounterContext {
     ? 2 + Math.floor(Math.random() * 3)
     : 0;
 
+  const objective = req.customObjective ?? defaultObjective(req.encounterTypes);
+
   return {
     introduction,
     context,
@@ -121,6 +140,7 @@ export function buildEncounter(req: EncounterStartRequest): EncounterContext {
     enemyCount,
     secrets:  pickSecrets(4),
     quests:   buildQuests(req.encounterTypes, enemyCount),
+    objective,
     npcIds:        req.npcIds,
     allyIds:       req.allyIds,
     startingZones: req.startingZones,

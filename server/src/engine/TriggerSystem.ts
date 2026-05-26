@@ -147,6 +147,10 @@ function guardHolds(ctx: GameContext, guard: TriggerGuard): boolean {
       const count = s.npcs.filter((n) => n.disposition === 'ally' && n.hp > 0).length;
       return compare(count, guard.op, guard.count);
     }
+    case 'npcs_alive': {
+      const count = s.npcs.filter((n) => n.defId === guard.defId && n.hp > 0).length;
+      return compare(count, guard.op, guard.count);
+    }
     case 'phase':
       return guard.in.includes(s.phase);
     case 'faction_standing': {

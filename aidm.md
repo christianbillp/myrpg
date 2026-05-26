@@ -74,6 +74,7 @@ Every user message is prefixed with a `[CURRENT STATE]` block that the engine bu
 - A **SCRIPTED EVENTS** section when one or more authored encounter triggers have queued narration via the `send_aidm_message` action — bullet-listed under the CONTEXT line. The DM is expected to incorporate these into the next reply; the engine clears them once the API call returns.
 - A **FACTION STANDINGS** block listing non-zero player reputations with each faction (−100..+100). Adjusted via `adjust_faction_standing` and persisted across save/load.
 - A **RUMORS** block listing the most recent 8 entries from world memory (highest-salience first within recency). Recorded via `create_rumor` — use these to reference past events naturally in narration ("word of what you did at the bridge has reached even here").
+- When the session is a chapter of an adventure (`GameState.adventureContext` is set), an **ADVENTURE:** header line showing `<title> — <chapter> (n of N)` and a **PRIOR CHAPTERS:** block listing 2-sentence summaries of every completed earlier chapter. The DM is expected to reference these naturally in narration when apt; they carry forward the durable consequences of player choices made in previous chapters.
 - The full combat log for the current encounter — including `── Aldric's turn — Action & Bonus refreshed ──` marker lines at every new player turn
 
 The model uses this block to resolve pronouns ("them", "it") to concrete entity references and to determine action availability. The block is rebuilt **once per tool-loop iteration**, not just once per turn, so mid-loop state changes (HP drops, disposition shifts, deaths) are immediately visible.
@@ -348,6 +349,8 @@ Starts combat when the phase is `exploring` and enemies are present on the map. 
 | Parameter | Type   | Required |
 | --------- | ------ | -------- |
 | `reason`  | string | yes      |
+
+> **Note.** `GameEngine.createSession` auto-calls `triggerCombat()` at session start whenever any NPC spawns with `disposition: 'enemy'` and live HP — so combat encounters (hand-authored with hostile spawns, AI-generated `simple_combat`, or deterministic-compose with `enemyIds`) land the player directly in combat without the DM having to call this tool on its first reply. The DM still needs to call `trigger_combat` when changing an NPC's disposition to `enemy` mid-scene (e.g. after a failed parley); see the **Creature disposition change** rule in the DM constraints.
 
 #### `end_combat`
 

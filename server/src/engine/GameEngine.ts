@@ -39,6 +39,7 @@ import { doUseFeature } from './FeatureRegistry.js';
 import { buildSessionState, SavedMapRecord } from './SessionBuilder.js';
 import { registerTriggers, adjustFactionStanding, recordRumor } from './TriggerSystem.js';
 import { registerDirector } from './Director.js';
+import { registerAdventureProgress } from './AdventureProgress.js';
 import { EventBus } from './EventBus.js';
 import { publishHpThresholdCrossings } from './ThresholdPublisher.js';
 import { WeaponDef } from './types.js';
@@ -87,6 +88,7 @@ export class GameEngine {
     // priority than triggers (50 vs -10) so directorial decisions arrive
     // before authored reactions to the same event.
     registerDirector(this.ctx);
+    registerAdventureProgress(this.ctx);
     registerTriggers(this.ctx);
   }
 
@@ -115,7 +117,20 @@ export class GameEngine {
       spawnEnemyAt: (id, tx, ty) => this.spawnEnemyAt(id, tx, ty),
       bus: this.bus,
       publish: (event) => this.bus.publish(event),
+      removeNpc: (id) => this.removeNpcFromEncounter(id),
     };
+  }
+
+  /**
+   * Removes an NPC from the encounter entirely (different from killNpc which
+   * leaves them as a corpse). Used when a fleeing creature escapes off the
+   * map edge. Combat auto-ends if no enemies remain.
+   */
+  private removeNpcFromEncounter(id: string): void {
+    const s = this.state;
+    s.npcs = s.npcs.filter((n) => n.id !== id);
+    // turnOrderIds intentionally untouched — advanceTurn skips ids it can't find.
+    this.autoEndCombatIfNoEnemies();
   }
 
   getState(): GameState { this.computeAvailableActions(); return this.state; }
@@ -646,6 +661,18 @@ export class GameEngine {
   ): GameEngine {
     const state = buildSessionState(sessionId, req, defs, savedMap);
     // The constructor clones playerDef internally to avoid mutating shared defs.
-    return new GameEngine(state, defs);
+    const engine = new GameEngine(state, defs);
+
+    // Auto-start combat when the encounter spawned any hostile creatures.
+    // The deterministic compose-encounter flow paints enemy zones + picks
+    // enemy creatures explicitly, so the player expects the encounter to
+    // begin in combat — without this, the phase stayed "exploring" and the
+    // turn-order UI never appeared even though enemies were on the map.
+    // Adventures that want a stealth / ambush opening should leave
+    // `enemyIds` empty and surface hostiles via triggers instead.
+    if (state.npcs.some((n) => n.disposition === 'enemy' && n.hp > 0)) {
+      engine.triggerCombat();
+    }
+    return engine;
   }
 }

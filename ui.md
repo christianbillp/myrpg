@@ -34,6 +34,7 @@ Defined in `client/src/ui/PlayerPanel.ts`. HTML DOM panel; **open by default** (
 | **Spell Slots**    | One-line summary of remaining spell slots per level (e.g. "Slots: L1 2/2"). Visible only when the character knows at least one spell slot tier. |
 | **Feature Resource Chips** | One-line summary of class-feature resource pools (e.g. "Second Wind: 2/2"). Visible when the character knows at least one feature with a `resourceLabel` and a non-`unlimited` resource. Each feature's template is rendered with `{remaining}`/`{max}` placeholders. Multiple chips join with " · ". |
 | **Concentration Chip** | Single-line indicator visible only while the player is concentrating on a spell. Format: "🌀 Concentrating: <Spell Name>". Cleared when concentration breaks (failed CON save on damage, replaced by a new concentration spell, or incapacitation). |
+| **Objective**      | One-line player-facing goal for the encounter, accent-coloured (`#e2b96f`). Sourced from `GameState.objective` (set per encounter in JSON, with a default derived from `encounterTypes` when omitted). Rendered immediately above the Quests list. |
 | **Quests**         | Section listing quests assigned at encounter start. Each quest shows "· Title  N/M" while in progress and "✓ Title" when complete. "None" when no quests are active for the current encounter type. |
 | **Action Buttons** | Context-sensitive combat buttons shown above CHARACTER/SEARCH (see below). Replaced by a **Spell Targeting Prompt** ("Select target for: SPELL_NAME") while spell-targeting mode is active. For attack-roll spells the prompt waits for a creature click; for AOE spells the affected tiles preview as an orange chebyshev disc that follows the cursor (or stays anchored on the player for self-range spells like Burning Hands), and clicking any tile fires the spell on that area. ESC cancels in either mode. |
 | **CHARACTER**      | Button at the bottom of the panel; always visible when the panel is open. Opens the Character Sheet Overlay (tabs: Character / Inventory / Spells). |
@@ -145,7 +146,81 @@ Appears automatically when the game map loads for the first time. Suppressed whe
 
 ### Story Log Overlay
 
-Defined in `client/src/ui/StorylogOverlay.ts`. Standalone HTML overlay (no `BaseOverlay`/`UIScale` dependency); opened from the Encounter Setup Scene via the STORY LOG button on a character card.
+Defined in `client/src/ui/StorylogOverlay.ts`. Standalone HTML overlay (no `BaseOverlay`/`UIScale` dependency); opened from either the Encounter Setup Scene or the Adventure Setup Scene via the STORY LOG button on a character card. The Adventure Setup Scene's DELETE SAVE button next to it clears **both** the character save and the adventure save for that character, so the player can replay the adventure from chapter 1 with default gear.
+
+---
+
+### Generator Setup Scene
+
+`client/src/scenes/GenerateSetupScene.ts` — third top-level setup scene reached via `MainMenuScene → GENERATE ENCOUNTER`. **No character selector** on this screen; after authoring an encounter the player is handed off to Encounter Setup Scene with the new encounter pre-selected (via `init({ presetEncounterId })`) so the character pick happens there. The scene is structured as two tabs.
+
+**Tab bar.** A pair of buttons at the top center of the scene: **DETERMINISTIC** and **GENERATIVE AI**. The active tab is highlighted with the accent colour; clicking switches which content container is visible and which bottom-bar buttons are wired up. The Deterministic tab is selected by default.
+
+#### Deterministic tab
+
+The deterministic tab is gated on an **accepted map**. The left panel always shows the map controls; the right panel changes shape depending on whether a map has been accepted.
+
+| Component | Description |
+| --------- | ----------- |
+| **MAP CONTROLS** (left) | Header label over the left panel. |
+| **TERRAIN chips** | `GRASSLAND` / `FOREST` radio chips. Exactly one must be selected for the COMPOSE MAP button to enable; Grassland is selected by default. |
+| **FEATURES chips** | `RUINS` / `BUILDINGS` / `CAMPSITES` / `PATH` multi-select chips. Features layer additional content on top of the chosen terrain in `MapComposer.composeMap`. The `PATH` feature lays a meandering dirt path across the map before other features stamp over it. |
+| **ENCOUNTER SETTINGS** (right) | Header label over the right panel. **Empty state** (no map accepted): the panel only renders the label `No map available` plus a hint reading "Compose a map on the left, then press ACCEPT in the preview." No other controls appear. **Filled state** (map accepted): the panel renders the thumbnail, zone painter, encounter-type chips, monster picker, and description textarea described below. |
+| **Thumbnail + zone painter** *(filled state)* | Small map preview pinned to the top-right of the right panel. Renders the accepted map at up to ~12 px per tile using the actual scribble spritesheet (tile size auto-shrinks to fit the panel). Cells are interactive: when `PAINT: PLAYER` is active, clicking a cell toggles it as a player-start zone (blue 50%-alpha overlay); when `PAINT: ENEMY` is active, clicking toggles an enemy-start zone (red 50%-alpha overlay). Click-and-drag paints / unpaints continuously. A cell can be either player or enemy, not both — repainting in the opposite mode swaps the assignment. **When no paint mode is active**, clicking any cell instead opens the [Map Preview Overlay](#map-preview-overlay) in view-only mode with the painted zones drawn on top — useful for inspecting a busy map at higher zoom. A small caption below the thumbnail reads `Map Name · click to enlarge`. |
+| **PAINT: PLAYER / PAINT: ENEMY / CLEAR ZONES** *(filled state)* | Mode toggles below the thumbnail caption. PAINT: PLAYER and PAINT: ENEMY are mutually exclusive radios that activate the painter; click again to deactivate. CLEAR ZONES wipes all painted cells. While both modes are off, clicking the thumbnail opens the enlarged view-only preview instead of painting. |
+| **Encounter type chips** *(filled state)* | COMBAT / SOCIAL / EXPLORATION toggles (multi-select), positioned to the left of the thumbnail. At least one is required for non-combat `completionFlag` generation; defaults route to `exploration`. |
+| **DESCRIPTION textarea** *(filled state)* | Multi-line input under the encounter-type chips. Width auto-fits the space remaining beside the thumbnail. Optional. Its value is written to the new encounter's `customContext` so the in-game DM has scene context to work with. |
+| **MONSTERS picker** *(filled state)* | Full-width scrollable list below the thumbnail / description columns (positioned below whichever ends lower). Lists every entry in the `monsters` registry. Each row shows the monster name, type, and max HP plus two side buttons: `+ ALLY` (adds the monster to the encounter's `allyIds`, spawned with friendly disposition near the player zone) and `+ ENEMY` (adds to the encounter's `enemyIds`, spawned at painted enemy zones with hostile disposition and an auto-assigned combat label). Both fields accept raw monster ids — the engine's `spawnNpc` falls back to the monster roster when an id isn't found in the NPC roster, so authoring a named NPC wrapper is not required. The same monster can be added multiple times — the picker tracks counts. A summary line beneath the picker shows `ALLIES: …` and `ENEMIES: …` with counts; a `CLEAR MONSTERS` button at the right of the summary wipes both selections. The list scrolls with the mouse wheel when the cursor is over it (the wheel listener is bounded by pointer position — no hit-target rectangle is layered over the row buttons, so `+ ALLY` / `+ ENEMY` remain clickable). |
+| **COMPOSE MAP** button | Bottom row (left). Composes the map deterministically via `POST /generate/map/composed`, then opens the Map Preview Overlay with REGENERATE / **ACCEPT** / CLOSE buttons. Iterating without accepting does not modify the right panel. |
+| **COMPOSE ENCOUNTER** button | Bottom row (right). When the preconditions aren't met it stays clickable but greyed; clicking surfaces a hint in the status line ("Compose a map and press ACCEPT in the preview first.", "Paint at least one player-start cell on the thumbnail (PAINT: PLAYER).") instead of going silent. Once enabled (map accepted + ≥1 player cell painted), posts `POST /generate/encounter/composed` with `existingMapId` (the accepted map), the painted starting zones, the selected encounter types, the description, and the expanded ally + enemy id lists. On success, navigates to Encounter Setup Scene with the new encounter pre-selected. |
+
+All disabled buttons across both tabs follow the same "stay clickable, surface a hint" pattern (e.g. on the Generative AI tab, clicking a disabled GENERATE button while the prompt is empty surfaces "Type a scene description (at least 8 characters), or click an example card on the right.").
+
+#### Generative AI tab
+
+| Component | Description |
+| --------- | ----------- |
+| **DESCRIBE THE SCENE** (left) | Header label over the left panel. |
+| **Prompt textarea** | Multi-line HTML textarea sized to the left panel. The player describes the scene in 2-3 sentences. Required (≥ 8 chars) to enable either bottom button. |
+| **Encounter type chips** | COMBAT / SOCIAL / EXPLORATION toggles below the textarea. Optional; leave all off to let the AI pick. |
+| **EXAMPLE PROMPTS** (right) | Header label over the right panel. |
+| **Example cards** | Six vertical cards (Moonlit Graveyard, Goblin Warren, Riverside Ambush, Abandoned Watchtower, Crossroads Market, Wolf Den). Each card shows a title and a one-paragraph body. Clicking a card **copies the body into the prompt textarea** so the player can edit or extend it. Cards do not auto-submit. |
+| **GENERATE MAP ONLY** button | Bottom row (left). Asks Claude for just a map via `POST /generate/map`, then opens the Map Preview Overlay for iteration. |
+| **GENERATE ENCOUNTER** button | Bottom row (right). Asks Claude for a full scenario via `POST /generate/encounter`, then navigates to Encounter Setup Scene with the new encounter pre-selected. While the call is in flight, the status line below reads "The Dungeon Master is building your encounter…". On error the status line shows the rejection message and the button re-enables. |
+
+#### Shared
+
+| Component | Description |
+| --------- | ----------- |
+| **BACK** button | Bottom-left. Returns to MainMenuScene. |
+| **Status line** | DOM div above the bottom button row showing in-flight messages ("Composing map…", "Generating encounter…") and any error returned by the server. |
+| **[DEV] DELETE ALL GEN MAPS** | Corner button at the bottom-right, gated behind `DevMode.enabled`. Calls `DELETE /generate/maps/all` to unlink every `gen_*.json` from `server/data/maps/` and `server/data/encounters/`, then refreshes `loadDefs()`. Slotted into leftover space so it doesn't shift any non-dev layout. |
+
+Generated encounters are saved to `server/data/encounters/gen_<timestamp>_<slug>.json` and `server/data/maps/gen_<timestamp>_<slug>.json`. On the Encounter Setup Scene, generated encounter cards display a `✦ GENERATED` badge in their top-right corner so they're visually distinct from hand-authored ones.
+
+---
+
+### Map Preview Overlay
+
+`client/src/ui/MapPreviewOverlay.ts`. In-scene Phaser overlay (not a `BaseOverlay` HTML modal — it needs to render the tileset spritesheet) opened from the COMPOSE MAP and GENERATE MAP ONLY buttons on Generator Setup Scene, **and** by clicking the accepted-map thumbnail on the deterministic tab. Renders the freshly generated tile grid using the actual preloaded `scribble.png` spritesheet at 14 px per tile.
+
+The overlay supports three button-row modes depending on which callbacks the caller supplied:
+- **Editor** (`onRegenerate` + `onAccept`) — REGENERATE / ACCEPT / CLOSE spread across the bottom (used by COMPOSE MAP).
+- **Iteration** (`onRegenerate` only) — REGENERATE / CLOSE (used by GENERATE MAP ONLY on the AI tab).
+- **View-only** (neither) — a single centred CLOSE button (used by the click-to-enlarge from the thumbnail).
+
+When the caller passes a `zones` option (`{ playerCells: Set<string>; enemyCells: Set<string> }`), the overlay draws blue (player) and red (enemy) 50%-alpha overlays on top of the matching grid cells. The overlays live inside `gridContainer` so they zoom and pan with the map.
+
+| Component | Description |
+| --------- | ----------- |
+| **Backdrop** | Semi-transparent black covering the whole canvas, swallows pointer events so the underlying scene can't be interacted with while the preview is open. |
+| **Title** | A small accent-coloured "MAP PREVIEW" tag above the authored map name. |
+| **Description** | Authored 1-2 sentence flavour line from the model. |
+| **Tile grid (zoom + pan + optional zones)** | The generated map rendered at 14 px / tile using the actual tileset textures, clipped to a 1020 × 440 viewport via a geometry mask. **Mouse wheel** zooms around the cursor (clamped to 0.5×–4×); **click-and-drag** inside the viewport pans the grid. Zoom + pan reset to defaults whenever the grid is replaced by a regeneration. Both terrain and object layers are drawn (object tiles overlay terrain). When the caller passed a `zones` option, player-start cells render with a blue 50%-alpha overlay and enemy-start cells with a red one — these are children of `gridContainer` so they transform with zoom + pan. Falls back to plain grey squares if the texture isn't loaded for some reason. |
+| **Saved-as footnote** | `Saved as gen_<id>` line beneath the grid — reminds the player the map persists on disk regardless of whether they keep iterating. |
+| **↻ REGENERATE** button | Re-runs the same compose / generate call. The preview shows a "Regenerating…" mask while the call is in flight, then swaps the rendered grid in place and resets zoom + pan. |
+| **✓ ACCEPT** button | *(shown only when an `onAccept` callback is supplied — currently from the deterministic COMPOSE MAP flow)* Commits the currently-shown map as the accepted map on `GenerateSetupScene`, closes the overlay, and unlocks the right-panel encounter-builder (thumbnail + zone painter + monster picker + description). Re-opening the preview and accepting a different map replaces the previous acceptance and resets all painted zones + monster selections. |
+| **CLOSE** button | Dismisses the overlay. The current map file stays on disk and is available to future custom encounters. |
 
 | Component            | Description                                                               |
 | -------------------- | ------------------------------------------------------------------------- |
@@ -180,3 +255,27 @@ Defined in `client/src/ui/ReactionPromptOverlay.ts`. Modal overlay surfaced when
 | **TAKE REACTION** button | Accept the prompt. Server fires the deferred effect (OA melee swing / Shield consumes a 1st-level slot + reaction and negates the hit) and resumes the turn loop. |
 | **TAKE NO REACTION** button | Decline. Server skips the deferred effect (Shield: incoming damage is applied normally; OA: enemy escapes unscathed) and resumes the turn loop. |
 | **Close (×) / Backdrop click** | Treated as "Take no reaction" — never spends the player's reaction or spell slot. |
+
+---
+
+### Wrap Up Loose Ends Overlay
+
+Defined in `client/src/ui/ChapterCompleteOverlay.ts`. Opens once when `GameState.chapterComplete` flips true inside an adventure (combat-ended with no enemies remaining, or the chapter's `completionFlag` is set). The chapter is **resolved at this point** — the player can stay on the map indefinitely to search corpses, talk to NPCs through the DM tab, equip recovered gear, and so on. The modal carries the **encounter's title** (e.g. "Bridge Toll", "Dungeon Delve") so the player immediately recognises which chapter they're wrapping up.
+
+| Component | Description |
+| --------- | ----------- |
+| **Tag**   | Small accent-coloured `WRAP UP LOOSE ENDS` line above the title. |
+| **Title** | The encounter title from `GameState.encounterTitle`. |
+| **Subtitle** | `Chapter N of M` from `GameState.adventureContext`. |
+| **Body**  | Short explanatory note that the chapter is resolved and the player can keep exploring or advance now. |
+| **CONTINUE EXPLORING** button | Dismisses the overlay; reveals the persistent Next Chapter Button at the top of the screen. The × button and backdrop click are equivalent. |
+| **NEXT CHAPTER** / **FINISH ADVENTURE** button | Advances the adventure immediately, skipping the in-encounter wrap-up. Label flips to FINISH ADVENTURE on the final chapter. |
+
+### Next Chapter Button
+
+Defined in `client/src/ui/NextChapterButton.ts`. Persistent floating button positioned at the top-center of the canvas (12 px below the top edge, centred horizontally) by `UIScale.canvasRect` and re-positioned on every resize. Created by `OverlayManager.syncChapterComplete` after the Wrap Up overlay is dismissed; destroyed when the player clicks it (or when `OverlayManager.reset()` runs at scene transition).
+
+| Component | Description |
+| --------- | ----------- |
+| **Label** | `Next Chapter →` for non-final chapters; `Finish Adventure` for the final chapter. |
+| **Click** | Calls `OverlayCallbacks.onAdvanceChapter` — GameScene closes the WS, calls `POST /adventure/:characterId/advance`, and either restarts the scene with the new chapter session or returns to the Main Menu when the adventure is complete. |

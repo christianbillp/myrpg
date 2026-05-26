@@ -20,6 +20,7 @@ import { gameClient } from "../net/GameClient";
 import type { GameState, GameEvent, GameMap, SpellDef, FeatureDef } from "../net/types";
 import type { ChatMessage } from "../ui/AIDMOverlay";
 import { DevMode } from "../devMode";
+import { decodeTileGid, TILE_VOID_GID } from "../../../shared/tileGid";
 
 const GAME_W = PLAYER_PANEL_WIDTH + GRID_COLS * TILE_SIZE + TARGET_PANEL_WIDTH;
 const GAME_H = GRID_ROWS * TILE_SIZE + HUD_HEIGHT;
@@ -121,6 +122,7 @@ export class GameScene extends Phaser.Scene {
       onBeginRitualCast: (spellId) => this.beginSpellCast(spellId, true),
       onAcceptReaction:  () => gameClient.sendAction({ type: "resolveReaction", accept: true }),
       onDeclineReaction: () => gameClient.sendAction({ type: "resolveReaction", accept: false }),
+      onAdvanceChapter:  () => this.advanceChapter(),
       getItems:    () => this.registry.get("equipment") as ItemDef[],
       getSpells:   () => (this.registry.get("spells") ?? []) as SpellDef[],
     });
@@ -207,6 +209,7 @@ export class GameScene extends Phaser.Scene {
     this.overlays.showIntroIfNeeded(state);
     this.overlays.refreshCharacterSheetIfOpen(state);
     this.overlays.syncReactionPrompt(state);
+    this.overlays.syncChapterComplete(state);
 
     this.updateHUD(state);
   }
@@ -638,6 +641,35 @@ export class GameScene extends Phaser.Scene {
     this.exitSpellTargetMode();
   }
 
+  /**
+   * Adventure chapter advance flow. Asks the server to mark the current
+   * chapter complete and start the next one. On success, the scene restarts
+   * with the new session id. On adventure completion, returns to MainMenu.
+   *
+   * IMPORTANT — close the WS BEFORE the advance request fires. The server
+   * deletes the just-finished session as part of advancing (which closes
+   * the WS from its end), and if `intentionalClose` is still false when
+   * that cascade reaches us, `ConnectionMonitor` treats it as a server-died
+   * disconnect and reloads the page — bouncing the player back to the main
+   * menu.
+   */
+  private async advanceChapter(): Promise<void> {
+    gameClient.closeWebSocket();
+    try {
+      const result = await gameClient.advanceChapter(this.playerDef.id);
+      this.uiScale.destroy();
+      if (result.complete) {
+        this.scene.start("MainMenuScene");
+        return;
+      }
+      // Restart this scene with the new session id; init() resets all
+      // per-session fields (mapDrawn, npcTokens, overlays, …).
+      this.scene.restart({ sessionId: result.sessionId, playerDef: this.playerDef, isResume: false });
+    } catch (err) {
+      console.error("advanceChapter failed", err);
+    }
+  }
+
   private updateHUD(state: GameState): void {
     const quests: QuestDisplay[] = state.quests.map(q => ({
       title:     q.title,
@@ -652,6 +684,7 @@ export class GameScene extends Phaser.Scene {
       this.playerDef.maxHp,
       quests,
       showSearch,
+      state.objective,
     );
 
     if (this.selectedEntityId) {
@@ -683,11 +716,29 @@ export class GameScene extends Phaser.Scene {
       const drawGrid = (grid: number[][]): void => {
         for (let row = 0; row < map.rows; row++) {
           for (let col = 0; col < map.cols; col++) {
-            const gid = grid[row][col];
-            if (!gid) continue;
-            const ts = tilesets.find((t) => gid >= t.firstgid);
+            const rawGid = grid[row][col];
+            if (!rawGid) continue;
+            // Strip the top-3 flip/rotation bits BEFORE matching against
+            // tileset firstgids — orientation has nothing to do with which
+            // tileset owns the tile.
+            const decoded = decodeTileGid(rawGid);
+            // Sentinel "void" GID — render a solid black rectangle instead
+            // of sampling a tileset frame. Used for chasms / abysses on
+            // tilesets that have no flat-black tile.
+            if (decoded.gid === TILE_VOID_GID) {
+              const r = this.add.rectangle(
+                col * TILE_SIZE + TILE_SIZE / 2,
+                row * TILE_SIZE + TILE_SIZE / 2,
+                TILE_SIZE,
+                TILE_SIZE,
+                0x000000,
+              );
+              container.add(r);
+              continue;
+            }
+            const ts = tilesets.find((t) => decoded.gid >= t.firstgid);
             if (!ts) continue;
-            const frame = gid - ts.firstgid;
+            const frame = decoded.gid - ts.firstgid;
             const sprite = this.add.image(
               col * TILE_SIZE + TILE_SIZE / 2,
               row * TILE_SIZE + TILE_SIZE / 2,
@@ -696,6 +747,9 @@ export class GameScene extends Phaser.Scene {
             );
             sprite.setDisplaySize(TILE_SIZE, TILE_SIZE);
             sprite.setAlpha(MAP_TILE_ALPHA);
+            if (decoded.angle !== 0) sprite.setAngle(decoded.angle);
+            if (decoded.flipX) sprite.setFlipX(true);
+            if (decoded.flipY) sprite.setFlipY(true);
             container.add(sprite);
           }
         }

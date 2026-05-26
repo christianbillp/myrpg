@@ -57,6 +57,16 @@ function scoreBehaviors(ctx: GameContext, npc: NpcState, def: MonsterDef): Behav
   };
 }
 
+/**
+ * True when the tile is on the playable-map boundary — any edge column or row.
+ * A fleeing creature that ends its turn on such a tile is considered to have
+ * escaped the encounter; the caller is responsible for despawning them.
+ */
+export function isMapEdge(ctx: GameContext, tileX: number, tileY: number): boolean {
+  const { cols, rows } = ctx.state.map;
+  return tileX === 0 || tileX === cols - 1 || tileY === 0 || tileY === rows - 1;
+}
+
 /** Parse an SRD challenge rating string ("0", "1/8", "1/4", "1/2", "2", …). */
 function parseCr(cr: string | undefined): number {
   if (!cr) return 0;

@@ -1,0 +1,2001 @@
+{
+  "name": "scribble",
+  "type": "tileset",
+  "tiledversion": "1.11.0",
+  "version": "1.10",
+  "image": "scribble.png",
+  "imagewidth": 1792,
+  "imageheight": 1408,
+  "tilewidth": 128,
+  "tileheight": 128,
+  "columns": 14,
+  "tilecount": 154,
+  "margin": 0,
+  "spacing": 0,
+  "tiles": [
+    {
+      "id": 0,
+      "type": "stone_floor",
+      "properties": [
+        {
+          "name": "name",
+          "type": "string",
+          "value": "stone_floor"
+        },
+        {
+          "name": "passable",
+          "type": "bool",
+          "value": true
+        },
+        {
+          "name": "layer",
+          "type": "string",
+          "value": "ground"
+        },
+        {
+          "name": "description",
+          "type": "string",
+          "value": "Pale grey flagstone floor with faint grid lines. Default walkable dungeon floor."
+        },
+        {
+          "name": "tags",
+          "type": "string",
+          "value": "stone,floor,dungeon,indoor,fill"
+        }
+      ]
+    },
+    {
+      "id": 1,
+      "type": "path_corner_se",
+      "properties": [
+        {
+          "name": "name",
+          "type": "string",
+          "value": "path_corner_se"
+        },
+        {
+          "name": "passable",
+          "type": "bool",
+          "value": true
+        },
+        {
+          "name": "layer",
+          "type": "string",
+          "value": "ground"
+        },
+        {
+          "name": "description",
+          "type": "string",
+          "value": "Dirt path corner; the path enters from the bottom edge and turns to exit on the right."
+        },
+        {
+          "name": "tags",
+          "type": "string",
+          "value": "path,road,outdoor,corner,connect_s,connect_e"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "stone_wall_corner_tl",
+      "properties": [
+        {
+          "name": "name",
+          "type": "string",
+          "value": "stone_wall_corner_tl"
+        },
+        {
+          "name": "passable",
+          "type": "bool",
+          "value": false
+        },
+        {
+          "name": "layer",
+          "type": "string",
+          "value": "ground"
+        },
+        {
+          "name": "description",
+          "type": "string",
+          "value": "Solid stone wall corner piece (top-left). Blocks movement and sight."
+        },
+        {
+          "name": "tags",
+          "type": "string",
+          "value": "stone,wall,dungeon,indoor,barrier,corner"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "stone_wall_top",
+      "properties": [
+        {
+          "name": "name",
+          "type": "string",
+          "value": "stone_wall_top"
+        },
+        {
+          "name": "passable",
+          "type": "bool",
+          "value": false
+        },
+        {
+          "name": "layer",
+          "type": "string",
+          "value": "ground"
+        },
+        {
+          "name": "description",
+          "type": "string",
+          "value": "Solid stone wall segment placed along the top of the tile. Blocks movement and sight."
+        },
+        {
+          "name": "tags",
+          "type": "string",
+          "value": "stone,wall,dungeon,indoor,barrier"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "doorway_top",
+      "properties": [
+        {
+          "name": "name",
+          "type": "string",
+          "value": "doorway_top"
+        },
+        {
+          "name": "passable",
+          "type": "bool",
+          "value": true
+        },
+        {
+          "name": "layer",
+          "type": "string",
+          "value": "object"
+        },
+        {
+          "name": "description",
+          "type": "string",
+          "value": "An open doorway (no door) set in the top part of the tile. Passable opening; place over a wall tile."
+        },
+        {
+          "name": "tags",
+          "type": "string",
+          "value": "door,entrance,dungeon,indoor,passage"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "type": "crate",
+      "properties": [
+        {
+          "name": "name",
+          "type": "string",
+          "value": "crate"
+        },
+        {
+          "name": "passable",
+          "type": "bool",
+          "value": false
+        },
+        {
+          "name": "layer",
+          "type": "string",
+          "value": "object"
+        },
+        {
+          "name": "description",
+          "type": "string",
+          "value": "A wooden crate marked with an X. Blocks movement; searchable for loot."
+        },
+        {
+          "name": "tags",
+          "type": "string",
+          "value": "crate,container,furniture,loot,searchable,indoor"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "type": "wood_wall_top",
+      "properties": [
+        {
+          "name": "name",
+          "type": "string",
+          "value": "wood_wall_top"
+        },
+        {
+          "name": "passable",
+          "type": "bool",
+          "value": false
+        },
+        {
+          "name": "layer",
+          "type": "string",
+          "value": "ground"
+        },
+        {
+          "name": "description",
+          "type": "string",
+          "value": "Light wooden plank wall segment along the top of the tile. Blocks movement and sight."
+        },
+        {
+          "name": "tags",
+          "type": "string",
+          "value": "wood,wall,tavern,indoor,barrier"
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "type": "grass",
+      "properties": [
+        {
+          "name": "name",
+          "type": "string",
+          "value": "grass"
+        },
+        {
+          "name": "passable",
+          "type": "bool",
+          "value": true
+        },
+        {
+          "name": "layer",
+          "type": "string",
+          "value": "ground"
+        },
+        {
+          "name": "description",
+          "type": "string",
+          "value": "Solid medium-green grass. Default outdoor ground fill."
+        },
+        {
+          "name": "tags",
+          "type": "string",
+          "value": "nature,outdoor,fill"
+        }
+      ]
+    },
+    {
+      "id": 14,
+      "type": "stone_floor_b",
+      "properties": [
+        {
+          "name": "name",
+          "type": "string",
+          "value": "stone_floor_b"
+        },
+        {
+          "name": "passable",
+          "type": "bool",
+          "value": true
+        },
+        {
+          "name": "layer",
+          "type": "string",
+          "value": "ground"
+        },
+        {
+          "name": "description",
+          "type": "string",
+          "value": "Pale grey flagstone floor (variant). Walkable dungeon floor."
+        },
+        {
+          "name": "tags",
+          "type": "string",
+          "value": "stone,floor,dungeon,indoor,fill"
+        }
+      ]
+    },
+    {
+      "id": 15,
+      "type": "path_straight_v",
+      "properties": [
+        {
+          "name": "name",
+          "type": "string",
+          "value": "path_straight_v"
+        },
+        {
+          "name": "passable",
+          "type": "bool",
+          "value": true
+        },
+        {
+          "name": "layer",
+          "type": "string",
+          "value": "ground"
+        },
+        {
+          "name": "description",
+          "type": "string",
+          "value": "Straight vertical dirt path running from the bottom edge to the top edge."
+        },
+        {
+          "name": "tags",
+          "type": "string",
+          "value": "path,road,outdoor,straight,connect_n,connect_s"
+        }
+      ]
+    },
+    {
+      "id": 16,
+      "type": "stone_wall_corner_curved",
+      "properties": [
+        {
+          "name": "name",
+          "type": "string",
+          "value": "stone_wall_corner_curved"
+        },
+        {
+          "name": "passable",
+          "type": "bool",
+          "value": false
+        },
+        {
+          "name": "layer",
+          "type": "string",
+          "value": "ground"
+        },
+        {
+          "name": "description",
+          "type": "string",
+          "value": "Curved stone wall corner piece. Blocks movement and sight."
+        },
+        {
+          "name": "tags",
+          "type": "string",
+          "value": "stone,wall,dungeon,indoor,barrier,corner"
+        }
+      ]
+    },
+    {
+      "id": 17,
+      "type": "half_wall_ul",
+      "properties": [
+        {
+          "name": "name",
+          "type": "string",
+          "value": "half_wall_ul"
+        },
+        {
+          "name": "passable",
+          "type": "bool",
+          "value": true
+        },
+        {
+          "name": "layer",
+          "type": "string",
+          "value": "object"
+        },
+        {
+          "name": "description",
+          "type": "string",
+          "value": "A low half-wall in the upper-left of the tile. Passable; provides cover but does not block line of sight."
+        },
+        {
+          "name": "tags",
+          "type": "string",
+          "value": "wall,half_wall,cover,passable,indoor"
+        }
+      ]
+    },
+    {
+      "id": 18,
+      "type": "doorway_open_top",
+      "properties": [
+        {
+          "name": "name",
+          "type": "string",
+          "value": "doorway_open_top"
+        },
+        {
+          "name": "passable",
+          "type": "bool",
+          "value": true
+        },
+        {
+          "name": "layer",
+          "type": "string",
+          "value": "object"
+        },
+        {
+          "name": "description",
+          "type": "string",
+          "value": "An open doorway with no door, set in the upper part of the tile. Passable opening."
+        },
+        {
+          "name": "tags",
+          "type": "string",
+          "value": "door,entrance,passage,indoor"
+        }
+      ]
+    },
+    {
+      "id": 19,
+      "type": "brazier",
+      "properties": [
+        {
+          "name": "name",
+          "type": "string",
+          "value": "brazier"
+        },
+        {
+          "name": "passable",
+          "type": "bool",
+          "value": false
+        },
+        {
+          "name": "layer",
+          "type": "string",
+          "value": "object"
+        },
+        {
+          "name": "description",
+          "type": "string",
+          "value": "A standing lit brazier. Blocks movement; emits light."
+        },
+        {
+          "name": "tags",
+          "type": "string",
+          "value": "brazier,light,fixture,furniture,indoor"
+        }
+      ]
+    },
+    {
+      "id": 20,
+      "type": "chair_n",
+      "properties": [
+        {
+          "name": "name",
+          "type": "string",
+          "value": "chair_n"
+        },
+        {
+          "name": "passable",
+          "type": "bool",
+          "value": true
+        },
+        {
+          "name": "layer",
+          "type": "string",
+          "value": "object"
+        },
+        {
+          "name": "description",
+          "type": "string",
+          "value": "A wooden chair, centered, facing north. Passable seat a character can occupy."
+        },
+        {
+          "name": "tags",
+          "type": "string",
+          "value": "chair,seat,furniture,indoor,facing_n"
+        }
+      ]
+    },
+    {
+      "id": 21,
+      "type": "crate_closed",
+      "properties": [
+        {
+          "name": "name",
+          "type": "string",
+          "value": "crate_closed"
+        },
+        {
+          "name": "passable",
+          "type": "bool",
+          "value": false
+        },
+        {
+          "name": "layer",
+          "type": "string",
+          "value": "object"
+        },
+        {
+          "name": "description",
+          "type": "string",
+          "value": "A closed crate with a slatted lid. Blocks movement; searchable for loot."
+        },
+        {
+          "name": "tags",
+          "type": "string",
+          "value": "crate,container,furniture,loot,searchable,indoor"
+        }
+      ]
+    },
+    {
+      "id": 28,
+      "type": "chasm_corner_tl",
+      "properties": [
+        {
+          "name": "name",
+          "type": "string",
+          "value": "chasm_corner_tl"
+        },
+        {
+          "name": "passable",
+          "type": "bool",
+          "value": false
+        },
+        {
+          "name": "layer",
+          "type": "string",
+          "value": "ground"
+        },
+        {
+          "name": "description",
+          "type": "string",
+          "value": "Floor meeting a void/chasm at the top-left corner. Blocks movement at the void."
+        },
+        {
+          "name": "tags",
+          "type": "string",
+          "value": "void,chasm,pit,hazard,corner"
+        }
+      ]
+    },
+    {
+      "id": 29,
+      "type": "path_intersection",
+      "properties": [
+        {
+          "name": "name",
+          "type": "string",
+          "value": "path_intersection"
+        },
+        {
+          "name": "passable",
+          "type": "bool",
+          "value": true
+        },
+        {
+          "name": "layer",
+          "type": "string",
+          "value": "ground"
+        },
+        {
+          "name": "description",
+          "type": "string",
+          "value": "A four-way dirt path intersection; paths meet in the center of the tile."
+        },
+        {
+          "name": "tags",
+          "type": "string",
+          "value": "path,road,outdoor,intersection,connect_n,connect_s,connect_e,connect_w"
+        }
+      ]
+    },
+    {
+      "id": 30,
+      "type": "stone_wall_corner_pit",
+      "properties": [
+        {
+          "name": "name",
+          "type": "string",
+          "value": "stone_wall_corner_pit"
+        },
+        {
+          "name": "passable",
+          "type": "bool",
+          "value": false
+        },
+        {
+          "name": "layer",
+          "type": "string",
+          "value": "ground"
+        },
+        {
+          "name": "description",
+          "type": "string",
+          "value": "Stone wall corner beside a void. Blocks movement and sight."
+        },
+        {
+          "name": "tags",
+          "type": "string",
+          "value": "stone,wall,dungeon,indoor,barrier,corner"
+        }
+      ]
+    },
+    {
+      "id": 31,
+      "type": "half_wall_cracked_ul",
+      "properties": [
+        {
+          "name": "name",
+          "type": "string",
+          "value": "half_wall_cracked_ul"
+        },
+        {
+          "name": "passable",
+          "type": "bool",
+          "value": true
+        },
+        {
+          "name": "layer",
+          "type": "string",
+          "value": "object"
+        },
+        {
+          "name": "description",
+          "type": "string",
+          "value": "A cracked low half-wall in the upper part of the tile. Passable; provides cover but does not block line of sight."
+        },
+        {
+          "name": "tags",
+          "type": "string",
+          "value": "wall,half_wall,cracked,cover,passable,indoor"
+        }
+      ]
+    },
+    {
+      "id": 32,
+      "type": "door_open_top",
+      "properties": [
+        {
+          "name": "name",
+          "type": "string",
+          "value": "door_open_top"
+        },
+        {
+          "name": "passable",
+          "type": "bool",
+          "value": true
+        },
+        {
+          "name": "layer",
+          "type": "string",
+          "value": "object"
+        },
+        {
+          "name": "description",
+          "type": "string",
+          "value": "An open door; frame in the upper part of the tile, door swung open toward the lower right. Passable."
+        },
+        {
+          "name": "tags",
+          "type": "string",
+          "value": "door,entrance,passage,indoor,open"
+        }
+      ]
+    },
+    {
+      "id": 33,
+      "type": "barrels_two",
+      "properties": [
+        {
+          "name": "name",
+          "type": "string",
+          "value": "barrels_two"
+        },
+        {
+          "name": "passable",
+          "type": "bool",
+          "value": false
+        },
+        {
+          "name": "layer",
+          "type": "string",
+          "value": "object"
+        },
+        {
+          "name": "description",
+          "type": "string",
+          "value": "Two barrels in the center; one upright at top-right, one lying on its side at lower-left. Blocks movement; searchable."
+        },
+        {
+          "name": "tags",
+          "type": "string",
+          "value": "barrel,container,furniture,loot,searchable,indoor"
+        }
+      ]
+    },
+    {
+      "id": 34,
+      "type": "firewood",
+      "properties": [
+        {
+          "name": "name",
+          "type": "string",
+          "value": "firewood"
+        },
+        {
+          "name": "passable",
+          "type": "bool",
+          "value": false
+        },
+        {
+          "name": "layer",
+          "type": "string",
+          "value": "object"
+        },
+        {
+          "name": "description",
+          "type": "string",
+          "value": "A pile of planks or firewood. Blocks movement; searchable."
+        },
+        {
+          "name": "tags",
+          "type": "string",
+          "value": "firewood,planks,wood,searchable,decoration"
+        }
+      ]
+    },
+    {
+      "id": 35,
+      "type": "trapdoor",
+      "properties": [
+        {
+          "name": "name",
+          "type": "string",
+          "value": "trapdoor"
+        },
+        {
+          "name": "passable",
+          "type": "bool",
+          "value": true
+        },
+        {
+          "name": "layer",
+          "type": "string",
+          "value": "object"
+        },
+        {
+          "name": "description",
+          "type": "string",
+          "value": "A trapdoor set into the floor that opens toward the right. Passable; acts as a level transition."
+        },
+        {
+          "name": "tags",
+          "type": "string",
+          "value": "trapdoor,transition,passage,floor,indoor"
+        }
+      ]
+    },
+    {
+      "id": 42,
+      "type": "stone_floor_diamond",
+      "properties": [
+        {
+          "name": "name",
+          "type": "string",
+          "value": "stone_floor_diamond"
+        },
+        {
+          "name": "passable",
+          "type": "bool",
+          "value": true
+        },
+        {
+          "name": "layer",
+          "type": "string",
+          "value": "ground"
+        },
+        {
+          "name": "description",
+          "type": "string",
+          "value": "Stone floor with a diamond tile pattern. Walkable dungeon floor."
+        },
+        {
+          "name": "tags",
+          "type": "string",
+          "value": "stone,floor,dungeon,indoor,fill,decorated"
+        }
+      ]
+    },
+    {
+      "id": 43,
+      "type": "rail_corner_se",
+      "properties": [
+        {
+          "name": "name",
+          "type": "string",
+          "value": "rail_corner_se"
+        },
+        {
+          "name": "passable",
+          "type": "bool",
+          "value": true
+        },
+        {
+          "name": "layer",
+          "type": "string",
+          "value": "ground"
+        },
+        {
+          "name": "description",
+          "type": "string",
+          "value": "Railway track curving from the bottom edge to the right edge."
+        },
+        {
+          "name": "tags",
+          "type": "string",
+          "value": "rail,track,corner,connect_s,connect_e,outdoor"
+        }
+      ]
+    },
+    {
+      "id": 44,
+      "type": "stone_wall_conduit_corner",
+      "properties": [
+        {
+          "name": "name",
+          "type": "string",
+          "value": "stone_wall_conduit_corner"
+        },
+        {
+          "name": "passable",
+          "type": "bool",
+          "value": false
+        },
+        {
+          "name": "layer",
+          "type": "string",
+          "value": "ground"
+        },
+        {
+          "name": "description",
+          "type": "string",
+          "value": "Curved stone wall corner with a conduit/pipe. Blocks movement and sight."
+        },
+        {
+          "name": "tags",
+          "type": "string",
+          "value": "stone,wall,dungeon,indoor,barrier,corner"
+        }
+      ]
+    },
+    {
+      "id": 45,
+      "type": "window_top",
+      "properties": [
+        {
+          "name": "name",
+          "type": "string",
+          "value": "window_top"
+        },
+        {
+          "name": "passable",
+          "type": "bool",
+          "value": false
+        },
+        {
+          "name": "layer",
+          "type": "string",
+          "value": "ground"
+        },
+        {
+          "name": "description",
+          "type": "string",
+          "value": "A horizontal window set into the top part of a wall. Blocks movement."
+        },
+        {
+          "name": "tags",
+          "type": "string",
+          "value": "window,wall,dungeon,indoor,barrier"
+        }
+      ]
+    },
+    {
+      "id": 46,
+      "type": "brazier_b",
+      "properties": [
+        {
+          "name": "name",
+          "type": "string",
+          "value": "brazier_b"
+        },
+        {
+          "name": "passable",
+          "type": "bool",
+          "value": false
+        },
+        {
+          "name": "layer",
+          "type": "string",
+          "value": "object"
+        },
+        {
+          "name": "description",
+          "type": "string",
+          "value": "A standing lit brazier. Blocks movement; emits light."
+        },
+        {
+          "name": "tags",
+          "type": "string",
+          "value": "brazier,light,fixture,furniture,indoor"
+        }
+      ]
+    },
+    {
+      "id": 47,
+      "type": "barrels_three",
+      "properties": [
+        {
+          "name": "name",
+          "type": "string",
+          "value": "barrels_three"
+        },
+        {
+          "name": "passable",
+          "type": "bool",
+          "value": false
+        },
+        {
+          "name": "layer",
+          "type": "string",
+          "value": "object"
+        },
+        {
+          "name": "description",
+          "type": "string",
+          "value": "Three barrels arranged along the vertical center of the tile. Blocks movement; searchable."
+        },
+        {
+          "name": "tags",
+          "type": "string",
+          "value": "barrel,container,furniture,loot,searchable,indoor"
+        }
+      ]
+    },
+    {
+      "id": 48,
+      "type": "bed_n",
+      "properties": [
+        {
+          "name": "name",
+          "type": "string",
+          "value": "bed_n"
+        },
+        {
+          "name": "passable",
+          "type": "bool",
+          "value": false
+        },
+        {
+          "name": "layer",
+          "type": "string",
+          "value": "object"
+        },
+        {
+          "name": "description",
+          "type": "string",
+          "value": "A bed, centered, vertical, facing north. Blocks movement."
+        },
+        {
+          "name": "tags",
+          "type": "string",
+          "value": "bed,furniture,indoor,facing_n"
+        }
+      ]
+    },
+    {
+      "id": 49,
+      "type": "stairs_up",
+      "properties": [
+        {
+          "name": "name",
+          "type": "string",
+          "value": "stairs_up"
+        },
+        {
+          "name": "passable",
+          "type": "bool",
+          "value": true
+        },
+        {
+          "name": "layer",
+          "type": "string",
+          "value": "object"
+        },
+        {
+          "name": "description",
+          "type": "string",
+          "value": "A staircase leading up. Passable; acts as a level transition."
+        },
+        {
+          "name": "tags",
+          "type": "string",
+          "value": "stairs,up,transition,passage,dungeon,indoor"
+        }
+      ]
+    },
+    {
+      "id": 56,
+      "type": "stone_floor_inlay",
+      "properties": [
+        {
+          "name": "name",
+          "type": "string",
+          "value": "stone_floor_inlay"
+        },
+        {
+          "name": "passable",
+          "type": "bool",
+          "value": true
+        },
+        {
+          "name": "layer",
+          "type": "string",
+          "value": "ground"
+        },
+        {
+          "name": "description",
+          "type": "string",
+          "value": "Stone floor with a central diamond inlay. Walkable dungeon floor."
+        },
+        {
+          "name": "tags",
+          "type": "string",
+          "value": "stone,floor,dungeon,indoor,fill,decorated"
+        }
+      ]
+    },
+    {
+      "id": 57,
+      "type": "rail_straight_v",
+      "properties": [
+        {
+          "name": "name",
+          "type": "string",
+          "value": "rail_straight_v"
+        },
+        {
+          "name": "passable",
+          "type": "bool",
+          "value": true
+        },
+        {
+          "name": "layer",
+          "type": "string",
+          "value": "ground"
+        },
+        {
+          "name": "description",
+          "type": "string",
+          "value": "Straight railway track running from the bottom edge to the top edge."
+        },
+        {
+          "name": "tags",
+          "type": "string",
+          "value": "rail,track,straight,connect_n,connect_s,outdoor"
+        }
+      ]
+    },
+    {
+      "id": 58,
+      "type": "stone_wall_corner_ul",
+      "properties": [
+        {
+          "name": "name",
+          "type": "string",
+          "value": "stone_wall_corner_ul"
+        },
+        {
+          "name": "passable",
+          "type": "bool",
+          "value": false
+        },
+        {
+          "name": "layer",
+          "type": "string",
+          "value": "ground"
+        },
+        {
+          "name": "description",
+          "type": "string",
+          "value": "Stone wall placed in the upper-left part of the tile. Blocks movement and sight."
+        },
+        {
+          "name": "tags",
+          "type": "string",
+          "value": "stone,wall,dungeon,indoor,barrier,corner"
+        }
+      ]
+    },
+    {
+      "id": 59,
+      "type": "wall_spikes_top",
+      "properties": [
+        {
+          "name": "name",
+          "type": "string",
+          "value": "wall_spikes_top"
+        },
+        {
+          "name": "passable",
+          "type": "bool",
+          "value": false
+        },
+        {
+          "name": "layer",
+          "type": "string",
+          "value": "object"
+        },
+        {
+          "name": "description",
+          "type": "string",
+          "value": "A horizontal wall along the top of the tile with spikes facing toward the center. Blocks movement and deals contact damage."
+        },
+        {
+          "name": "tags",
+          "type": "string",
+          "value": "wall,spikes,trap,hazard,barrier,trap_spikes,indoor"
+        }
+      ]
+    },
+    {
+      "id": 60,
+      "type": "chest_s",
+      "properties": [
+        {
+          "name": "name",
+          "type": "string",
+          "value": "chest_s"
+        },
+        {
+          "name": "passable",
+          "type": "bool",
+          "value": false
+        },
+        {
+          "name": "layer",
+          "type": "string",
+          "value": "object"
+        },
+        {
+          "name": "description",
+          "type": "string",
+          "value": "A chest, facing south. Blocks movement; searchable for loot."
+        },
+        {
+          "name": "tags",
+          "type": "string",
+          "value": "chest,container,furniture,loot,searchable,indoor"
+        }
+      ]
+    },
+    {
+      "id": 61,
+      "type": "arrow_body_se",
+      "properties": [
+        {
+          "name": "name",
+          "type": "string",
+          "value": "arrow_body_se"
+        },
+        {
+          "name": "passable",
+          "type": "bool",
+          "value": true
+        },
+        {
+          "name": "layer",
+          "type": "string",
+          "value": "object"
+        },
+        {
+          "name": "description",
+          "type": "string",
+          "value": "Marker: arrow body curving from the center-bottom toward the center-right. Part of a multi-tile directional arrow overlay."
+        },
+        {
+          "name": "tags",
+          "type": "string",
+          "value": "marker,arrow,ui,overlay,connect_s,connect_e"
+        }
+      ]
+    },
+    {
+      "id": 62,
+      "type": "bed_unmade",
+      "properties": [
+        {
+          "name": "name",
+          "type": "string",
+          "value": "bed_unmade"
+        },
+        {
+          "name": "passable",
+          "type": "bool",
+          "value": false
+        },
+        {
+          "name": "layer",
+          "type": "string",
+          "value": "object"
+        },
+        {
+          "name": "description",
+          "type": "string",
+          "value": "An unmade bed. Blocks movement."
+        },
+        {
+          "name": "tags",
+          "type": "string",
+          "value": "bed,furniture,indoor,unmade"
+        }
+      ]
+    },
+    {
+      "id": 63,
+      "type": "stairs_down",
+      "properties": [
+        {
+          "name": "name",
+          "type": "string",
+          "value": "stairs_down"
+        },
+        {
+          "name": "passable",
+          "type": "bool",
+          "value": true
+        },
+        {
+          "name": "layer",
+          "type": "string",
+          "value": "object"
+        },
+        {
+          "name": "description",
+          "type": "string",
+          "value": "A staircase leading down. Passable; acts as a level transition."
+        },
+        {
+          "name": "tags",
+          "type": "string",
+          "value": "stairs,down,transition,passage,dungeon,indoor"
+        }
+      ]
+    },
+    {
+      "id": 70,
+      "type": "stone_floor_cracked",
+      "properties": [
+        {
+          "name": "name",
+          "type": "string",
+          "value": "stone_floor_cracked"
+        },
+        {
+          "name": "passable",
+          "type": "bool",
+          "value": true
+        },
+        {
+          "name": "layer",
+          "type": "string",
+          "value": "ground"
+        },
+        {
+          "name": "description",
+          "type": "string",
+          "value": "Cracked grey stone floor. Walkable dungeon floor."
+        },
+        {
+          "name": "tags",
+          "type": "string",
+          "value": "stone,floor,dungeon,indoor,fill,cracked"
+        }
+      ]
+    },
+    {
+      "id": 71,
+      "type": "rail_intersection",
+      "properties": [
+        {
+          "name": "name",
+          "type": "string",
+          "value": "rail_intersection"
+        },
+        {
+          "name": "passable",
+          "type": "bool",
+          "value": true
+        },
+        {
+          "name": "layer",
+          "type": "string",
+          "value": "ground"
+        },
+        {
+          "name": "description",
+          "type": "string",
+          "value": "A railway intersection; tracks meet in the center of the tile."
+        },
+        {
+          "name": "tags",
+          "type": "string",
+          "value": "rail,track,intersection,connect_n,connect_s,connect_e,connect_w,outdoor"
+        }
+      ]
+    },
+    {
+      "id": 72,
+      "type": "stone_wall_corner_ul_b",
+      "properties": [
+        {
+          "name": "name",
+          "type": "string",
+          "value": "stone_wall_corner_ul_b"
+        },
+        {
+          "name": "passable",
+          "type": "bool",
+          "value": false
+        },
+        {
+          "name": "layer",
+          "type": "string",
+          "value": "ground"
+        },
+        {
+          "name": "description",
+          "type": "string",
+          "value": "Stone wall placed in the upper-left part of the tile. Blocks movement and sight."
+        },
+        {
+          "name": "tags",
+          "type": "string",
+          "value": "stone,wall,dungeon,indoor,barrier,corner"
+        }
+      ]
+    },
+    {
+      "id": 73,
+      "type": "wall_broken_top",
+      "properties": [
+        {
+          "name": "name",
+          "type": "string",
+          "value": "wall_broken_top"
+        },
+        {
+          "name": "passable",
+          "type": "bool",
+          "value": true
+        },
+        {
+          "name": "layer",
+          "type": "string",
+          "value": "object"
+        },
+        {
+          "name": "description",
+          "type": "string",
+          "value": "A broken-down wall along the top of the tile, rubble spilling toward the center. Passable over the rubble."
+        },
+        {
+          "name": "tags",
+          "type": "string",
+          "value": "wall,broken,rubble,passable,indoor"
+        }
+      ]
+    },
+    {
+      "id": 74,
+      "type": "campfire",
+      "properties": [
+        {
+          "name": "name",
+          "type": "string",
+          "value": "campfire"
+        },
+        {
+          "name": "passable",
+          "type": "bool",
+          "value": false
+        },
+        {
+          "name": "layer",
+          "type": "string",
+          "value": "object"
+        },
+        {
+          "name": "description",
+          "type": "string",
+          "value": "A lit campfire. Blocks movement; emits light."
+        },
+        {
+          "name": "tags",
+          "type": "string",
+          "value": "campfire,fire,light,camp,fixture,outdoor"
+        }
+      ]
+    },
+    {
+      "id": 75,
+      "type": "arrow_body_v",
+      "properties": [
+        {
+          "name": "name",
+          "type": "string",
+          "value": "arrow_body_v"
+        },
+        {
+          "name": "passable",
+          "type": "bool",
+          "value": true
+        },
+        {
+          "name": "layer",
+          "type": "string",
+          "value": "object"
+        },
+        {
+          "name": "description",
+          "type": "string",
+          "value": "Marker: vertical arrow body, centered, running from top to bottom. Part of a multi-tile directional arrow overlay."
+        },
+        {
+          "name": "tags",
+          "type": "string",
+          "value": "marker,arrow,ui,overlay,connect_n,connect_s"
+        }
+      ]
+    },
+    {
+      "id": 76,
+      "type": "coffin",
+      "properties": [
+        {
+          "name": "name",
+          "type": "string",
+          "value": "coffin"
+        },
+        {
+          "name": "passable",
+          "type": "bool",
+          "value": false
+        },
+        {
+          "name": "layer",
+          "type": "string",
+          "value": "object"
+        },
+        {
+          "name": "description",
+          "type": "string",
+          "value": "A coffin or tomb marked with a cross. Blocks movement; searchable."
+        },
+        {
+          "name": "tags",
+          "type": "string",
+          "value": "coffin,tomb,furniture,searchable,indoor"
+        }
+      ]
+    },
+    {
+      "id": 77,
+      "type": "bridge_v",
+      "properties": [
+        {
+          "name": "name",
+          "type": "string",
+          "value": "bridge_v"
+        },
+        {
+          "name": "passable",
+          "type": "bool",
+          "value": true
+        },
+        {
+          "name": "layer",
+          "type": "string",
+          "value": "ground"
+        },
+        {
+          "name": "description",
+          "type": "string",
+          "value": "A straight bridge segment running from top to bottom. Passable; lay across water or chasm to cross."
+        },
+        {
+          "name": "tags",
+          "type": "string",
+          "value": "bridge,wood,crossing,connect_n,connect_s"
+        }
+      ]
+    },
+    {
+      "id": 84,
+      "type": "wood_floor",
+      "properties": [
+        {
+          "name": "name",
+          "type": "string",
+          "value": "wood_floor"
+        },
+        {
+          "name": "passable",
+          "type": "bool",
+          "value": true
+        },
+        {
+          "name": "layer",
+          "type": "string",
+          "value": "ground"
+        },
+        {
+          "name": "description",
+          "type": "string",
+          "value": "Warm wooden plank floor. Default walkable floor for taverns and wooden interiors."
+        },
+        {
+          "name": "tags",
+          "type": "string",
+          "value": "wood,floor,tavern,indoor,fill"
+        }
+      ]
+    },
+    {
+      "id": 85,
+      "type": "minecart_n",
+      "properties": [
+        {
+          "name": "name",
+          "type": "string",
+          "value": "minecart_n"
+        },
+        {
+          "name": "passable",
+          "type": "bool",
+          "value": false
+        },
+        {
+          "name": "layer",
+          "type": "string",
+          "value": "object"
+        },
+        {
+          "name": "description",
+          "type": "string",
+          "value": "A minecart on a railway track, facing north. Blocks movement."
+        },
+        {
+          "name": "tags",
+          "type": "string",
+          "value": "minecart,rail,cart,furniture,facing_n"
+        }
+      ]
+    },
+    {
+      "id": 86,
+      "type": "stone_wall_curve_top",
+      "properties": [
+        {
+          "name": "name",
+          "type": "string",
+          "value": "stone_wall_curve_top"
+        },
+        {
+          "name": "passable",
+          "type": "bool",
+          "value": false
+        },
+        {
+          "name": "layer",
+          "type": "string",
+          "value": "ground"
+        },
+        {
+          "name": "description",
+          "type": "string",
+          "value": "A horizontal stone wall in the upper part of the tile, curved on the right side. Blocks movement and sight."
+        },
+        {
+          "name": "tags",
+          "type": "string",
+          "value": "stone,wall,dungeon,indoor,barrier,curve"
+        }
+      ]
+    },
+    {
+      "id": 87,
+      "type": "grate_square",
+      "properties": [
+        {
+          "name": "name",
+          "type": "string",
+          "value": "grate_square"
+        },
+        {
+          "name": "passable",
+          "type": "bool",
+          "value": true
+        },
+        {
+          "name": "layer",
+          "type": "string",
+          "value": "object"
+        },
+        {
+          "name": "description",
+          "type": "string",
+          "value": "A square floor grate. Passable."
+        },
+        {
+          "name": "tags",
+          "type": "string",
+          "value": "grate,floor,decoration,indoor"
+        }
+      ]
+    },
+    {
+      "id": 88,
+      "type": "flowers",
+      "properties": [
+        {
+          "name": "name",
+          "type": "string",
+          "value": "flowers"
+        },
+        {
+          "name": "passable",
+          "type": "bool",
+          "value": true
+        },
+        {
+          "name": "layer",
+          "type": "string",
+          "value": "object"
+        },
+        {
+          "name": "description",
+          "type": "string",
+          "value": "A patch of flowers. Low decoration; does not block movement."
+        },
+        {
+          "name": "tags",
+          "type": "string",
+          "value": "flowers,nature,outdoor,decoration"
+        }
+      ]
+    },
+    {
+      "id": 89,
+      "type": "arrow_head_n",
+      "properties": [
+        {
+          "name": "name",
+          "type": "string",
+          "value": "arrow_head_n"
+        },
+        {
+          "name": "passable",
+          "type": "bool",
+          "value": true
+        },
+        {
+          "name": "layer",
+          "type": "string",
+          "value": "object"
+        },
+        {
+          "name": "description",
+          "type": "string",
+          "value": "Marker: arrowhead pointing up (north). Endpoint of a multi-tile directional arrow overlay."
+        },
+        {
+          "name": "tags",
+          "type": "string",
+          "value": "marker,arrow,arrowhead,ui,overlay,connect_s"
+        }
+      ]
+    },
+    {
+      "id": 90,
+      "type": "liquid_floor",
+      "properties": [
+        {
+          "name": "name",
+          "type": "string",
+          "value": "liquid_floor"
+        },
+        {
+          "name": "passable",
+          "type": "bool",
+          "value": true
+        },
+        {
+          "name": "layer",
+          "type": "string",
+          "value": "ground"
+        },
+        {
+          "name": "description",
+          "type": "string",
+          "value": "A pool of liquid on the ground. Passable."
+        },
+        {
+          "name": "tags",
+          "type": "string",
+          "value": "liquid,water,floor,outdoor"
+        }
+      ]
+    },
+    {
+      "id": 91,
+      "type": "bridge_broken_bottom",
+      "properties": [
+        {
+          "name": "name",
+          "type": "string",
+          "value": "bridge_broken_bottom"
+        },
+        {
+          "name": "passable",
+          "type": "bool",
+          "value": true
+        },
+        {
+          "name": "layer",
+          "type": "string",
+          "value": "ground"
+        },
+        {
+          "name": "description",
+          "type": "string",
+          "value": "A bridge segment with a missing board at the bottom. Passable but broken at the south edge."
+        },
+        {
+          "name": "tags",
+          "type": "string",
+          "value": "bridge,wood,crossing,broken,connect_n"
+        }
+      ]
+    },
+    {
+      "id": 98,
+      "type": "terrain_bumpy",
+      "properties": [
+        {
+          "name": "name",
+          "type": "string",
+          "value": "terrain_bumpy"
+        },
+        {
+          "name": "passable",
+          "type": "bool",
+          "value": true
+        },
+        {
+          "name": "layer",
+          "type": "string",
+          "value": "ground"
+        },
+        {
+          "name": "description",
+          "type": "string",
+          "value": "Bumpy, uneven terrain. Walkable but counts as difficult terrain."
+        },
+        {
+          "name": "tags",
+          "type": "string",
+          "value": "terrain,rough,difficult,outdoor,fill"
+        }
+      ]
+    },
+    {
+      "id": 99,
+      "type": "minecart_offrail_n",
+      "properties": [
+        {
+          "name": "name",
+          "type": "string",
+          "value": "minecart_offrail_n"
+        },
+        {
+          "name": "passable",
+          "type": "bool",
+          "value": false
+        },
+        {
+          "name": "layer",
+          "type": "string",
+          "value": "object"
+        },
+        {
+          "name": "description",
+          "type": "string",
+          "value": "A minecart off the tracks, centered, facing north. Blocks movement."
+        },
+        {
+          "name": "tags",
+          "type": "string",
+          "value": "minecart,cart,furniture,facing_n"
+        }
+      ]
+    },
+    {
+      "id": 100,
+      "type": "stone_wall_corner_ul_top",
+      "properties": [
+        {
+          "name": "name",
+          "type": "string",
+          "value": "stone_wall_corner_ul_top"
+        },
+        {
+          "name": "passable",
+          "type": "bool",
+          "value": false
+        },
+        {
+          "name": "layer",
+          "type": "string",
+          "value": "ground"
+        },
+        {
+          "name": "description",
+          "type": "string",
+          "value": "A horizontal stone wall in the upper-left part of the tile. Blocks movement and sight."
+        },
+        {
+          "name": "tags",
+          "type": "string",
+          "value": "stone,wall,dungeon,indoor,barrier,corner"
+        }
+      ]
+    },
+    {
+      "id": 101,
+      "type": "grate_round",
+      "properties": [
+        {
+          "name": "name",
+          "type": "string",
+          "value": "grate_round"
+        },
+        {
+          "name": "passable",
+          "type": "bool",
+          "value": true
+        },
+        {
+          "name": "layer",
+          "type": "string",
+          "value": "object"
+        },
+        {
+          "name": "description",
+          "type": "string",
+          "value": "A round floor grate. Passable."
+        },
+        {
+          "name": "tags",
+          "type": "string",
+          "value": "grate,floor,decoration,indoor"
+        }
+      ]
+    },
+    {
+      "id": 102,
+      "type": "tree",
+      "properties": [
+        {
+          "name": "name",
+          "type": "string",
+          "value": "tree"
+        },
+        {
+          "name": "passable",
+          "type": "bool",
+          "value": false
+        },
+        {
+          "name": "layer",
+          "type": "string",
+          "value": "object"
+        },
+        {
+          "name": "description",
+          "type": "string",
+          "value": "A tree placed on top of a ground tile. Blocks movement."
+        },
+        {
+          "name": "tags",
+          "type": "string",
+          "value": "tree,nature,forest,outdoor"
+        }
+      ]
+    },
+    {
+      "id": 103,
+      "type": "arrow_start_n",
+      "properties": [
+        {
+          "name": "name",
+          "type": "string",
+          "value": "arrow_start_n"
+        },
+        {
+          "name": "passable",
+          "type": "bool",
+          "value": true
+        },
+        {
+          "name": "layer",
+          "type": "string",
+          "value": "object"
+        },
+        {
+          "name": "description",
+          "type": "string",
+          "value": "Marker: start of a multi-tile arrow, beginning at center and continuing north. Part of a directional arrow overlay."
+        },
+        {
+          "name": "tags",
+          "type": "string",
+          "value": "marker,arrow,start,ui,overlay,connect_n"
+        }
+      ]
+    },
+    {
+      "id": 104,
+      "type": "dragon_skull",
+      "properties": [
+        {
+          "name": "name",
+          "type": "string",
+          "value": "dragon_skull"
+        },
+        {
+          "name": "passable",
+          "type": "bool",
+          "value": false
+        },
+        {
+          "name": "layer",
+          "type": "string",
+          "value": "object"
+        },
+        {
+          "name": "description",
+          "type": "string",
+          "value": "The skull of a dragon. Blocks movement; searchable."
+        },
+        {
+          "name": "tags",
+          "type": "string",
+          "value": "skull,dragon,bones,decoration,searchable"
+        }
+      ]
+    },
+    {
+      "id": 105,
+      "type": "walkway_v",
+      "properties": [
+        {
+          "name": "name",
+          "type": "string",
+          "value": "walkway_v"
+        },
+        {
+          "name": "passable",
+          "type": "bool",
+          "value": true
+        },
+        {
+          "name": "layer",
+          "type": "string",
+          "value": "ground"
+        },
+        {
+          "name": "description",
+          "type": "string",
+          "value": "A straight elevated walkway running from top to bottom. Passable."
+        },
+        {
+          "name": "tags",
+          "type": "string",
+          "value": "walkway,bridge,elevated,crossing,connect_n,connect_s"
+        }
+      ]
+    }
+  ]
+}

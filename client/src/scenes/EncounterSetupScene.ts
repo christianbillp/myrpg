@@ -73,7 +73,12 @@ export class EncounterSetupScene extends Phaser.Scene {
     super({ key: "EncounterSetupScene" });
   }
 
-  init(): void {
+  /** Optional encounter id to pre-select on create. Set by GenerateSetupScene
+   * after a fresh encounter has been authored so the player lands on the
+   * character-pick screen with that encounter already highlighted. */
+  private pendingEncounterId: string | null = null;
+
+  init(data?: { presetEncounterId?: string }): void {
     this.selectedPlayer = null;
     this.selectedEncounter = null;
     this.selectedSave = null;
@@ -81,11 +86,28 @@ export class EncounterSetupScene extends Phaser.Scene {
     this.charCardBgs.clear();
     this.encounterCardBgs.clear();
     this.saveDisplays.clear();
+    this.pendingEncounterId = data?.presetEncounterId ?? null;
   }
 
   create(): void {
     this.characters = this.registry.get("characters") as PlayerDef[];
     this.encounters = this.registry.get("encounters") as EncounterDef[];
+
+    // If we arrived here with a pre-selected encounter id but it isn't in the
+    // cached registry (typical when the user just generated a brand-new one),
+    // refresh both encounters AND maps from the server before rendering. The
+    // maps refresh is critical so the BEGIN button's `savedMap` lookup finds
+    // the freshly-generated map.
+    if (this.pendingEncounterId && !this.encounters.find((e) => e.id === this.pendingEncounterId)) {
+      Promise.all([gameClient.listEncounters(), gameClient.listMaps()]).then(([encs, maps]) => {
+        if (!this.scene.isActive()) return;
+        this.registry.set("encounters", encs as EncounterDef[]);
+        this.registry.set("maps", maps as SavedMapDef[]);
+        // Restart the scene so the new lists render through the normal
+        // create() path — cheaper than re-doing the card layout inline.
+        this.scene.restart({ presetEncounterId: this.pendingEncounterId });
+      }).catch(() => { /* fall through to render existing list */ });
+    }
 
     for (const char of this.characters) {
       const raw = localStorage.getItem(saveKey(char.id));
@@ -133,6 +155,11 @@ export class EncounterSetupScene extends Phaser.Scene {
     if (lastId) {
       const def = this.characters.find((c) => c.id === lastId);
       if (def) this.selectChar(def);
+    }
+
+    if (this.pendingEncounterId) {
+      const enc = this.encounters.find((e) => e.id === this.pendingEncounterId);
+      if (enc) this.selectEncounter(enc);
     }
 
     // Sync all characters from server. Server is the source of truth — if
@@ -318,6 +345,11 @@ export class EncounterSetupScene extends Phaser.Scene {
     bg.on("pointerdown", () => this.selectEncounter(def));
 
     this.add.text(left + 14, top + 10, def.mapId.toUpperCase(), { fontSize: "9px", color: "#445566", fontFamily: "monospace", resolution: DPR, letterSpacing: 1 }).setOrigin(0, 0);
+    if ((def as { generated?: boolean }).generated) {
+      this.add.text(left + ENC_CARD_W - 14, top + 10, "✦ GENERATED", {
+        fontSize: "9px", color: "#88ccaa", fontFamily: "monospace", resolution: DPR, letterSpacing: 1,
+      }).setOrigin(1, 0);
+    }
     this.add.text(cx, top + 26, def.encounterTitle, { fontSize: "14px", color: "#e8e8f8", fontFamily: "monospace", resolution: DPR }).setOrigin(0.5, 0);
 
     this.add.text(cx, top + 48, def.description, { fontSize: "10px", color: "#8899aa", fontFamily: "monospace", resolution: DPR, wordWrap: { width: ENC_CARD_W - 28 }, lineSpacing: 4, align: "left" }).setOrigin(0.5, 0);
@@ -361,14 +393,21 @@ export class EncounterSetupScene extends Phaser.Scene {
         encounterTypes: enc.encounterTypes as import("../net/types").EncounterType[],
         mapType: "saved",
         playerDefId: player.id,
-        savedMapId: savedMap?.id,
+        // Always send the encounter's mapId, even if the client's registry hasn't
+        // picked up the map yet (typical for freshly-generated encounters that
+        // were authored after BootScene cached the maps list). The server holds
+        // the authoritative `defs.maps` and will resolve it there — sending
+        // `undefined` here would silently fall back to a random procedural map.
+        savedMapId: enc.mapId,
         encounterTitle: enc.encounterTitle,
         savedMapName: savedMap?.name,
         savedMapDescription: savedMap?.mapdescription,
         npcIds: enc.npcIds,
         allyIds: enc.allyIds,
+        enemyIds: enc.enemyIds,
         customIntroduction: enc.customIntroduction,
         customContext: enc.customContext,
+        customObjective: enc.objective,
         tileProperties: enc.tileProperties,
         startingZones: enc.startingZones,
         triggers: enc.triggers,

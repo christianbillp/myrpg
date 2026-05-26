@@ -210,8 +210,16 @@ function buildStateMessage(engine: GameEngine): string {
     ? `\nRUMORS (world memory, newest first — reference when narratively apt):\n${[...s.rumors].sort((a, b) => b.recordedAt - a.recordedAt).slice(0, 8).map((r) => `  • [${r.id}] (sal ${r.salience}) ${r.text}`).join('\n')}\n`
     : '';
 
+  // Adventure framing — when this session is a chapter of an adventure,
+  // surface the chapter index and short summaries of prior chapters so the
+  // DM can reference earlier scenes ("word of what you did at the bridge
+  // has travelled ahead of you").
+  const adventureBlock = s.adventureContext
+    ? `\nADVENTURE: ${s.adventureContext.adventureTitle} — ${s.adventureContext.chapterTitle} (chapter ${s.adventureContext.chapterIndex + 1} of ${s.adventureContext.totalChapters})${s.adventureContext.priorChapterSummaries.length > 0 ? `\nPRIOR CHAPTERS:\n${s.adventureContext.priorChapterSummaries.map((c) => `  • ${c.chapterTitle}: ${c.summary}`).join('\n')}` : ''}\n`
+    : '';
+
   return `SETTING: ${s.mapName} | PHASE: ${s.phase} | ENCOUNTER: ${s.encounterTypes.join(', ')}
-CONTEXT: ${s.encounterContext}${scriptedEvents}${factionsBlock}${rumorsBlock}
+CONTEXT: ${s.encounterContext}${adventureBlock}${scriptedEvents}${factionsBlock}${rumorsBlock}
 
 PLAYER: tile (${p.tileX},${p.tileY}) · HP ${p.hp} · ${p.gold} GP · ${flags || 'no flags'}
   Inventory: ${p.inventoryIds.join(', ') || 'empty'}
@@ -383,6 +391,21 @@ export async function processAIDMChat(
     // N. Cache breakpoint on the most-recent tool_result block. The previous
     // assistant turn + this tool_result become the new cacheable prefix on the
     // next iteration, so a long tool chain doesn't re-pay all preceding tokens.
+    //
+    // Anthropic caps cache_control markers at 4 per request (system + tools +
+    // recent tool_result + …). To stay under the limit on long tool chains we
+    // strip cache_control from *every previously-set* tool_result before
+    // marking the current one — only the freshest breakpoint matters; the
+    // older ones have already done their job for cache lookup and just bloat
+    // the marker count on subsequent iterations.
+    for (const m of messages) {
+      if (m.role !== 'user' || !Array.isArray(m.content)) continue;
+      for (const block of m.content as Array<{ type?: string; cache_control?: unknown }>) {
+        if (block && block.type === 'tool_result' && 'cache_control' in block) {
+          delete block.cache_control;
+        }
+      }
+    }
     if (toolResults.length > 0) {
       toolResults[toolResults.length - 1].cache_control = { type: 'ephemeral' };
     }
