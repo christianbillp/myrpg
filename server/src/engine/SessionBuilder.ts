@@ -198,6 +198,9 @@ export function buildSessionState(
       castableSpellIds: [],
     },
     pendingReaction: null,
+    triggers: req.triggers ?? [],
+    firedTriggerIds: [],
+    pendingAidmEvents: [],
   };
 
   return state;

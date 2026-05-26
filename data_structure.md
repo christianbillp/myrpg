@@ -684,6 +684,7 @@ A flavored combination of a map and one or more NPCs, with optional AIDM instruc
 | `customContext` | string | *(optional)* Replaces the auto-generated AIDM context string. Use this to give the AIDM specific instructions about the scenario, the NPCs, and what mechanics to use. |
 | `tileProperties` | object[] | Per-GID semantics for the referenced map's tiles **in this encounter**. See below. Required to make any tile passable. |
 | `startingZones` | object | *(optional)* Tiled-style tile layer marking spawn regions for the player, allies, neutral NPCs, and enemies. Same dimensions as the referenced map. See below. |
+| `triggers` | object[] | *(optional)* Authored scripted events for this encounter — ambushes, reinforcements, scripted reveals. See [triggers](#triggers). |
 
 ### tileProperties
 
@@ -725,6 +726,61 @@ When provided, `startingZones` is a Tiled-compatible tile layer with a fixed imp
 | `4` | Enemy starting zone |
 
 Only passable map tiles are eligible for spawning regardless of zone GID. If no zone is defined for a role, the server falls back to default placement rules (player in the left third of the map, enemies at least 5 tiles away, etc.). Format the `data` array with one row per source line to keep the spawn-zone shape eyeball-readable in code review.
+
+### triggers
+
+Authored scripted events evaluated server-side at well-defined hook points. Each trigger marries a `condition` (when does this fire?) to a list of `actions` (what happens?). Triggers are the deterministic counterpart to AIDM-driven scenes — once authored, they fire reliably regardless of LLM behaviour.
+
+**Trigger entry:**
+
+| Field | Type | Notes |
+|---|---|---|
+| `id` | string | Unique within the encounter. Used as the dedupe key in `GameState.firedTriggerIds`. |
+| `condition` | object | One of the condition shapes below. |
+| `actions` | object[] | Ordered list of action shapes; all actions of a fired trigger run sequentially. |
+| `once` | boolean | *(default `true`)* When `true`, the trigger fires at most once per session (persisted across save/load via `firedTriggerIds`). When `false`, it re-fires on every condition match. |
+
+**Conditions:**
+
+| `type` | Fields | Hook | Fires when |
+|---|---|---|---|
+| `enter_area` | `x, y, w, h` | `doMove` | Player steps onto any tile in the rectangle `[x, x+w) × [y, y+h)`. |
+| `enter_tile` | `x, y` | `doMove` | Player steps onto the exact tile. |
+| `npc_killed` | `defId` | `killNpc` | Any NPC with the matching `defId` reaches 0 HP. |
+| `item_picked_up` | `defId` | `checkItemPickup` | The player picks up an item with the matching equipment `defId`. |
+
+**Actions:**
+
+| `type` | Fields | Effect |
+|---|---|---|
+| `spawn_enemy_near_player` | `monsterId`, `minDist?` (default 3), `maxDist?` (default 8) | Spawns an enemy on a free tile at Chebyshev distance `[minDist, maxDist]` from the player. No-ops if no tile is free in range. |
+| `spawn_enemy_at` | `monsterId`, `x`, `y` | Spawns an enemy at the given tile; falls back to the nearest free tile (within 6 tiles) if the target is occupied / impassable. |
+| `show_log` | `message` | Pushes a `header`-styled line into the Combat Log. |
+| `send_aidm_message` | `message` | Appends to `GameState.pendingAidmEvents`; surfaced to the next AIDM turn under the `SCRIPTED EVENTS` block in CURRENT STATE, then cleared after the reply. Use this when the engine action needs DM narration to land. |
+
+Hook order matters in a few places worth knowing:
+
+- `player_moved` triggers are evaluated **before** the combat-start proximity check, so an `enter_area` trigger that spawns enemies near the player kicks off combat on the same tile entry.
+- `npc_killed` triggers are evaluated **before** `autoEndCombatIfNoEnemies`, so a kill-triggered reinforcement spawn prevents combat from ending.
+- `item_picked_up` triggers fire **after** the item is moved into the player's inventory and quest progress is advanced.
+
+**Example — guard-room ambush in `encounters/dungeon_delve.json`:**
+
+```json
+"triggers": [
+  {
+    "id": "guardroom_ambush",
+    "condition": { "type": "enter_area", "x": 3, "y": 12, "w": 6, "h": 3 },
+    "actions": [
+      { "type": "show_log", "message": "⚔ Bones scrape against stone — skeletal figures rise from the rubble!" },
+      { "type": "spawn_enemy_near_player", "monsterId": "skeleton", "minDist": 2, "maxDist": 4 },
+      { "type": "spawn_enemy_near_player", "monsterId": "skeleton", "minDist": 2, "maxDist": 4 },
+      { "type": "send_aidm_message", "message": "Two skeletons rise from the rubble of the guard room and lurch toward the party." }
+    ],
+    "once": true
+  }
+]
+```
 
 ### Example — `encounters/bridge_standoff.json`
 
@@ -807,6 +863,9 @@ Key runtime fields of note:
 | `turnOrderIds` | Initiative-sorted list of combatant ids: `'player'` plus each NPC `id`. Sort key is `initiativeRoll` (descending), tiebreak by DEX mod / `initiativeBonus`. Iterated by `advanceTurn`; dead combatants are skipped at iteration time (entries are NOT removed when a combatant dies — removing them mid-iteration would shift indices). |
 | `activeNpcIndex` | Index into `turnOrderIds` pointing at the combatant currently taking their turn. The HUD turn-order bar reads `turnOrderIds` and highlights the chip whose corresponding combatant has `isActive === true` (NPCs) or whose entry is `'player'` and `phase === 'player_turn'` / `'death_saves'`. |
 | `pendingReaction` | *(optional, top-level on `GameState`)* When set, the engine has paused the turn loop on a reaction-eligible trigger and is awaiting a `resolveReaction { accept }` action from the player. Cleared by `doResolveReaction` after applying (or skipping) the deferred effect. Two shapes: `{ kind: 'opportunity_attack', npcId, npcName }` and `{ kind: 'shield', attackerId, attackerName, incomingDamage, attackTotal, shieldedAc }`. While set, `advanceTurn` early-returns. |
+| `triggers` | *(top-level on `GameState`)* Authored encounter triggers seeded from `EncounterDef.triggers` at session creation. Static across the session — never mutated at runtime. |
+| `firedTriggerIds` | *(top-level on `GameState`)* String ids of triggers that have already fired. Consulted by `TriggerSystem.evaluateTriggers` to enforce `once: true` semantics. Persisted in `world.json` so one-shot triggers stay one-shot across save/load. |
+| `pendingAidmEvents` | *(top-level on `GameState`)* Scripted-event lines queued by `send_aidm_message` trigger actions. Rendered into the next AIDM CURRENT STATE block under `SCRIPTED EVENTS`, then cleared after the AIDM reply lands. |
 | `aidmHistory` | The **sliding-window** AIDM conversation persisted into `world.json` (serialised from server session memory). Bounded to ~20 verbatim messages plus an optional leading `[SUMMARY OF EARLIER TURNS]` assistant message that collapses anything older. `[CURRENT STATE]` prefixes are stripped from historical user messages before each API call so the model always reasons from the current injected state, not stale snapshots. The `GET /world` response surfaces this under the `dmHistory` field for client-side display. |
 
 ### Session-only AIDM state (in-memory)

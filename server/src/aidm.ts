@@ -192,8 +192,16 @@ function buildStateMessage(engine: GameEngine): string {
   const itemIds = engine.getItemIds().join(', ');
   const monsterIds = engine.getMonsterIds().join(', ');
 
+  // Scripted events authored on the encounter (via TriggerSystem's
+  // `send_aidm_message` action). Surfaced here so Claude can weave them into
+  // the next reply. The server clears `pendingAidmEvents` once the API call
+  // returns successfully.
+  const scriptedEvents = s.pendingAidmEvents.length > 0
+    ? `\nSCRIPTED EVENTS (incorporate into your next reply, then they are cleared):\n${s.pendingAidmEvents.map((m) => `  • ${m}`).join('\n')}\n`
+    : '';
+
   return `SETTING: ${s.mapName} | PHASE: ${s.phase} | ENCOUNTER: ${s.encounterTypes.join(', ')}
-CONTEXT: ${s.encounterContext}
+CONTEXT: ${s.encounterContext}${scriptedEvents}
 
 PLAYER: tile (${p.tileX},${p.tileY}) · HP ${p.hp} · ${p.gold} GP · ${flags || 'no flags'}
   Inventory: ${p.inventoryIds.join(', ') || 'empty'}
@@ -397,6 +405,10 @@ export async function processAIDMChat(
 
     response = await callClaudeWithRetry(anthropic, { model, max_tokens: 600, system, tools, messages }, onChunkForward);
   }
+
+  // Scripted events were folded into this reply — clear them so they aren't
+  // re-injected on the next turn.
+  engine.getState().pendingAidmEvents.length = 0;
 
   // Persist the exchange into server-side history (clean user/assistant pairs only).
   history.push({ role: 'user', content: currentUserContent });

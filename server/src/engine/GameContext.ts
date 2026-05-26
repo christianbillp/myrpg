@@ -27,4 +27,9 @@ export interface GameContext {
 
   doStartCombat(events: GameEvent[]): void;
   doPlayerOpportunityAttack(npc: NpcState, events: GameEvent[]): void;
+
+  /** Spawn an enemy near the player (uses `findFreeTileNear`). Returns the spawned NpcState or null when no tile is free in range. */
+  spawnEnemyNearPlayer(monsterId: string, minDist?: number, maxDist?: number): NpcState | null;
+  /** Spawn an enemy at a specific tile, falling back to the nearest free tile when the target is occupied / impassable. */
+  spawnEnemyAt(monsterId: string, tx: number, ty: number): NpcState | null;
 }

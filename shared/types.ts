@@ -517,6 +517,97 @@ export interface EncounterDef {
    */
   tileProperties?: EncounterTileProperty[];
   startingZones?: StartingZonesLayer;
+  /**
+   * Authored gameplay scripts (ambushes, reinforcements, scripted reveals).
+   * Each trigger declares a condition (player enters a tile region, an NPC
+   * dies, etc.) and a list of actions to fire when the condition matches.
+   * See `server/src/engine/TriggerSystem.ts` for the runtime evaluator.
+   */
+  triggers?: EncounterTrigger[];
+}
+
+// ── Encounter triggers ───────────────────────────────────────────────────────
+//
+// Data-driven gameplay scripting. Triggers belong to an encounter and are
+// evaluated server-side at well-defined hook points (player movement, NPC
+// death, item pickup). Each fired trigger's id is appended to
+// `GameState.firedTriggerIds` so `once` semantics survive save/load.
+
+export interface EnterAreaCondition {
+  type: 'enter_area';
+  /** Top-left tile of the rectangle (inclusive). */
+  x: number;
+  y: number;
+  /** Width / height in tiles. */
+  w: number;
+  h: number;
+}
+
+export interface EnterTileCondition {
+  type: 'enter_tile';
+  x: number;
+  y: number;
+}
+
+export interface NpcKilledCondition {
+  type: 'npc_killed';
+  /** Match any NPC whose defId equals this value. */
+  defId: string;
+}
+
+export interface ItemPickedUpCondition {
+  type: 'item_picked_up';
+  /** Match a specific item defId from `equipment/`. */
+  defId: string;
+}
+
+export type TriggerCondition =
+  | EnterAreaCondition
+  | EnterTileCondition
+  | NpcKilledCondition
+  | ItemPickedUpCondition;
+
+export interface SpawnEnemyNearPlayerAction {
+  type: 'spawn_enemy_near_player';
+  monsterId: string;
+  /** Minimum Chebyshev distance from the player; defaults to 3. */
+  minDist?: number;
+  /** Maximum Chebyshev distance from the player; defaults to 8. */
+  maxDist?: number;
+}
+
+export interface SpawnEnemyAtAction {
+  type: 'spawn_enemy_at';
+  monsterId: string;
+  x: number;
+  y: number;
+}
+
+export interface ShowLogAction {
+  type: 'show_log';
+  /** Pushed into the Combat Log as a `header`-styled line. */
+  message: string;
+}
+
+export interface SendAidmMessageAction {
+  type: 'send_aidm_message';
+  /** Queued onto `GameState.pendingAidmEvents` and surfaced to the next AIDM turn under SCRIPTED EVENTS so the DM can incorporate it into the next reply. */
+  message: string;
+}
+
+export type TriggerAction =
+  | SpawnEnemyNearPlayerAction
+  | SpawnEnemyAtAction
+  | ShowLogAction
+  | SendAidmMessageAction;
+
+export interface EncounterTrigger {
+  /** Unique within the encounter; used as the dedupe key in `firedTriggerIds`. */
+  id: string;
+  condition: TriggerCondition;
+  actions: TriggerAction[];
+  /** When omitted or true, the trigger fires at most once per session. When false, it re-fires on every condition match. */
+  once?: boolean;
 }
 
 // ── Combat log ───────────────────────────────────────────────────────────────
@@ -678,6 +769,12 @@ export interface GameState {
   availableActions: AvailableActions;
   /** Set when the engine has paused on a reaction-eligible trigger. The next player action must be `resolveReaction`. Cleared on resolution. */
   pendingReaction: PendingReaction | null;
+  /** Authored encounter triggers active for this session. Sourced from `EncounterDef.triggers` at session creation. */
+  triggers: EncounterTrigger[];
+  /** Ids of triggers that have already fired. Persisted in `world.json` so `once` semantics survive save/load. */
+  firedTriggerIds: string[];
+  /** Scripted-event lines queued by `send_aidm_message` actions. Surfaced to the next AIDM turn under the SCRIPTED EVENTS block and cleared once consumed. */
+  pendingAidmEvents: string[];
 }
 
 // ── Reaction prompts ─────────────────────────────────────────────────────────
@@ -781,6 +878,7 @@ export interface CreateSessionRequest {
   customContext?: string;
   tileProperties?: EncounterTileProperty[];
   startingZones?: StartingZonesLayer;
+  triggers?: EncounterTrigger[];
   resumeHp?: number;
   resumeXp?: number;
   resumeGold?: number;

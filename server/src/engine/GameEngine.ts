@@ -37,6 +37,7 @@ import { doCastSpell as spDoCastSpell } from './SpellSystem.js';
 import { maybeBreakConcentration } from './ConcentrationSystem.js';
 import { doUseFeature } from './FeatureRegistry.js';
 import { buildSessionState, SavedMapRecord } from './SessionBuilder.js';
+import { evaluateTriggers } from './TriggerSystem.js';
 import { WeaponDef } from './types.js';
 
 export interface ActionResult {
@@ -99,6 +100,8 @@ export class GameEngine {
       applyMasteryConditions: (tgt, v, s) => this.applyMasteryConditions(tgt, v, s),
       doStartCombat: (ev) => cfDoStartCombat(this.ctx, ev),
       doPlayerOpportunityAttack: (npc) => caDoPlayerOA(this.ctx, npc),
+      spawnEnemyNearPlayer: (id, mn, mx) => this.spawnEnemyNearPlayer(id, mn, mx),
+      spawnEnemyAt: (id, tx, ty) => this.spawnEnemyAt(id, tx, ty),
     };
   }
 
@@ -294,11 +297,37 @@ export class GameEngine {
   }
 
   spawnEnemy(monsterId: string): GameEvent[] {
-    const def = this.defs.monsters.find((m) => m.id === monsterId);
-    if (!def) return [];
+    this.spawnEnemyNearPlayer(monsterId);
+    return [];
+  }
+
+  spawnEnemyNearPlayer(monsterId: string, minDist = 3, maxDist = 8): NpcState | null {
     const s = this.state;
-    const [tx, ty] = this.findFreeTileNear(s.player.tileX, s.player.tileY, 3, 8);
-    if (tx === -1) return [];
+    const [tx, ty] = this.findFreeTileNear(s.player.tileX, s.player.tileY, minDist, maxDist);
+    if (tx === -1) return null;
+    return this.materializeEnemy(monsterId, tx, ty);
+  }
+
+  spawnEnemyAt(monsterId: string, tx: number, ty: number): NpcState | null {
+    const s = this.state;
+    const { cols, rows, passable } = s.map;
+    const inBounds = tx >= 0 && tx < cols && ty >= 0 && ty < rows;
+    const occupied = (x: number, y: number) =>
+      (s.player.tileX === x && s.player.tileY === y)
+      || s.npcs.some((n) => n.hp > 0 && n.tileX === x && n.tileY === y);
+    if (inBounds && passable[ty][tx] && !occupied(tx, ty)) {
+      return this.materializeEnemy(monsterId, tx, ty);
+    }
+    // Fall back to the nearest free tile around the requested anchor.
+    const [fx, fy] = this.findFreeTileNear(tx, ty, 0, 6);
+    if (fx === -1) return null;
+    return this.materializeEnemy(monsterId, fx, fy);
+  }
+
+  private materializeEnemy(monsterId: string, tx: number, ty: number): NpcState | null {
+    const def = this.defs.monsters.find((m) => m.id === monsterId);
+    if (!def) return null;
+    const s = this.state;
     const usedLabels = new Set(s.npcs.filter((n) => n.disposition === 'enemy').map((n) => n.combatLabel));
     let combatLabel = 'A';
     for (let i = 0; i < 26; i++) {
@@ -315,7 +344,7 @@ export class GameEngine {
     };
     s.npcs.push(npc);
     if (s.phase !== 'exploring') s.turnOrderIds.push(npc.id);
-    return [];
+    return npc;
   }
 
   endCombat(): GameEvent[] { return cfEndCombat(this.ctx); }
@@ -494,6 +523,9 @@ export class GameEngine {
     // would shift indices and could cause a still-alive combatant to skip
     // their turn.
     this.advanceQuest('kill');
+    // Fire npc_killed triggers BEFORE autoEndCombatIfNoEnemies so a trigger
+    // can spawn reinforcements that prevent combat from auto-ending.
+    evaluateTriggers(this.ctx, { kind: 'npc_killed', npc: dying });
     this.autoEndCombatIfNoEnemies();
   }
 

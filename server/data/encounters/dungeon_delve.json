@@ -35,5 +35,18 @@
         0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
         0, 0, 0, 0, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
       ]
-  }
+  },
+  "triggers": [
+    {
+      "id": "guardroom_ambush",
+      "condition": { "type": "enter_area", "x": 3, "y": 12, "w": 6, "h": 3 },
+      "actions": [
+        { "type": "show_log", "message": "⚔ Bones scrape against stone — skeletal figures rise from the rubble!" },
+        { "type": "spawn_enemy_near_player", "monsterId": "skeleton", "minDist": 2, "maxDist": 4 },
+        { "type": "spawn_enemy_near_player", "monsterId": "skeleton", "minDist": 2, "maxDist": 4 },
+        { "type": "send_aidm_message", "message": "Two skeletons rise from the rubble of the guard room and lurch toward the party." }
+      ],
+      "once": true
+    }
+  ]
 }

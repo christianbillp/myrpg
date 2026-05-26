@@ -71,6 +71,7 @@ Every user message is prefixed with a `[CURRENT STATE]` block that the engine bu
 - Items on the ground, with a trailing `Secrets remaining: N` count
 - NPC personas
 - A **REFERENCE DATA** section listing valid `item_id` and `monster_id` values (the source of truth for `add_item` and `spawn_enemy`)
+- A **SCRIPTED EVENTS** section when one or more authored encounter triggers have queued narration via the `send_aidm_message` action — bullet-listed under the CONTEXT line. The DM is expected to incorporate these into the next reply; the engine clears them once the API call returns.
 - The full combat log for the current encounter — including `── Aldric's turn — Action & Bonus refreshed ──` marker lines at every new player turn
 
 The model uses this block to resolve pronouns ("them", "it") to concrete entity references and to determine action availability. The block is rebuilt **once per tool-loop iteration**, not just once per turn, so mid-loop state changes (HP drops, disposition shifts, deaths) are immediately visible.
