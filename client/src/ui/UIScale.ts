@@ -105,7 +105,7 @@ export function injectGameUIStyles(): void {
     /* Allow text selection in log/chat areas */
     .gui-selectable { user-select: text; }
 
-    /* HUD navigation buttons (NEW ENCOUNTER, DUNGEON MASTER) */
+    /* HUD navigation buttons (NEW ENCOUNTER, GAME MASTER) */
     .gui-btn-hud {
       height: 26px;
       padding: 0 10px;

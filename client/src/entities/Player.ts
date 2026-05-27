@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import { TILE_SIZE } from '../constants';
+import { TILE_SIZE, DEFAULT_TOKEN_COLOR } from '../constants';
 
 const MOVE_DURATION = 150;
 
@@ -10,12 +10,21 @@ export class Player {
   private hpBar: Phaser.GameObjects.Graphics;
   private scene: Phaser.Scene;
 
-  constructor(scene: Phaser.Scene, tileX: number, tileY: number, color = 0x4fc3f7) {
+  /**
+   * @param tokenKey Phaser texture key (typically from `tokenTextureKey(playerDef.tokenAsset)`).
+   *                 When the texture is missing the renderer falls back to a coloured circle
+   *                 in `color`, so the scene still boots if a token asset failed to load.
+   *                 Defaults to `DEFAULT_TOKEN_COLOR` — the shared player-blue.
+   */
+  constructor(scene: Phaser.Scene, tileX: number, tileY: number, tokenKey: string, color = DEFAULT_TOKEN_COLOR) {
     this.scene = scene;
     this.tileX = tileX;
     this.tileY = tileY;
 
-    const body = scene.add.circle(0, 0, (TILE_SIZE - 6) / 2, color);
+    const diameter = TILE_SIZE - 6;
+    const body: Phaser.GameObjects.GameObject = scene.textures.exists(tokenKey)
+      ? scene.add.image(0, 0, tokenKey).setDisplaySize(diameter, diameter)
+      : scene.add.circle(0, 0, diameter / 2, color);
     this.hpBar = scene.add.graphics();
 
     this.container = scene.add

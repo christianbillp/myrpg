@@ -12,7 +12,14 @@
   "wis": 8,
   "cha": 5,
   "proficiencyBonus": 2,
-  "savingThrows": { "str": 0, "dex": 3, "con": 2, "int": -2, "wis": -1, "cha": -3 },
+  "savingThrows": {
+    "str": 0,
+    "dex": 3,
+    "con": 2,
+    "int": -2,
+    "wis": -1,
+    "cha": -3
+  },
   "initiativeBonus": 3,
   "stealthBonus": 3,
   "passivePerception": 9,
@@ -41,8 +48,11 @@
       "damageType": "piercing"
     }
   ],
-  "vulnerabilities": ["bludgeoning"],
+  "vulnerabilities": [
+    "bludgeoning"
+  ],
   "xp": 50,
   "cr": "1/4",
-  "color": 13421755
+  "color": 13421755,
+  "tokenAsset": "/tokens/monster_skeleton.svg"
 }

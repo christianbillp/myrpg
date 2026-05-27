@@ -8,7 +8,7 @@ import { NpcToken } from '../entities/NpcToken';
 import { PlayerDef } from '../data/player';
 import { UIScale } from './UIScale';
 import { DevMode } from '../devMode';
-import type { ChatMessage, DMPersona } from './AIDMOverlay';
+import type { ChatMessage, GMPersona } from './AIGMOverlay';
 
 const GRID_H  = GRID_ROWS * TILE_SIZE;
 const GRID_W  = GRID_COLS * TILE_SIZE;
@@ -17,10 +17,13 @@ const TOTAL_W = PLAYER_PANEL_WIDTH + GRID_W + TARGET_PANEL_WIDTH;
 const RESIZE_HANDLE_H  = 8;
 const RESIZE_HANDLE_W  = 8;
 const ROW_H            = 14;
-const CHIP_W           = 140;
-const CHIP_H           = 22;
-const CHIP_GAP         = 8;
-const BAR_H            = 30;
+// Turn-order chip sizes — square token tiles. The active chip is 30% bigger
+// (per the LABELS/turn-order spec) and the bar height fits that enlarged
+// chip with a few px of vertical padding.
+const CHIP_SIZE        = 36;
+const CHIP_ACTIVE_SIZE = Math.round(CHIP_SIZE * 1.3); // ≈ 47
+const CHIP_GAP         = 6;
+const BAR_H            = CHIP_ACTIVE_SIZE + 6;
 const MIN_HUD_HEIGHT   = 80;
 const MAX_HUD_HEIGHT   = 350;
 const MIN_HUD_WIDTH    = 300;
@@ -90,13 +93,20 @@ function isDmRoll(content: string): boolean { return content.startsWith(ROLL_PRE
 function isDmRollSuccess(content: string): boolean { return /SUCCESS/.test(content); }
 
 export interface TurnOrderChip {
-  /** Display label inside the chip — combat label letter for NPCs, '' for player. */
+  /** Combat label letter overlaid on the token (e.g. `A`, `B`). Empty for
+   *  the player (player has no combat label) and for neutral NPCs that
+   *  haven't been assigned a label. */
   label: string;
-  /** Display name — player name or NPC's revealed/known name. */
+  /** Display name — surfaced via the chip's `title` (tooltip) attribute so
+   *  the bar can stay compact while still revealing creature identity on
+   *  hover. */
   name: string;
-  /** Token colour. */
+  /** Token colour — used for the active-chip outline + dead-token tint. */
   color: number;
-  /** Currently taking their turn. */
+  /** Resolved token-SVG URL (absolute, including the API origin so the
+   *  HUD's HTML `<img>` can fetch it directly). */
+  tokenUrl: string;
+  /** Currently taking their turn — renders 30% larger with a coloured ring. */
   isActive: boolean;
   /** Dead — dimmed in the bar. */
   isDead: boolean;
@@ -108,14 +118,18 @@ export interface HUDState {
   playerHp: number;
   /** Initiative-ordered chips for the turn-order bar; empty when not in combat. */
   turnOrderChips: TurnOrderChip[];
-  combatLog: LogEntry[];
+  eventLog: LogEntry[];
   selectedNpcName: string | null;
 }
 
 export interface HUDCallbacks {
-  onSendAIDM: (message: string, persona: DMPersona) => Promise<{ reply: string; rollResults: string[] }>;
+  onSendAIGM: (message: string, persona: GMPersona) => Promise<{ reply: string; rollResults: string[] }>;
   onDisableKeyboard: () => void;
   onEnableKeyboard: () => void;
+  /** Fires when the player toggles the LABELS chip in the GM panel.
+   *  GameScene iterates its NpcTokens and calls `setNameVisible(visible)`
+   *  on each so nameplates show or hide in sync. */
+  onLabelsToggle: (visible: boolean) => void;
 }
 
 export class HUD {
@@ -123,35 +137,37 @@ export class HUD {
   private readonly turnOrderEl: HTMLDivElement;
   private readonly logEl: HTMLElement;
   private readonly logTabBtn: HTMLButtonElement;
-  private readonly dmTabBtn: HTMLButtonElement;
-  private readonly dmContentEl: HTMLElement;
-  private readonly dmChatEl: HTMLDivElement;
-  private readonly dmInputEl: HTMLInputElement;
-  private readonly dmStatusEl: HTMLElement;
-  private readonly dmStoryChip: HTMLButtonElement;
-  private readonly dmDevChip: HTMLButtonElement | null;
+  private readonly gmTabBtn: HTMLButtonElement;
+  private readonly gmContentEl: HTMLElement;
+  private readonly gmChatEl: HTMLDivElement;
+  private readonly gmInputEl: HTMLInputElement;
+  private readonly gmStatusEl: HTMLElement;
+  private readonly gmStoryChip: HTMLButtonElement;
+  private readonly gmDevChip: HTMLButtonElement | null;
+  private readonly gmLabelsChip: HTMLButtonElement;
+  private labelsVisible = false;
   private readonly offResize: () => void;
   private readonly scale: UIScale;
   private readonly callbacks: HUDCallbacks;
   private hudHeight: number;
   private hudWidth: number;
   private turnOrderWidth = 0;
-  private readonly dmModeBtn: HTMLButtonElement;
-  private dmMode: 'dm' | 'sayto' = 'dm';
-  private dmDropup: HTMLDivElement | null = null;
-  private dmDropupCleanup: (() => void) | null = null;
+  private readonly gmModeBtn: HTMLButtonElement;
+  private gmMode: 'gm' | 'sayto' = 'gm';
+  private gmDropup: HTMLDivElement | null = null;
+  private gmDropupCleanup: (() => void) | null = null;
   private playerName = '';
   private selectedNpcName: string | null = null;
-  private dmHistory: ChatMessage[] = [];
-  private dmPersona: DMPersona = 'story';
-  private dmThinking = false;
+  private gmHistory: ChatMessage[] = [];
+  private gmPersona: GMPersona = 'story';
+  private gmThinking = false;
 
-  // Streaming AIDM state. While `dmStreaming` is true, the last entry of
-  // `dmHistory` is an assistant message being grown by aidm_chunk events;
-  // `dmStreamBaseline` is the text length BEFORE the latest run of chunks so
-  // aidm_speculative_discard can roll it back.
-  private dmStreaming = false;
-  private dmStreamBaseline = 0;
+  // Streaming AIGM state. While `gmStreaming` is true, the last entry of
+  // `gmHistory` is an assistant message being grown by aigm_chunk events;
+  // `gmStreamBaseline` is the text length BEFORE the latest run of chunks so
+  // aigm_speculative_discard can roll it back.
+  private gmStreaming = false;
+  private gmStreamBaseline = 0;
 
   constructor(scale: UIScale, callbacks: HUDCallbacks) {
     this.scale = scale;
@@ -190,17 +206,17 @@ export class HUD {
     tabBar.innerHTML = `
       <button data-tab-log style="padding:6px 16px;font-size:10px;font-family:monospace;cursor:pointer;
         background:transparent;border:none;border-bottom:2px solid #aabbcc;
-        color:#ddeeff;text-transform:uppercase;letter-spacing:0.08em;">COMBAT LOG</button>
+        color:#ddeeff;text-transform:uppercase;letter-spacing:0.08em;">EVENT LOG</button>
       <button data-tab-dm style="padding:6px 16px;font-size:10px;font-family:monospace;cursor:pointer;
         background:transparent;border:none;border-bottom:2px solid transparent;
-        color:#556677;text-transform:uppercase;letter-spacing:0.08em;">DUNGEON MASTER</button>
+        color:#556677;text-transform:uppercase;letter-spacing:0.08em;">GAME MASTER</button>
     `;
     this.hudEl.appendChild(tabBar);
 
     this.logTabBtn = tabBar.querySelector('[data-tab-log]') as HTMLButtonElement;
-    this.dmTabBtn  = tabBar.querySelector('[data-tab-dm]')  as HTMLButtonElement;
+    this.gmTabBtn  = tabBar.querySelector('[data-tab-dm]')  as HTMLButtonElement;
     this.logTabBtn.onclick = () => this.switchTab('log');
-    this.dmTabBtn.onclick  = () => this.switchTab('dm');
+    this.gmTabBtn.onclick  = () => this.switchTab('gm');
 
     // ── Combat log content ────────────────────────────────────────────────────
     this.logEl = document.createElement('div');
@@ -217,66 +233,76 @@ export class HUD {
     `;
     this.hudEl.appendChild(this.logEl);
 
-    // ── DM tab content ────────────────────────────────────────────────────────
-    this.dmContentEl = document.createElement('div');
-    this.dmContentEl.style.cssText = `
+    // ── GM tab content ────────────────────────────────────────────────────────
+    this.gmContentEl = document.createElement('div');
+    this.gmContentEl.style.cssText = `
       flex: 1;
       display: none;
       flex-direction: column;
       min-height: 0;
       padding: 8px 12px 8px;
     `;
-    this.dmContentEl.innerHTML = `
+    this.gmContentEl.innerHTML = `
       <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px;flex-shrink:0;">
-        <button data-dm-chip="story" style="width:56px;height:18px;font-family:monospace;font-size:9px;
+        <button data-gm-chip="story" style="width:56px;height:18px;font-family:monospace;font-size:9px;
           cursor:pointer;border:1px solid ${ACCENT};background:#1a1a00;color:${ACCENT};">STORY</button>
-        ${DevMode.enabled ? `<button data-dm-chip="dev" style="width:56px;height:18px;font-family:monospace;font-size:9px;
+        ${DevMode.enabled ? `<button data-gm-chip="dev" style="width:56px;height:18px;font-family:monospace;font-size:9px;
           cursor:pointer;border:1px solid #224422;background:#001a00;color:#336633;">DEV</button>` : ''}
+        <div style="flex:1;"></div>
+        <button data-gm-labels style="width:64px;height:18px;font-family:monospace;font-size:9px;
+          cursor:pointer;border:1px solid #4a78d8;background:#0c1830;color:#9cc4ff;">LABELS</button>
       </div>
-      <div data-dm-chat style="flex:1;min-height:0;overflow-y:auto;overflow-x:hidden;
+      <div data-gm-chat style="flex:1;min-height:0;overflow-y:auto;overflow-x:hidden;
         scrollbar-width:thin;scrollbar-color:${ACCENT} transparent;
         background:#080812;padding:6px 10px;box-sizing:border-box;
         font-size:11px;line-height:1.55;color:#c8d8e8;"></div>
       <div style="height:1px;background:#334455;flex-shrink:0;margin-top:6px;"></div>
-      <div data-dm-status style="font-size:10px;color:#b8960c;min-height:16px;padding:2px 0;flex-shrink:0;"></div>
+      <div data-gm-status style="font-size:10px;color:#b8960c;min-height:16px;padding:2px 0;flex-shrink:0;"></div>
       <div style="height:1px;background:#334455;flex-shrink:0;margin-bottom:6px;"></div>
       <div style="display:flex;gap:6px;flex-shrink:0;">
-        <button data-dm-mode style="height:30px;padding:0 8px;flex-shrink:0;
+        <button data-gm-mode style="height:30px;padding:0 8px;flex-shrink:0;
           font-family:monospace;font-size:10px;cursor:pointer;
           background:#111122;border:1px solid #445566;color:#aabbcc;
-          white-space:nowrap;">DM ▾</button>
-        <input data-dm-input type="text" maxlength="300" autocomplete="off"
-          placeholder="Speak to the Dungeon Master…"
+          white-space:nowrap;">GM ▾</button>
+        <input data-gm-input type="text" maxlength="300" autocomplete="off"
+          placeholder="Speak to the Game Master…"
           style="flex:1;height:30px;background:#111122;border:1px solid #554422;
             color:#e0d0a0;font-family:monospace;font-size:12px;padding:0 8px;
             outline:none;box-sizing:border-box;caret-color:${ACCENT};" />
-        <button data-dm-send class="gui-btn-hud" style="width:72px;height:30px;background:#2a1e08;
+        <button data-gm-send class="gui-btn-hud" style="width:72px;height:30px;background:#2a1e08;
           border:1px solid ${ACCENT};color:${ACCENT};font-size:12px;flex-shrink:0;">SEND</button>
       </div>
     `;
-    this.hudEl.appendChild(this.dmContentEl);
+    this.hudEl.appendChild(this.gmContentEl);
 
-    const dmRef = (a: string) => this.dmContentEl.querySelector(`[data-${a}]`) as HTMLElement;
-    this.dmChatEl   = dmRef('dm-chat')   as HTMLDivElement;
-    this.dmChatEl.classList.add('gui-selectable');
-    this.dmInputEl  = dmRef('dm-input')  as HTMLInputElement;
-    this.dmStatusEl = dmRef('dm-status');
-    this.dmModeBtn  = dmRef('dm-mode')   as HTMLButtonElement;
-    this.dmStoryChip = this.dmContentEl.querySelector('[data-dm-chip="story"]') as HTMLButtonElement;
-    this.dmDevChip   = this.dmContentEl.querySelector('[data-dm-chip="dev"]')   as HTMLButtonElement | null;
+    const gmRef = (a: string) => this.gmContentEl.querySelector(`[data-${a}]`) as HTMLElement;
+    this.gmChatEl   = gmRef('gm-chat')   as HTMLDivElement;
+    this.gmChatEl.classList.add('gui-selectable');
+    this.gmInputEl  = gmRef('gm-input')  as HTMLInputElement;
+    this.gmStatusEl = gmRef('gm-status');
+    this.gmModeBtn  = gmRef('gm-mode')   as HTMLButtonElement;
+    this.gmStoryChip = this.gmContentEl.querySelector('[data-gm-chip="story"]') as HTMLButtonElement;
+    this.gmDevChip   = this.gmContentEl.querySelector('[data-gm-chip="dev"]')   as HTMLButtonElement | null;
+    this.gmLabelsChip = this.gmContentEl.querySelector('[data-gm-labels]')      as HTMLButtonElement;
 
-    this.dmStoryChip.addEventListener('pointerdown', () => { this.dmPersona = 'story'; this.refreshDmChips(); });
-    this.dmDevChip?.addEventListener('pointerdown',  () => { this.dmPersona = 'dev';   this.refreshDmChips(); });
-
-    this.dmModeBtn.addEventListener('pointerdown', (e) => { e.stopPropagation(); this.openDmDropup(); });
-    (dmRef('dm-send') as HTMLButtonElement).addEventListener('pointerdown', () => this.sendDm());
-    this.dmInputEl.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter')      { e.preventDefault(); this.sendDm(); }
-      else if (e.key === 'ArrowUp')   { e.preventDefault(); this.dmChatEl.scrollTop -= 48; }
-      else if (e.key === 'ArrowDown') { e.preventDefault(); this.dmChatEl.scrollTop += 48; }
+    this.gmStoryChip.addEventListener('pointerdown', () => { this.gmPersona = 'story'; this.refreshDmChips(); });
+    this.gmDevChip?.addEventListener('pointerdown',  () => { this.gmPersona = 'dev';   this.refreshDmChips(); });
+    this.gmLabelsChip.addEventListener('pointerdown', () => {
+      this.labelsVisible = !this.labelsVisible;
+      this.refreshLabelsChip();
+      this.callbacks.onLabelsToggle(this.labelsVisible);
     });
-    this.dmInputEl.addEventListener('focus', () => callbacks.onDisableKeyboard());
-    this.dmInputEl.addEventListener('blur',  () => callbacks.onEnableKeyboard());
+    this.refreshLabelsChip();
+
+    this.gmModeBtn.addEventListener('pointerdown', (e) => { e.stopPropagation(); this.openDmDropup(); });
+    (gmRef('gm-send') as HTMLButtonElement).addEventListener('pointerdown', () => this.sendGm());
+    this.gmInputEl.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter')      { e.preventDefault(); this.sendGm(); }
+      else if (e.key === 'ArrowUp')   { e.preventDefault(); this.gmChatEl.scrollTop -= 48; }
+      else if (e.key === 'ArrowDown') { e.preventDefault(); this.gmChatEl.scrollTop += 48; }
+    });
+    this.gmInputEl.addEventListener('focus', () => callbacks.onDisableKeyboard());
+    this.gmInputEl.addEventListener('blur',  () => callbacks.onEnableKeyboard());
 
     // ── Width resize handle (left edge) ───────────────────────────────────────
     this.hudEl.appendChild(this.buildWidthHandle());
@@ -285,11 +311,14 @@ export class HUD {
 
     // ── Turn order bar ────────────────────────────────────────────────────────
     this.turnOrderEl = document.createElement('div');
-    this.turnOrderEl.className = 'gui-panel';
+    // No `gui-panel` class — we want a transparent, borderless bar so the
+    // chips float against the game canvas without a panel chrome behind
+    // them. Position is absolute so `scale.placePanel` can pin it.
     this.turnOrderEl.style.cssText += `
+      position: absolute;
       height: ${BAR_H}px;
-      background: rgba(7,7,15,0.92);
-      border-bottom: 1px solid #334455;
+      background: transparent;
+      border: none;
       display: none;
       align-items: center;
       overflow: visible;
@@ -389,128 +418,141 @@ export class HUD {
     return handle;
   }
 
-  private switchTab(tab: 'log' | 'dm'): void {
+  private switchTab(tab: 'log' | 'gm'): void {
     const onLog = tab === 'log';
     this.logEl.style.display = onLog ? 'block' : 'none';
-    this.dmContentEl.style.display = onLog ? 'none' : 'flex';
+    this.gmContentEl.style.display = onLog ? 'none' : 'flex';
     this.logTabBtn.style.borderBottomColor = onLog ? '#aabbcc' : 'transparent';
     this.logTabBtn.style.color             = onLog ? '#ddeeff' : '#556677';
-    this.dmTabBtn.style.borderBottomColor  = onLog ? 'transparent' : ACCENT;
-    this.dmTabBtn.style.color              = onLog ? '#556677' : ACCENT;
-    if (!onLog) this.dmInputEl.focus();
+    this.gmTabBtn.style.borderBottomColor  = onLog ? 'transparent' : ACCENT;
+    this.gmTabBtn.style.color              = onLog ? '#556677' : ACCENT;
+    if (!onLog) this.gmInputEl.focus();
   }
 
   private refreshDmChips(): void {
-    const isStory = this.dmPersona === 'story';
-    this.dmStoryChip.style.borderColor = isStory ? ACCENT   : '#443300';
-    this.dmStoryChip.style.color       = isStory ? ACCENT   : '#665533';
-    if (this.dmDevChip) {
-      this.dmDevChip.style.borderColor = !isStory ? '#44cc44' : '#224422';
-      this.dmDevChip.style.color       = !isStory ? '#66ee66' : '#336633';
+    const isStory = this.gmPersona === 'story';
+    this.gmStoryChip.style.borderColor = isStory ? ACCENT   : '#443300';
+    this.gmStoryChip.style.color       = isStory ? ACCENT   : '#665533';
+    if (this.gmDevChip) {
+      this.gmDevChip.style.borderColor = !isStory ? '#44cc44' : '#224422';
+      this.gmDevChip.style.color       = !isStory ? '#66ee66' : '#336633';
     }
   }
 
-  private async sendDm(): Promise<void> {
-    const text = this.dmInputEl.value.trim();
-    if (!text || this.dmThinking) return;
-    this.dmInputEl.value = '';
+  /** Active (labels visible): bright blue border + text. Inactive: greyed out. */
+  private refreshLabelsChip(): void {
+    if (this.labelsVisible) {
+      this.gmLabelsChip.style.borderColor = '#5588ff';
+      this.gmLabelsChip.style.background  = '#0c1830';
+      this.gmLabelsChip.style.color       = '#cce0ff';
+    } else {
+      this.gmLabelsChip.style.borderColor = '#334455';
+      this.gmLabelsChip.style.background  = '#0a0a14';
+      this.gmLabelsChip.style.color       = '#556677';
+    }
+  }
 
-    const prompt = (this.dmMode === 'sayto' && this.selectedNpcName)
+  private async sendGm(): Promise<void> {
+    const text = this.gmInputEl.value.trim();
+    if (!text || this.gmThinking) return;
+    this.gmInputEl.value = '';
+
+    const prompt = (this.gmMode === 'sayto' && this.selectedNpcName)
       ? `[${this.playerName} says to ${this.selectedNpcName}]: ${text}`
       : text;
 
-    this.dmThinking = true;
-    this.dmInputEl.disabled = true;
-    this.dmHistory.push({ role: 'user', content: prompt });
+    this.gmThinking = true;
+    this.gmInputEl.disabled = true;
+    this.gmHistory.push({ role: 'user', content: prompt });
     this.renderDmHistory();
-    this.dmStatusEl.textContent = 'The Dungeon Master considers…';
+    this.gmStatusEl.textContent = 'The Game Master considers…';
 
     try {
-      // Streaming chunks arrive in parallel via aidmChunk(). The HTTP promise
-      // resolves after the final aidm_done has fired. We rely on aidmDone() to
+      // Streaming chunks arrive in parallel via aigmChunk(). The HTTP promise
+      // resolves after the final aigm_done has fired. We rely on aigmDone() to
       // append the rollResults and finalize the streaming bubble; the HTTP
       // result is just a confirmation that the round completed.
-      await this.callbacks.onSendAIDM(prompt, this.dmPersona);
+      await this.callbacks.onSendAIGM(prompt, this.gmPersona);
     } catch {
       // If streaming never produced anything, leave an apology in the bubble.
-      if (this.dmStreaming) {
-        this.aidmDone('(The Dungeon Master is silent.)', []);
+      if (this.gmStreaming) {
+        this.aigmDone('(The Game Master is silent.)', []);
       } else {
-        this.dmHistory.push({ role: 'assistant', content: '(The Dungeon Master is silent.)' });
+        this.gmHistory.push({ role: 'assistant', content: '(The Game Master is silent.)' });
         this.renderDmHistory();
       }
     }
 
-    this.dmThinking = false;
-    this.dmInputEl.disabled = false;
-    this.dmInputEl.focus();
-    this.dmStatusEl.textContent = '';
+    this.gmThinking = false;
+    this.gmInputEl.disabled = false;
+    this.gmInputEl.focus();
+    this.gmStatusEl.textContent = '';
     this.callbacks.onDisableKeyboard();
   }
 
-  // ── Streaming AIDM handlers (called from GameClient via GameScene) ─────────
+  // ── Streaming AIGM handlers (called from GameClient via GameScene) ─────────
 
-  aidmStart(): void {
+  aigmStart(): void {
     // Open a fresh assistant bubble that incoming chunks will append to.
-    this.dmHistory.push({ role: 'assistant', content: '' });
-    this.dmStreaming = true;
-    this.dmStreamBaseline = 0;
+    this.gmHistory.push({ role: 'assistant', content: '' });
+    this.gmStreaming = true;
+    this.gmStreamBaseline = 0;
     this.renderDmHistory();
   }
 
-  aidmChunk(text: string): void {
-    if (!this.dmStreaming) return;
-    const last = this.dmHistory[this.dmHistory.length - 1];
+  aigmChunk(text: string): void {
+    if (!this.gmStreaming) return;
+    const last = this.gmHistory[this.gmHistory.length - 1];
     if (!last || last.role !== 'assistant') return;
     last.content += text;
     this.renderDmHistory();
   }
 
-  aidmCheckpoint(): void {
-    if (!this.dmStreaming) return;
-    const last = this.dmHistory[this.dmHistory.length - 1];
+  aigmCheckpoint(): void {
+    if (!this.gmStreaming) return;
+    const last = this.gmHistory[this.gmHistory.length - 1];
     if (!last || last.role !== 'assistant') return;
     // The current run of chunks is canonical — future discards can only revert
     // to here, not earlier.
-    this.dmStreamBaseline = last.content.length;
+    this.gmStreamBaseline = last.content.length;
   }
 
-  aidmSpeculativeDiscard(): void {
-    if (!this.dmStreaming) return;
-    const last = this.dmHistory[this.dmHistory.length - 1];
+  aigmSpeculativeDiscard(): void {
+    if (!this.gmStreaming) return;
+    const last = this.gmHistory[this.gmHistory.length - 1];
     if (!last || last.role !== 'assistant') return;
-    last.content = last.content.slice(0, this.dmStreamBaseline);
+    last.content = last.content.slice(0, this.gmStreamBaseline);
     this.renderDmHistory();
   }
 
-  aidmDone(reply: string, rollResults: string[]): void {
-    if (this.dmStreaming) {
+  aigmDone(reply: string, rollResults: string[]): void {
+    if (this.gmStreaming) {
       // Replace the streamed text with the canonical reply (handles any
       // post-processing trim/whitespace differences) and append roll results.
-      const last = this.dmHistory[this.dmHistory.length - 1];
+      const last = this.gmHistory[this.gmHistory.length - 1];
       if (last && last.role === 'assistant') {
         // Insert roll results BEFORE the final assistant reply so they appear
         // in the same order as the non-streaming path.
-        this.dmHistory.pop();
+        this.gmHistory.pop();
         for (const r of rollResults) {
-          this.dmHistory.push({ role: 'user', content: ROLL_PREFIX + r });
+          this.gmHistory.push({ role: 'user', content: ROLL_PREFIX + r });
         }
-        this.dmHistory.push({ role: 'assistant', content: reply });
+        this.gmHistory.push({ role: 'assistant', content: reply });
       }
     } else {
       for (const r of rollResults) {
-        this.dmHistory.push({ role: 'user', content: ROLL_PREFIX + r });
+        this.gmHistory.push({ role: 'user', content: ROLL_PREFIX + r });
       }
-      this.dmHistory.push({ role: 'assistant', content: reply });
+      this.gmHistory.push({ role: 'assistant', content: reply });
     }
-    this.dmStreaming = false;
-    this.dmStreamBaseline = 0;
+    this.gmStreaming = false;
+    this.gmStreamBaseline = 0;
     this.renderDmHistory();
   }
 
   private renderDmHistory(): void {
     let html = '';
-    for (const msg of this.dmHistory) {
+    for (const msg of this.gmHistory) {
       const roll = isDmRoll(msg.content);
       if (roll) {
         const content = escHtml(msg.content.slice(ROLL_PREFIX.length));
@@ -523,13 +565,13 @@ export class HUD {
         html += `<div class="hud-dm-msg" style="color:#c8d8e8;margin-bottom:${MSG_GAP}px">${md}</div>`;
       }
     }
-    this.dmChatEl.innerHTML = html;
-    this.dmChatEl.scrollTop = this.dmChatEl.scrollHeight;
+    this.gmChatEl.innerHTML = html;
+    this.gmChatEl.scrollTop = this.gmChatEl.scrollHeight;
   }
 
-  seedDmHistory(history: ChatMessage[]): void {
+  seedGmHistory(history: ChatMessage[]): void {
     if (history.length > 0) {
-      this.dmHistory = [...history];
+      this.gmHistory = [...history];
       this.renderDmHistory();
     }
   }
@@ -537,29 +579,29 @@ export class HUD {
   refresh(state: HUDState): void {
     this.playerName = state.playerDef.name;
     this.selectedNpcName = state.selectedNpcName;
-    if (this.dmMode === 'sayto' && !this.selectedNpcName) this.dmMode = 'dm';
+    if (this.gmMode === 'sayto' && !this.selectedNpcName) this.gmMode = 'gm';
     this.refreshDmModeBtn();
     this.refreshTurnOrder(state);
-    this.refreshLog(state.combatLog);
+    this.refreshLog(state.eventLog);
   }
 
   private refreshDmModeBtn(): void {
-    if (this.dmMode === 'dm') {
-      this.dmModeBtn.textContent = 'DM ▾';
-      this.dmModeBtn.style.color       = '#aabbcc';
-      this.dmModeBtn.style.borderColor = '#445566';
+    if (this.gmMode === 'gm') {
+      this.gmModeBtn.textContent = 'GM ▾';
+      this.gmModeBtn.style.color       = '#aabbcc';
+      this.gmModeBtn.style.borderColor = '#445566';
     } else {
       const short = this.selectedNpcName!.split(' ')[0].toUpperCase();
-      this.dmModeBtn.textContent = `${short} ▾`;
-      this.dmModeBtn.style.color       = ACCENT;
-      this.dmModeBtn.style.borderColor = ACCENT;
+      this.gmModeBtn.textContent = `${short} ▾`;
+      this.gmModeBtn.style.color       = ACCENT;
+      this.gmModeBtn.style.borderColor = ACCENT;
     }
   }
 
   private openDmDropup(): void {
     this.closeDmDropup();
 
-    const rect = this.dmModeBtn.getBoundingClientRect();
+    const rect = this.gmModeBtn.getBoundingClientRect();
 
     const menu = document.createElement('div');
     menu.style.cssText = `
@@ -575,9 +617,9 @@ export class HUD {
       color:#aabbcc;
     `;
 
-    const options: { label: string; value: 'dm' | 'sayto'; disabled: boolean }[] = [
-      { label: 'Dungeon Master',
-        value: 'dm',
+    const options: { label: string; value: 'gm' | 'sayto'; disabled: boolean }[] = [
+      { label: 'Game Master',
+        value: 'gm',
         disabled: false },
       { label: this.selectedNpcName ? `Say to ${this.selectedNpcName}` : 'Say to (no target)',
         value: 'sayto',
@@ -586,7 +628,7 @@ export class HUD {
 
     for (const opt of options) {
       const item = document.createElement('div');
-      const isActive = opt.value === this.dmMode;
+      const isActive = opt.value === this.gmMode;
       item.style.cssText = `
         padding:6px 10px;
         cursor:${opt.disabled ? 'default' : 'pointer'};
@@ -600,7 +642,7 @@ export class HUD {
         item.addEventListener('pointerout',  () => { item.style.background = isActive ? '#1a2a3a' : 'transparent'; });
         item.addEventListener('pointerdown', (e) => {
           e.stopPropagation();
-          this.dmMode = opt.value;
+          this.gmMode = opt.value;
           this.refreshDmModeBtn();
           this.closeDmDropup();
         });
@@ -609,20 +651,20 @@ export class HUD {
     }
 
     document.body.appendChild(menu);
-    this.dmDropup = menu;
+    this.gmDropup = menu;
 
     const onOutside = (e: PointerEvent) => {
-      if (!menu.contains(e.target as Node) && e.target !== this.dmModeBtn) this.closeDmDropup();
+      if (!menu.contains(e.target as Node) && e.target !== this.gmModeBtn) this.closeDmDropup();
     };
     setTimeout(() => document.addEventListener('pointerdown', onOutside), 0);
-    this.dmDropupCleanup = () => document.removeEventListener('pointerdown', onOutside);
+    this.gmDropupCleanup = () => document.removeEventListener('pointerdown', onOutside);
   }
 
   private closeDmDropup(): void {
-    this.dmDropupCleanup?.();
-    this.dmDropupCleanup = null;
-    this.dmDropup?.remove();
-    this.dmDropup = null;
+    this.gmDropupCleanup?.();
+    this.gmDropupCleanup = null;
+    this.gmDropup?.remove();
+    this.gmDropup = null;
   }
 
   private refreshTurnOrder(state: HUDState): void {
@@ -632,34 +674,46 @@ export class HUD {
 
     const chips = state.turnOrderChips;
 
-    const totalW = chips.length * CHIP_W + (chips.length - 1) * CHIP_GAP;
+    // Per-chip widths vary (active is 30% larger); compute the total so the
+    // bar self-centres on the canvas.
+    const widths = chips.map((c) => (c.isActive ? CHIP_ACTIVE_SIZE : CHIP_SIZE));
+    const totalW = widths.reduce((a, w) => a + w, 0) + (chips.length - 1) * CHIP_GAP;
     this.turnOrderWidth = totalW;
     this.turnOrderEl.style.width = `${totalW}px`;
     this.place();
 
+    let x = 0;
     this.turnOrderEl.innerHTML = chips.map((chip, i) => {
-      const x = i * (CHIP_W + CHIP_GAP);
-      const colorHex = '#' + chip.color.toString(16).padStart(6, '0');
-      const fillBg   = chip.isActive ? '#1a3a20' : '#0f0f1e';
-      const stroke   = chip.isActive ? '#55aa66' : '#334455';
-      const textCol  = chip.isActive ? '#ffffff'  : '#778899';
-      const opacity  = chip.isDead ? '0.3' : '1';
-      const display  = chip.label ? `${chip.name} (${chip.label})` : chip.name;
+      const size = widths[i];
+      const opacity = chip.isDead ? '0.3' : '1';
+      // Top-align so the active (taller) chip grows DOWN from the same
+      // baseline as the resting chips, rather than upward into the bar.
+      const top = 3;
+      const left = x;
+      x += size + CHIP_GAP;
+      // No chip background or border — the token sprite is the chip. The
+      // 30% size bump is the active-state indicator. Combat label still
+      // appears as a small floating badge in the bottom-right corner.
+      const labelBadge = chip.label
+        ? `<div style="position:absolute;right:-2px;bottom:-2px;min-width:14px;height:14px;
+            padding:0 3px;background:#0a0a14;color:#ffe9a8;
+            font-family:monospace;font-size:10px;font-weight:bold;display:flex;
+            align-items:center;justify-content:center;border-radius:2px;">${escHtml(chip.label)}</div>`
+        : '';
       return `
-        <div style="position:absolute;left:${x}px;top:${(BAR_H - CHIP_H) / 2}px;
-          width:${CHIP_W}px;height:${CHIP_H}px;background:${fillBg};
-          border:1px solid ${stroke};opacity:${opacity};display:flex;align-items:center;gap:0;">
-          <div style="width:8px;height:8px;background:${colorHex};margin:0 6px;flex-shrink:0;"></div>
-          <span style="font-size:10px;color:${textCol};white-space:nowrap;overflow:hidden;
-            text-overflow:ellipsis;font-family:monospace;">${escHtml(display)}</span>
+        <div title="${escHtml(chip.name)}" style="position:absolute;left:${left}px;top:${top}px;
+          width:${size}px;height:${size}px;opacity:${opacity};">
+          <img src="${escHtml(chip.tokenUrl)}" alt="" draggable="false"
+            style="width:${size}px;height:${size}px;display:block;pointer-events:none;" />
+          ${labelBadge}
         </div>`;
     }).join('');
   }
 
-  private refreshLog(combatLog: LogEntry[]): void {
+  private refreshLog(eventLog: LogEntry[]): void {
     const atBottom = this.logEl.scrollHeight - this.logEl.clientHeight <= this.logEl.scrollTop + 20;
 
-    this.logEl.innerHTML = combatLog.map(entry => {
+    this.logEl.innerHTML = eventLog.map(entry => {
       const lc    = styleColor(entry.style);
       const rc    = styleColorDim(entry.style);
       const lhtml = String(marked.parseInline(entry.left));

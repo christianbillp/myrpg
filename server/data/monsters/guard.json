@@ -12,7 +12,14 @@
   "wis": 11,
   "cha": 10,
   "proficiencyBonus": 2,
-  "savingThrows": { "str": 1, "dex": 1, "con": 1, "int": 0, "wis": 0, "cha": 0 },
+  "savingThrows": {
+    "str": 1,
+    "dex": 1,
+    "con": 1,
+    "int": 0,
+    "wis": 0,
+    "cha": 0
+  },
   "initiativeBonus": 1,
   "stealthBonus": 1,
   "passivePerception": 12,
@@ -33,5 +40,6 @@
   ],
   "xp": 25,
   "cr": "1/8",
-  "color": 7833753
+  "color": 7833753,
+  "tokenAsset": "/tokens/monster_guard.svg"
 }

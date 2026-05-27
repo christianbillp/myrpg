@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64"><circle cx="32" cy="32" r="29" fill="#cf9f6a" stroke="#222222" stroke-width="4.0"/><g stroke="#222222" stroke-width="2.2" stroke-linejoin="round" stroke-linecap="round">
+  <circle cx="19" cy="34" r="4" fill="#f1c9a5"/><circle cx="45" cy="34" r="4" fill="#f1c9a5"/>
+  <ellipse cx="32" cy="34" rx="13" ry="15" fill="#f1c9a5"/>
+  <path d="M22 18 Q32 14 42 18" fill="none" stroke-width="2.4"/>       <!-- hairline -->
+  <circle cx="26" cy="32" r="2.2" fill="#222222"/><circle cx="38" cy="32" r="2.2" fill="#222222"/>
+  <circle cx="22" cy="38" r="2.4" fill="#e89a8a" stroke="none"/>       <!-- rosy cheeks -->
+  <circle cx="42" cy="38" r="2.4" fill="#e89a8a" stroke="none"/>
+  <path d="M24 43 Q28 48 32 44 Q36 48 40 43" fill="none" stroke-width="2.6"/> <!-- mustache -->
+  <path d="M20 52 L44 52 L44 56 L20 56 Z" fill="#f0ead8"/>             <!-- apron --></g></svg>

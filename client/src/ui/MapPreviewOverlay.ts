@@ -4,13 +4,16 @@ import type { SavedMapDef } from "../net/types";
 import { decodeTileGid, TILE_VOID_GID } from "../../../shared/tileGid";
 
 export interface MapPreviewData {
-  mapId: string;
+  /** Set only when the map has been persisted (by `/generate/map/save`). Null/undefined for unsaved previews. */
+  mapId?: string | null;
   width: number;
   height: number;
   terrainData: number[];
   objectData: number[];
   name: string;
   description: string;
+  /** Tileset references the data uses. Carried through from the composer so a save call can preserve them. */
+  tilesets?: Array<{ firstgid: number; source: string }>;
 }
 
 export interface MapPreviewZones {
@@ -18,6 +21,13 @@ export interface MapPreviewZones {
   playerCells: Set<string>;
   /** Cell keys formatted as `"x,y"` — enemy-start cells, rendered as a red overlay. */
   enemyCells: Set<string>;
+  /** Cell keys formatted as `"x,y"` — neutral-NPC cells, rendered as an amber overlay. */
+  neutralCells?: Set<string>;
+  /** Trigger regions rendered as colour-coded outlined rectangles on top of the grid. */
+  triggerRegions?: Array<{
+    kind: 'perception' | 'log' | 'aigm' | 'combat';
+    region: { x: number; y: number; w: number; h: number };
+  }>;
 }
 
 export interface MapPreviewOptions {
@@ -39,6 +49,14 @@ export interface MapPreviewOptions {
  *   • `setBusy(true|false)` — toggles a "Regenerating…" overlay on the grid.
  *   • `destroy()` — tears down all Phaser objects in the container.
  */
+/** Per-kind outline colour for trigger-region overlays. Matches `ZonePainter.TRIGGER_COLOR`. */
+const TRIGGER_COLOR: Record<'perception' | 'log' | 'aigm' | 'combat', number> = {
+  perception: 0x88ccaa,
+  log:        0xc8d8e8,
+  aigm:       0xe2b96f,
+  combat:     0xff6644,
+};
+
 const PANEL_W = 1100;
 const PANEL_H = 700;
 const PREVIEW_AREA_H = 440;
@@ -57,7 +75,14 @@ export class MapPreviewOverlay {
   private readonly busyText: Phaser.GameObjects.Text;
   private readonly regenBg: Phaser.GameObjects.Rectangle | null;
   private readonly regenLabel: Phaser.GameObjects.Text | null;
-  private readonly tilesetKey: string;
+  private readonly saveBg: Phaser.GameObjects.Rectangle | null;
+  private readonly saveLabel: Phaser.GameObjects.Text | null;
+  private readonly savedAsText: Phaser.GameObjects.Text;
+  private saved = false;
+  /** The fallback single-tileset key, used when a map carries no `tilesets[]` (legacy AI previews). */
+  private readonly fallbackTilesetKey: string;
+  /** The current map's per-tileset key + firstgid, sorted by descending firstgid so a GID lookup picks the highest firstgid ≤ gid. */
+  private tilesetRouting: Array<{ firstgid: number; key: string }> = [];
   private readonly viewportCenterX: number;
   private readonly viewportCenterY: number;
   private readonly zones: MapPreviewZones | null;
@@ -76,11 +101,13 @@ export class MapPreviewOverlay {
     deltaX: number,
     deltaY: number,
   ) => void;
+  private moveHandler?: (pointer: Phaser.Input.Pointer) => void;
+  private upHandler?: () => void;
 
   constructor(
     scene: Phaser.Scene,
     initial: MapPreviewData,
-    callbacks: { onClose: () => void; onRegenerate?: () => void; onAccept?: () => void },
+    callbacks: { onClose: () => void; onRegenerate?: () => void; onSave?: () => void },
     options?: MapPreviewOptions,
   ) {
     this.scene = scene;
@@ -88,7 +115,8 @@ export class MapPreviewOverlay {
     const w = scene.scale.width;
     const h = scene.scale.height;
 
-    this.tilesetKey = pickTilesetKey(scene);
+    this.fallbackTilesetKey = pickTilesetKey(scene);
+    this.refreshTilesetRouting(initial);
 
     this.container = scene.add.container(0, 0).setDepth(1000);
 
@@ -163,16 +191,16 @@ export class MapPreviewOverlay {
     this.container.add(this.busyText);
 
     // Buttons row. Layout adapts to which callbacks were supplied —
-    // view-only mode (no onRegenerate, no onAccept) shows only a single
-    // centred CLOSE button; the full editor (regenerate + accept + close)
+    // view-only mode (no onRegenerate, no onSave) shows only a single
+    // centred CLOSE button; the full editor (regenerate + save + close)
     // spreads three buttons across the bottom.
     const buttonY = top + PANEL_H - 50;
-    const showAccept = !!callbacks.onAccept;
-    const showRegen  = !!callbacks.onRegenerate;
+    const showSave  = !!callbacks.onSave;
+    const showRegen = !!callbacks.onRegenerate;
     const buttonsCenter = left + PANEL_W / 2;
 
     if (showRegen) {
-      const regenX = showAccept ? buttonsCenter - 240 : buttonsCenter - 130;
+      const regenX = showSave ? buttonsCenter - 240 : buttonsCenter - 130;
       this.regenBg = scene.add.rectangle(regenX, buttonY, 220, 40, 0x1a3a2a)
         .setStrokeStyle(2, 0x2a6655).setInteractive({ useHandCursor: true });
       this.regenLabel = scene.add.text(regenX, buttonY, "↻ REGENERATE", {
@@ -186,21 +214,27 @@ export class MapPreviewOverlay {
       this.regenLabel = null;
     }
 
-    if (showAccept) {
-      const acceptX = showRegen ? buttonsCenter : buttonsCenter - 130;
-      const acceptBg = scene.add.rectangle(acceptX, buttonY, 220, 40, 0x2a3a55)
+    if (showSave) {
+      const saveX = showRegen ? buttonsCenter : buttonsCenter - 130;
+      this.saveBg = scene.add.rectangle(saveX, buttonY, 220, 40, 0x2a3a55)
         .setStrokeStyle(2, 0x5588aa).setInteractive({ useHandCursor: true });
-      const acceptLabel = scene.add.text(acceptX, buttonY, "✓ ACCEPT", {
+      this.saveLabel = scene.add.text(saveX, buttonY, "✓ SAVE", {
         fontSize: "13px", color: "#cce4ff", fontFamily: "monospace",
       }).setOrigin(0.5);
-      acceptBg.on("pointerdown", () => callbacks.onAccept!());
-      this.container.add(acceptBg);
-      this.container.add(acceptLabel);
+      this.saveBg.on("pointerdown", () => {
+        if (this.saved) return;
+        callbacks.onSave!();
+      });
+      this.container.add(this.saveBg);
+      this.container.add(this.saveLabel);
+    } else {
+      this.saveBg = null;
+      this.saveLabel = null;
     }
 
     // CLOSE always exists. Position depends on what's beside it.
-    const closeX = (showRegen && showAccept) ? buttonsCenter + 240
-                 : (showRegen || showAccept) ? buttonsCenter + 130
+    const closeX = (showRegen && showSave) ? buttonsCenter + 240
+                 : (showRegen || showSave) ? buttonsCenter + 130
                  : buttonsCenter;
     const closeBg = scene.add.rectangle(closeX, buttonY, 220, 40, 0x222233)
       .setStrokeStyle(2, 0x556677).setInteractive({ useHandCursor: true });
@@ -211,11 +245,23 @@ export class MapPreviewOverlay {
     this.container.add(closeBg);
     this.container.add(closeLabel);
 
-    // "Saved as gen_..." footnote
-    const savedAs = scene.add.text(w / 2, buttonY - 30, `Saved as ${initial.mapId}`, {
+    // "Saved as gen_..." footnote — hidden until the user clicks SAVE.
+    this.savedAsText = scene.add.text(w / 2, buttonY - 30, "", {
       fontSize: "10px", color: "#556677", fontFamily: "monospace",
-    }).setOrigin(0.5);
-    this.container.add(savedAs);
+    }).setOrigin(0.5).setVisible(false);
+    this.container.add(this.savedAsText);
+  }
+
+  /** Lock the SAVE button into a "✓ SAVED" disabled state. Cleared by `update`. */
+  markSaved(mapId: string): void {
+    this.saved = true;
+    if (this.saveBg && this.saveLabel) {
+      this.saveBg.disableInteractive();
+      this.saveBg.setFillStyle(0x1a2222);
+      this.saveBg.setStrokeStyle(2, 0x334455);
+      this.saveLabel.setText("✓ SAVED").setColor("#556677");
+    }
+    this.savedAsText.setText(`Saved as ${mapId}`).setVisible(true);
   }
 
   update(data: MapPreviewData): void {
@@ -227,7 +273,17 @@ export class MapPreviewOverlay {
     this.panX = 0;
     this.panY = 0;
     this.applyTransform();
+    this.refreshTilesetRouting(data);
     this.renderGrid(data);
+    // A regenerated map is unsaved — re-enable the SAVE button.
+    this.saved = false;
+    if (this.saveBg && this.saveLabel) {
+      this.saveBg.setInteractive({ useHandCursor: true });
+      this.saveBg.setFillStyle(0x2a3a55);
+      this.saveBg.setStrokeStyle(2, 0x5588aa);
+      this.saveLabel.setText("✓ SAVE").setColor("#cce4ff");
+    }
+    this.savedAsText.setVisible(false);
   }
 
   setBusy(busy: boolean): void {
@@ -243,8 +299,11 @@ export class MapPreviewOverlay {
   }
 
   destroy(): void {
-    if (this.wheelHandler) {
-      this.scene.input.off("wheel", this.wheelHandler);
+    if (this.wheelHandler) this.scene.input.off("wheel", this.wheelHandler);
+    if (this.moveHandler)  this.scene.input.off("pointermove", this.moveHandler);
+    if (this.upHandler) {
+      this.scene.input.off("pointerup", this.upHandler);
+      this.scene.input.off("pointerupoutside", this.upHandler);
     }
     this.container.destroy();
   }
@@ -280,14 +339,18 @@ export class MapPreviewOverlay {
       this.dragStartPanX = this.panX;
       this.dragStartPanY = this.panY;
     });
-    this.scene.input.on("pointermove", (pointer: Phaser.Input.Pointer) => {
+    // Store handler refs so `destroy()` can detach them — otherwise each
+    // overlay open stacks a new listener on the scene.
+    this.moveHandler = (pointer: Phaser.Input.Pointer) => {
       if (!this.dragging) return;
       this.panX = this.dragStartPanX + (pointer.x - this.dragStartPointerX);
       this.panY = this.dragStartPanY + (pointer.y - this.dragStartPointerY);
       this.applyTransform();
-    });
-    this.scene.input.on("pointerup", () => { this.dragging = false; });
-    this.scene.input.on("pointerupoutside", () => { this.dragging = false; });
+    };
+    this.upHandler = () => { this.dragging = false; };
+    this.scene.input.on("pointermove", this.moveHandler);
+    this.scene.input.on("pointerup", this.upHandler);
+    this.scene.input.on("pointerupoutside", this.upHandler);
   }
 
   private pointerInViewport(pointer: Phaser.Input.Pointer): boolean {
@@ -308,6 +371,23 @@ export class MapPreviewOverlay {
 
   // ── Tile rendering ──────────────────────────────────────────────────────
 
+  /**
+   * Build the per-map GID→spritesheet lookup. Reads `data.tilesets` when
+   * present and pre-resolves each entry to a Phaser texture key sorted by
+   * descending firstgid (so a lookup picks the highest firstgid ≤ gid). Falls
+   * back to a single-tileset routing at firstgid=1 when the data carries no
+   * tilesets metadata.
+   */
+  private refreshTilesetRouting(data: MapPreviewData): void {
+    if (data.tilesets && data.tilesets.length > 0) {
+      this.tilesetRouting = [...data.tilesets]
+        .map((ts) => ({ firstgid: ts.firstgid, key: tilesetTextureKey(tsetImageUrlFromSource(ts.source)) }))
+        .sort((a, b) => b.firstgid - a.firstgid);
+    } else {
+      this.tilesetRouting = [{ firstgid: 1, key: this.fallbackTilesetKey }];
+    }
+  }
+
   private renderGrid(data: MapPreviewData): void {
     // Clear any previous tiles
     this.gridContainer.removeAll(true);
@@ -322,9 +402,6 @@ export class MapPreviewOverlay {
       .setStrokeStyle(1, 0x334455);
     this.gridContainer.add(back);
 
-    const hasTexture = this.scene.textures.exists(this.tilesetKey);
-    const FIRSTGID = 1; // Generated maps always use roguelike at firstgid=1.
-
     for (let y = 0; y < data.height; y++) {
       for (let x = 0; x < data.width; x++) {
         const i = y * data.width + x;
@@ -332,8 +409,8 @@ export class MapPreviewOverlay {
         const ty = startY + y * TILE_PX + TILE_PX / 2;
 
         const groundGid = data.terrainData[i];
-        if (hasTexture && groundGid > 0) {
-          this.drawTile(tx, ty, groundGid, FIRSTGID);
+        if (groundGid > 0) {
+          this.drawTile(tx, ty, groundGid);
         } else {
           // Fallback: solid grey square so the layout still reads.
           this.gridContainer.add(
@@ -342,8 +419,8 @@ export class MapPreviewOverlay {
         }
 
         const objectGid = data.objectData[i];
-        if (hasTexture && objectGid > 0) {
-          this.drawTile(tx, ty, objectGid, FIRSTGID);
+        if (objectGid > 0) {
+          this.drawTile(tx, ty, objectGid);
         }
 
         // Starting-zone overlay (drawn on top of both terrain and objects).
@@ -353,14 +430,33 @@ export class MapPreviewOverlay {
             this.gridContainer.add(this.scene.add.rectangle(tx, ty, TILE_PX, TILE_PX, 0x3388ff, 0.5));
           } else if (this.zones.enemyCells.has(key)) {
             this.gridContainer.add(this.scene.add.rectangle(tx, ty, TILE_PX, TILE_PX, 0xff4444, 0.5));
+          } else if (this.zones.neutralCells?.has(key)) {
+            this.gridContainer.add(this.scene.add.rectangle(tx, ty, TILE_PX, TILE_PX, 0xe2b96f, 0.5));
           }
         }
       }
     }
+
+    // Trigger region outlines, drawn after the per-cell overlays so the
+    // outline reads on top of zone fills. One graphics object covers all
+    // trigger rectangles.
+    if (this.zones?.triggerRegions && this.zones.triggerRegions.length > 0) {
+      const g = this.scene.add.graphics();
+      for (const t of this.zones.triggerRegions) {
+        const color = TRIGGER_COLOR[t.kind];
+        const rx = startX + t.region.x * TILE_PX;
+        const ry = startY + t.region.y * TILE_PX;
+        const rw = t.region.w * TILE_PX;
+        const rh = t.region.h * TILE_PX;
+        g.fillStyle(color, 0.12).fillRect(rx, ry, rw, rh);
+        g.lineStyle(2, color, 0.9).strokeRect(rx, ry, rw, rh);
+      }
+      this.gridContainer.add(g);
+    }
   }
 
   /** Render a single tile (terrain or object) with flip-bit decoding applied. */
-  private drawTile(tx: number, ty: number, rawGid: number, firstGid: number): void {
+  private drawTile(tx: number, ty: number, rawGid: number): void {
     const dec = decodeTileGid(rawGid);
     if (dec.gid === TILE_VOID_GID) {
       this.gridContainer.add(
@@ -368,13 +464,33 @@ export class MapPreviewOverlay {
       );
       return;
     }
-    const img = this.scene.add.image(tx, ty, this.tilesetKey, dec.gid - firstGid)
+    // Find the owning tileset by firstgid (sorted descending so the first
+    // match wins). Skip the tile entirely if no tileset claims the GID — a
+    // grey square shows through from the backing rect instead.
+    const owner = this.tilesetRouting.find((t) => dec.gid >= t.firstgid);
+    if (!owner || !this.scene.textures.exists(owner.key)) {
+      this.gridContainer.add(
+        this.scene.add.rectangle(tx, ty, TILE_PX, TILE_PX, 0x556677),
+      );
+      return;
+    }
+    const frame = dec.gid - owner.firstgid;
+    const img = this.scene.add.image(tx, ty, owner.key, frame)
       .setDisplaySize(TILE_PX, TILE_PX);
     if (dec.angle !== 0) img.setAngle(dec.angle);
     if (dec.flipX) img.setFlipX(true);
     if (dec.flipY) img.setFlipY(true);
     this.gridContainer.add(img);
   }
+}
+
+/**
+ * Translate a Tiled-style relative tileset path (e.g. `../tilesets/water.tsj`)
+ * into the `/tilesets/<name>.png` url Phaser uses to key the spritesheet.
+ */
+function tsetImageUrlFromSource(source: string): string {
+  const base = (source.split("/").pop() ?? source).replace(/\.tsj$/i, ".png");
+  return `/tilesets/${base}`;
 }
 
 function pickTilesetKey(scene: Phaser.Scene): string {

@@ -1,20 +1,21 @@
-import type { StartingZonesLayer } from './engine/types.js';
+import type { StartingZonesLayer, EncounterEnvironment } from './engine/types.js';
 
-export type EncounterType = 'simple_combat' | 'social_interaction' | 'exploration';
 export type QuestGoalType = 'kill' | 'collect' | 'explore' | 'talk';
 
 export interface EncounterContext {
   introduction: string;
   context: string;
   mapName: string;
-  enemyCount: number;
   secrets: SecretDef[];
   quests: QuestDef[];
-  /** Player-facing one-line objective for this encounter. Derived from `encounterTypes` when the EncounterDef doesn't set one explicitly. Shown at the top of the Quests section in the Player Panel. */
+  /** Player-facing one-line objective for this encounter. Falls back to a generic "Complete the encounter" when not supplied. */
   objective: string;
   npcIds?: string[];
   allyIds?: string[];
+  enemyIds?: string[];
   startingZones?: StartingZonesLayer;
+  /** Environmental flags consulted by combat resolvers (e.g. sunlit → triggers Sunlight Sensitivity). */
+  environment?: EncounterEnvironment;
 }
 
 export type SecretReward =
@@ -31,7 +32,6 @@ export interface QuestDef {
 }
 
 export interface EncounterStartRequest {
-  encounterTypes: EncounterType[];
   mapType: 'open' | 'rooms' | 'saved';
   playerDefId: string;
   playerName: string;
@@ -44,10 +44,12 @@ export interface EncounterStartRequest {
   savedMapDescription?: string;
   npcIds?: string[];
   allyIds?: string[];
+  enemyIds?: string[];
   customIntroduction?: string;
   customContext?: string;
   customObjective?: string;
   startingZones?: StartingZonesLayer;
+  environment?: EncounterEnvironment;
 }
 
 const SECRET_POOL: SecretDef[] = [
@@ -63,45 +65,24 @@ const SECRET_POOL: SecretDef[] = [
 function shuffle<T>(arr: T[]): T[] { return [...arr].sort(() => Math.random() - 0.5); }
 function pickSecrets(count: number): SecretDef[] { return shuffle(SECRET_POOL).slice(0, count); }
 
-function buildQuests(types: EncounterType[], enemyCount: number): QuestDef[] {
+/**
+ * Build a small default quest list from what the encounter actually contains.
+ * Hand-picked enemies generate kill quests, hand-picked NPCs generate a "make
+ * contact" quest, and an exploration-style "keen eye" quest is always added
+ * since secrets are always seeded.
+ */
+function buildQuests(enemyCount: number, npcCount: number): QuestDef[] {
   const quests: QuestDef[] = [];
-  if (types.includes('simple_combat')) {
+  if (enemyCount > 0) {
     quests.push({ id: 'first_blood',  title: 'First Blood',   goal: { type: 'kill',    target: 1 },          rewardXp: 10, rewardGp: 5  });
     quests.push({ id: 'treasure_hunt',title: 'Treasure Hunt', goal: { type: 'collect', target: 2 },          rewardXp: 10, rewardGp: 5  });
     if (enemyCount > 1)
       quests.push({ id: 'slay_all',   title: 'Slay All',      goal: { type: 'kill',    target: enemyCount }, rewardXp: 25, rewardGp: 15 });
   }
-  if (types.includes('exploration'))
-    quests.push({ id: 'keen_eye',     title: 'Keen Eye',     goal: { type: 'explore', target: 2 }, rewardXp: 15, rewardGp: 10 });
-  if (types.includes('social_interaction'))
+  if (npcCount > 0)
     quests.push({ id: 'make_contact', title: 'Make Contact', goal: { type: 'talk',    target: 1 }, rewardXp: 10, rewardGp: 5 });
+  quests.push({ id: 'keen_eye', title: 'Keen Eye', goal: { type: 'explore', target: 2 }, rewardXp: 15, rewardGp: 10 });
   return quests;
-}
-
-const TYPE_NARRATIVE: Record<EncounterType, string> = {
-  simple_combat:      'Hostile figures have been spotted — combat is unavoidable.',
-  social_interaction: 'A local NPC is nearby, cautious but willing to speak.',
-  exploration:        'Something feels hidden here — secrets reward the observant.',
-};
-
-const TYPE_CONTEXT: Record<EncounterType, string> = {
-  simple_combat:      'Combat against hostile creatures; the player must defeat all enemies.',
-  social_interaction: 'An NPC available for conversation; the player speaks with all creatures through the Dungeon Master overlay.',
-  exploration:        'Four hidden secrets on the map, found via Wisdom (Perception) checks.',
-};
-
-const TYPE_OBJECTIVE: Record<EncounterType, string> = {
-  simple_combat:      'Defeat the hostile creatures',
-  social_interaction: 'Speak with the locals and resolve the situation',
-  exploration:        'Search the area for hidden secrets',
-};
-
-function defaultObjective(types: EncounterType[]): string {
-  // Prefer the most "story-shaping" type when an encounter is mixed.
-  if (types.includes('simple_combat')) return TYPE_OBJECTIVE.simple_combat;
-  if (types.includes('social_interaction')) return TYPE_OBJECTIVE.social_interaction;
-  if (types.includes('exploration')) return TYPE_OBJECTIVE.exploration;
-  return 'Complete the encounter';
 }
 
 export function buildEncounter(req: EncounterStartRequest): EncounterContext {
@@ -113,36 +94,43 @@ export function buildEncounter(req: EncounterStartRequest): EncounterContext {
     req.mapType === 'saved' && req.savedMapName ? req.savedMapName
     : req.mapType === 'rooms' ? 'dungeon' : 'open terrain';
 
-  const isCombat = req.encounterTypes.includes('simple_combat');
-  const charOpener = isCombat
+  const enemyCount = (req.enemyIds ?? []).length;
+  const npcCount   = (req.npcIds ?? []).length;
+  const allyCount  = (req.allyIds ?? []).length;
+
+  // Default opening — author-supplied `customIntroduction` always wins.
+  const charOpener = enemyCount > 0
     ? `${req.playerName} the ${req.playerClassName} enters ${mapDescription}, senses sharp and weapon ready.`
     : `${req.playerName} the ${req.playerClassName} steps into ${mapDescription}.`;
+  const introduction = req.customIntroduction ?? charOpener;
 
-  const introduction = req.customIntroduction
-    ?? [charOpener, ...req.encounterTypes.map((t) => TYPE_NARRATIVE[t])].join(' ');
-  const context = req.customContext
-    ?? [
-      `Player: ${req.playerName}, ${req.playerSpeciesName} ${req.playerClassName} (Level ${req.playerLevel}, ${req.playerMaxHp} HP, AC ${req.playerAc}).`,
-      `Setting: ${mapLabel} — ${mapDescription}.`,
-      `Active encounter objectives: ${req.encounterTypes.map((t) => TYPE_CONTEXT[t]).join(' ')}.`,
-    ].join(' ');
+  // Default GM context — assembled from the encounter's actual contents.
+  const contents: string[] = [];
+  if (enemyCount > 0) contents.push(`${enemyCount} hostile creature${enemyCount === 1 ? '' : 's'} on the map`);
+  if (npcCount > 0)   contents.push(`${npcCount} neutral NPC${npcCount === 1 ? '' : 's'} available for conversation`);
+  if (allyCount > 0)  contents.push(`${allyCount} ally combatant${allyCount === 1 ? '' : 's'}`);
+  const contentsLine = contents.length > 0
+    ? `Encounter contains: ${contents.join('; ')}.`
+    : 'No combatants on the map at start — pure exploration / social scene.';
+  const context = req.customContext ?? [
+    `Player: ${req.playerName}, ${req.playerSpeciesName} ${req.playerClassName} (Level ${req.playerLevel}, ${req.playerMaxHp} HP, AC ${req.playerAc}).`,
+    `Setting: ${mapLabel} — ${mapDescription}.`,
+    contentsLine,
+  ].join(' ');
 
-  const enemyCount = req.encounterTypes.includes('simple_combat')
-    ? 2 + Math.floor(Math.random() * 3)
-    : 0;
-
-  const objective = req.customObjective ?? defaultObjective(req.encounterTypes);
+  const objective = req.customObjective ?? 'Complete the encounter';
 
   return {
     introduction,
     context,
     mapName: mapLabel,
-    enemyCount,
     secrets:  pickSecrets(4),
-    quests:   buildQuests(req.encounterTypes, enemyCount),
+    quests:   buildQuests(enemyCount, npcCount),
     objective,
     npcIds:        req.npcIds,
     allyIds:       req.allyIds,
+    enemyIds:      req.enemyIds,
     startingZones: req.startingZones,
+    environment:   req.environment,
   };
 }

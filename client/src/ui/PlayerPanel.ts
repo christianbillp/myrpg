@@ -57,6 +57,7 @@ export interface PlayerPanelCallbacks {
   onDash: () => void;
   onDodge: () => void;
   onDisengage: () => void;
+  onDetach: () => void;
   onHide: () => void;
   onDeathSave: () => void;
   onShortRest: () => void;
@@ -330,6 +331,11 @@ export class PlayerPanel {
       const disEl = this.makeBtn('DISENGAGE', GREEN, this.callbacks.onDisengage);
       disEl.disabled = actionUsed;
       this.actionArea.prepend(disEl);
+
+      if (aa.canDetach) {
+        const detEl = this.makeBtn('DETACH', GREEN, this.callbacks.onDetach);
+        this.actionArea.prepend(detEl);
+      }
 
       const dodEl = this.makeBtn('DODGE', GREEN, this.callbacks.onDodge);
       dodEl.disabled = actionUsed;

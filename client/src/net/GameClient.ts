@@ -5,12 +5,29 @@ import type {
 const API_URL = 'http://localhost:3000';
 const WS_URL  = 'ws://localhost:3000';
 
-export type StateUpdateHandler = (state: GameState, events: GameEvent[]) => void;
-export type AIDMReplyHandler   = (reply: string) => void;
+/**
+ * Named regions of interest returned by `POST /generate/map/composed`. Every
+ * field is optional — only features the composer actually placed are populated.
+ * Consumed by the encounter randomizer for story-suitable spawn placement.
+ * Mirrors the server-side `MapAnchors` shape.
+ */
+export interface ComposedMapAnchors {
+  rooms?: Array<{ x: number; y: number; w: number; h: number; cx: number; cy: number }>;
+  entrance?: { x: number; y: number };
+  vault?: { x: number; y: number };
+  campfires?: Array<{ x: number; y: number }>;
+  buildings?: Array<{ x: number; y: number; w: number; h: number }>;
+  ruins?: Array<{ x: number; y: number; w: number; h: number }>;
+  pathEndpoints?: Array<{ x: number; y: number }>;
+  inlandBand?: Array<{ x: number; y: number }>;
+}
 
-// Streaming AIDM handlers — fed by aidm_start / aidm_chunk /
-// aidm_speculative_discard / aidm_done WebSocket messages.
-export interface AIDMStreamHandlers {
+export type StateUpdateHandler = (state: GameState, events: GameEvent[]) => void;
+export type AIGMReplyHandler   = (reply: string) => void;
+
+// Streaming AIGM handlers — fed by aigm_start / aigm_chunk /
+// aigm_speculative_discard / aigm_done WebSocket messages.
+export interface AIGMStreamHandlers {
   onStart?: () => void;
   onChunk?: (text: string) => void;
   onCheckpoint?: () => void;
@@ -23,23 +40,23 @@ export class GameClient {
   private sessionId: string | null = null;
   private ws: WebSocket | null = null;
   private onStateUpdate: StateUpdateHandler | null = null;
-  private onAIDMReply: AIDMReplyHandler | null = null;
-  private aidmStreamHandlers: AIDMStreamHandlers | null = null;
+  private onAIGMReply: AIGMReplyHandler | null = null;
+  private aigmStreamHandlers: AIGMStreamHandlers | null = null;
   private onDisconnect: (() => void) | null = null;
   private intentionalClose = false;
 
   setStateUpdateHandler(fn: StateUpdateHandler): void { this.onStateUpdate = fn; }
-  setAIDMReplyHandler(fn: AIDMReplyHandler): void { this.onAIDMReply = fn; }
-  setAIDMStreamHandlers(handlers: AIDMStreamHandlers): void { this.aidmStreamHandlers = handlers; }
+  setAIGMReplyHandler(fn: AIGMReplyHandler): void { this.onAIGMReply = fn; }
+  setAIGMStreamHandlers(handlers: AIGMStreamHandlers): void { this.aigmStreamHandlers = handlers; }
   setDisconnectHandler(fn: () => void): void { this.onDisconnect = fn; }
 
   resumeSession(sessionId: string): void { this.sessionId = sessionId; }
 
-  async loadWorld(): Promise<{ sessionId: string; state: GameState; dmHistory: { role: 'user' | 'assistant'; content: string }[] } | null> {
+  async loadWorld(): Promise<{ sessionId: string; state: GameState; gmHistory: { role: 'user' | 'assistant'; content: string }[] } | null> {
     try {
       const res = await fetch(`${API_URL}/world`, { signal: AbortSignal.timeout(5000) });
       if (!res.ok) return null;
-      return res.json() as Promise<{ sessionId: string; state: GameState; dmHistory: { role: 'user' | 'assistant'; content: string }[] }>;
+      return res.json() as Promise<{ sessionId: string; state: GameState; gmHistory: { role: 'user' | 'assistant'; content: string }[] }>;
     } catch {
       return null;
     }
@@ -65,18 +82,18 @@ export class GameClient {
       const msg = JSON.parse(event.data as string) as ServerWSMessage;
       if (msg.type === 'state_update') {
         this.onStateUpdate?.(msg.state, msg.events);
-      } else if (msg.type === 'aidm_reply') {
-        this.onAIDMReply?.(msg.reply);
-      } else if (msg.type === 'aidm_start') {
-        this.aidmStreamHandlers?.onStart?.();
-      } else if (msg.type === 'aidm_chunk') {
-        this.aidmStreamHandlers?.onChunk?.(msg.text);
-      } else if (msg.type === 'aidm_checkpoint') {
-        this.aidmStreamHandlers?.onCheckpoint?.();
-      } else if (msg.type === 'aidm_speculative_discard') {
-        this.aidmStreamHandlers?.onSpeculativeDiscard?.();
-      } else if (msg.type === 'aidm_done') {
-        this.aidmStreamHandlers?.onDone?.(msg.reply, msg.rollResults);
+      } else if (msg.type === 'aigm_reply') {
+        this.onAIGMReply?.(msg.reply);
+      } else if (msg.type === 'aigm_start') {
+        this.aigmStreamHandlers?.onStart?.();
+      } else if (msg.type === 'aigm_chunk') {
+        this.aigmStreamHandlers?.onChunk?.(msg.text);
+      } else if (msg.type === 'aigm_checkpoint') {
+        this.aigmStreamHandlers?.onCheckpoint?.();
+      } else if (msg.type === 'aigm_speculative_discard') {
+        this.aigmStreamHandlers?.onSpeculativeDiscard?.();
+      } else if (msg.type === 'aigm_done') {
+        this.aigmStreamHandlers?.onDone?.(msg.reply, msg.rollResults);
       }
     };
     this.ws.onerror = (e) => console.error('WebSocket error:', e);
@@ -112,19 +129,19 @@ export class GameClient {
     // State update arrives via WebSocket
   }
 
-  async sendAIDMMessage(
+  async sendAIGMMessage(
     playerMessage: string,
-    dmPersona: 'story' | 'dev',
+    gmPersona: 'story' | 'dev',
   ): Promise<{ reply: string; rollResults: string[] }> {
     if (!this.sessionId) return { reply: '', rollResults: [] };
-    const res = await fetch(`${API_URL}/game/session/${this.sessionId}/aidm`, {
+    const res = await fetch(`${API_URL}/game/session/${this.sessionId}/aigm`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ playerMessage, dmPersona }),
+      body: JSON.stringify({ playerMessage, gmPersona }),
     });
-    if (!res.ok) throw new Error(`AIDM request failed: ${res.status}`);
+    if (!res.ok) throw new Error(`AIGM request failed: ${res.status}`);
     const { reply, rollResults } = await res.json() as { reply: string; rollResults: string[] };
-    // State update (if AIDM used tools) arrives via WebSocket
+    // State update (if AIGM used tools) arrives via WebSocket
     return { reply, rollResults: rollResults ?? [] };
   }
 
@@ -157,7 +174,6 @@ export class GameClient {
    */
   async generateEncounter(req: {
     prompt: string;
-    encounterTypes?: string[];
     playerName?: string;
     playerClassName?: string;
   }): Promise<{ encounterId: string; mapId: string }> {
@@ -180,17 +196,21 @@ export class GameClient {
    * by the rule-based composer in `engine/MapComposer.ts`.
    */
   async composeMap(args: {
-    terrain: 'grassland' | 'forest';
-    features: Array<'ruins' | 'buildings' | 'campsites' | 'path'>;
+    terrain: 'grassland' | 'forest' | 'dungeon';
+    features: Array<'ruins' | 'buildings' | 'campsites' | 'path' | 'coastline' | '3-room' | '5-room'>;
     seed?: number;
   }): Promise<{
-    mapId: string;
+    /** Always null for /generate/map/composed — the preview is not persisted. Call `saveMap` to persist. */
+    mapId: null;
     width: number;
     height: number;
     terrainData: number[];
     objectData: number[];
     name: string;
     description: string;
+    tilesets: Array<{ firstgid: number; source: string }>;
+    /** Story-suitable spawn anchors found / stamped by the composer (entrance, vault, campfires, etc). */
+    anchors: ComposedMapAnchors;
   }> {
     const res = await fetch(`${API_URL}/generate/map/composed`, {
       method: 'POST',
@@ -202,10 +222,38 @@ export class GameClient {
       throw new Error(body.error ?? `Map compose failed: ${res.status}`);
     }
     return res.json() as Promise<{
-      mapId: string; width: number; height: number;
+      mapId: null; width: number; height: number;
       terrainData: number[]; objectData: number[];
       name: string; description: string;
+      tilesets: Array<{ firstgid: number; source: string }>;
+      anchors: ComposedMapAnchors;
     }>;
+  }
+
+  /**
+   * Persist a previously-composed map preview. Returns the new mapId — the
+   * caller is responsible for tracking it on the preview so the encounter
+   * builder can reference it.
+   */
+  async saveMap(args: {
+    name: string;
+    description: string;
+    width: number;
+    height: number;
+    terrainData: number[];
+    objectData: number[];
+    tilesets?: Array<{ firstgid: number; source: string }>;
+  }): Promise<{ mapId: string }> {
+    const res = await fetch(`${API_URL}/generate/map/save`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(args),
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({ error: `HTTP ${res.status}` })) as { error?: string };
+      throw new Error(body.error ?? `Map save failed: ${res.status}`);
+    }
+    return res.json() as Promise<{ mapId: string }>;
   }
 
   /**
@@ -224,14 +272,30 @@ export class GameClient {
    */
   async composeEncounter(args: {
     existingMapId?: string;
-    terrain?: 'grassland' | 'forest';
-    features?: Array<'ruins' | 'buildings' | 'campsites' | 'path'>;
-    encounterTypes?: string[];
+    terrain?: 'grassland' | 'forest' | 'dungeon';
+    features?: Array<'ruins' | 'buildings' | 'campsites' | 'path' | 'coastline' | '3-room' | '5-room'>;
     description?: string;
     seed?: number;
     startingZonesData?: number[];
     allyIds?: string[];
     enemyIds?: string[];
+    neutralIds?: string[];
+    customTitle?: string;
+    customIntroduction?: string;
+    customObjective?: string;
+    completionFlag?: string;
+    /** Author-painted triggers: rectangular region + one of four action templates. The server expands each into a full `EncounterTrigger`. */
+    triggers?: Array<{
+      id: string;
+      region: { x: number; y: number; w: number; h: number };
+      kind: "perception" | "log" | "aigm" | "combat";
+      dc: number;
+      passMessage: string;
+      message: string;
+      defId: string;
+      /** Optional bulk-flip list for `combat` kind — RANDOMIZE flow fills this with every rolled enemy type. */
+      defIds?: string[];
+    }>;
   }): Promise<{
     mapId: string;
     encounterId: string;
@@ -294,6 +358,25 @@ export class GameClient {
   }
 
   /**
+   * Promote a generated (`gen_*`) encounter to a stable premade id. The slug
+   * defaults to a sanitised version of the encounter title; if omitted the
+   * server derives it. Renames the encounter JSON, removes its `generated`
+   * flag, and (if it references a `gen_*` map) renames that too.
+   */
+  async promoteEncounter(encounterId: string, slug?: string): Promise<{ encounterId: string; mapId?: string }> {
+    const res = await fetch(`${API_URL}/generate/encounter/promote`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ encounterId, slug }),
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({ error: `HTTP ${res.status}` })) as { error?: string };
+      throw new Error(body.error ?? `Promote failed: ${res.status}`);
+    }
+    return res.json() as Promise<{ encounterId: string; mapId?: string }>;
+  }
+
+  /**
    * Generate just a map (no encounter wrapper). Returns the map's id and
    * the raw GID arrays so the client can render a preview without an
    * additional round-trip. The map is persisted on disk for future use.
@@ -330,7 +413,7 @@ export class GameClient {
    */
   async startGeneratedEncounter(encounterId: string, characterId: string): Promise<GameState> {
     const list = await fetch(`${API_URL}/encounters`).then((r) => r.json()) as Array<{
-      id: string; encounterTitle: string; encounterTypes: string[]; mapId: string;
+      id: string; encounterTitle: string; mapId: string;
       npcIds?: string[]; allyIds?: string[]; enemyIds?: string[];
       customIntroduction?: string; customContext?: string;
       tileProperties?: unknown[]; startingZones?: unknown;
@@ -339,7 +422,6 @@ export class GameClient {
     const enc = list.find((e) => e.id === encounterId);
     if (!enc) throw new Error(`Encounter "${encounterId}" not found after generation.`);
     return this.createSession({
-      encounterTypes: enc.encounterTypes as never,
       mapType: "saved",
       playerDefId: characterId,
       savedMapId: enc.mapId,

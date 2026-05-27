@@ -60,7 +60,8 @@ One file per playable character. Defines identity, ability scores, class feature
 | `defaultSpellbookIds` | string[] | *(optional, wizard-style)* Full known spell list. A subset is "prepared" at any moment. |
 | `defaultPreparedSpellIds` | string[] | *(optional, caster-only)* Subset of `defaultSpellbookIds` (or fixed-list classes) currently castable. Wizards mutate this on Long Rest. |
 | `defaultSpellSlots` | number[] | *(optional, caster-only)* Starting slot pool by level − 1, e.g. `[2]` = 2 × L1 slots, no higher. Refilled on Long Rest. |
-| `description` | string | Character backstory. Surfaced to the AIDM as persona context. |
+| `description` | string | Character backstory. Surfaced to the AIGM as persona context. |
+| `tokenAsset` | string | *(optional)* Path to the SVG token sprite, e.g. `/tokens/player_fighter_human.svg`. When omitted, the path is derived by convention: `/tokens/player_<className_lower>_<speciesLineage \| speciesId, dashes stripped>.svg`. See [tokens/](#tokens-1). |
 
 **Fields computed at runtime (absent from JSON):**
 
@@ -126,12 +127,13 @@ SRD stat blocks for all creatures — both random enemies and the underlying sta
 | `speed` | number | Movement speed in **feet**. |
 | `attacks` | Attack[] | One or more attack entries (see below). |
 | `xp` | number | XP awarded on kill. |
-| `cr` | string | Challenge Rating, e.g. `"1/8"`, `"1/4"`, `"1"`. Classifies encounter difficulty. Not used for automatic reward calculation — gold must be granted by the AIDM via `award_gold`. |
+| `cr` | string | Challenge Rating, e.g. `"1/8"`, `"1/4"`, `"1"`. Classifies encounter difficulty. Not used for automatic reward calculation — gold must be granted by the AIGM via `award_gold`. |
 | `color` | number | Token colour as a decimal integer. |
 | `vulnerabilities` | string[] | *(optional)* Damage types that deal double damage, e.g. `["bludgeoning"]`. |
 | `resistances` | string[] | *(optional)* Damage types that deal half damage. |
 | `immunities` | string[] | *(optional)* Damage types that deal no damage. Immunity takes precedence over vulnerability. |
 | `conditionImmunities` | string[] | *(optional)* Conditions that cannot be applied to this creature. |
+| `tokenAsset` | string | *(optional)* Path to the SVG token sprite. When omitted, the path is derived by convention: `/tokens/monster_<id>.svg`. See [tokens/](#tokens-1). |
 
 ### Attack entry fields
 
@@ -164,7 +166,8 @@ Named characters with identity and persona layered on top of a monster stat bloc
 | `name` | string | Display name shown on the map token. |
 | `monsterClass` | string | `id` of a `monsters/` entry. Determines HP, AC, speed, attacks, and other combat stats. |
 | `color` | number | Token colour as a decimal integer. |
-| `persona` | string | *(optional)* Roleplay instructions for the AIDM. The AIDM speaks as this character when the player addresses them. |
+| `persona` | string | *(optional)* Roleplay instructions for the AIGM. The AIGM speaks as this character when the player addresses them. |
+| `tokenAsset` | string | *(optional)* Path to the SVG token sprite, e.g. `/tokens/npc_wandering_sage.svg`. When omitted, the path is derived by convention: `/tokens/npc_<id>.svg`. If neither an explicit field nor a convention-matched file exists, the NPC falls back to its `monsterClass`'s token at render time. See [tokens/](#tokens-1). |
 
 ### Example — `npcs/tavern_keeper.json`
 
@@ -299,7 +302,7 @@ Catch-all for non-functional inventory items — class artifacts (a wizard's spe
 | `id` | string | Unique key, e.g. `"spellbook"`. |
 | `name` | string | Display name. |
 | `type` | string | `"gear"` |
-| `description` | string? | Flavour text — shown only via tooltips/AIDM context, not in the inventory list. |
+| `description` | string? | Flavour text — shown only via tooltips/AIGM context, not in the inventory list. |
 | `cost` | number? | Gold piece value. |
 
 ---
@@ -407,7 +410,7 @@ Each spell carries SRD metadata (level, school, classes, casting time, range, co
 | `darts` | integer? | *(Magic Missile-style)* Number of guaranteed-hit projectiles. |
 | `rider` | string? | One-line secondary effect on hit (e.g. Ray of Frost's slow rider). |
 | `effect` | object? | Free-form condition outcome, e.g. `{ onFail: "incapacitated", onSecondFail: "unconscious" }` for Sleep. |
-| `description` | string | The full SRD spell text — used by the AIDM for ruling and shown to the player. |
+| `description` | string | The full SRD spell text — used by the AIGM for ruling and shown to the player. |
 | `scaling` | string? | "Cantrip Upgrade" or "Using a Higher-Level Spell Slot" text. |
 
 ### Example — `spells/fire-bolt.json`
@@ -485,6 +488,37 @@ The shape mirrors `spells/`: data describes WHAT and WHEN; code describes HOW. N
 
 ---
 
+## tokens/
+
+SVG token sprites rendered on the map and in the turn-order bar. One file per creature; the same artwork is used for the in-game token, the turn-order chip, and the character-card avatar on Encounter Setup / Adventure Setup.
+
+### Filename convention
+
+Resolution is handled by [`client/src/data/tokens.ts`](../client/src/data/tokens.ts), which honours an explicit `tokenAsset` field on the def first and otherwise derives the path from the convention:
+
+| Def kind | Convention path | Example |
+|---|---|---|
+| `PlayerDef` | `/tokens/player_<className_lower>_<speciesLineage \| speciesId, dashes stripped>.svg` | `aldric` (Fighter / Human) → `/tokens/player_fighter_human.svg`; `miriel` (Rogue / wood-elf) → `/tokens/player_rogue_woodelf.svg` |
+| `MonsterDef` | `/tokens/monster_<id>.svg` | `bandit` → `/tokens/monster_bandit.svg` |
+| `NPCDef` | `/tokens/npc_<id>.svg`, then falls back to the monsterClass's token if the file isn't present | `tavern_keeper` → `/tokens/npc_tavern_keeper.svg`; `bridge_bandit` (no file) → falls back to `/tokens/monster_bandit.svg` |
+
+When the artist wants to name a file differently from the id (e.g. `wanderer` rendered as `npc_wandering_sage.svg`), the NPC JSON sets `tokenAsset: "/tokens/npc_wandering_sage.svg"` explicitly. Same mechanism works for players and monsters.
+
+### Server endpoints
+
+| Endpoint | Returns | Notes |
+|---|---|---|
+| `GET /tokens` | `string[]` of filenames in the directory | Used by `BootScene` to filter which convention paths to actually queue — NPCs with no corresponding file silently fall back to the monsterClass token at render time instead of triggering a load-time error. |
+| `GET /tokens/:filename` | The SVG bytes (`Content-Type: image/svg+xml`) | Filename validated against `^[A-Za-z0-9_-]+\.svg$`. |
+
+### Loading
+
+`BootScene.preload` fetches the listing from `GET /tokens`, then for every player / monster / NPC def queues `load.svg(tokenTextureKey(path), …, { width: TILE_SIZE*2, height: TILE_SIZE*2 })` only when the convention path is in the listing. Tokens are rasterised at 2× tile size (100 × 100 px) for retina-friendly resolution and scaled down per render via `setDisplaySize`.
+
+The default fallback colour when an SVG fails to load is `DEFAULT_TOKEN_COLOR` (`0x3388ff`) — exposed from [`client/src/constants.ts`](../client/src/constants.ts) alongside `DEFAULT_TOKEN_COLOR_HEX` (`'#3388ff'`), which is also the unified text colour for NPC nameplates.
+
+---
+
 ## tilesets/
 
 Shared tile palettes. Three kinds of files live here:
@@ -525,10 +559,53 @@ The current scribble legend also reserves **GID 65534 (`void`)** as a sentinel: 
 | `stampRoom(terrain, opts)` | Support primitive. Lays down a rectangular room with the correct corner/edge rotations from the scribble palette (`stone_wall_top` 0/90/180/270, `stone_wall_corner_tl` 0/90/180/270), an interior of `floorBase` with optional `floorAccent` checker mix, named `doorways` carved out as floor tiles, and a `ruinedBreaks` count of additional random non-corner gaps. Always overwrites whatever was at those cells. |
 | `composeMap(opts)` | Top-level composer. Builds a base grid from `terrain: 'grassland' \| 'forest'` (forest = ~22% tree density on the object layer, sparser along the south edge for spawn room) and layers `features: ('ruins' \| 'buildings' \| 'campsites' \| 'path')[]` on top. `path` is laid down first as a meandering N↔S or E↔W dirt trail (using `path_straight_v` ± 90° rotation), so subsequent features stamp on top where they overlap. Seeded via mulberry32 so the same `{ terrain, features, seed }` yields the same map. |
 
-Map-composer routes:
+Map-composer routes (all live in `server/src/routes/generate.ts`, mounted by `index.ts` via `registerGenerateRoutes`):
 - `POST /generate/map/composed` — composes the map only and writes it to `server/data/maps/gen_<timestamp>_<slug>.json`. Returns the payload for immediate preview.
-- `POST /generate/encounter/composed` — composes (or reuses) a map and writes a minimal encounter shell (no Claude call). Body accepts either `{ terrain, features, width?, height?, seed? }` to compose a fresh map, OR `existingMapId` to reuse an already-saved map (the path used after the player presses ACCEPT in the Map Preview Overlay). Additional fields: `encounterTypes` (defaults to `['exploration']`), `description` (written into `customContext`), `startingZonesData` (flat row-major zone array with values 0..4 — at least one cell must equal 1 for player start; falls back to first-passable-cell when omitted), `allyIds` (def ids spawned as allies with friendly disposition — written to the encounter's `allyIds`), and `enemyIds` (def ids spawned as hostiles — written to the encounter's new `enemyIds` field, **not** `npcIds`). All creature ids are validated against the monster + NPC rosters and rejected with HTTP 400 if unknown. Returns `{ mapId, encounterId, width, height, terrainData, objectData, name, description }`.
-- `DELETE /generate/maps/all` — dev-mode cleanup. Unlinks every `gen_*.json` in `server/data/maps/` and `server/data/encounters/`, then re-runs `loadDefs()`. Returns `{ mapsDeleted, encountersDeleted }`. Triggered from the `[DEV] DELETE ALL GEN MAPS` button on Generator Setup Scene.
+- `POST /generate/encounter/composed` — composes (or reuses) a map and writes a minimal encounter shell (no Claude call). Body accepts either `{ terrain, features, width?, height?, seed? }` to compose a fresh map, OR `existingMapId` to reuse an already-saved map (the path used after the player presses ACCEPT in the Map Preview Overlay). Additional fields: `encounterTypes` (defaults to `['exploration']`), `description` (written into `customContext`), `startingZonesData` (flat row-major zone array with the values from `shared/startingZones.ts` — `STARTING_ZONE_PLAYER` (1) / `_ALLY` (2) / `_NEUTRAL` (3) / `_ENEMY` (4) — at least one cell must equal `STARTING_ZONE_PLAYER` for spawn; falls back to first-passable-cell when omitted), `allyIds` (def ids spawned as allies with friendly disposition — written to the encounter's `allyIds`), and `enemyIds` (def ids spawned as hostiles — written to the encounter's new `enemyIds` field, **not** `npcIds`). All creature ids are validated against the monster + NPC rosters and rejected with HTTP 400 if unknown. Returns `{ mapId, encounterId, width, height, terrainData, objectData, name, description }`.
+- `DELETE /generate/maps/all` — dev-mode cleanup. Unlinks every `gen_*.json` in `server/data/maps/` and `server/data/encounters/`, then re-runs `loadDefs()`. Returns `{ mapsDeleted, encountersDeleted }`. Triggered from the `[DEV] DELETE ALL GEN MAPS` button on Generator Setup Scene. Relies on the **`gen_` namespace invariant** (`isGeneratedId` in `engine/MapPersistence.ts`) — hand-authored map and encounter ids MUST NOT begin with `gen_` or they'd be silently wiped here.
+
+### Encounter archetypes — random-encounter recipes
+
+The Adjudicator's **★ RANDOMIZE** button (`GenerateSetupScene.runRandomizeEncounter`) authors a complete encounter without any author inputs by rolling a weighted entry from a data-driven registry. Placement is **anchor-driven** so spawns are suitable for the rolled terrain + story (dungeon parties at the entrance, vault guardians at the deepest room, bandits at the campfire, undead in the seaside ruins). Three modules:
+
+| Module | Responsibility |
+|---|---|
+| `server/src/engine/MapComposer.ts` — `MapAnchors` | The composer now records named regions of interest as it stamps features and returns them on `ComposedMap.anchors`. Fields populated: `rooms[]`, `entrance` + `vault` (dungeons), `campfires[]` (campsites), `buildings[]` + `ruins[]` (interior footprints, ie. one cell in from the walls), `pathEndpoints` (path's two map-edge cells), `inlandBand[]` (dry-side cells when coastline is on). Every field is optional — only features that actually placed end up populated. |
+| `client/src/data/encounterArchetypes.ts` | The registry — exports `ENCOUNTER_ARCHETYPES: EncounterArchetype[]`. Each archetype declares `terrain`, fixed `features` or a `featurePicks` pool, `titles` / `introductions` / `descriptions` / `objectives` string pools, `enemyPool` + `enemyCount` ranges, optional `allyPool` + `allyCount`, plus two ordered `PlacementAnchor` lists: `playerAnchors` and `enemyAnchors`. The randomizer walks each list in order and paints cells around the first anchor present on the rolled map; archetypes always end with an `edge:*` fallback so placement is guaranteed when a feature placer didn't fire. A `weight` field biases the pick. **Adding new content is a single new entry in this array.** |
+| `client/src/encounterRandomizer.ts` | Pure functions consumed by the scene: `pickArchetype(archetypes)` (weighted random pick), `rollArchetype(arch)` (rolls feature subset + monster ids + story strings into a `RolledEncounter`), `buildStartingZonesFromAnchors(width, height, anchors, playerAnchors, enemyAnchors)` (resolves each anchor list against the composed map's `MapAnchors` and paints PLAYER (blue) + NEUTRAL (amber) cells — see the "spawn neutral" note below for why hostile-intent monsters land in the NEUTRAL bucket), and `rollTriggersFromAnchors(width, height, anchors, templates, rolledHostileDefIds)` (resolves each `TriggerTemplate.anchor` into a clamped `{x,y,w,h}` region, returning at most two `ComposedTrigger` objects ready to seed the TriggerEditor; combat-kind triggers carry the deduped `rolledHostileDefIds` as `defIds` so they flip every rolled type at fire time). The randomizer paints generous footprints (5×5 cluster around point anchors, entire interior for rect anchors, 3-row band for edge fallbacks); the server's `parseStartingZones` filters to passable cells. |
+
+The `PlacementAnchor` vocabulary: point anchors (`entrance`, `vault`, `campfire`), `far_room` (any dungeon room other than the entrance), rect anchors (`building`, `ruin` — full interior), `path_endpoint` (picks the endpoint farthest from the player band, so player + enemy can each land at a different end), `inland` (coastline dry band), `edge:south`/`north`/`west`/`east` (fallback), and `away_from:campfire`/`ruin`/`building`/`entrance` (any open cell ≥ 6 tiles away — used for enemy placement when the player band hugs a feature; not usable for trigger templates since no single rectangle conveys "everywhere far from X").
+
+**Trigger templates.** Each archetype optionally declares `triggerTemplates: TriggerTemplate[]`, where each template carries `{ kind, anchor, radius?, dc?, passMessage?, message?, defId? }`. Kinds match the existing four (perception / log / aigm / combat). The randomizer resolves each template's anchor into a region rectangle and silently drops templates whose anchor didn't materialise on the rolled map — so a Forest Ambush whose path failed to lay down still produces a valid encounter, just without the perception trigger that wanted to sit at the path endpoint. The TriggerEditor caps at two triggers; archetypes that declare more are fine (only the first two that resolve are kept). The rolled triggers populate the TriggerEditor via its new `initialTriggers` option.
+
+**Random encounters spawn neutral, escalate via trigger.** Rolled monsters are routed into the encounter's `npcIds` (neutral disposition) rather than `enemyIds`, so the session-create auto-combat check in `index.ts:854` doesn't fire and the encounter starts in `exploring` phase. Combat starts either when the player attacks one of them (faction aggro flips all same-`factionId` NPCs) or when a `combat`-kind trigger fires. The server-side trigger expansion at `/generate/encounter/composed` accepts a new `defIds: string[]` field on combat triggers alongside the existing single `defId`; both are unioned + de-duped into one `set_disposition_by_def_id` action per id, then `trigger_combat`. `rollTriggersFromAnchors` fills `defIds` with the deduped list of every rolled enemy type so a single combat trigger flips a heterogeneous pool (e.g. Dungeon Sweep's `['skeleton', 'kobold_warrior']`) in one fire. The randomizer's `buildStartingZonesFromAnchors` correspondingly paints `STARTING_ZONE_NEUTRAL` cells at the would-be enemy anchors (not `STARTING_ZONE_ENEMY`) — the painter renders them amber, which matches the new "they're here but not hostile yet" semantic.
+
+**Trigger region visualisation.** Both the right-panel thumbnail (`ZonePainter.setTriggerRegions`) and the large `MapPreviewOverlay` (via `MapPreviewZones.triggerRegions`) render trigger regions as colour-coded outlined rectangles — perception = teal `0x88ccaa`, log = pale blue `0xc8d8e8`, aigm = amber `0xe2b96f`, combat = red `0xff6644`. The thumbnail's overlay is a single `Phaser.GameObjects.Graphics` that gets cleared and re-drawn on every TriggerEditor edit via the `onChange` callback wired in `buildFilledRightPanel`.
+
+**Map-save deferral.** `runRandomizeEncounter` no longer calls `saveMap` — the rolled map sits in `acceptedMap` with `mapId: null` until either (a) the user clicks SAVE in the COMPOSE MAP preview overlay (`saveCurrentMap`), or (b) the user clicks SAVE ENCOUNTER (`runComposeEncounter` checks `acceptedMap.mapId` and calls `saveMap` itself if missing, then proceeds with `composeEncounter`).
+
+Flow at click time: `pickArchetype` → `rollArchetype` → `composeMap` (returns `anchors`; not saved) → `buildStartingZonesFromAnchors` → `rollTriggersFromAnchors` → **populate scene state** (selectedTerrain, selectedFeatures, detTitle / detIntroduction / detDescription / detObjective / detCompletionFlag, rolledPlayerCells, rolledNeutralCells (was-enemy anchor cells now amber), rolledAllyIds, rolledNeutralIds (rolled monster ids), rolledTriggers) → `rebuildDeterministicRight`. The encounter is **NOT** written at roll time — the user must press SAVE ENCOUNTER (which saves the map if needed, then runs `POST /generate/encounter/composed`). `MonsterPicker.initialAllyIds / initialEnemyIds / initialNeutralIds`, `ZonePainter.initialPlayerCells / initialEnemyCells / initialNeutralCells`, and `TriggerEditor.initialTriggers` are the seeding hooks used by the right-panel rebuild; the `buildLineInput` / `buildTextarea` helpers accept an optional `initialValue` so DOM inputs reflect rolled strings on rebuild.
+
+### Generator-UI components
+
+The Adjudicator tab of `GenerateSetupScene` is assembled from a handful of self-contained components under `client/src/ui/generate/`. They own their own Phaser objects + DOM inputs and expose narrow APIs the scene consumes:
+
+| Component | Responsibility |
+|---|---|
+| `MapSelectorOverlay.ts` | Modal opened by the **PICK MAP** button. Renders a scrollable grid of cards — one per saved map (`registry.get("maps")`) — with the map's own multi-tileset routing (water + scribble + dungeon all decode correctly), name, and short description. Selecting a card converts the `SavedMapDef` into a `MapPreviewData` (terrain/object grids flattened, tileset `source` paths reversed back to `../tilesets/<name>.tsj`) and resolves via `onSelect`. The scene treats the result as a fresh `acceptedMap` (`mapId` set, no need to re-save) and rebuilds the right panel. |
+| `ZonePainter.ts` | Thumbnail + click-and-paint surface. Paints PLAYER (blue) / ENEMY (red) / NEUTRAL (amber) cells; `setTriggerRegions(regions)` draws color-coded outlined rectangles on top via a `Phaser.GameObjects.Graphics` layer. Constructor accepts `initialPlayerCells / initialEnemyCells / initialNeutralCells` Sets for the RANDOMIZE seeding path. |
+| `MonsterPicker.ts` | Scrollable monster registry list with `+ ALLY` / `+ NEUTRAL` / `+ ENEMY` buttons per row. `initialAllyIds / initialEnemyIds / initialNeutralIds` seed selections at construction; `getAllyIds / getEnemyIds / getNeutralIds` return flat id lists. Owns a scene-level wheel listener that `destroy()` detaches. |
+| `TriggerEditor.ts` | Per-row inline editor for trigger regions + kind + per-kind config. Each row carries absolutely-positioned DOM `<input>` / `<textarea>` elements (region xywh, DC, pass message, log/aigm message, defId). `initialTriggers: ComposedTrigger[]` seeds rows at construction; `getTriggers()` snapshots; `setVisible(bool)` toggles all DOM inputs (used by tab-switching). `destroy()` removes every owned DOM element and detaches the `scale.resize` handlers — **the scene's `teardownDom` must call this on `shutdown`/`destroy`** or the trigger inputs stay parented to `document.body` after the user navigates away (visible residue across scenes). |
+
+### Shared engine helpers
+
+The server engine factors out repeated work into a handful of small support modules consumed by the routes + `SessionBuilder`:
+
+| Module | Responsibility |
+|---|---|
+| `shared/startingZones.ts` | `STARTING_ZONE_*` constants + `ZONE_LETTER` map. The single source of truth for the 0..4 GID values used by `EncounterDef.startingZones.data`. Imported by the server validation path, the deterministic compose endpoint, the client zone painter, and `SpawnHelpers.parseStartingZones`. |
+| `engine/MapPersistence.ts` | `buildMapJson` (pure Tiled-shape constructor) + `writeMapJson` (writes to `server/data/maps/<id>.json`, creates dir) + `isGeneratedId` (checks the `gen_` prefix). The three map-write sites (`/generate/map/composed`, `/generate/encounter/composed`, `encounterGenerator.generateMap`) all delegate to these helpers so the file shape and tileset path live in exactly one place. |
+| `engine/SpawnHelpers.ts` | `spawnNpc` (NPC-or-monster-def resolution, four dispositions including `enemy` with auto combat-label), `spawnEnemies` (legacy random-roster, only used when `enemyIds` is empty in a combat encounter), `spawnItems`, `spawnSecrets`, and the top-level `populateNpcs(out, map, defs, input)` that the route + `SessionBuilder` use to declaratively populate a fresh encounter map. |
 
 ---
 
@@ -544,7 +621,7 @@ The server loads each map at startup and stores the raw GID grid(s) — a requir
 |---|---|---|
 | `id` | string | Unique key. Referenced by `encounters.mapId`. |
 | `name` | string | Display name shown in the UI. |
-| `mapdescription` | string | Prose description of the map layout, surfaced to the AIDM for spatial context. |
+| `mapdescription` | string | Prose description of the map layout, surfaced to the AIGM for spatial context. |
 | `width` | integer | Grid width in tiles (Tiled convention). |
 | `height` | integer | Grid height in tiles. |
 | `tilesets` | object[] | Tile palette(s). See below. |
@@ -683,7 +760,7 @@ The image is served at `GET /tilesets/roguelike.png` (the route whitelists `.png
 
 ## encounters/
 
-A flavored combination of a map and one or more NPCs, with optional AIDM instructions to set the scene. The server reads all files in this directory and serves them at `GET /encounters`.
+A flavored combination of a map and one or more NPCs, with optional AIGM instructions to set the scene. The server reads all files in this directory and serves them at `GET /encounters`.
 
 ### Fields
 
@@ -698,9 +775,9 @@ A flavored combination of a map and one or more NPCs, with optional AIDM instruc
 | `allyIds` | string[] | *(optional)* Creature ids to spawn with **ally** disposition near the player. Each id is resolved against `npcs/` first, then `monsters/`, so both named NPC defs and raw monster defs are accepted (e.g. `frightened_traveller` for a scripted character, or `guard` for a generic friendly soldier). Spawned regardless of encounter type. |
 | `enemyIds` | string[] | *(optional)* Creature ids to spawn with **enemy** disposition at the enemy starting zone. Resolved like `allyIds` — NPC defs first, then monster defs. Each spawn is assigned a unique combat label (`A`, `B`, …). Spawned regardless of encounter type, so the deterministic compose-encounter flow can place hostiles in an exploration-tagged scene. When `enemyIds` is empty AND `encounterTypes` includes `simple_combat`, the engine falls back to the legacy `spawnEnemies(encounterContext.enemyCount)` random-roster path. |
 | `customIntroduction` | string | *(optional)* Replaces the auto-generated introduction shown in the Introduction Overlay at encounter start. |
-| `customContext` | string | *(optional)* Replaces the auto-generated AIDM context string. Use this to give the AIDM specific instructions about the scenario, the NPCs, and what mechanics to use. |
+| `customContext` | string | *(optional)* Replaces the auto-generated AIGM context string. Use this to give the AIGM specific instructions about the scenario, the NPCs, and what mechanics to use. |
 | `objective` | string | *(optional)* Player-facing one-line goal shown as the OBJECTIVE row at the top of the Player Panel's Quests section. When omitted, a default is derived from `encounterTypes` (combat → "Defeat the hostile creatures"; social → "Speak with the locals and resolve the situation"; exploration → "Search the area for hidden secrets"). |
-| `completionFlag` | string | *(optional, but **required for non-combat encounters used as adventure chapters**)* Name of a world flag that, when set via `set_world_flag`, marks the chapter complete. Pair with a `customContext` instruction telling the AIDM to set it at the narrative resolution. |
+| `completionFlag` | string | *(optional, but **required for non-combat encounters used as adventure chapters**)* Name of a world flag that, when set via `set_world_flag`, marks the chapter complete. Pair with a `customContext` instruction telling the AIGM to set it at the narrative resolution. |
 | `generated` | boolean | *(optional)* `true` for encounters authored by the AI generator (`POST /generate/encounter`, files prefixed `gen_<timestamp>_<slug>`). Surfaces a `✦ GENERATED` badge on the Encounter Setup card. |
 | `tileProperties` | object[] | Per-GID semantics for the referenced map's tiles **in this encounter**. See below. Required to make any tile passable. |
 | `startingZones` | object | *(optional)* Tiled-style tile layer marking spawn regions for the player, allies, neutral NPCs, and enemies. Same dimensions as the referenced map. See below. |
@@ -708,11 +785,11 @@ A flavored combination of a map and one or more NPCs, with optional AIDM instruc
 
 ### Combat phase on session start
 
-`GameEngine.createSession` inspects the freshly-spawned NPC list and **automatically calls `triggerCombat()`** when any NPC has `disposition === 'enemy'` and live HP. This rolls initiative, builds the turn order, sets the phase to `player_turn` (or an enemy turn) and writes a `⚔ Combat begins` entry to the combat log — the player lands directly in combat as soon as they dismiss the Introduction Overlay.
+`GameEngine.createSession` inspects the freshly-spawned NPC list and **automatically calls `triggerCombat()`** when any NPC has `disposition === 'enemy'` and live HP. This rolls initiative, builds the turn order, sets the phase to `player_turn` (or an enemy turn) and writes a `⚔ Combat begins` entry to the event log — the player lands directly in combat as soon as they dismiss the Introduction Overlay.
 
 The auto-trigger covers the common cases without authoring boilerplate:
 - Deterministic compose-encounters with `enemyIds` set — the player explicitly painted enemy zones + picked hostile creatures, so combat begins immediately.
-- AI-generated combat encounters that spawn enemies via `spawnEnemies` — previously the DM had to call `trigger_combat` on its first reply; now the engine handles it.
+- AI-generated combat encounters that spawn enemies via `spawnEnemies` — previously the GM had to call `trigger_combat` on its first reply; now the engine handles it.
 
 Encounters that want a delayed reveal (stealth / ambush) should leave the map free of `enemy`-disposition NPCs at session start. The bridge-standoff pattern is the canonical example: NPCs spawn as `neutral` and a trigger flips their disposition via `set_disposition_by_def_id` followed by `trigger_combat` when the player crosses the bridge.
 
@@ -759,7 +836,7 @@ Only passable map tiles are eligible for spawning regardless of zone GID. If no 
 
 ### triggers
 
-Authored scripted events evaluated server-side via the engine event bus. Each trigger is a `WHEN <event> IF <guards> THEN <effects>` rule. Triggers are the deterministic counterpart to AIDM-driven scenes — once authored, they fire reliably regardless of LLM behaviour. Implementation lives in `server/src/engine/TriggerSystem.ts`; the bus in `server/src/engine/EventBus.ts`.
+Authored scripted events evaluated server-side via the engine event bus. Each trigger is a `WHEN <event> IF <guards> THEN <effects>` rule. Triggers are the deterministic counterpart to AIGM-driven scenes — once authored, they fire reliably regardless of LLM behaviour. Implementation lives in `server/src/engine/TriggerSystem.ts`; the bus in `server/src/engine/EventBus.ts`.
 
 **Trigger entry:**
 
@@ -781,7 +858,7 @@ Authored scripted events evaluated server-side via the engine event bus. Each tr
 | `turn_started` | `combatantId?` (`'player'` or NPC id) | `CombatFlow.enterPlayerTurn` / `runSingleEnemyTurn` / `runSingleAllyTurn` | A combatant's turn begins. |
 | `turn_ended` | `combatantId?` | `CombatFlow.endPlayerTurn` / end of `runSingleEnemyTurn` / `runSingleAllyTurn` | A combatant's turn ends. |
 | `combat_started` | — | `CombatFlow.doStartCombat` | Initiative has been rolled. |
-| `combat_ended` | — | `CombatFlow.endCombat` | All enemies down or `end_combat` AIDM tool fired. |
+| `combat_ended` | — | `CombatFlow.endCombat` | All enemies down or `end_combat` AIGM tool fired. |
 | `damage_dealt` | `target?` | `GameEngine.applyDamageToPlayer` + `ThresholdPublisher.publishNpcDamage` | An entity took damage. |
 | `hp_threshold_crossed` | `target?`, `ratio?`, `direction?` | `ThresholdPublisher.publishHpThresholdCrossings` | An entity's HP/maxHp ratio crossed 0.75, 0.5, or 0.25 (in either direction). |
 | `faction_changed` | `factionId?` | TriggerSystem `adjustFactionStanding` | A faction standing was adjusted (and actually changed). |
@@ -807,8 +884,8 @@ Authored scripted events evaluated server-side via the engine event bus. Each tr
 |---|---|---|
 | `spawn_enemy_near_player` | `monsterId`, `minDist?` (default 3), `maxDist?` (default 8) | Spawns an enemy on a free tile at Chebyshev distance `[minDist, maxDist]` from the player. No-ops if no tile is free in range. |
 | `spawn_enemy_at` | `monsterId`, `x`, `y` | Spawns at the given tile; falls back to the nearest free tile (within 6 tiles) if the target is occupied / impassable. |
-| `show_log` | `message` | Pushes a `header`-styled line into the Combat Log. |
-| `send_aidm_message` | `message` | Appends to `GameState.pendingAidmEvents`; surfaced to the next AIDM turn under `SCRIPTED EVENTS`, then cleared. No-op when the DM is disabled (`DevMode.disableAIDM`). |
+| `show_log` | `message` | Pushes a `header`-styled line into the Event Log. |
+| `send_aigm_message` | `message` | Appends to `GameState.pendingAigmEvents`; surfaced to the next AIGM turn under `SCRIPTED EVENTS`, then cleared. No-op when the GM is disabled (`DevMode.disableAIGM`). |
 | `narrate` | `narrationId` | Picks a canned variant from `server/data/narration/{narrationId}.json` and pushes it as a header-styled log line. The picker avoids the last-used variant per id (tracked in `narrationLastUsed`). |
 | `set_flag` | `name`, `value: number\|string\|boolean` | Writes `GameState.worldFlags[name]` and publishes a `flag_set` event so other triggers can fan out. |
 | `apply_condition_to_player` | `condition` | Adds a condition to the player (idempotent). Future scope: arbitrary target selectors. |
@@ -839,7 +916,7 @@ Authored scripted events evaluated server-side via the engine event bus. Each tr
       { "type": "spawn_enemy_near_player", "monsterId": "skeleton", "minDist": 2, "maxDist": 4 },
       { "type": "spawn_enemy_near_player", "monsterId": "skeleton", "minDist": 2, "maxDist": 4 },
       { "type": "set_flag", "name": "guardroom_seen", "value": true },
-      { "type": "send_aidm_message", "message": "Two skeletons rise from the rubble of the guard room and lurch toward the party." }
+      { "type": "send_aigm_message", "message": "Two skeletons rise from the rubble of the guard room and lurch toward the party." }
     ],
     "once": true
   }
@@ -850,7 +927,7 @@ Authored scripted events evaluated server-side via the engine event bus. Each tr
 
 ## narration/
 
-Canned-text variants for narratable engine moments. The `narrate(narrationId)` trigger action picks one per fire, avoiding the previously-used variant when more than one exists — so deterministic scenes feel different across plays without invoking the generative DM. Read by `NarrationSystem.pickNarrationVariant` and tracked in `GameState.narrationLastUsed`.
+Canned-text variants for narratable engine moments. The `narrate(narrationId)` trigger action picks one per fire, avoiding the previously-used variant when more than one exists — so deterministic scenes feel different across plays without invoking the generative GM. Read by `NarrationSystem.pickNarrationVariant` and tracked in `GameState.narrationLastUsed`.
 
 ### Fields
 
@@ -871,7 +948,7 @@ Authored strings of encounters that share cross-chapter state. Each adventure is
 | Field | Type | Notes |
 |---|---|---|
 | `id` | string | Stable short slug. |
-| `title` | string | Display title (adventure cards, intro overlay, AIDM context). |
+| `title` | string | Display title (adventure cards, intro overlay, AIGM context). |
 | `description` | string | One-paragraph blurb shown on the adventure card. |
 | `introduction` | string | Optional opening prose; carried into chapter 1's intro overlay. |
 | `chapters` | object[] | Ordered list of `AdventureChapter` (see below). |
@@ -881,10 +958,10 @@ Authored strings of encounters that share cross-chapter state. Each adventure is
 | Field | Type | Notes |
 |---|---|---|
 | `id` | string | Unique within the adventure. Used as the save-file dedupe key. |
-| `title` | string | Display title (chapter card, chapter-complete overlay, AIDM context). |
+| `title` | string | Display title (chapter card, chapter-complete overlay, AIGM context). |
 | `encounterId` | string | Reference to an existing `EncounterDef.id`. The chapter reuses that encounter wholesale; only the cross-chapter seed differs. |
 | `unlockedBy` | object | *(optional)* `{ flag_set: name }` or `{ flag_equals: { name, value } }` — gates the chapter on a world flag set in an earlier chapter. |
-| `completionFlag` | string | *(optional)* When this `worldFlag` is set, the chapter is marked complete (in addition to the default combat-ended detection). **Required for non-combat chapters** — without it, social and exploration chapters have no built-in resolution condition and the player gets stuck. Pair it with an instruction in the encounter's `customContext` that tells the AIDM to call `set_world_flag` with the matching name at the right narrative moment. Combat chapters can omit it and rely on the default combat-ended detection. |
+| `completionFlag` | string | *(optional)* When this `worldFlag` is set, the chapter is marked complete (in addition to the default combat-ended detection). **Required for non-combat chapters** — without it, social and exploration chapters have no built-in resolution condition and the player gets stuck. Pair it with an instruction in the encounter's `customContext` that tells the AIGM to call `set_world_flag` with the matching name at the right narrative moment. Combat chapters can omit it and rely on the default combat-ended detection. |
 
 ### Save layer — `saves/{characterId}_adventure.json` (`AdventureSave`)
 
@@ -899,7 +976,7 @@ Persists cross-chapter state. Created on `POST /adventure/start`, updated on eac
 | `worldFlags` | object | Snapshot of cross-chapter world flags. Seeds `GameState.worldFlags` when each chapter session starts. |
 | `factionStandings` | object | Snapshot of player reputations. Seeds `GameState.factionStandings`. |
 | `rumors` | object[] | Snapshot of long-term world memory. Seeds `GameState.rumors`. |
-| `priorChapterSummaries` | object[] | `{ chapterId, chapterTitle, summary }[]` — 2-sentence Haiku-generated summaries appended on each chapter advance. Surfaced to the DM in CURRENT STATE under `PRIOR CHAPTERS`. |
+| `priorChapterSummaries` | object[] | `{ chapterId, chapterTitle, summary }[]` — 2-sentence Haiku-generated summaries appended on each chapter advance. Surfaced to the GM in CURRENT STATE under `PRIOR CHAPTERS`. |
 
 ### Example — `adventures/the_long_road.json`
 
@@ -978,7 +1055,7 @@ Three save files coexist:
 | File | Scope | Lifetime |
 |---|---|---|
 | `saves/{characterId}.json` | Persistent per-character (HP / XP / gold / inventory / equipped slots / spell slots / class-feature resources / encounter log / storylog). | Carries across encounters and adventures. Deleted via `DELETE /save/:characterId`. |
-| `saves/world.json` | Active session — current map, NPC positions, combat state, world flags, faction standings, rumors, narration anti-repeat memory, AIDM history. | One per running session. Deleted on `NEW ENCOUNTER` or when a chapter advances. |
+| `saves/world.json` | Active session — current map, NPC positions, combat state, world flags, faction standings, rumors, narration anti-repeat memory, AIGM history. | One per running session. Deleted on `NEW ENCOUNTER` or when a chapter advances. |
 | `saves/{characterId}_adventure.json` | Per-character adventure progress (chapter index, completed chapter ids, cross-chapter `worldFlags` / `factionStandings` / `rumors`, prior-chapter summaries). See the [adventures/](#adventures) section above. | Created on `POST /adventure/start`; survives chapter transitions and reloads; deleted via `DELETE /adventure/:characterId` (also wiped when the player presses DELETE SAVE on either Setup scene). |
 
 ### Character save — `saves/{characterId}.json`
@@ -1001,20 +1078,20 @@ Stores the persistent player state that carries across encounters. Written after
 
 ### World save — `saves/world.json`
 
-Stores the full encounter state so the player can resume mid-encounter. This file is deleted when the player starts a new encounter. The `GET /world` endpoint also returns `dmHistory` (the AIDM conversation history for the session), which is kept in server session memory and restored to the client on reconnect.
+Stores the full encounter state so the player can resume mid-encounter. This file is deleted when the player starts a new encounter. The `GET /world` endpoint also returns `gmHistory` (the AIGM conversation history for the session), which is kept in server session memory and restored to the client on reconnect.
 
 Key runtime fields of note:
 
 | Field | Notes |
 |---|---|
-| `npcs[].id` | Generated at spawn as `{defId}_{index}` (e.g. `villager_0`). The AIDM entity ref is `npc_{id}` (e.g. `npc_villager_0`). |
+| `npcs[].id` | Generated at spawn as `{defId}_{index}` (e.g. `villager_0`). The AIGM entity ref is `npc_{id}` (e.g. `npc_villager_0`). |
 | `npcs[].combatLabel` | Single uppercase letter (A, B, C…) assigned when the NPC enters combat or is spawned as an enemy. Empty string for neutral NPCs that have not yet entered combat. Rendered in the centre of the token circle during combat. Shared letter pool across enemies and allies. |
-| `npcs[].revealedName` | *(optional)* The name an NPC disclosed in conversation, set by the `reveal_npc_name` AIDM tool. Replaces the generic name displayed above the map token and is shown as `(known as: X)` in the AIDM CURRENT STATE. |
-| `npcs[].combatPassive` | *(optional)* When `true`, the ally skips their combat turn (set via the `set_npc_passive` AIDM tool). Used when the player instructs an ally to stand down. Reversed by calling the tool with `passive: false`. |
+| `npcs[].revealedName` | *(optional)* The name an NPC disclosed in conversation, set by the `reveal_npc_name` AIGM tool. Replaces the generic name displayed above the map token and is shown as `(known as: X)` in the AIGM CURRENT STATE. |
+| `npcs[].combatPassive` | *(optional)* When `true`, the ally skips their combat turn (set via the `set_npc_passive` AIGM tool). Used when the player instructs an ally to stand down. Reversed by calling the tool with `passive: false`. |
 | `npcs[].inventoryIds` | Items held by each NPC (string `id` values from `equipment/`). Populated when a thrown item hits the creature; each item is moved to `mapItems` at the creature's tile when it dies, making it recoverable. |
-| `npcs[].hp` | When `hp` reaches 0 the NPC is treated as a corpse: it remains in the `npcs` array, stays on the map at 40% opacity, and is excluded from combat turns, movement AI, ability check triggers, and all AIDM state sections except CORPSES. `inventoryIds` is cleared and `isActive` is set to `false` on death. |
+| `npcs[].hp` | When `hp` reaches 0 the NPC is treated as a corpse: it remains in the `npcs` array, stays on the map at 40% opacity, and is excluded from combat turns, movement AI, ability check triggers, and all AIGM state sections except CORPSES. `inventoryIds` is cleared and `isActive` is set to `false` on death. |
 | `npcs[].initiativeRoll` | *(optional)* The combatant's d20 + initiativeBonus total for the current combat. Set at `doStartCombat` (with Disadvantage if Surprised, Advantage if Invisible). Cleared on `endCombat`. Used as the sort key for `turnOrderIds`. |
-| `npcs[].reactionUsed` | Per-creature Reaction tracker. Set `true` when the NPC spends its Reaction (e.g. an Opportunity Attack against the player or another NPC). Reset to `false` at the *start of that NPC's own turn* (in `runSingleEnemyTurn` / `runSingleAllyTurn`) — never on the player's turn. Mirrors `player.reactionUsed` for the player. Surfaced to the AIDM CURRENT STATE as `Reaction: AVAILABLE`/`USED` on each combatant line while combat is active. |
+| `npcs[].reactionUsed` | Per-creature Reaction tracker. Set `true` when the NPC spends its Reaction (e.g. an Opportunity Attack against the player or another NPC). Reset to `false` at the *start of that NPC's own turn* (in `runSingleEnemyTurn` / `runSingleAllyTurn`) — never on the player's turn. Mirrors `player.reactionUsed` for the player. Surfaced to the AIGM CURRENT STATE as `Reaction: AVAILABLE`/`USED` on each combatant line while combat is active. |
 | `player.initiativeRoll` | Same idea for the player: d20 + DEX mod, set at combat start, cleared at combat end. |
 | `player.freeObjectInteractionUsed` | SRD "one free object interaction per turn" tracker. Set when the player equips/unequips a weapon or shield during `player_turn`. Reset by `enterPlayerTurn`. Once set, a second swap that turn requires the Utilize action and consumes `actionUsed`. |
 | `turnOrderIds` | Initiative-sorted list of combatant ids: `'player'` plus each NPC `id`. Sort key is `initiativeRoll` (descending), tiebreak by DEX mod / `initiativeBonus`. Iterated by `advanceTurn`; dead combatants are skipped at iteration time (entries are NOT removed when a combatant dies — removing them mid-iteration would shift indices). |
@@ -1022,25 +1099,25 @@ Key runtime fields of note:
 | `pendingReaction` | *(optional, top-level on `GameState`)* When set, the engine has paused the turn loop on a reaction-eligible trigger and is awaiting a `resolveReaction { accept }` action from the player. Cleared by `doResolveReaction` after applying (or skipping) the deferred effect. Two shapes: `{ kind: 'opportunity_attack', npcId, npcName }` and `{ kind: 'shield', attackerId, attackerName, incomingDamage, attackTotal, shieldedAc }`. While set, `advanceTurn` early-returns. |
 | `triggers` | *(top-level on `GameState`)* Authored encounter triggers seeded from `EncounterDef.triggers` at session creation. Static across the session — never mutated at runtime. |
 | `firedTriggerIds` | *(top-level on `GameState`)* String ids of triggers that have already fired. Consulted by `TriggerSystem.evaluateTriggers` to enforce `once: true` semantics. Persisted in `world.json` so one-shot triggers stay one-shot across save/load. |
-| `pendingAidmEvents` | *(top-level on `GameState`)* Scripted-event lines queued by `send_aidm_message` trigger actions. Rendered into the next AIDM CURRENT STATE block under `SCRIPTED EVENTS`, then cleared after the AIDM reply lands. |
+| `pendingAigmEvents` | *(top-level on `GameState`)* Scripted-event lines queued by `send_aigm_message` trigger actions. Rendered into the next AIGM CURRENT STATE block under `SCRIPTED EVENTS`, then cleared after the AIGM reply lands. |
 | `worldFlags` | *(top-level on `GameState`)* `Record<string, number\|string\|boolean>` written by `set_flag` trigger actions and read by `flag_set` / `flag_unset` / `flag_equals` guards. Persisted with the world save so authored scripts can branch on history across save/load. |
 | `narrationLastUsed` | *(top-level on `GameState`)* Per-`narrationId` last-picked variant index. Used by `NarrationSystem.pickNarrationVariant` to avoid back-to-back repeats. Persisted so reloads don't reset anti-repeat memory mid-encounter. |
-| `factionStandings` | *(top-level on `GameState`)* `Record<string, number>` of player reputation with each faction (−100..+100). Written by the `adjust_faction_standing` AIDM tool and trigger action; read by the `faction_standing` guard. Unknown factions default to 0. |
-| `rumors` | *(top-level on `GameState`)* `Rumor[]` of significant world events the world "remembers." Each entry has `id` (stable dedupe key), `text`, `salience` (1–10), `recordedAt` (Date.now). Surfaced to the DM in CURRENT STATE under the `RUMORS` block; appended idempotently by the `create_rumor` AIDM tool and `record_rumor` trigger action. |
+| `factionStandings` | *(top-level on `GameState`)* `Record<string, number>` of player reputation with each faction (−100..+100). Written by the `adjust_faction_standing` AIGM tool and trigger action; read by the `faction_standing` guard. Unknown factions default to 0. |
+| `rumors` | *(top-level on `GameState`)* `Rumor[]` of significant world events the world "remembers." Each entry has `id` (stable dedupe key), `text`, `salience` (1–10), `recordedAt` (Date.now). Surfaced to the GM in CURRENT STATE under the `RUMORS` block; appended idempotently by the `create_rumor` AIGM tool and `record_rumor` trigger action. |
 | `worldFlags['director:*']` | *(reserved key prefix)* The Director (`Director.ts`) tracks per-encounter round counts and "already-fired" flags under reserved keys (`director:round`, `director:assist_fired`, `director:pressure_fired`). Reset at every `combat_started`. Triggers can safely set their own `worldFlags` outside this prefix. |
-| `adventureContext` | *(top-level on `GameState`, optional)* When set, the current session is a chapter of an adventure. Carries `{ adventureId, adventureTitle, chapterId, chapterTitle, chapterIndex, totalChapters, priorChapterSummaries, completionFlag? }`. Null for single-encounter sessions. Drives the END CHAPTER overlay and the AIDM CURRENT STATE `ADVENTURE:` / `PRIOR CHAPTERS:` blocks. |
+| `adventureContext` | *(top-level on `GameState`, optional)* When set, the current session is a chapter of an adventure. Carries `{ adventureId, adventureTitle, chapterId, chapterTitle, chapterIndex, totalChapters, priorChapterSummaries, completionFlag? }`. Null for single-encounter sessions. Drives the END CHAPTER overlay and the AIGM CURRENT STATE `ADVENTURE:` / `PRIOR CHAPTERS:` blocks. |
 | `chapterComplete` | *(top-level on `GameState`)* `true` once the active chapter has resolved (combat-ended with no remaining enemies, OR the chapter's `completionFlag` was set). One-way — set by `AdventureProgress.ts` subscribers, never cleared mid-session. The client opens the "Wrap Up Loose Ends" overlay once when this flips true; dismissing the overlay shows the persistent NEXT CHAPTER button. |
 | `objective` | *(top-level on `GameState`)* Player-facing one-line objective for the current encounter. Sourced from `EncounterDef.objective` when set, otherwise derived from `encounterTypes` by `encounterService.defaultObjective`. Rendered as the OBJECTIVE row at the top of the Player Panel's Quests section. |
-| `aidmHistory` | The **sliding-window** AIDM conversation persisted into `world.json` (serialised from server session memory). Bounded to ~20 verbatim messages plus an optional leading `[SUMMARY OF EARLIER TURNS]` assistant message that collapses anything older. `[CURRENT STATE]` prefixes are stripped from historical user messages before each API call so the model always reasons from the current injected state, not stale snapshots. The `GET /world` response surfaces this under the `dmHistory` field for client-side display. |
+| `aigmHistory` | The **sliding-window** AIGM conversation persisted into `world.json` (serialised from server session memory). Bounded to ~20 verbatim messages plus an optional leading `[SUMMARY OF EARLIER TURNS]` assistant message that collapses anything older. `[CURRENT STATE]` prefixes are stripped from historical user messages before each API call so the model always reasons from the current injected state, not stale snapshots. The `GET /world` response surfaces this under the `gmHistory` field for client-side display. |
 
-### Session-only AIDM state (in-memory)
+### Session-only AIGM state (in-memory)
 
 These are kept in server session memory only — not persisted to disk — and reset if the server restarts:
 
 | Field | Notes |
 |---|---|
-| `aidmArchive` | The **full, unsummarized record** of every user/assistant exchange this session. Used exclusively by the `recall_memory` tool for case-insensitive substring lookups. Separate from `aidmHistory` so summarisation doesn't erase searchable content. |
-| `aidmBusy` | Boolean mutex flag. While true, the `/aidm` route returns HTTP 429 for concurrent requests on the same session. Released in a `finally` block. |
+| `aigmArchive` | The **full, unsummarized record** of every user/assistant exchange this session. Used exclusively by the `recall_memory` tool for case-insensitive substring lookups. Separate from `aigmHistory` so summarisation doesn't erase searchable content. |
+| `aigmBusy` | Boolean mutex flag. While true, the `/aigm` route returns HTTP 429 for concurrent requests on the same session. Released in a `finally` block. |
 
 ---
 

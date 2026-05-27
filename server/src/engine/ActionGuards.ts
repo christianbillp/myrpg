@@ -112,6 +112,11 @@ export function canDisengage(ctx: GameContext): boolean {
   return canSpendAction(ctx) && hasLivingEnemies(ctx);
 }
 
+/** Can the player Detach an attached creature this turn? */
+export function canDetach(ctx: GameContext): boolean {
+  return canSpendAction(ctx) && ctx.state.player.ongoingEffects.some((oe) => oe.kind === 'attach');
+}
+
 /** Can the player take a Short Rest right now (always in exploring phase)? */
 export function canShortRest(ctx: GameContext): boolean {
   const s = ctx.state;

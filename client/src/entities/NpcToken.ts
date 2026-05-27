@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import { TILE_SIZE } from '../constants';
+import { TILE_SIZE, DEFAULT_TOKEN_COLOR_HEX } from '../constants';
 import { MonsterDef } from '../data/monsters';
 import { Disposition } from '../net/types';
 
@@ -23,6 +23,14 @@ export class NpcToken {
   private scene: Phaser.Scene;
   private moving = false;
 
+  /**
+   * @param tokenKey Phaser texture key for this creature's SVG token. NPCs may
+   *                 override their monster's token via `NPCDef.tokenAsset`; the
+   *                 caller is responsible for resolving the fallback chain
+   *                 (npc.tokenAsset → monster.tokenAsset) before passing it.
+   *                 If the texture isn't loaded, falls back to a `def.color`
+   *                 circle so the scene still renders.
+   */
   constructor(
     scene: Phaser.Scene,
     id: string,
@@ -32,6 +40,7 @@ export class NpcToken {
     disposition: Disposition,
     hp: number,
     maxHp: number,
+    tokenKey: string,
   ) {
     this.scene = scene;
     this.id = id;
@@ -43,18 +52,22 @@ export class NpcToken {
     this.maxHp = maxHp;
 
     const radius = (TILE_SIZE - 8) / 2;
+    const diameter = radius * 2;
     const nameY = -(radius + 3);
-    const tokenColorHex = '#' + def.color.toString(16).padStart(6, '0');
 
     this.selectionRing = scene.add.graphics();
-    const body = scene.add.circle(0, 0, radius, def.color);
+    const body: Phaser.GameObjects.GameObject = scene.textures.exists(tokenKey)
+      ? scene.add.image(0, 0, tokenKey).setDisplaySize(diameter, diameter)
+      : scene.add.circle(0, 0, radius, def.color);
     this.hpBar = scene.add.graphics();
 
-    // Name always rendered above the circle, in the token's colour.
+    // Name rendered above the circle in the default token colour so every
+    // nameplate reads in a unified accent regardless of the creature's
+    // individual `def.color`.
     this.nameText = scene.add
       .text(0, nameY, def.name, {
         fontSize: '10px',
-        color: tokenColorHex,
+        color: DEFAULT_TOKEN_COLOR_HEX,
         fontFamily: 'monospace',
         resolution: DPR,
       })
@@ -107,6 +120,13 @@ export class NpcToken {
 
   setNameText(name: string): void {
     this.nameText.setText(name);
+  }
+
+  /** Show/hide the nameplate above the token (independent of the combat
+   *  label inside the token — combat labels stay visible because they're
+   *  functional, not decorative). Driven by the GM panel's LABELS toggle. */
+  setNameVisible(visible: boolean): void {
+    this.nameText.setVisible(visible);
   }
 
   setLabelVisible(visible: boolean): void {

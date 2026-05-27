@@ -4,18 +4,23 @@ import {
 } from './types.js';
 import { shuffle } from './MapUtils.js';
 import { chebyshev } from './EnemyAI.js';
+import {
+  STARTING_ZONE_PLAYER, STARTING_ZONE_ALLY, STARTING_ZONE_NEUTRAL, STARTING_ZONE_ENEMY,
+  ZONE_LETTER,
+} from '../../../shared/startingZones.js';
 
 export type Zone = [number, number][]; // [tileX, tileY] pairs, already filtered to passable tiles
 export type ZoneMap = Map<string, Zone>;
 
-// Fixed implicit spawn-zone tileset. The encounter JSONs reference these GIDs
-// directly; the legacy ASCII letters (P/A/N/E) are preserved as ZoneMap keys
-// so SessionBuilder's `zoneMap.get('P')` lookups don't need to change.
+// Encounter JSONs encode the spawn layer as flat row-major GIDs from the
+// `STARTING_ZONE_*` constants in `shared/startingZones.ts`. The legacy ASCII
+// letters (P/A/N/E) are preserved as ZoneMap keys so SessionBuilder's
+// `zoneMap.get('P')` lookups don't need to change.
 const GID_TO_ZONE_KEY: Record<number, string> = {
-  1: 'P', // player spawn
-  2: 'A', // ally spawn
-  3: 'N', // neutral NPC spawn
-  4: 'E', // enemy spawn
+  [STARTING_ZONE_PLAYER]:  ZONE_LETTER[STARTING_ZONE_PLAYER],
+  [STARTING_ZONE_ALLY]:    ZONE_LETTER[STARTING_ZONE_ALLY],
+  [STARTING_ZONE_NEUTRAL]: ZONE_LETTER[STARTING_ZONE_NEUTRAL],
+  [STARTING_ZONE_ENEMY]:   ZONE_LETTER[STARTING_ZONE_ENEMY],
 };
 
 export function parseStartingZones(layer: StartingZonesLayer, map: GameMap): ZoneMap {
@@ -57,48 +62,6 @@ export function findPlayerSpawn(map: GameMap, zone?: Zone): [number, number] {
   return [0, 0];
 }
 
-export function spawnEnemies(
-  out: NpcState[], map: GameMap, monsters: MonsterDef[],
-  px: number, py: number, count: number,
-  zone?: Zone,
-): void {
-  const defs = monsters.filter((m) => m.combatSpawn !== false);
-  const occupied = new Set<string>([`${px},${py}`, ...out.map((n) => `${n.tileX},${n.tileY}`)]);
-
-  if (zone) {
-    const free = shuffle(zone.filter(([c, r]) => !occupied.has(`${c},${r}`))).slice(0, Math.min(count, zone.length));
-    free.forEach(([c, r], i) => {
-      const def = defs[Math.floor(Math.random() * defs.length)];
-      out.push({
-        id: `enemy_${i}`, defId: def.id, name: def.name, combatLabel: String.fromCharCode(65 + i),
-        tileX: c, tileY: r,
-        disposition: 'enemy', factionId: def.id,
-        hp: def.maxHp, maxHp: def.maxHp,
-        isActive: false,
-        reactionUsed: false, conditions: [], inventoryIds: [],
-      });
-    });
-    return;
-  }
-
-  const { cols, rows, passable } = map;
-  const candidates: [number, number][] = [];
-  for (let r = 0; r < rows; r++)
-    for (let c = 0; c < cols; c++)
-      if (passable[r][c] && chebyshev(c, r, px, py) >= 5) candidates.push([r, c]);
-  const picked = shuffle(candidates).slice(0, Math.min(count, candidates.length));
-  picked.forEach(([r, c], i) => {
-    const def = defs[Math.floor(Math.random() * defs.length)];
-    out.push({
-      id: `enemy_${i}`, defId: def.id, name: def.name, combatLabel: String.fromCharCode(65 + i),
-      tileX: c, tileY: r,
-      disposition: 'enemy', factionId: def.id,
-      hp: def.maxHp, maxHp: def.maxHp,
-      isActive: false,
-      reactionUsed: false, conditions: [], inventoryIds: [],
-    });
-  });
-}
 
 export function spawnItems(
   out: MapItemState[], map: GameMap, items: ItemDef[],
@@ -182,7 +145,7 @@ export function spawnNpc(
     combatLabel,
     hp: maxHp, maxHp,
     isActive: false,
-    reactionUsed: false, conditions: [], inventoryIds: [],
+    reactionUsed: false, conditions: [], inventoryIds: [], ongoingEffects: [],
   });
 }
 
@@ -199,4 +162,57 @@ export function spawnSecrets(
   shuffle(candidates).slice(0, Math.min(secretDefs.length, candidates.length)).forEach(([r, c], i) => {
     out.push({ tileX: c, tileY: r, def: secretDefs[i] as SecretDef });
   });
+}
+
+/**
+ * Single entry point for populating a freshly-built encounter map with NPCs,
+ * items and secrets — collapses the four separate spawn calls that used to
+ * live inline in `SessionBuilder` into one declarative pass keyed off the
+ * encounter's id lists + types.
+ *
+ * Spawn rules (data-driven; the legacy `encounterTypes` gating is gone):
+ *  • Allies (`allyIds`) — spawned near the player at the ally zone.
+ *  • Hand-picked enemies (`enemyIds`) — spawned at the enemy zone.
+ *  • Neutral NPCs (`npcIds`) — spawned at the npc zone.
+ *  • Ground items (healing potions etc.) — spawned when the encounter
+ *    contains at least one hand-picked enemy.
+ *  • Secrets — spawned when the encounter author seeded any `secretDefs`.
+ *    The default 4-pick pool means most encounters get them automatically.
+ */
+export interface PopulateNpcsInput {
+  allyIds?: string[];
+  enemyIds?: string[];
+  npcIds?: string[];
+  secretDefs?: SecretDef[];
+  playerX: number;
+  playerY: number;
+  allyZone?: Zone;
+  enemyZone?: Zone;
+  npcZone?: Zone;
+}
+
+export function populateNpcs(
+  out: { npcs: NpcState[]; mapItems: MapItemState[]; secrets: SecretState[] },
+  map: GameMap,
+  defs: { npcs: NPCDef[]; monsters: MonsterDef[]; equipment: ItemDef[] },
+  input: PopulateNpcsInput,
+): void {
+  const { allyIds, enemyIds, npcIds, secretDefs,
+          playerX, playerY, allyZone, enemyZone, npcZone } = input;
+
+  for (const defId of allyIds ?? []) {
+    spawnNpc(out.npcs, map, defs.npcs, defs.monsters, defId, playerX, playerY, 'ally', allyZone);
+  }
+  for (const defId of enemyIds ?? []) {
+    spawnNpc(out.npcs, map, defs.npcs, defs.monsters, defId, playerX, playerY, 'enemy', enemyZone);
+  }
+  for (const defId of npcIds ?? []) {
+    spawnNpc(out.npcs, map, defs.npcs, defs.monsters, defId, playerX, playerY, 'neutral', npcZone);
+  }
+  if ((enemyIds ?? []).length > 0) {
+    spawnItems(out.mapItems, map, defs.equipment, playerX, playerY, out.npcs);
+  }
+  if ((secretDefs ?? []).length > 0) {
+    spawnSecrets(out.secrets, map, secretDefs ?? [], playerX, playerY, out.npcs);
+  }
 }

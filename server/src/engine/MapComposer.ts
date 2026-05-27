@@ -8,15 +8,19 @@
  *
  * The core primitive is `stampRoom` — it lays down a rectangular building
  * with correctly-rotated walls, corner tiles, and optional doorways. Higher-
- * level features (ruins, buildings, campsites) are layered on top of a base
- * terrain (grassland or forest).
- *
- * GIDs here are hard-coded to the scribble tileset since that's the only
- * tileset currently in use. If we ever support a second tileset, this would
- * lift to a per-tileset palette table.
+ * level features (ruins, buildings, campsites, coastline) are layered
+ * on top of a base terrain (grassland or forest); dungeons take a separate
+ * path that carves rooms + corridors out of a solid wall fill.
  */
 
-// ── Scribble palette ────────────────────────────────────────────────────────
+// ── Tileset palettes ────────────────────────────────────────────────────────
+//
+// Scribble lives at firstgid=1 (155 tiles, ids 0-154). Water lives at
+// firstgid=WATER_FIRSTGID below that; the saved map JSON declares both
+// tilesets so the renderer + passability resolver pick the right one.
+
+export const WATER_FIRSTGID = 200;
+const WL = WATER_FIRSTGID; // local shorthand for the water tileset offset
 
 const G = {
   GRASS: 8,
@@ -26,10 +30,22 @@ const G = {
   WALL_SOUTH: 4 + 0xC0000000,           // 180°
   WALL_EAST:  4 + 0xA0000000,           // 90° CW
   WALL_WEST:  4 + 0x60000000,           // 270° CW
+  // CORNER_* — `stone_wall_corner_tl` (an L-shaped corner piece). Used at the
+  // four convex corners of a rectangular room (wall art faces outward, away
+  // from the room interior). stampRoom / outdoor buildings use this set.
   CORNER_TL:  3,
   CORNER_TR:  3 + 0xA0000000,
   CORNER_BR:  3 + 0xC0000000,
   CORNER_BL:  3 + 0x60000000,
+  // PARTIAL_CORNER_* — `stone_wall_corner_ul` (tile id 58, gid 59): a partial
+  // wall covering one quadrant of the tile, leaving the opposite quadrant
+  // open for the floor. Used at *concave* corners (e.g. where a corridor
+  // joins a room) where the room interior wraps around two sides of the
+  // wall tile and the wall must occupy only the outer corner of the tile.
+  PARTIAL_CORNER_UL: 59,                            // wall in UL → room at LR (SE)
+  PARTIAL_CORNER_UR: 59 + 0xA0000000,               // wall in UR → room at LL (SW)
+  PARTIAL_CORNER_LR: 59 + 0xC0000000,               // wall in LR → room at UL (NW)
+  PARTIAL_CORNER_LL: 59 + 0x60000000,               // wall in LL → room at UR (NE)
   TREE: 103,
   CAMPFIRE: 75,
   FLOWERS: 89,
@@ -47,10 +63,28 @@ const G = {
   PATH_CORNER_SW: 2 + 0xA0000000,       //  90° CW → W + S
   PATH_CORNER_NW: 2 + 0xC0000000,       // 180°    → N + W
   PATH_CORNER_NE: 2 + 0x60000000,       // 270° CW → E + N
+  // Water tileset (firstgid=WATER_FIRSTGID). Local tile ids: 0 water, 1 grass,
+  // 4-7 edges N/E/S/W, 8-11 outer corners NW/NE/SE/SW, 12-15 inner corners.
+  WATER:           WL + 0,
+  WATER_EDGE_N:    WL + 4,
+  WATER_EDGE_E:    WL + 5,
+  WATER_EDGE_S:    WL + 6,
+  WATER_EDGE_W:    WL + 7,
+  WATER_OUTER_NW:  WL + 8,
+  WATER_OUTER_NE:  WL + 9,
+  WATER_OUTER_SE:  WL + 10,
+  WATER_OUTER_SW:  WL + 11,
+  WATER_INNER_NW:  WL + 12,
+  WATER_INNER_NE:  WL + 13,
+  WATER_INNER_SE:  WL + 14,
+  WATER_INNER_SW:  WL + 15,
 };
 
-export type Terrain = 'grassland' | 'forest';
-export type Feature = 'ruins' | 'buildings' | 'campsites' | 'path';
+export type Terrain = 'grassland' | 'forest' | 'dungeon';
+export type Feature =
+  | 'ruins' | 'buildings' | 'campsites' | 'path'
+  | 'coastline'
+  | '3-room' | '5-room';
 
 export interface ComposeOptions {
   width: number;
@@ -61,6 +95,37 @@ export interface ComposeOptions {
   seed?: number;
 }
 
+export interface ComposedTilesetRef {
+  firstgid: number;
+  source: string;
+}
+
+/**
+ * Named regions of interest a feature placer found / stamped. The randomizer
+ * uses these to spawn the player and enemies at story-suitable locations
+ * (entrance vs. vault, on a path vs. at a campfire) instead of guessing
+ * geometrically. Every field is optional — only features the composer actually
+ * placed end up populated.
+ */
+export interface MapAnchors {
+  /** Every carved dungeon room as `{ rect, center }`. Sorted by `cy + cx` so [0] is closest to NW, last is deepest. */
+  rooms?: Array<{ x: number; y: number; w: number; h: number; cx: number; cy: number }>;
+  /** Center cell of the southernmost dungeon room (where the entry corridor meets the wall). */
+  entrance?: { x: number; y: number };
+  /** Center cell of the dungeon room farthest from the entrance. */
+  vault?: { x: number; y: number };
+  /** Campfire centers placed by `placeCampsites`. */
+  campfires?: Array<{ x: number; y: number }>;
+  /** Building footprints (interior, ie. one cell in from the walls). */
+  buildings?: Array<{ x: number; y: number; w: number; h: number }>;
+  /** Ruin footprints (interior, ie. one cell in from the walls). */
+  ruins?: Array<{ x: number; y: number; w: number; h: number }>;
+  /** The two map-edge cells where the path emerges. */
+  pathEndpoints?: Array<{ x: number; y: number }>;
+  /** Cells along the dry (grass) side, away from water. Populated when `coastline` is on. */
+  inlandBand?: Array<{ x: number; y: number }>;
+}
+
 export interface ComposedMap {
   width: number;
   height: number;
@@ -68,6 +133,10 @@ export interface ComposedMap {
   objectData: number[];
   name: string;
   description: string;
+  /** Tilesets the rendered map data references, with their firstgids. */
+  tilesets: ComposedTilesetRef[];
+  /** Story-suitable spawn anchors derived during feature placement. */
+  anchors: MapAnchors;
 }
 
 // ── stampRoom — the core support primitive ──────────────────────────────────
@@ -191,13 +260,21 @@ export function stampRoom(terrain: number[][], opts: RoomOptions): void {
 
 // ── Top-level composer ──────────────────────────────────────────────────────
 
+const SCRIBBLE_TILESET: ComposedTilesetRef = { firstgid: 1, source: '../tilesets/scribble.tsj' };
+const WATER_TILESET: ComposedTilesetRef = { firstgid: WATER_FIRSTGID, source: '../tilesets/water.tsj' };
+
 export function composeMap(opts: ComposeOptions): ComposedMap {
   const { width, height, terrain, features } = opts;
   if (width < 12 || height < 8) throw new Error('Map too small (min 12×8)');
 
   const rng = mulberry32((opts.seed ?? Date.now()) & 0xffffffff);
 
-  // Grid init — grass everywhere by default; object layer empty.
+  if (terrain === 'dungeon') {
+    return composeDungeon(width, height, features, rng);
+  }
+
+  // Outdoor terrains share a grass base, optionally with trees scattered on
+  // top, plus the standard feature stack.
   const terrainGrid: number[][] = [];
   const objectGrid: number[][] = [];
   for (let r = 0; r < height; r++) {
@@ -205,7 +282,6 @@ export function composeMap(opts: ComposeOptions): ComposedMap {
     objectGrid.push(new Array<number>(width).fill(0));
   }
 
-  // Terrain layer modifications.
   if (terrain === 'forest') {
     // Scatter trees densely with clumping — Poisson-ish with a thinner belt
     // along the south edge so the player has open ground to spawn on.
@@ -217,13 +293,21 @@ export function composeMap(opts: ComposeOptions): ComposedMap {
     }
   }
 
-  // Features layer.
-  // Path is laid down first so ruins/buildings/campsites stamp over it where they overlap
-  // — i.e. the path runs through the map and other features sit on top of (or replace) it.
-  if (features.includes('path'))       placePath(terrainGrid, objectGrid, rng, width, height);
-  if (features.includes('ruins'))      placeRuins(terrainGrid, objectGrid, rng, width, height);
-  if (features.includes('buildings'))  placeBuildings(terrainGrid, objectGrid, rng, width, height);
-  if (features.includes('campsites'))  placeCampsites(terrainGrid, objectGrid, rng, width, height);
+  // Features layer. The coastline carves its footprint first so subsequent
+  // feature placers can detect water tiles and avoid them; path runs across
+  // the map next; ruins/buildings/campsites stamp on top. Each placer that
+  // produces story-relevant locations records them in `anchors`.
+  const anchors: MapAnchors = {};
+  const usesWater = features.includes('coastline');
+  if (features.includes('coastline')) placeCoastline(terrainGrid, objectGrid, rng, width, height, anchors);
+  if (features.includes('path'))      placePath(terrainGrid, objectGrid, rng, width, height, anchors);
+  if (features.includes('ruins'))     placeRuins(terrainGrid, objectGrid, rng, width, height, anchors);
+  if (features.includes('buildings')) placeBuildings(terrainGrid, objectGrid, rng, width, height, anchors);
+  if (features.includes('campsites')) placeCampsites(terrainGrid, objectGrid, rng, width, height, anchors);
+
+  const tilesets: ComposedTilesetRef[] = usesWater
+    ? [SCRIBBLE_TILESET, WATER_TILESET]
+    : [SCRIBBLE_TILESET];
 
   return {
     width, height,
@@ -231,83 +315,117 @@ export function composeMap(opts: ComposeOptions): ComposedMap {
     objectData: flatten(objectGrid),
     name: composeName(terrain, features),
     description: composeDescription(terrain, features),
+    tilesets,
+    anchors,
   };
 }
 
 // ── Feature placers ─────────────────────────────────────────────────────────
 
-function placeRuins(terrain: number[][], objects: number[][], rng: () => number, W: number, H: number): void {
+/** True iff the given cell's terrain GID belongs to the water tileset
+ *  (firstgid=WATER_FIRSTGID, 16 tiles). Feature placers use this to skip
+ *  any footprint that would overlap water. */
+function isWaterCell(terrain: number[][], r: number, c: number, W: number, H: number): boolean {
+  if (r < 0 || r >= H || c < 0 || c >= W) return false;
+  const gid = terrain[r][c];
+  return gid >= WATER_FIRSTGID && gid < WATER_FIRSTGID + 16;
+}
+
+/** True iff any cell in the rectangle [x, x+w) × [y, y+h) is water. */
+function rectTouchesWater(terrain: number[][], x: number, y: number, w: number, h: number, W: number, H: number): boolean {
+  for (let r = y; r < y + h; r++) {
+    for (let c = x; c < x + w; c++) {
+      if (isWaterCell(terrain, r, c, W, H)) return true;
+    }
+  }
+  return false;
+}
+
+function placeRuins(terrain: number[][], objects: number[][], rng: () => number, W: number, H: number, anchors: MapAnchors): void {
   const count = 2 + Math.floor(rng() * 2);  // 2-3 ruined buildings
   for (let i = 0; i < count; i++) {
-    const w = 6 + Math.floor(rng() * 4);   // 6-9 wide
-    const h = 5 + Math.floor(rng() * 3);   // 5-7 tall
-    const x = 1 + Math.floor(rng() * Math.max(1, W - w - 2));
-    const y = 1 + Math.floor(rng() * Math.max(1, H - h - 2));
-    const sides: Doorway['side'][] = ['N', 'S', 'E', 'W'];
-    const dwSide = sides[Math.floor(rng() * 4)];
-    const wallLen = (dwSide === 'N' || dwSide === 'S') ? w : h;
-    const doorways: Doorway[] = [{
-      side: dwSide,
-      offset: 1 + Math.floor(rng() * Math.max(1, wallLen - 3)),
-      length: 1,
-    }];
-    try {
-      stampRoom(terrain, {
-        x, y, w, h,
-        floorBase: G.STONE_FLOOR,
-        floorAccent: G.STONE_FLOOR_CRACKED,
-        doorways,
-        ruinedBreaks: 2 + Math.floor(rng() * 3),  // 2-4 random wall breaks
-        rng,
-      });
-      // Clear any tree on top of the room footprint (ruined buildings are clearings).
-      for (let r = y; r < y + h; r++) {
-        for (let c = x; c < x + w; c++) objects[r][c] = 0;
-      }
-    } catch { /* skip if room overlaps edge */ }
+    let placed = false;
+    for (let attempt = 0; attempt < 12 && !placed; attempt++) {
+      const w = 6 + Math.floor(rng() * 4);   // 6-9 wide
+      const h = 5 + Math.floor(rng() * 3);   // 5-7 tall
+      const x = 1 + Math.floor(rng() * Math.max(1, W - w - 2));
+      const y = 1 + Math.floor(rng() * Math.max(1, H - h - 2));
+      // Skip footprints that overlap any coastline water.
+      if (rectTouchesWater(terrain, x, y, w, h, W, H)) continue;
+      const sides: Doorway['side'][] = ['N', 'S', 'E', 'W'];
+      const dwSide = sides[Math.floor(rng() * 4)];
+      const wallLen = (dwSide === 'N' || dwSide === 'S') ? w : h;
+      const doorways: Doorway[] = [{
+        side: dwSide,
+        offset: 1 + Math.floor(rng() * Math.max(1, wallLen - 3)),
+        length: 1,
+      }];
+      try {
+        stampRoom(terrain, {
+          x, y, w, h,
+          floorBase: G.STONE_FLOOR,
+          floorAccent: G.STONE_FLOOR_CRACKED,
+          doorways,
+          ruinedBreaks: 2 + Math.floor(rng() * 3),  // 2-4 random wall breaks
+          rng,
+        });
+        // Clear any tree on top of the room footprint (ruined buildings are clearings).
+        for (let r = y; r < y + h; r++) {
+          for (let c = x; c < x + w; c++) objects[r][c] = 0;
+        }
+        (anchors.ruins ??= []).push({ x: x + 1, y: y + 1, w: w - 2, h: h - 2 });
+        placed = true;
+      } catch { /* skip if room overlaps edge */ }
+    }
   }
 }
 
-function placeBuildings(terrain: number[][], objects: number[][], rng: () => number, W: number, H: number): void {
+function placeBuildings(terrain: number[][], objects: number[][], rng: () => number, W: number, H: number, anchors: MapAnchors): void {
   const count = 1 + Math.floor(rng() * 2);  // 1-2 intact buildings
   for (let i = 0; i < count; i++) {
-    const w = 6 + Math.floor(rng() * 3);
-    const h = 5 + Math.floor(rng() * 3);
-    const x = 1 + Math.floor(rng() * Math.max(1, W - w - 2));
-    const y = 1 + Math.floor(rng() * Math.max(1, H - h - 2));
-    const sides: Doorway['side'][] = ['N', 'S', 'E', 'W'];
-    const dwSide = sides[Math.floor(rng() * 4)];
-    const wallLen = (dwSide === 'N' || dwSide === 'S') ? w : h;
-    try {
-      stampRoom(terrain, {
-        x, y, w, h,
-        floorBase: G.STONE_FLOOR,
-        doorways: [{
-          side: dwSide,
-          offset: 1 + Math.floor(rng() * Math.max(1, wallLen - 3)),
-          length: 1,
-        }],
-      });
-      // Sprinkle some indoor furniture for atmosphere.
-      const furniture = [G.CRATE_CLOSED, G.BARRELS_TWO, G.FIREWOOD];
-      const numItems = 1 + Math.floor(rng() * 3);
-      for (let f = 0; f < numItems; f++) {
-        const fx = x + 1 + Math.floor(rng() * (w - 2));
-        const fy = y + 1 + Math.floor(rng() * (h - 2));
-        objects[fy][fx] = furniture[Math.floor(rng() * furniture.length)];
-      }
-      // Clear trees from the building footprint.
-      for (let r = y; r < y + h; r++) {
-        for (let c = x; c < x + w; c++) {
-          // Don't clear the placed furniture — only trees that happened to land here.
-          if (objects[r][c] === G.TREE) objects[r][c] = 0;
+    let placed = false;
+    for (let attempt = 0; attempt < 12 && !placed; attempt++) {
+      const w = 6 + Math.floor(rng() * 3);
+      const h = 5 + Math.floor(rng() * 3);
+      const x = 1 + Math.floor(rng() * Math.max(1, W - w - 2));
+      const y = 1 + Math.floor(rng() * Math.max(1, H - h - 2));
+      if (rectTouchesWater(terrain, x, y, w, h, W, H)) continue;
+      const sides: Doorway['side'][] = ['N', 'S', 'E', 'W'];
+      const dwSide = sides[Math.floor(rng() * 4)];
+      const wallLen = (dwSide === 'N' || dwSide === 'S') ? w : h;
+      try {
+        stampRoom(terrain, {
+          x, y, w, h,
+          floorBase: G.STONE_FLOOR,
+          doorways: [{
+            side: dwSide,
+            offset: 1 + Math.floor(rng() * Math.max(1, wallLen - 3)),
+            length: 1,
+          }],
+        });
+        // Sprinkle some indoor furniture for atmosphere.
+        const furniture = [G.CRATE_CLOSED, G.BARRELS_TWO, G.FIREWOOD];
+        const numItems = 1 + Math.floor(rng() * 3);
+        for (let f = 0; f < numItems; f++) {
+          const fx = x + 1 + Math.floor(rng() * (w - 2));
+          const fy = y + 1 + Math.floor(rng() * (h - 2));
+          objects[fy][fx] = furniture[Math.floor(rng() * furniture.length)];
         }
-      }
-    } catch { /* skip if room overlaps edge */ }
+        // Clear trees from the building footprint.
+        for (let r = y; r < y + h; r++) {
+          for (let c = x; c < x + w; c++) {
+            // Don't clear the placed furniture — only trees that happened to land here.
+            if (objects[r][c] === G.TREE) objects[r][c] = 0;
+          }
+        }
+        (anchors.buildings ??= []).push({ x: x + 1, y: y + 1, w: w - 2, h: h - 2 });
+        placed = true;
+      } catch { /* skip if room overlaps edge */ }
+    }
   }
 }
 
-function placePath(terrain: number[][], objects: number[][], rng: () => number, W: number, H: number): void {
+function placePath(terrain: number[][], objects: number[][], rng: () => number, W: number, H: number, anchors: MapAnchors): void {
   // The path runs from one edge of the map to the opposite edge. Straight
   // runs use PATH_V / PATH_H; every direction change uses a tile-2 corner
   // (one of the four rotations in G) so the trail reads as a continuous
@@ -361,20 +479,46 @@ function placePath(terrain: number[][], objects: number[][], rng: () => number, 
     }
   }
 
+  // Record path endpoints — the first and last cells the trail draws are
+  // by construction at the map edges, so they're the natural "where a
+  // traveller emerges from the woods" anchors. Skip endpoints that fell on
+  // water (the path stops at the shore).
+  const dry = cells.filter((c) => !isWaterCell(terrain, c.y, c.x, W, H));
+  if (dry.length >= 2) {
+    anchors.pathEndpoints = [
+      { x: dry[0].x, y: dry[0].y },
+      { x: dry[dry.length - 1].x, y: dry[dry.length - 1].y },
+    ];
+  }
+
   for (const cell of cells) {
     if (cell.x < 0 || cell.x >= W || cell.y < 0 || cell.y >= H) continue;
+    // Don't overwrite coastline water — the path stops at the shore.
+    if (isWaterCell(terrain, cell.y, cell.x, W, H)) continue;
     terrain[cell.y][cell.x] = cell.tile;
     if (objects[cell.y][cell.x] === G.TREE) objects[cell.y][cell.x] = 0;
   }
 }
 
-function placeCampsites(terrain: number[][], objects: number[][], rng: () => number, W: number, H: number): void {
+function placeCampsites(terrain: number[][], objects: number[][], rng: () => number, W: number, H: number, anchors: MapAnchors): void {
   const count = 1 + Math.floor(rng() * 2);
   for (let i = 0; i < count; i++) {
-    const cx = 2 + Math.floor(rng() * (W - 4));
-    const cy = 2 + Math.floor(rng() * (H - 4));
+    let cx = -1, cy = -1;
+    // Retry until the campfire centre AND its 3×3 clearing land entirely on
+    // dry ground. Bail after a few attempts to keep this O(1) per campsite.
+    for (let attempt = 0; attempt < 12; attempt++) {
+      const tx = 2 + Math.floor(rng() * (W - 4));
+      const ty = 2 + Math.floor(rng() * (H - 4));
+      if (!rectTouchesWater(terrain, tx - 1, ty - 1, 3, 3, W, H)) {
+        cx = tx;
+        cy = ty;
+        break;
+      }
+    }
+    if (cx < 0) continue;
     // Campfire in the centre.
     objects[cy][cx] = G.CAMPFIRE;
+    (anchors.campfires ??= []).push({ x: cx, y: cy });
     // Clear trees around the campfire to make a small clearing.
     for (let r = Math.max(0, cy - 2); r < Math.min(H, cy + 3); r++) {
       for (let c = Math.max(0, cx - 2); c < Math.min(W, cx + 3); c++) {
@@ -395,17 +539,304 @@ function placeCampsites(terrain: number[][], objects: number[][], rng: () => num
   }
 }
 
+// ── Water features (coastline) ──────────────────────────────────────────────
+//
+// Both call the same shoreline-aware fill routine. A boolean `water` grid
+// describes the desired water footprint; the routine assigns the correct
+// water tile id at every cell of the grid based on its neighbours (open
+// water, edges along the four cardinal sides, outer corners where two water
+// edges meet, and inner corners where the water rounds into a grass pocket).
+// Trees are cleared on water cells; the player is responsible for finding an
+// edge tile to spawn at.
+
+function paintWater(terrain: number[][], objects: number[][], water: boolean[][], W: number, H: number): void {
+  const isWater = (x: number, y: number): boolean => x >= 0 && x < W && y >= 0 && y < H && water[y][x];
+  // Pass 1 — water cells at the edges or convex corners of the water body.
+  //
+  // NOTE on corner naming: the water tileset's `<dir>` label points at the
+  // direction the *water bulges* (the rounded face of the water body), not
+  // at the direction of the grass pocket. So a water cell with grass to its
+  // N and W (sitting at the NW corner of the body) needs the tile whose
+  // water rounds out toward the SE — `WATER_OUTER_SE`. This is the inverse
+  // of a naïve "named corner = grass corner" reading.
+  for (let r = 0; r < H; r++) {
+    for (let c = 0; c < W; c++) {
+      if (!water[r][c]) continue;
+      objects[r][c] = 0; // trees / props drown.
+      const n = isWater(c, r - 1);
+      const s = isWater(c, r + 1);
+      const e = isWater(c + 1, r);
+      const w = isWater(c - 1, r);
+      // Outer corner: water cell, two adjacent grass neighbours. The named
+      // corner points toward the water (away from the grass).
+      if (!n && !w && s && e) { terrain[r][c] = G.WATER_OUTER_SE; continue; }
+      if (!n && !e && s && w) { terrain[r][c] = G.WATER_OUTER_SW; continue; }
+      if (!s && !e && n && w) { terrain[r][c] = G.WATER_OUTER_NW; continue; }
+      if (!s && !w && n && e) { terrain[r][c] = G.WATER_OUTER_NE; continue; }
+      // Edge: a single grass side.
+      if (!n && s && e && w) { terrain[r][c] = G.WATER_EDGE_N; continue; }
+      if (!s && n && e && w) { terrain[r][c] = G.WATER_EDGE_S; continue; }
+      if (!e && n && s && w) { terrain[r][c] = G.WATER_EDGE_E; continue; }
+      if (!w && n && s && e) { terrain[r][c] = G.WATER_EDGE_W; continue; }
+      // Open water — fully surrounded.
+      terrain[r][c] = G.WATER;
+    }
+  }
+  // Pass 2 — grass cells sitting in a concave corner of the water body.
+  // Same inverted-direction convention as the outer corners: the named
+  // corner of `WATER_INNER_<dir>` points at the *water* side of the curve,
+  // not the grass side. A grass cell with water to N and W therefore uses
+  // `WATER_INNER_NW` only if the convention is grass-pocket; per the actual
+  // artwork it needs `WATER_INNER_SE` (water rounds out toward SE).
+  for (let r = 0; r < H; r++) {
+    for (let c = 0; c < W; c++) {
+      if (water[r][c]) continue;
+      const n = isWater(c, r - 1);
+      const s = isWater(c, r + 1);
+      const e = isWater(c + 1, r);
+      const w = isWater(c - 1, r);
+      if (n && w && !s && !e) terrain[r][c] = G.WATER_INNER_SE;
+      else if (n && e && !s && !w) terrain[r][c] = G.WATER_INNER_SW;
+      else if (s && e && !n && !w) terrain[r][c] = G.WATER_INNER_NW;
+      else if (s && w && !n && !e) terrain[r][c] = G.WATER_INNER_NE;
+    }
+  }
+}
+
+function placeCoastline(terrain: number[][], objects: number[][], rng: () => number, W: number, H: number, anchors: MapAnchors): void {
+  // Flood one of the four edges inward by a uniform depth — a perfectly
+  // straight coastline with no wave variation.
+  const sides = ['N', 'E', 'S', 'W'] as const;
+  const side = sides[Math.floor(rng() * 4)];
+  const water = Array.from({ length: H }, () => new Array<boolean>(W).fill(false));
+  const depth = side === 'N' || side === 'S' ? Math.max(3, Math.floor(H * 0.4)) : Math.max(3, Math.floor(W * 0.4));
+
+  if (side === 'N' || side === 'S') {
+    for (let c = 0; c < W; c++) {
+      for (let i = 0; i < depth; i++) {
+        const r = side === 'N' ? i : H - 1 - i;
+        water[r][c] = true;
+      }
+    }
+  } else {
+    for (let r = 0; r < H; r++) {
+      for (let i = 0; i < depth; i++) {
+        const c = side === 'W' ? i : W - 1 - i;
+        water[r][c] = true;
+      }
+    }
+  }
+
+  paintWater(terrain, objects, water, W, H);
+
+  // Record a thin inland band on the opposite (dry) edge — that's where a
+  // traveller approaches the coast from. The randomizer uses this so the
+  // player party doesn't spawn standing in the surf.
+  const band: Array<{ x: number; y: number }> = [];
+  if (side === 'N') {
+    for (let c = 0; c < W; c++) for (let i = 0; i < 3; i++) band.push({ x: c, y: H - 1 - i });
+  } else if (side === 'S') {
+    for (let c = 0; c < W; c++) for (let i = 0; i < 3; i++) band.push({ x: c, y: i });
+  } else if (side === 'W') {
+    for (let r = 0; r < H; r++) for (let i = 0; i < 3; i++) band.push({ x: W - 1 - i, y: r });
+  } else {
+    for (let r = 0; r < H; r++) for (let i = 0; i < 3; i++) band.push({ x: i, y: r });
+  }
+  anchors.inlandBand = band;
+}
+
+// ── Dungeon generator ────────────────────────────────────────────────────────
+//
+// `dungeon` terrain is fundamentally different from outdoor terrain: every
+// cell starts impassable, and rooms + corridors are carved out. The 3-room /
+// 5-room features control how many chambers are placed; their shapes and
+// positions are drawn from a small library of fixed layouts so the result
+// fits inside a 30×22 default canvas without needing complex BSP logic.
+//
+// The dungeon entry is a single passable cell on the southern edge that
+// extends into the southernmost room — players enter from off-map.
+
+function composeDungeon(W: number, H: number, features: Feature[], rng: () => number): ComposedMap {
+  const terrainGrid: number[][] = [];
+  const objectGrid: number[][] = [];
+  for (let r = 0; r < H; r++) {
+    terrainGrid.push(new Array<number>(W).fill(0));   // GID 0 = impassable void
+    objectGrid.push(new Array<number>(W).fill(0));
+  }
+
+  // Floor mask (true = carved). Walls are derived after carving.
+  const floor: boolean[][] = Array.from({ length: H }, () => new Array<boolean>(W).fill(false));
+
+  // Pick the room count. Default to 3 rooms when neither flag is set so the
+  // dungeon still resolves to something.
+  const roomCount = features.includes('5-room') ? 5 : 3;
+
+  // Lay out non-overlapping rooms inside the playable area, leaving a 1-tile
+  // void margin around the map edge for walls.
+  const rooms: Array<{ x: number; y: number; w: number; h: number; cx: number; cy: number }> = [];
+  const maxAttempts = 80;
+  while (rooms.length < roomCount) {
+    let placed = false;
+    for (let attempt = 0; attempt < maxAttempts && !placed; attempt++) {
+      const w = 4 + Math.floor(rng() * 4);   // 4-7 wide
+      const h = 4 + Math.floor(rng() * 3);   // 4-6 tall
+      const x = 2 + Math.floor(rng() * (W - w - 4));
+      const y = 2 + Math.floor(rng() * (H - h - 4));
+      const overlap = rooms.some((r) =>
+        x < r.x + r.w + 2 && x + w + 2 > r.x && y < r.y + r.h + 2 && y + h + 2 > r.y,
+      );
+      if (overlap) continue;
+      rooms.push({ x, y, w, h, cx: x + Math.floor(w / 2), cy: y + Math.floor(h / 2) });
+      placed = true;
+    }
+    if (!placed) break; // give up — limited canvas can't fit any more rooms
+  }
+
+  // Carve each room's floor.
+  for (const r of rooms) {
+    for (let dy = 0; dy < r.h; dy++) {
+      for (let dx = 0; dx < r.w; dx++) {
+        floor[r.y + dy][r.x + dx] = true;
+      }
+    }
+  }
+
+  // Sort rooms by centre so corridors form a vaguely linear chain rather than
+  // crossing themselves. Connect each consecutive pair with an L-shaped
+  // corridor (1 tile wide).
+  rooms.sort((a, b) => (a.cy + a.cx) - (b.cy + b.cx));
+  for (let i = 1; i < rooms.length; i++) {
+    carveCorridor(floor, rooms[i - 1].cx, rooms[i - 1].cy, rooms[i].cx, rooms[i].cy);
+  }
+
+  // Pick the southernmost room and punch an entry corridor from its south
+  // wall to the southern map edge.
+  let entryRoom = rooms[0];
+  for (const r of rooms) {
+    if (r.y + r.h > entryRoom.y + entryRoom.h) entryRoom = r;
+  }
+  if (entryRoom) {
+    const entryX = entryRoom.x + Math.floor(entryRoom.w / 2);
+    for (let r = entryRoom.y + entryRoom.h; r < H; r++) floor[r][entryX] = true;
+  }
+
+  // Paint floor + walls. A wall sits at any non-floor cell adjacent to at
+  // least one floor cell (orthogonally OR diagonally — diagonal-only neighbours
+  // are the room's outer corners). Pick the wall art so its visible surface
+  // faces OUTWARD from the room interior, matching the convention used by
+  // `stampRoom` for outdoor buildings:
+  //   • one orthogonal floor neighbour → straight wall along the room's edge
+  //   • two perpendicular orthogonal floor neighbours → inner room corner
+  //   • diagonal-only floor neighbour → outer room corner
+  for (let r = 0; r < H; r++) {
+    for (let c = 0; c < W; c++) {
+      if (floor[r][c]) {
+        terrainGrid[r][c] = G.STONE_FLOOR;
+        continue;
+      }
+      const fN  = !!floor[r - 1]?.[c];
+      const fS  = !!floor[r + 1]?.[c];
+      const fE  = !!floor[r]?.[c + 1];
+      const fW  = !!floor[r]?.[c - 1];
+      const fNW = !!floor[r - 1]?.[c - 1];
+      const fNE = !!floor[r - 1]?.[c + 1];
+      const fSW = !!floor[r + 1]?.[c - 1];
+      const fSE = !!floor[r + 1]?.[c + 1];
+
+      // CONCAVE corner — two perpendicular orthogonal floors. The room
+      // wraps around the wall tile on those two sides, so the wall sits in
+      // a single quadrant of the tile (the corner OPPOSITE the room) while
+      // the rest of the tile shows floor. `stone_wall_corner_ul` and its
+      // rotations cover all four quadrants. E.g. floor S+E → room is at
+      // SE → wall occupies the NW quadrant → PARTIAL_CORNER_UL.
+      if (fS && fE)      terrainGrid[r][c] = G.PARTIAL_CORNER_UL;
+      else if (fS && fW) terrainGrid[r][c] = G.PARTIAL_CORNER_UR;
+      else if (fN && fE) terrainGrid[r][c] = G.PARTIAL_CORNER_LL;
+      else if (fN && fW) terrainGrid[r][c] = G.PARTIAL_CORNER_LR;
+      // One orthogonal floor → straight wall facing outward.
+      else if (fS) terrainGrid[r][c] = G.WALL_NORTH;
+      else if (fN) terrainGrid[r][c] = G.WALL_SOUTH;
+      else if (fE) terrainGrid[r][c] = G.WALL_WEST;
+      else if (fW) terrainGrid[r][c] = G.WALL_EAST;
+      // CONVEX corner — diagonal-only floor (the four corners of a
+      // rectangular room as `stampRoom` produces them for the ruins map).
+      // The wall corner points AWAY from the room interior.
+      else if (fSE) terrainGrid[r][c] = G.CORNER_TL;
+      else if (fSW) terrainGrid[r][c] = G.CORNER_TR;
+      else if (fNE) terrainGrid[r][c] = G.CORNER_BL;
+      else if (fNW) terrainGrid[r][c] = G.CORNER_BR;
+    }
+  }
+
+  // Build the dungeon anchors. The southernmost room (`entryRoom`) is the
+  // entrance; the room farthest from it (by Manhattan distance between
+  // centers) is the vault.
+  const anchors: MapAnchors = {
+    rooms: rooms.map((r) => ({ x: r.x, y: r.y, w: r.w, h: r.h, cx: r.cx, cy: r.cy })),
+  };
+  if (entryRoom) {
+    anchors.entrance = { x: entryRoom.cx, y: entryRoom.cy };
+    let vault = entryRoom;
+    let best = -1;
+    for (const r of rooms) {
+      const d = Math.abs(r.cx - entryRoom.cx) + Math.abs(r.cy - entryRoom.cy);
+      if (d > best) { best = d; vault = r; }
+    }
+    anchors.vault = { x: vault.cx, y: vault.cy };
+  }
+
+  return {
+    width: W,
+    height: H,
+    terrainData: flatten(terrainGrid),
+    objectData: flatten(objectGrid),
+    name: roomCount === 5 ? 'Five-Chamber Dungeon' : 'Three-Chamber Dungeon',
+    description: `A stone dungeon of ${roomCount} rooms linked by short corridors. The entrance opens onto the southern edge of the map.`,
+    tilesets: [SCRIBBLE_TILESET],
+    anchors,
+  };
+}
+
+function carveCorridor(floor: boolean[][], x1: number, y1: number, x2: number, y2: number): void {
+  // L-shaped: walk horizontally first then vertically (or vice versa).
+  const cols = floor[0].length;
+  const rows = floor.length;
+  const horizFirst = (x1 + y1) % 2 === 0;
+  if (horizFirst) {
+    const [a, b] = x1 < x2 ? [x1, x2] : [x2, x1];
+    for (let c = a; c <= b; c++) if (y1 >= 0 && y1 < rows && c >= 0 && c < cols) floor[y1][c] = true;
+    const [c, d] = y1 < y2 ? [y1, y2] : [y2, y1];
+    for (let r = c; r <= d; r++) if (r >= 0 && r < rows && x2 >= 0 && x2 < cols) floor[r][x2] = true;
+  } else {
+    const [a, b] = y1 < y2 ? [y1, y2] : [y2, y1];
+    for (let r = a; r <= b; r++) if (r >= 0 && r < rows && x1 >= 0 && x1 < cols) floor[r][x1] = true;
+    const [c, d] = x1 < x2 ? [x1, x2] : [x2, x1];
+    for (let cc = c; cc <= d; cc++) if (y2 >= 0 && y2 < rows && cc >= 0 && cc < cols) floor[y2][cc] = true;
+  }
+}
+
 // ── Naming + helpers ────────────────────────────────────────────────────────
 
+const FEATURE_ADJ: Partial<Record<Feature, string>> = {
+  ruins: 'Ruined',
+  buildings: 'Settled',
+  campsites: 'Camped',
+  coastline: 'Coastal',
+};
+
 function composeName(terrain: Terrain, features: Feature[]): string {
+  if (terrain === 'dungeon') return features.includes('5-room') ? 'Five-Chamber Dungeon' : 'Three-Chamber Dungeon';
   const t = terrain === 'forest' ? 'Forest' : 'Field';
   if (features.length === 0) return t;
-  const f = features[0];
-  const adj = f === 'ruins' ? 'Ruined' : f === 'buildings' ? 'Settled' : 'Camped';
-  return `${adj} ${t}`;
+  const adj = FEATURE_ADJ[features[0]];
+  return adj ? `${adj} ${t}` : t;
 }
 
 function composeDescription(terrain: Terrain, features: Feature[]): string {
+  if (terrain === 'dungeon') {
+    const n = features.includes('5-room') ? 'five' : 'three';
+    return `A stone dungeon of ${n} rooms linked by short corridors. The entrance opens onto the southern edge of the map.`;
+  }
   const base = terrain === 'forest'
     ? 'A wooded clearing under thick canopy.'
     : 'Open grassland stretches across the map.';

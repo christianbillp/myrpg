@@ -1,0 +1,252 @@
+/**
+ * ZonePainter — interactive map thumbnail + starting-zone painter for the
+ * Deterministic tab of `GenerateSetupScene`. Renders the accepted map at a
+ * shrunk-to-fit tile size, lets the user paint player (blue) and enemy (red)
+ * starting cells by clicking/dragging, and surfaces a `CLEAR ZONES` mode plus
+ * `PAINT: PLAYER` / `PAINT: ENEMY` toggle buttons below the thumbnail.
+ *
+ * The component owns its zone state and exposes it via Set references so the
+ * caller can read live values without copying. When the player clicks a cell
+ * with no paint mode active, `onClickEmpty` fires — the scene uses this to
+ * open the larger Map Preview Overlay for inspection.
+ */
+import Phaser from "phaser";
+import { decodeTileGid, TILE_VOID_GID } from "../../../../shared/tileGid";
+import type { MapPreviewData } from "../MapPreviewOverlay";
+
+const DPR = window.devicePixelRatio;
+
+/** Per-kind outline colour for trigger-region overlays. */
+const TRIGGER_COLOR: Record<TriggerRegion["kind"], number> = {
+  perception: 0x88ccaa,  // muted teal — non-violent senses
+  log:        0xc8d8e8,  // pale blue — neutral log message
+  aigm:       0xe2b96f,  // amber — narrative cue
+  combat:     0xff6644,  // hot red — fight starts here
+};
+
+export type PaintMode = "player" | "enemy" | "neutral" | null;
+
+export interface ZonePainterOptions {
+  scene: Phaser.Scene;
+  parent: Phaser.GameObjects.Container;
+  map: MapPreviewData;
+  thumbX: number;
+  thumbY: number;
+  thumbW: number;
+  thumbH: number;
+  tileSize: number;
+  tilesetKey: string;
+  /** Fires whenever zone state changes — caller typically refreshes button enable-state. */
+  onZonesChanged: () => void;
+  /** Fires when a cell is clicked with no active paint mode (e.g. open the larger preview). */
+  onClickEmpty: () => void;
+  /** Optional preset zones (e.g. seeded by the RANDOMIZE flow). Each set holds "x,y" keys. */
+  initialPlayerCells?: Set<string>;
+  initialEnemyCells?: Set<string>;
+  initialNeutralCells?: Set<string>;
+}
+
+/** A trigger region drawn on the thumbnail so the author can see what tiles fire the trigger. */
+export interface TriggerRegion {
+  id: string;
+  kind: "perception" | "log" | "aigm" | "combat";
+  region: { x: number; y: number; w: number; h: number };
+}
+
+export class ZonePainter {
+  private readonly playerCells = new Set<string>();
+  private readonly enemyCells = new Set<string>();
+  private readonly neutralCells = new Set<string>();
+  private readonly zoneOverlayCells = new Map<string, Phaser.GameObjects.Rectangle>();
+  private readonly triggerOverlay: Phaser.GameObjects.Graphics;
+  private paintMode: PaintMode = null;
+  private paintModePlayerBg: Phaser.GameObjects.Rectangle | null = null;
+  private paintModePlayerLabel: Phaser.GameObjects.Text | null = null;
+  private paintModeEnemyBg: Phaser.GameObjects.Rectangle | null = null;
+  private paintModeEnemyLabel: Phaser.GameObjects.Text | null = null;
+  private paintModeNeutralBg: Phaser.GameObjects.Rectangle | null = null;
+  private paintModeNeutralLabel: Phaser.GameObjects.Text | null = null;
+
+  constructor(private readonly opts: ZonePainterOptions) {
+    for (const k of opts.initialPlayerCells  ?? []) this.playerCells.add(k);
+    for (const k of opts.initialEnemyCells   ?? []) this.enemyCells.add(k);
+    for (const k of opts.initialNeutralCells ?? []) this.neutralCells.add(k);
+    this.buildThumbnail();
+    // Graphics layer on top of the zone overlay cells for trigger-region
+    // outlines. Empty until `setTriggerRegions` is called.
+    this.triggerOverlay = opts.scene.add.graphics();
+    opts.parent.add(this.triggerOverlay);
+  }
+
+  /** Replace the drawn trigger-region outlines. Color-coded by kind. */
+  setTriggerRegions(regions: TriggerRegion[]): void {
+    const { thumbX: x, thumbY: y, tileSize } = this.opts;
+    this.triggerOverlay.clear();
+    for (const r of regions) {
+      const color = TRIGGER_COLOR[r.kind];
+      const px = x + r.region.x * tileSize;
+      const py = y + r.region.y * tileSize;
+      const pw = r.region.w * tileSize;
+      const ph = r.region.h * tileSize;
+      this.triggerOverlay.fillStyle(color, 0.15).fillRect(px, py, pw, ph);
+      this.triggerOverlay.lineStyle(2, color, 0.9).strokeRect(px, py, pw, ph);
+    }
+  }
+
+  /** Live reference — readers see edits as they happen. */
+  getPlayerZones(): Set<string> { return this.playerCells; }
+  getEnemyZones(): Set<string> { return this.enemyCells; }
+  getNeutralZones(): Set<string> { return this.neutralCells; }
+
+  /** Build the 3-button paint mode toolbar below the thumbnail. Call this
+   *  after the thumbnail's footnote/label have been positioned externally. */
+  buildPaintModeButtons(x: number, y: number, totalW: number): void {
+    const { scene, parent } = this.opts;
+    const btnW = (totalW - 30) / 4;
+    const btnH = 26;
+    const mkBtn = (cx: number, label: string, onClick: () => void) => {
+      const bg = scene.add.rectangle(cx + btnW / 2, y, btnW, btnH, 0x1a1a2a).setStrokeStyle(1, 0x445566).setInteractive({ useHandCursor: true });
+      const lbl = scene.add.text(cx + btnW / 2, y, label, {
+        fontSize: "10px", color: "#aabbcc", fontFamily: "monospace", resolution: DPR, letterSpacing: 1,
+      }).setOrigin(0.5);
+      bg.on("pointerdown", onClick);
+      parent.add(bg);
+      parent.add(lbl);
+      return { bg, lbl };
+    };
+    const player = mkBtn(x, "PLAYER", () => {
+      this.paintMode = this.paintMode === "player" ? null : "player";
+      this.refreshPaintModeButtons();
+    });
+    const enemy = mkBtn(x + btnW + 10, "ENEMY", () => {
+      this.paintMode = this.paintMode === "enemy" ? null : "enemy";
+      this.refreshPaintModeButtons();
+    });
+    const neutral = mkBtn(x + 2 * (btnW + 10), "NEUTRAL", () => {
+      this.paintMode = this.paintMode === "neutral" ? null : "neutral";
+      this.refreshPaintModeButtons();
+    });
+    mkBtn(x + 3 * (btnW + 10), "CLEAR", () => {
+      this.playerCells.clear();
+      this.enemyCells.clear();
+      this.neutralCells.clear();
+      for (const key of this.zoneOverlayCells.keys()) this.refreshZoneOverlay(key);
+      this.opts.onZonesChanged();
+    });
+    this.paintModePlayerBg = player.bg;
+    this.paintModePlayerLabel = player.lbl;
+    this.paintModeEnemyBg = enemy.bg;
+    this.paintModeEnemyLabel = enemy.lbl;
+    this.paintModeNeutralBg = neutral.bg;
+    this.paintModeNeutralLabel = neutral.lbl;
+    this.refreshPaintModeButtons();
+  }
+
+  // ── Internal ────────────────────────────────────────────────────────────
+
+  private buildThumbnail(): void {
+    const { scene, parent, map, thumbX: x, thumbY: y, thumbW: w, thumbH: h, tileSize, tilesetKey } = this.opts;
+    parent.add(scene.add.rectangle(x + w / 2, y + h / 2, w + 4, h + 4, 0x0a0e16).setStrokeStyle(1, 0x334455));
+    const hasTexture = scene.textures.exists(tilesetKey);
+    const FIRSTGID = 1;
+
+    // Tile sprites.
+    for (let ty = 0; ty < map.height; ty++) {
+      for (let tx = 0; tx < map.width; tx++) {
+        const px = x + tx * tileSize + tileSize / 2;
+        const py = y + ty * tileSize + tileSize / 2;
+        const i = ty * map.width + tx;
+        const groundGid = map.terrainData[i];
+        if (hasTexture && groundGid > 0) {
+          this.drawTile(px, py, tileSize, groundGid, FIRSTGID, tilesetKey);
+        } else {
+          parent.add(scene.add.rectangle(px, py, tileSize, tileSize, 0x556677));
+        }
+        const objectGid = map.objectData[i];
+        if (hasTexture && objectGid > 0) this.drawTile(px, py, tileSize, objectGid, FIRSTGID, tilesetKey);
+      }
+    }
+
+    // Transparent click cells on top, recoloured per zone state.
+    for (let ty = 0; ty < map.height; ty++) {
+      for (let tx = 0; tx < map.width; tx++) {
+        const px = x + tx * tileSize + tileSize / 2;
+        const py = y + ty * tileSize + tileSize / 2;
+        const key = `${tx},${ty}`;
+        const cell = scene.add.rectangle(px, py, tileSize, tileSize, 0x000000, 0)
+          .setStrokeStyle(0)
+          .setInteractive({ useHandCursor: true });
+        this.zoneOverlayCells.set(key, cell);
+        this.refreshZoneOverlay(key);
+        cell.on("pointerdown", () => {
+          if (this.paintMode) this.paintCell(tx, ty);
+          else this.opts.onClickEmpty();
+        });
+        cell.on("pointerover", (pointer: Phaser.Input.Pointer) => {
+          if (this.paintMode && pointer.isDown) this.paintCell(tx, ty);
+        });
+        parent.add(cell);
+      }
+    }
+  }
+
+  private drawTile(px: number, py: number, sz: number, rawGid: number, firstGid: number, tilesetKey: string): void {
+    const { scene, parent } = this.opts;
+    const dec = decodeTileGid(rawGid);
+    if (dec.gid === TILE_VOID_GID) {
+      parent.add(scene.add.rectangle(px, py, sz, sz, 0x000000));
+      return;
+    }
+    const img = scene.add.image(px, py, tilesetKey, dec.gid - firstGid).setDisplaySize(sz, sz);
+    if (dec.angle !== 0) img.setAngle(dec.angle);
+    if (dec.flipX) img.setFlipX(true);
+    if (dec.flipY) img.setFlipY(true);
+    parent.add(img);
+  }
+
+  private paintCell(x: number, y: number): void {
+    const key = `${x},${y}`;
+    // Painting a cell with the current mode toggles that mode for the cell.
+    // Switching modes clears the cell from the other two sets so each cell
+    // belongs to at most one zone.
+    if (this.paintMode === "player") {
+      if (this.playerCells.has(key)) this.playerCells.delete(key);
+      else { this.playerCells.add(key); this.enemyCells.delete(key); this.neutralCells.delete(key); }
+    } else if (this.paintMode === "enemy") {
+      if (this.enemyCells.has(key)) this.enemyCells.delete(key);
+      else { this.enemyCells.add(key); this.playerCells.delete(key); this.neutralCells.delete(key); }
+    } else if (this.paintMode === "neutral") {
+      if (this.neutralCells.has(key)) this.neutralCells.delete(key);
+      else { this.neutralCells.add(key); this.playerCells.delete(key); this.enemyCells.delete(key); }
+    }
+    this.refreshZoneOverlay(key);
+    this.opts.onZonesChanged();
+  }
+
+  private refreshZoneOverlay(key: string): void {
+    const cell = this.zoneOverlayCells.get(key);
+    if (!cell) return;
+    if (this.playerCells.has(key))       cell.setFillStyle(0x3388ff, 0.5);
+    else if (this.enemyCells.has(key))   cell.setFillStyle(0xff4444, 0.5);
+    else if (this.neutralCells.has(key)) cell.setFillStyle(0xe2b96f, 0.5);
+    else                                 cell.setFillStyle(0x000000, 0);
+  }
+
+  private refreshPaintModeButtons(): void {
+    if (this.paintModePlayerBg && this.paintModePlayerLabel) {
+      const on = this.paintMode === "player";
+      this.paintModePlayerBg.setFillStyle(on ? 0x3388ff : 0x1a1a2a, on ? 0.4 : 1).setStrokeStyle(2, on ? 0x3388ff : 0x445566);
+      this.paintModePlayerLabel.setColor(on ? "#dde6ff" : "#aabbcc");
+    }
+    if (this.paintModeEnemyBg && this.paintModeEnemyLabel) {
+      const on = this.paintMode === "enemy";
+      this.paintModeEnemyBg.setFillStyle(on ? 0xaa3333 : 0x1a1a2a, on ? 0.4 : 1).setStrokeStyle(2, on ? 0xaa3333 : 0x445566);
+      this.paintModeEnemyLabel.setColor(on ? "#ffd6d6" : "#aabbcc");
+    }
+    if (this.paintModeNeutralBg && this.paintModeNeutralLabel) {
+      const on = this.paintMode === "neutral";
+      this.paintModeNeutralBg.setFillStyle(on ? 0xe2b96f : 0x1a1a2a, on ? 0.4 : 1).setStrokeStyle(2, on ? 0xe2b96f : 0x445566);
+      this.paintModeNeutralLabel.setColor(on ? "#fff1c8" : "#aabbcc");
+    }
+  }
+}

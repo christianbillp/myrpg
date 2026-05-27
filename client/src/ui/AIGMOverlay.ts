@@ -8,7 +8,7 @@ export interface ChatMessage {
   content: string;
 }
 
-export type DMPersona = "story" | "dev";
+export type GMPersona = "story" | "dev";
 
 const ACCENT   = "#e2b96f";
 const MSG_GAP  = 8;
@@ -21,31 +21,31 @@ function escHtml(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
-const CHAT_STYLE_ID = "aidm-chat-style";
+const CHAT_STYLE_ID = "aigm-chat-style";
 
 function injectChatStyle(): void {
   if (document.getElementById(CHAT_STYLE_ID)) return;
   const el = document.createElement("style");
   el.id = CHAT_STYLE_ID;
   el.textContent = `
-    .aidm-msg p  { margin: 0 0 4px 0; }
-    .aidm-msg strong { color: #f0e0c0; }
-    .aidm-msg em { color: #d0c090; font-style: italic; }
-    .aidm-msg ul, .aidm-msg ol { margin: 4px 0; padding-left: 16px; }
-    .aidm-msg li { margin: 2px 0; }
-    .aidm-msg h1, .aidm-msg h2, .aidm-msg h3 {
+    .aigm-msg p  { margin: 0 0 4px 0; }
+    .aigm-msg strong { color: #f0e0c0; }
+    .aigm-msg em { color: #d0c090; font-style: italic; }
+    .aigm-msg ul, .aigm-msg ol { margin: 4px 0; padding-left: 16px; }
+    .aigm-msg li { margin: 2px 0; }
+    .aigm-msg h1, .aigm-msg h2, .aigm-msg h3 {
       color: #e2b96f; margin: 6px 0 4px; font-size: 1em;
       text-transform: uppercase; letter-spacing: 0.05em;
     }
-    .aidm-msg code { background: #1a1a2e; padding: 0 3px; border-radius: 2px; font-family: monospace; }
-    .aidm-msg pre  { background: #1a1a2e; padding: 6px 8px; border-radius: 3px; overflow-x: auto; margin: 4px 0; }
-    .aidm-msg blockquote { border-left: 2px solid #e2b96f; padding-left: 8px; color: #a0b0c0; margin: 4px 0; }
-    .aidm-msg hr { border: none; border-top: 1px solid #334455; margin: 6px 0; }
+    .aigm-msg code { background: #1a1a2e; padding: 0 3px; border-radius: 2px; font-family: monospace; }
+    .aigm-msg pre  { background: #1a1a2e; padding: 6px 8px; border-radius: 3px; overflow-x: auto; margin: 4px 0; }
+    .aigm-msg blockquote { border-left: 2px solid #e2b96f; padding-left: 8px; color: #a0b0c0; margin: 4px 0; }
+    .aigm-msg hr { border: none; border-top: 1px solid #334455; margin: 6px 0; }
   `;
   document.head.appendChild(el);
 }
 
-export class AIDMOverlay extends BaseOverlay {
+export class AIGMOverlay extends BaseOverlay {
   private readonly chatEl: HTMLDivElement;
   private readonly inputEl: HTMLInputElement;
   private readonly statusEl: HTMLDivElement;
@@ -53,10 +53,10 @@ export class AIDMOverlay extends BaseOverlay {
   private readonly devChip: HTMLButtonElement | null;
   private history: ChatMessage[];
   private thinking = false;
-  private dmPersona: DMPersona;
+  private gmPersona: GMPersona;
   private readonly onSend: (
     playerMessage: string,
-    dmPersona: DMPersona,
+    gmPersona: GMPersona,
   ) => Promise<{ reply: string; rollResults: string[] }>;
   private readonly disableKeyboard: () => void;
   private readonly enableKeyboard: () => void;
@@ -64,24 +64,24 @@ export class AIDMOverlay extends BaseOverlay {
   constructor(
     scale: UIScale,
     initialHistory: ChatMessage[],
-    initialPersona: DMPersona,
+    initialPersona: GMPersona,
     onSend: (
       playerMessage: string,
-      dmPersona: DMPersona,
+      gmPersona: GMPersona,
     ) => Promise<{ reply: string; rollResults: string[] }>,
-    onClose: (history: ChatMessage[], persona: DMPersona) => void,
+    onClose: (history: ChatMessage[], persona: GMPersona) => void,
     disableKeyboard: () => void,
     enableKeyboard: () => void,
   ) {
     super(scale, 640, 480, ACCENT, () => {
       enableKeyboard();
-      onClose(this.history, this.dmPersona);
+      onClose(this.history, this.gmPersona);
     });
 
     injectChatStyle();
 
     this.history = [...initialHistory];
-    this.dmPersona = initialPersona;
+    this.gmPersona = initialPersona;
     this.onSend = onSend;
     this.disableKeyboard = disableKeyboard;
     this.enableKeyboard = enableKeyboard;
@@ -92,7 +92,7 @@ export class AIDMOverlay extends BaseOverlay {
       <div style="display:flex;flex-direction:column;height:100%;padding:12px 16px 12px;box-sizing:border-box;">
 
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;flex-shrink:0;padding-right:26px;">
-          <div style="font-size:15px;color:${ACCENT};">DUNGEON MASTER</div>
+          <div style="font-size:15px;color:${ACCENT};">GAME MASTER</div>
           <div style="display:flex;gap:6px;">
             <button data-chip="story" style="width:56px;height:18px;font-family:monospace;font-size:9px;cursor:pointer;border:1px solid #443300;background:#1a1a00;color:#665533;">STORY</button>
             ${DevMode.enabled ? `<button data-chip="dev" style="width:56px;height:18px;font-family:monospace;font-size:9px;cursor:pointer;border:1px solid #224422;background:#001a00;color:#336633;">DEV</button>` : ''}
@@ -112,7 +112,7 @@ export class AIDMOverlay extends BaseOverlay {
 
         <div style="display:flex;gap:8px;flex-shrink:0;">
           <input data-input type="text" maxlength="300" autocomplete="off"
-            placeholder="Speak to the Dungeon Master…"
+            placeholder="Speak to the Game Master…"
             style="flex:1;height:30px;background:#111122;border:1px solid #554422;
               color:#e0d0a0;font-family:monospace;font-size:12px;padding:0 8px;
               outline:none;box-sizing:border-box;caret-color:${ACCENT};" />
@@ -131,8 +131,8 @@ export class AIDMOverlay extends BaseOverlay {
 
     this.refreshChips();
 
-    this.storyChip.addEventListener("pointerdown", () => { this.dmPersona = "story"; this.refreshChips(); });
-    this.devChip?.addEventListener("pointerdown",  () => { this.dmPersona = "dev";   this.refreshChips(); });
+    this.storyChip.addEventListener("pointerdown", () => { this.gmPersona = "story"; this.refreshChips(); });
+    this.devChip?.addEventListener("pointerdown",  () => { this.gmPersona = "dev";   this.refreshChips(); });
 
     (ref("send") as HTMLButtonElement).addEventListener("pointerdown",  () => this.send());
 
@@ -147,7 +147,7 @@ export class AIDMOverlay extends BaseOverlay {
   }
 
   private refreshChips(): void {
-    const isStory = this.dmPersona === "story";
+    const isStory = this.gmPersona === "story";
     this.storyChip.style.borderColor = isStory ? ACCENT   : "#443300";
     this.storyChip.style.color       = isStory ? ACCENT   : "#665533";
     if (this.devChip) {
@@ -169,16 +169,16 @@ export class AIDMOverlay extends BaseOverlay {
     this.inputEl.disabled = true;
     this.history.push({ role: "user", content: text });
     this.renderHistory();
-    this.statusEl.textContent = "The Dungeon Master considers…";
+    this.statusEl.textContent = "The Game Master considers…";
 
     try {
-      const { reply, rollResults } = await this.onSend(text, this.dmPersona);
+      const { reply, rollResults } = await this.onSend(text, this.gmPersona);
       for (const r of rollResults) {
         this.history.push({ role: "user", content: ROLL_PREFIX + r });
       }
       this.history.push({ role: "assistant", content: reply });
     } catch {
-      this.history.push({ role: "assistant", content: "(The Dungeon Master is silent.)" });
+      this.history.push({ role: "assistant", content: "(The Game Master is silent.)" });
     }
 
     this.thinking = false;
@@ -201,7 +201,7 @@ export class AIDMOverlay extends BaseOverlay {
         html += `<div style="color:${ACCENT};margin-bottom:${MSG_GAP}px">▸ ${escHtml(msg.content)}</div>`;
       } else {
         const md = String(marked.parse(msg.content));
-        html += `<div class="aidm-msg" style="color:#c8d8e8;margin-bottom:${MSG_GAP}px">${md}</div>`;
+        html += `<div class="aigm-msg" style="color:#c8d8e8;margin-bottom:${MSG_GAP}px">${md}</div>`;
       }
     }
     this.chatEl.innerHTML = html;

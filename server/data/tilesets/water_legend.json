@@ -1,0 +1,193 @@
+{
+  "tileset": "water",
+  "image": "water.png",
+  "tile_size": 128,
+  "grid": {
+    "cols": 4,
+    "rows": 4
+  },
+  "id_formula": "local GID = row*4 + col + 1",
+  "notes": "AI-facing tile legend for the WATER tileset (128x128 scribble-style tiles, 4-column x 4-row sheet, 16 cells / 14 used). This is a SEPARATE tileset from scribble; load it with its own firstgid. GID = row*4 + col + 1 within this sheet (local). When used in a Tiled map, add the map's firstgid offset for this tileset. Tiles are black-and-white scribble line art: WATER is shown with ripple curves, GRASS with small blade tufts; the two are distinguished by texture, not color. AUTO-TILING: edge_* tiles have grass on the named side and water opposite (tags grass_<dir>/water_<dir>). outer_corner_* = a water body's rounded corner with a grass pocket in the named corner. inner_corner_* = grass with a water pocket rounding into the named corner. Compose a pond with outer corners at the four corners, edges along the sides, and water tiles in the middle. 'passable' false for all water/shore tiles; grass is passable. Place bridge/walkway tiles (from the scribble set) over water to cross.",
+  "tiles": {
+    "1": {
+      "name": "water",
+      "passable": false,
+      "layer": "ground",
+      "description": "Open water with rippling surface. Impassable unless bridged.",
+      "tags": [
+        "water",
+        "liquid",
+        "fill",
+        "outdoor"
+      ]
+    },
+    "2": {
+      "name": "grass",
+      "passable": true,
+      "layer": "ground",
+      "description": "Grassy ground.",
+      "tags": [
+        "nature",
+        "grass",
+        "fill",
+        "outdoor"
+      ]
+    },
+    "5": {
+      "name": "water_edge_n",
+      "passable": false,
+      "layer": "ground",
+      "description": "Shoreline: grass to the north, water to the south.",
+      "tags": [
+        "water",
+        "shore",
+        "edge",
+        "grass_n",
+        "water_s"
+      ]
+    },
+    "6": {
+      "name": "water_edge_e",
+      "passable": false,
+      "layer": "ground",
+      "description": "Shoreline: grass to the east, water to the west.",
+      "tags": [
+        "water",
+        "shore",
+        "edge",
+        "grass_e",
+        "water_w"
+      ]
+    },
+    "7": {
+      "name": "water_edge_s",
+      "passable": false,
+      "layer": "ground",
+      "description": "Shoreline: grass to the south, water to the north.",
+      "tags": [
+        "water",
+        "shore",
+        "edge",
+        "grass_s",
+        "water_n"
+      ]
+    },
+    "8": {
+      "name": "water_edge_w",
+      "passable": false,
+      "layer": "ground",
+      "description": "Shoreline: grass to the west, water to the east.",
+      "tags": [
+        "water",
+        "shore",
+        "edge",
+        "grass_w",
+        "water_e"
+      ]
+    },
+    "9": {
+      "name": "water_outer_nw",
+      "passable": false,
+      "layer": "ground",
+      "description": "Water body's rounded corner; grass pocket in the north-west.",
+      "tags": [
+        "water",
+        "shore",
+        "corner",
+        "outer",
+        "grass_nw"
+      ]
+    },
+    "10": {
+      "name": "water_outer_ne",
+      "passable": false,
+      "layer": "ground",
+      "description": "Water body's rounded corner; grass pocket in the north-east.",
+      "tags": [
+        "water",
+        "shore",
+        "corner",
+        "outer",
+        "grass_ne"
+      ]
+    },
+    "11": {
+      "name": "water_outer_se",
+      "passable": false,
+      "layer": "ground",
+      "description": "Water body's rounded corner; grass pocket in the south-east.",
+      "tags": [
+        "water",
+        "shore",
+        "corner",
+        "outer",
+        "grass_se"
+      ]
+    },
+    "12": {
+      "name": "water_outer_sw",
+      "passable": false,
+      "layer": "ground",
+      "description": "Water body's rounded corner; grass pocket in the south-west.",
+      "tags": [
+        "water",
+        "shore",
+        "corner",
+        "outer",
+        "grass_sw"
+      ]
+    },
+    "13": {
+      "name": "water_inner_nw",
+      "passable": false,
+      "layer": "ground",
+      "description": "Grass with a water pocket rounding into the north-west corner.",
+      "tags": [
+        "water",
+        "shore",
+        "corner",
+        "inner",
+        "water_nw"
+      ]
+    },
+    "14": {
+      "name": "water_inner_ne",
+      "passable": false,
+      "layer": "ground",
+      "description": "Grass with a water pocket rounding into the north-east corner.",
+      "tags": [
+        "water",
+        "shore",
+        "corner",
+        "inner",
+        "water_ne"
+      ]
+    },
+    "15": {
+      "name": "water_inner_se",
+      "passable": false,
+      "layer": "ground",
+      "description": "Grass with a water pocket rounding into the south-east corner.",
+      "tags": [
+        "water",
+        "shore",
+        "corner",
+        "inner",
+        "water_se"
+      ]
+    },
+    "16": {
+      "name": "water_inner_sw",
+      "passable": false,
+      "layer": "ground",
+      "description": "Grass with a water pocket rounding into the south-west corner.",
+      "tags": [
+        "water",
+        "shore",
+        "corner",
+        "inner",
+        "water_sw"
+      ]
+    }
+  }
+}

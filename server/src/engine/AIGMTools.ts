@@ -1,7 +1,7 @@
 import { GameEngine } from './GameEngine.js';
 import { GameEvent } from './types.js';
 
-export interface AIDMToolResult {
+export interface AIGMToolResult {
   // GameEvent[] only carries client-facing animation signals (e.g. entity_move).
   // Most tools return [] because their state changes are picked up by the full
   // state snapshot pushed over WebSocket. Only move_entity meaningfully emits
@@ -12,13 +12,13 @@ export interface AIDMToolResult {
 }
 
 /** Side-channel context that some tools need (e.g. recall_memory). */
-export interface AIDMToolContext {
+export interface AIGMToolContext {
   archive?: { role: 'user' | 'assistant'; content: string }[];
 }
 
 // The tool list is fully static — content/IDs live in CURRENT STATE so the
 // tools block stays cache-stable even when JSON definitions change.
-export function buildAIDMTools() {
+export function buildAIGMTools() {
   return buildToolList();
 }
 
@@ -48,7 +48,7 @@ function buildToolList() { return [
   },
   {
     name: 'add_log_entry',
-    description: 'Add a narrative entry to the combat log without changing game state.',
+    description: 'Add a narrative entry to the event log without changing game state.',
     input_schema: { type: 'object' as const, properties: { text: { type: 'string' } }, required: ['text'] },
   },
   {
@@ -163,17 +163,17 @@ function buildToolList() { return [
   },
   {
     name: 'recall_memory',
-    description: 'Search the full, unsummarized conversation archive for past content matching a keyword or phrase. Use this when the sliding-window history doesn\'t contain enough detail — e.g. to look up an NPC\'s previous statements, a quest hook the player mentioned long ago, or any earlier exchange. Returns up to 8 matching message snippets (player and DM lines) with rough turn indices. The query is a case-insensitive substring match.',
+    description: 'Search the full, unsummarized conversation archive for past content matching a keyword or phrase. Use this when the sliding-window history doesn\'t contain enough detail — e.g. to look up an NPC\'s previous statements, a quest hook the player mentioned long ago, or any earlier exchange. Returns up to 8 matching message snippets (player and GM lines) with rough turn indices. The query is a case-insensitive substring match.',
     input_schema: { type: 'object' as const, properties: { query: { type: 'string' }, reason: { type: 'string' } }, required: ['query', 'reason'] },
   },
   {
     name: 'adjust_faction_standing',
-    description: 'Adjust the player\'s standing with a faction by `delta` (positive = better, negative = worse). Standings are clamped to [-100, +100]. Use when an action durably shifts how a faction views the player — saving a faction member, betraying them, completing a faction quest, etc. The faction id is a free-form string; encounter authors and AIDM should use stable short ids ("bridge_bandits", "town_guard"). Surfaced to future turns in CURRENT STATE.',
+    description: 'Adjust the player\'s standing with a faction by `delta` (positive = better, negative = worse). Standings are clamped to [-100, +100]. Use when an action durably shifts how a faction views the player — saving a faction member, betraying them, completing a faction quest, etc. The faction id is a free-form string; encounter authors and AIGM should use stable short ids ("bridge_bandits", "town_guard"). Surfaced to future turns in CURRENT STATE.',
     input_schema: { type: 'object' as const, properties: { faction_id: { type: 'string' }, delta: { type: 'integer' }, reason: { type: 'string' } }, required: ['faction_id', 'delta', 'reason'] },
   },
   {
     name: 'create_rumor',
-    description: 'Record a significant world event into long-term world memory. Use when something happens that NPCs in this world would plausibly hear about and reference later — a public defeat, a saved village, a treaty signed. The `id` is a stable short slug used by triggers; `text` is the human-readable summary the DM can reference; `salience` is 1–10 (default 5) where 10 = "everyone is talking about it." Idempotent: a second call with the same id is ignored.',
+    description: 'Record a significant world event into long-term world memory. Use when something happens that NPCs in this world would plausibly hear about and reference later — a public defeat, a saved village, a treaty signed. The `id` is a stable short slug used by triggers; `text` is the human-readable summary the GM can reference; `salience` is 1–10 (default 5) where 10 = "everyone is talking about it." Idempotent: a second call with the same id is ignored.',
     input_schema: { type: 'object' as const, properties: { id: { type: 'string' }, text: { type: 'string' }, salience: { type: 'integer' }, reason: { type: 'string' } }, required: ['id', 'text', 'reason'] },
   },
   {
@@ -183,7 +183,7 @@ function buildToolList() { return [
   },
 ]; }
 
-// Tracks quests force-completed within a single AIDM turn so that subsequent
+// Tracks quests force-completed within a single AIGM turn so that subsequent
 // award_xp calls in the same turn can detect and reject double-credit attempts.
 // Reset between turns by callers (see resetTurnGuards).
 let questsCompletedThisTurn = new Set<string>();
@@ -194,12 +194,12 @@ export function resetTurnGuards(): void {
   xpAwardedThisTurnFromQuests = 0;
 }
 
-export function applyAIDMTool(
+export function applyAIGMTool(
   engine: GameEngine,
   name: string,
   input: Record<string, unknown>,
-  ctx: AIDMToolContext = {},
-): AIDMToolResult {
+  ctx: AIGMToolContext = {},
+): AIGMToolResult {
   let events: GameEvent[] = [];
   let toolResultContent = 'Applied.';
   let rollResult: string | undefined;
@@ -217,7 +217,7 @@ export function applyAIDMTool(
     }
     case 'award_xp': {
       const amount = input['amount'] as number;
-      // Guard: if the AIDM already collected XP this turn via complete_quest,
+      // Guard: if the AIGM already collected XP this turn via complete_quest,
       // refuse direct award_xp calls — those would double-credit the player.
       if (questsCompletedThisTurn.size > 0 && amount > 0) {
         toolResultContent = `award_xp rejected — you already granted ${xpAwardedThisTurnFromQuests} XP this turn via complete_quest for: ${[...questsCompletedThisTurn].join(', ')}. Quest rewards are awarded automatically; do not also call award_xp for the same outcome.`;
@@ -240,7 +240,7 @@ export function applyAIDMTool(
     }
     case 'adjust_npc_hp': {
       // Compute the result from before/after state directly — never slice the
-      // combat log, which may contain unrelated entries (quest fires, etc.).
+      // event log, which may contain unrelated entries (quest fires, etc.).
       const entity = input['entity'] as string;
       const delta = input['delta'] as number;
       const damageType = input['damage_type'] as string | undefined;
@@ -395,13 +395,13 @@ export function applyAIDMTool(
         toolResultContent = 'Action already spent this turn — throw not performed. Inform the player their action is used and they must end their turn or use a bonus action instead.';
         break;
       }
-      const logBefore = stateBeforeThrow.combatLog.length;
+      const logBefore = stateBeforeThrow.eventLog.length;
       events = engine.throwItem(input['item_id'] as string, input['target'] as string | undefined);
       // Filter out lines that aren't part of the throw outcome — quest progress,
       // turn-boundary markers, and quest completion can fire as side effects of
       // a kill and shouldn't be conflated with the throw result.
       const SIDE_EFFECT_PREFIXES = ['Quest complete:', 'Total XP:', '──'];
-      const newEntries = engine.getState().combatLog
+      const newEntries = engine.getState().eventLog
         .slice(logBefore)
         .filter((e) => !SIDE_EFFECT_PREFIXES.some((p) => e.left.startsWith(p)));
       toolResultContent = newEntries.map((e) => e.right ? `${e.left} [${e.right}]` : e.left).join(' | ') || 'Throw resolved.';
@@ -434,10 +434,10 @@ export function applyAIDMTool(
         targetIds = [npc.id];
       }
       const slotLevel = slotLevelInput ?? spell.level;
-      const logBefore = stateBeforeCast.combatLog.length;
+      const logBefore = stateBeforeCast.eventLog.length;
       events = engine.castSpell(spellId, slotLevel, targetIds);
       const SIDE_EFFECT_PREFIXES = ['Quest complete:', 'Total XP:', '──'];
-      const newEntries = engine.getState().combatLog
+      const newEntries = engine.getState().eventLog
         .slice(logBefore)
         .filter((e) => !SIDE_EFFECT_PREFIXES.some((p) => e.left.startsWith(p)));
       toolResultContent = newEntries.map((e) => e.right ? `${e.left} [${e.right}]` : e.left).join(' | ') || `${spell.name} resolved.`;

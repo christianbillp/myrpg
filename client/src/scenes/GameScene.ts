@@ -1,5 +1,6 @@
 import Phaser from "phaser";
-import { tilesetTextureKey } from "./BootScene";
+import { tilesetTextureKey, tokenTextureKey } from "./BootScene";
+import { tokenAssetForPlayer, tokenAssetForMonster, tokenAssetForNpc } from "../data/tokens";
 import { Player } from "../entities/Player";
 import { NpcToken } from "../entities/NpcToken";
 import { MapItem } from "../entities/MapItem";
@@ -18,13 +19,14 @@ import { MonsterDef, NPCDef } from "../data/monsters";
 import { ItemDef } from "../data/equipment";
 import { gameClient } from "../net/GameClient";
 import type { GameState, GameEvent, GameMap, SpellDef, FeatureDef } from "../net/types";
-import type { ChatMessage } from "../ui/AIDMOverlay";
+import type { ChatMessage } from "../ui/AIGMOverlay";
 import { DevMode } from "../devMode";
 import { decodeTileGid, TILE_VOID_GID } from "../../../shared/tileGid";
 
 const GAME_W = PLAYER_PANEL_WIDTH + GRID_COLS * TILE_SIZE + TARGET_PANEL_WIDTH;
 const GAME_H = GRID_ROWS * TILE_SIZE + HUD_HEIGHT;
 const MAP_TILE_ALPHA = 0.7;
+const API_URL = "http://localhost:3000";
 
 export class GameScene extends Phaser.Scene {
   private playerDef!: PlayerDef;
@@ -33,10 +35,22 @@ export class GameScene extends Phaser.Scene {
   private eventQueue: GameEvent[] = [];
   private animating = false;
   private mapDrawn = false;
+  /** While an `entity_move` event is animating, this holds the moving
+   *  entity's id (`'player'` or `npc.id`). The HUD's turn-order chip data
+   *  is overridden so that entity reads as active for the duration of the
+   *  animation — the server resets `npc.isActive` atomically at the end of
+   *  each NPC's turn, so without this the client only sees the final state
+   *  with no NPC active. Cleared when the event queue drains. */
+  private animatingEntityId: string | null = null;
 
   private player: Player | null = null;
   private npcTokens = new Map<string, NpcToken>();
   private itemTokens = new Map<string, MapItem>();
+  /** Mirrors the HUD's LABELS chip — applied to fresh NpcTokens at spawn so
+   *  enemies arriving mid-encounter respect the player's current preference.
+   *  Defaults to false so the map opens with a clean view; the player opts
+   *  in via the LABELS chip in the GM panel. */
+  private labelsVisible = false;
 
   private selectedEntityId: string | null = null;
 
@@ -67,7 +81,7 @@ export class GameScene extends Phaser.Scene {
     | { kind: "creature"; spellId: string; spellName: string; asRitual: boolean }
     | { kind: "aoe"; spellId: string; spellName: string; asRitual: boolean; radiusTiles: number; selfAnchored: boolean; shape: "cone" | "sphere" | "cube" | "line" }
     | null = null;
-  private pendingDmHistory: ChatMessage[] = [];
+  private pendingGmHistory: ChatMessage[] = [];
   private pendingIsResume = false;
 
   private cursors!: Phaser.Types.Input.Keyboard.CursorKeys;
@@ -83,10 +97,10 @@ export class GameScene extends Phaser.Scene {
     super({ key: "GameScene" });
   }
 
-  init(data: { sessionId: string; playerDef: PlayerDef; dmHistory?: ChatMessage[]; isResume?: boolean }): void {
+  init(data: { sessionId: string; playerDef: PlayerDef; gmHistory?: ChatMessage[]; isResume?: boolean }): void {
     this.playerDef = data.playerDef;
     this.pendingIsResume = data.isResume ?? false;
-    this.pendingDmHistory = data.isResume ? (data.dmHistory ?? []) : [];
+    this.pendingGmHistory = data.isResume ? (data.gmHistory ?? []) : [];
     this.player = null;
     this.eventQueue = [];
     this.animating = false;
@@ -130,7 +144,7 @@ export class GameScene extends Phaser.Scene {
 
     this.setupInput();
     this.buildHUD();
-    if (this.pendingIsResume) this.hud.seedDmHistory(this.pendingDmHistory);
+    if (this.pendingIsResume) this.hud.seedGmHistory(this.pendingGmHistory);
 
     gameClient.setStateUpdateHandler((state, events) => this.handleStateUpdate(state, events));
     gameClient.connectWebSocket();
@@ -159,12 +173,18 @@ export class GameScene extends Phaser.Scene {
 
   private processNextEvent(): void {
     if (this.eventQueue.length === 0) {
+      this.animatingEntityId = null;
       this.applyState(this.gameState);
       return;
     }
     const event = this.eventQueue.shift()!;
     this.animating = true;
     if (event.type === "entity_move") {
+      // Highlight the moving entity's chip while their animation plays —
+      // refresh the HUD immediately so the bar updates the moment the
+      // event starts (no need to wait for the tween to finish).
+      this.animatingEntityId = event.entityId;
+      if (this.gameState) this.updateHUD(this.gameState);
       if (event.entityId === 'player' && this.player) {
         this.player.moveTo(event.toX, event.toY, () => {
           this.animating = false;
@@ -195,7 +215,12 @@ export class GameScene extends Phaser.Scene {
     }
 
     if (!this.player) {
-      this.player = new Player(this, state.player.tileX, state.player.tileY, this.playerDef.color);
+      this.player = new Player(
+        this,
+        state.player.tileX, state.player.tileY,
+        tokenTextureKey(tokenAssetForPlayer(this.playerDef)),
+        this.playerDef.color,
+      );
       this.gridView.container.add(this.player.gameObject);
     } else {
       this.player.teleport(state.player.tileX, state.player.tileY);
@@ -232,8 +257,13 @@ export class GameScene extends Phaser.Scene {
       let token = this.npcTokens.get(nState.id);
       if (!token) {
         const def = this.resolveMonsterDef(nState.defId);
-        token = new NpcToken(this, nState.id, def, nState.tileX, nState.tileY, nState.disposition, nState.hp, nState.maxHp);
+        token = new NpcToken(
+          this, nState.id, def, nState.tileX, nState.tileY,
+          nState.disposition, nState.hp, nState.maxHp,
+          tokenTextureKey(tokenAssetForMonster(def)),
+        );
         token.setNameText(nState.name);
+        token.setNameVisible(this.labelsVisible);
         this.npcTokens.set(nState.id, token);
         this.gridView.container.add(token.gameObject);
       } else if (nState.disposition === "neutral" && nState.hp > 0) {
@@ -440,6 +470,7 @@ export class GameScene extends Phaser.Scene {
       onDash:           () => gameClient.sendAction({ type: "dash" }),
       onDodge:          () => gameClient.sendAction({ type: "dodge" }),
       onDisengage:      () => gameClient.sendAction({ type: "disengage" }),
+      onDetach:         () => gameClient.sendAction({ type: "detach" }),
       onUseFeature:     (featureId) => gameClient.sendAction({ type: "useFeature", featureId }),
       onHide:           () => gameClient.sendAction({ type: "hide" }),
       onDeathSave:      () => gameClient.sendAction({ type: "rollDeathSave" }),
@@ -457,27 +488,34 @@ export class GameScene extends Phaser.Scene {
     });
     this.targetPanel = new TargetPanel(this.uiScale);
     this.hud = new HUD(this.uiScale, {
-      // When the DM is disabled (DevMode.disableAIDM), short-circuit with a
+      // When the GM is disabled (DevMode.disableAIGM), short-circuit with a
       // canned silent reply instead of hitting the server. The encounter still
       // plays end-to-end on the deterministic layer alone (US-068 criterion).
-      onSendAIDM: (msg, persona) => {
-        if (DevMode.disableAIDM) {
-          this.hud.aidmStart();
-          this.hud.aidmDone('(The Dungeon Master is silent. The world responds only to your actions.)', []);
+      onSendAIGM: (msg, persona) => {
+        if (DevMode.disableAIGM) {
+          this.hud.aigmStart();
+          this.hud.aigmDone('(The Game Master is silent. The world responds only to your actions.)', []);
           return Promise.resolve({ reply: '', rollResults: [] });
         }
-        return gameClient.sendAIDMMessage(msg, persona);
+        return gameClient.sendAIGMMessage(msg, persona);
       },
       onDisableKeyboard: () => this.input.keyboard?.disableGlobalCapture(),
       onEnableKeyboard:  () => this.input.keyboard?.enableGlobalCapture(),
+      // Fan the LABELS chip out to every live NpcToken. Captured into a
+      // field so freshly-spawned tokens (mid-encounter spawns via the GM,
+      // ally additions, etc.) honour the current state — see `reconcileNpcs`.
+      onLabelsToggle: (visible) => {
+        this.labelsVisible = visible;
+        for (const token of this.npcTokens.values()) token.setNameVisible(visible);
+      },
     });
-    // E. Hook the AIDM streaming protocol into the HUD's chat panel.
-    gameClient.setAIDMStreamHandlers({
-      onStart:              () => this.hud.aidmStart(),
-      onChunk:              (text) => this.hud.aidmChunk(text),
-      onCheckpoint:         () => this.hud.aidmCheckpoint(),
-      onSpeculativeDiscard: () => this.hud.aidmSpeculativeDiscard(),
-      onDone:               (reply, rollResults) => this.hud.aidmDone(reply, rollResults),
+    // E. Hook the AIGM streaming protocol into the HUD's chat panel.
+    gameClient.setAIGMStreamHandlers({
+      onStart:              () => this.hud.aigmStart(),
+      onChunk:              (text) => this.hud.aigmChunk(text),
+      onCheckpoint:         () => this.hud.aigmCheckpoint(),
+      onSpeculativeDiscard: () => this.hud.aigmSpeculativeDiscard(),
+      onDone:               (reply, rollResults) => this.hud.aigmDone(reply, rollResults),
     });
   }
 
@@ -488,6 +526,11 @@ export class GameScene extends Phaser.Scene {
 
     // Build initiative-ordered turn-order chips directly from turnOrderIds.
     // Falls back to a simple player-first list when combat hasn't begun.
+    // `animatingEntityId` overrides `isActive` while an entity_move is
+    // playing — without it, NPC chips never highlight because the server's
+    // atomic turn processing flips `isActive` back to false before any
+    // event reaches the client.
+    const animating = this.animatingEntityId;
     const turnOrderChips = state.turnOrderIds.length > 0
       ? state.turnOrderIds.flatMap((id) => {
           if (id === 'player') {
@@ -495,18 +538,26 @@ export class GameScene extends Phaser.Scene {
               label: '',
               name: this.playerDef.name,
               color: this.playerDef.color,
-              isActive: state.phase === 'player_turn' || state.phase === 'death_saves',
+              tokenUrl: `${API_URL}${tokenAssetForPlayer(this.playerDef)}`,
+              isActive: animating === 'player'
+                || state.phase === 'player_turn'
+                || state.phase === 'death_saves',
               isDead: state.player.hp <= 0,
             }];
           }
           const npc = state.npcs.find(n => n.id === id);
           if (!npc) return [];
           const def = this.resolveMonsterDef(npc.defId);
+          // `resolveMonsterDef` already applied the NPC→monster token
+          // fallback (npc.tokenAsset → monster.tokenAsset). Pull the resolved
+          // path off the synthesised def and prefix the API origin.
+          const tokenPath = def.tokenAsset ?? tokenAssetForMonster(def);
           return [{
             label: npc.combatLabel,
             name: npc.revealedName ?? def.name,
             color: def.color,
-            isActive: !!npc.isActive,
+            tokenUrl: `${API_URL}${tokenPath}`,
+            isActive: animating === npc.id || !!npc.isActive,
             isDead: npc.hp <= 0,
           }];
         })
@@ -517,7 +568,7 @@ export class GameScene extends Phaser.Scene {
       playerDef: this.playerDef,
       playerHp:  state.player.hp,
       turnOrderChips,
-      combatLog: state.combatLog,
+      eventLog: state.eventLog,
       selectedNpcName,
     };
   }
@@ -947,8 +998,18 @@ export class GameScene extends Phaser.Scene {
     const npcs = this.registry.get("npcs") as NPCDef[];
     const npcDef = npcs.find(n => n.id === defId);
     if (npcDef) {
+      // NPCs inherit stats from their monsterClass but can override id, name,
+      // colour, and (optionally) the token SVG. Token resolution: explicit
+      // `npc.tokenAsset` if set, else fall back to the monsterClass's token.
       const base = monsters.find(m => m.id === npcDef.monsterClass) ?? monsters[0];
-      return { ...base, id: npcDef.id, name: npcDef.name, color: npcDef.color };
+      const npcPath = tokenAssetForNpc(npcDef);
+      return {
+        ...base,
+        id: npcDef.id,
+        name: npcDef.name,
+        color: npcDef.color,
+        tokenAsset: npcPath ?? tokenAssetForMonster(base),
+      };
     }
     return monsters[0];
   }

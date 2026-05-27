@@ -3,7 +3,7 @@ import { writeFile, mkdir } from "fs/promises";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
 import type { GameDefs } from "./engine/types.js";
-import type { EncounterType } from "./encounterService.js";
+import { buildMapJson as sharedBuildMapJson } from "./engine/MapPersistence.js";
 
 /**
  * Encounter Generator — given a free-text prompt, asks Claude Sonnet to
@@ -22,7 +22,6 @@ const DATA_DIR   = join(__dirname, "..", "data");
 
 export interface GenerateRequest {
   prompt: string;
-  encounterTypes?: EncounterType[];
   playerName?: string;
   playerClassName?: string;
 }
@@ -84,7 +83,7 @@ export async function generateEncounter(
   const generatedId = `gen_${stamp}_${slug}`;
 
   const mapJson = buildMapJson(generatedId, payload);
-  const encounterJson = buildEncounterJson(generatedId, payload, req.encounterTypes);
+  const encounterJson = buildEncounterJson(generatedId, payload);
 
   await mkdir(join(DATA_DIR, "maps"), { recursive: true });
   await mkdir(join(DATA_DIR, "encounters"), { recursive: true });
@@ -138,7 +137,6 @@ export async function generateMap(
     objective: "",
     customIntroduction: "",
     customContext: "",
-    encounterTypes: [],
     width: payload.width,
     height: payload.height,
     terrainData: payload.terrainData,
@@ -267,20 +265,20 @@ ENCOUNTER FIELDS:
 - mapdescription: short flavour line for the map.
 - objective: one-line player-facing goal.
 - customIntroduction: 2-3 sentence opening prose in the player's POV (second person, present tense).
-- customContext: instructions for the in-game DM — what the scene is about, NPC motivations, escalation paths, and any flags you'd like set on resolution. Mention any completionFlag the DM should set with set_world_flag when the encounter is resolved.
-- completionFlag: short snake_case string (e.g. "tomb_opened", "diplomat_convinced"). Required for non-combat encounters.
+- customContext: instructions for the in-game GM — what the scene is about, NPC motivations, escalation paths, and any flags you'd like set on resolution. Mention any completionFlag the GM should set with set_world_flag when the encounter is resolved.
+- completionFlag: short snake_case string (e.g. "tomb_opened", "diplomat_convinced"). Required when the encounter has no enemies (combat encounters auto-complete on enemy defeat).
+- enemyIds: monster ids spawned as hostile combatants. Use for combat scenes.
+- npcIds: NPC ids spawned as neutral conversationalists. Use for social scenes.
+- allyIds: NPC ids spawned as friendly combatants (fight alongside the player).
 
 TONE: gritty, grounded fantasy. Avoid clichés ("a dark and stormy night"). Match the player's prompt closely.`;
 }
 
 function buildUserPrompt(req: GenerateRequest): string {
-  const types = req.encounterTypes && req.encounterTypes.length > 0
-    ? `Encounter types: ${req.encounterTypes.join(", ")}.`
-    : "Choose appropriate encounter types from: simple_combat, social_interaction, exploration.";
   const player = req.playerName
-    ? `Player character: ${req.playerName}${req.playerClassName ? ` the ${req.playerClassName}` : ""}.`
+    ? `Player character: ${req.playerName}${req.playerClassName ? ` the ${req.playerClassName}` : ""}.\n`
     : "";
-  return `${types}\n${player}\n\nScene description:\n${req.prompt}\n\nAuthor the scenario now via the submit_scenario tool.`;
+  return `${player}\nScene description:\n${req.prompt}\n\nAuthor the scenario now via the submit_scenario tool.`;
 }
 
 // ── Anthropic tool schema (structured output) ───────────────────────────────
@@ -300,12 +298,9 @@ function buildResponseTool() {
         customIntroduction: { type: "string" },
         customContext: { type: "string" },
         completionFlag: { type: "string" },
-        encounterTypes: {
-          type: "array",
-          items: { type: "string", enum: ["simple_combat", "social_interaction", "exploration"] },
-        },
-        npcIds: { type: "array", items: { type: "string" } },
-        allyIds: { type: "array", items: { type: "string" } },
+        npcIds:   { type: "array", items: { type: "string" } },
+        allyIds:  { type: "array", items: { type: "string" } },
+        enemyIds: { type: "array", items: { type: "string" } },
         width:  { type: "integer", minimum: 12, maximum: 30 },
         height: { type: "integer", minimum: 8,  maximum: 22 },
         terrainData: { type: "array", items: { type: "integer" } },
@@ -314,7 +309,7 @@ function buildResponseTool() {
       },
       required: [
         "encounterTitle", "description", "mapName", "mapdescription", "objective",
-        "customIntroduction", "customContext", "encounterTypes",
+        "customIntroduction", "customContext",
         "width", "height", "terrainData", "objectData", "startingZonesData",
       ],
     },
@@ -330,9 +325,9 @@ interface GeneratedPayload {
   customIntroduction: string;
   customContext: string;
   completionFlag?: string;
-  encounterTypes: EncounterType[];
   npcIds?: string[];
   allyIds?: string[];
+  enemyIds?: string[];
   width: number;
   height: number;
   terrainData: number[];
@@ -364,18 +359,17 @@ function validate(
   const playerZoneCount = p.startingZonesData.filter((z) => z === 1).length;
   if (playerZoneCount === 0) throw new Error("startingZonesData has no player-spawn (zone 1) tiles");
 
-  // Combine NPC + ally id validation against both rosters.
-  const allReferencedIds = [...(p.npcIds ?? []), ...(p.allyIds ?? [])];
+  // Combine NPC + ally + enemy id validation against both rosters.
+  const allReferencedIds = [...(p.npcIds ?? []), ...(p.allyIds ?? []), ...(p.enemyIds ?? [])];
   for (const id of allReferencedIds) {
     if (!validNpcIds.has(id) && !validMonsterIds.has(id)) {
       throw new Error(`Unknown NPC id "${id}" — not in npcs/ or monsters/`);
     }
   }
 
-  if (p.encounterTypes.length === 0) throw new Error("encounterTypes must include at least one type");
-
-  // Non-combat encounters must declare a completionFlag.
-  if (!p.encounterTypes.includes("simple_combat") && !p.completionFlag) {
+  // Non-combat encounters (no hand-picked enemies) must declare a completionFlag
+  // since they can't auto-complete on enemy defeat.
+  if ((p.enemyIds ?? []).length === 0 && !p.completionFlag) {
     throw new Error("Non-combat encounters must declare a completionFlag");
   }
 }
@@ -383,44 +377,29 @@ function validate(
 // ── File-shape builders ─────────────────────────────────────────────────────
 
 function buildMapJson(id: string, p: GeneratedPayload): unknown {
-  const layers: unknown[] = [
-    {
-      type: "tilelayer",
-      name: "terrain",
-      width: p.width,
-      height: p.height,
-      data: p.terrainData,
-    },
-  ];
-  if (p.objectData.some((g) => g !== 0)) {
-    layers.push({
-      type: "tilelayer",
-      name: "objects",
-      width: p.width,
-      height: p.height,
-      data: p.objectData,
-    });
-  }
-  return {
+  // Delegates to the shared `MapPersistence.buildMapJson` for the Tiled-shape
+  // layout. The generator's `GeneratedPayload` carries both map and encounter
+  // fields; only the map subset matters here.
+  return sharedBuildMapJson({
     id,
     name: p.mapName,
-    mapdescription: p.mapdescription,
+    description: p.mapdescription,
     width: p.width,
     height: p.height,
-    tilesets: [{ firstgid: 1, source: "../tilesets/scribble.tsj" }],
-    layers,
-  };
+    terrainData: p.terrainData,
+    objectData: p.objectData,
+  });
 }
 
-function buildEncounterJson(id: string, p: GeneratedPayload, requestedTypes: EncounterType[] | undefined): unknown {
+function buildEncounterJson(id: string, p: GeneratedPayload): unknown {
   return {
     id,
     encounterTitle: p.encounterTitle,
     description: p.description,
-    encounterTypes: requestedTypes && requestedTypes.length > 0 ? requestedTypes : p.encounterTypes,
     mapId: id,
     npcIds: p.npcIds ?? [],
     allyIds: p.allyIds ?? [],
+    enemyIds: p.enemyIds ?? [],
     customIntroduction: p.customIntroduction,
     customContext: p.customContext,
     objective: p.objective,

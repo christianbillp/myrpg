@@ -1,0 +1,144 @@
+{
+  "set": "Standard",
+  "style": "clean bold cartoon, flat fills, thick #222222 outline, 64x64",
+  "style_module": "standard_style.py",
+  "spec": "STYLE_SPEC.md",
+  "tokens": {
+    "monster_bandit": {
+      "name": "Bandit",
+      "category": "monster",
+      "faction": "hostile",
+      "description": "A bandit wearing a domino eye-mask.",
+      "svg": "tokens/monster_bandit.svg",
+      "png": "tokens/monster_bandit.png"
+    },
+    "monster_commoner": {
+      "name": "Commoner",
+      "category": "monster",
+      "faction": "neutral",
+      "description": "An ordinary commoner.",
+      "svg": "tokens/monster_commoner.svg",
+      "png": "tokens/monster_commoner.png"
+    },
+    "monster_goblin_minion": {
+      "name": "Goblin Minion",
+      "category": "monster",
+      "faction": "hostile",
+      "description": "A small green goblin with big ears and a fang.",
+      "svg": "tokens/monster_goblin_minion.svg",
+      "png": "tokens/monster_goblin_minion.png"
+    },
+    "monster_guard": {
+      "name": "Guard",
+      "category": "monster",
+      "faction": "lawful",
+      "description": "A bareheaded town guard, stern, with an armored collar.",
+      "svg": "tokens/monster_guard.svg",
+      "png": "tokens/monster_guard.png"
+    },
+    "monster_skeleton": {
+      "name": "Skeleton",
+      "category": "monster",
+      "faction": "undead",
+      "description": "An animated skeleton skull.",
+      "svg": "tokens/monster_skeleton.svg",
+      "png": "tokens/monster_skeleton.png"
+    },
+    "npc_frightened_traveller": {
+      "name": "Frightened Traveller",
+      "category": "npc",
+      "faction": "fearful",
+      "description": "A wide-eyed traveller in a hood.",
+      "svg": "tokens/npc_frightened_traveller.svg",
+      "png": "tokens/npc_frightened_traveller.png"
+    },
+    "npc_tavern_keeper": {
+      "name": "Tavern Keeper",
+      "category": "npc",
+      "faction": "friendly",
+      "description": "A human tavern keeper with a mustache and apron.",
+      "svg": "tokens/npc_tavern_keeper.svg",
+      "png": "tokens/npc_tavern_keeper.png"
+    },
+    "npc_villager": {
+      "name": "Villager",
+      "category": "npc",
+      "faction": "friendly",
+      "description": "A villager in a kerchief.",
+      "svg": "tokens/npc_villager.svg",
+      "png": "tokens/npc_villager.png"
+    },
+    "npc_wandering_sage": {
+      "name": "Wandering Sage",
+      "category": "npc",
+      "faction": "wise",
+      "description": "A grey-bearded sage with a circlet.",
+      "svg": "tokens/npc_wandering_sage.svg",
+      "png": "tokens/npc_wandering_sage.png"
+    },
+    "player_fighter_human": {
+      "name": "Human Fighter",
+      "category": "player",
+      "faction": "martial",
+      "description": "A human fighter in a sleek sallet helm with a gorget.",
+      "svg": "tokens/player_fighter_human.svg",
+      "png": "tokens/player_fighter_human.png"
+    },
+    "player_rogue_woodelf": {
+      "name": "Wood Elf Rogue",
+      "category": "player",
+      "faction": "stealth",
+      "description": "A wood elf female rogue in a hood.",
+      "svg": "tokens/player_rogue_woodelf.svg",
+      "png": "tokens/player_rogue_woodelf.png"
+    },
+    "player_wizard_highelf": {
+      "name": "High Elf Wizard",
+      "category": "player",
+      "faction": "arcane",
+      "description": "A bald high elf wizard with a long beard and a glowing arcane rune on the brow.",
+      "svg": "tokens/player_wizard_highelf.svg",
+      "png": "tokens/player_wizard_highelf.png"
+    },
+    "monster_cultist": {
+      "name": "Cultist",
+      "category": "monster",
+      "faction": "hostile",
+      "description": "A robed cultist in a peaked hood with two glowing red eyes.",
+      "svg": "tokens/monster_cultist.svg",
+      "png": "tokens/monster_cultist.png"
+    },
+    "monster_noble": {
+      "name": "Noble",
+      "category": "monster",
+      "faction": "neutral",
+      "description": "A finely-dressed noble in a feathered cap.",
+      "svg": "tokens/monster_noble.svg",
+      "png": "tokens/monster_noble.png"
+    },
+    "monster_warrior_infantry": {
+      "name": "Warrior Infantry",
+      "category": "monster",
+      "faction": "hostile",
+      "description": "An armored infantry soldier in a nasal helm.",
+      "svg": "tokens/monster_warrior_infantry.svg",
+      "png": "tokens/monster_warrior_infantry.png"
+    },
+    "monster_kobold_warrior": {
+      "name": "Kobold Warrior",
+      "category": "monster",
+      "faction": "hostile",
+      "description": "A red-scaled draconic kobold warrior with horns and slit eyes, serving a red dragon.",
+      "svg": "tokens/monster_kobold_warrior.svg",
+      "png": "tokens/monster_kobold_warrior.png"
+    },
+    "monster_stirge": {
+      "name": "Stirge",
+      "category": "monster",
+      "faction": "hostile",
+      "description": "A winged blood-drinking stirge with a long proboscis.",
+      "svg": "tokens/monster_stirge.svg",
+      "png": "tokens/monster_stirge.png"
+    }
+  }
+}

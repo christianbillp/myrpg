@@ -1,0 +1,46 @@
+{
+  "id": "warrior_infantry",
+  "name": "Warrior Infantry",
+  "type": "Medium or Small Humanoid, Neutral",
+  "maxHp": 9,
+  "hpFormula": "2d8",
+  "ac": 13,
+  "str": 13,
+  "dex": 11,
+  "con": 11,
+  "int": 8,
+  "wis": 11,
+  "cha": 8,
+  "proficiencyBonus": 2,
+  "savingThrows": {
+    "str": 1,
+    "dex": 0,
+    "con": 0,
+    "int": -1,
+    "wis": 0,
+    "cha": -1
+  },
+  "initiativeBonus": 0,
+  "stealthBonus": 0,
+  "passivePerception": 10,
+  "speed": 30,
+  "attacks": [
+    {
+      "name": "Spear",
+      "attackType": "both",
+      "bonus": 3,
+      "reach": 5,
+      "rangeNormal": 20,
+      "rangeLong": 60,
+      "damageDice": 1,
+      "damageSides": 6,
+      "damageBonus": 1,
+      "damageType": "piercing"
+    }
+  ],
+  "xp": 25,
+  "cr": "1/8",
+  "color": 8421504,
+  "traits": ["pack_tactics"],
+  "tokenAsset": "/tokens/monster_warrior_infantry.svg"
+}

@@ -6,6 +6,8 @@ import { SavedMapDef } from "../data/maps";
 import { gameClient } from "../net/GameClient";
 import type { GameState, EquipmentSlots, EncounterRecord, StorylogEntry } from "../net/types";
 import { StorylogOverlay } from "../ui/StorylogOverlay";
+import { tokenTextureKey } from "./BootScene";
+import { tokenAssetForPlayer } from "../data/tokens";
 import {
   TILE_SIZE,
   GRID_COLS,
@@ -63,6 +65,8 @@ export class EncounterSetupScene extends Phaser.Scene {
   private saveDisplays: Map<string, SaveDisplay> = new Map();
   private beginBg!: Phaser.GameObjects.Rectangle;
   private beginLabel!: Phaser.GameObjects.Text;
+  private promoteBg!: Phaser.GameObjects.Rectangle;
+  private promoteLabel!: Phaser.GameObjects.Text;
 
   private characters: PlayerDef[] = [];
   private encounters: EncounterDef[] = [];
@@ -148,8 +152,11 @@ export class EncounterSetupScene extends Phaser.Scene {
     });
 
     this.add.rectangle(W / 2, H - 58, W - 64, 1, 0x334455);
+    this.buildBackButton(120, H - 36);
     this.buildBeginButton(W / 2, H - 36);
+    this.buildPromoteButton(W - 200, H - 36);
     this.refreshBeginButton();
+    this.refreshPromoteButton();
 
     const lastId = localStorage.getItem(LAST_CHAR_KEY);
     if (lastId) {
@@ -238,7 +245,7 @@ export class EncounterSetupScene extends Phaser.Scene {
 
     const top = cy - cardH / 2;
 
-    this.add.rectangle(cx, top + 50, 48, 48, def.color);
+    this.buildCharAvatar(def, cx, top + 50, 48);
     this.add.text(cx, top + 90, def.name, { fontSize: "15px", color: "#ffffff", fontFamily: "monospace", resolution: DPR }).setOrigin(0.5, 0);
     this.add.text(cx, top + 114, `${def.speciesName}  ${def.className} ${def.level}`, { fontSize: "11px", color: "#8899aa", fontFamily: "monospace", resolution: DPR }).setOrigin(0.5, 0);
     this.add.rectangle(cx, top + 140, cardW - 32, 1, 0x334455);
@@ -334,6 +341,17 @@ export class EncounterSetupScene extends Phaser.Scene {
     this.refreshBeginButton();
   }
 
+  /** Render the character's SVG token as a card avatar; falls back to a
+   *  coloured square if the SVG texture isn't loaded yet (e.g. asset missing). */
+  private buildCharAvatar(def: PlayerDef, cx: number, cy: number, size: number): void {
+    const key = tokenTextureKey(tokenAssetForPlayer(def));
+    if (this.textures.exists(key)) {
+      this.add.image(cx, cy, key).setDisplaySize(size, size);
+    } else {
+      this.add.rectangle(cx, cy, size, size, def.color);
+    }
+  }
+
   private buildEncounterCard(def: EncounterDef, cx: number, cy: number): void {
     const top = cy - ENC_CARD_H / 2;
     const left = cx - ENC_CARD_W / 2;
@@ -360,6 +378,7 @@ export class EncounterSetupScene extends Phaser.Scene {
       b.setStrokeStyle(1, id === def.id ? 0xe2b96f : 0x334455);
     this.selectedEncounter = def;
     this.refreshBeginButton();
+    this.refreshPromoteButton();
   }
 
   private isReady(): boolean {
@@ -370,6 +389,14 @@ export class EncounterSetupScene extends Phaser.Scene {
     const ready = this.isReady();
     this.beginBg.setAlpha(ready ? 1 : 0.4);
     this.beginLabel.setAlpha(ready ? 1 : 0.4);
+  }
+
+  private buildBackButton(cx: number, cy: number): void {
+    const bg = this.add.rectangle(cx, cy, 160, 36, 0x222233).setStrokeStyle(1, 0x556677).setInteractive({ useHandCursor: true });
+    this.add.text(cx, cy, "BACK", {
+      fontSize: "13px", color: "#aabbcc", fontFamily: "monospace", resolution: DPR,
+    }).setOrigin(0.5);
+    bg.on("pointerdown", () => this.scene.start("MainMenuScene"));
   }
 
   private buildBeginButton(cx: number, cy: number): void {
@@ -390,7 +417,6 @@ export class EncounterSetupScene extends Phaser.Scene {
       const save = this.selectedSave;
 
       gameClient.createSession({
-        encounterTypes: enc.encounterTypes as import("../net/types").EncounterType[],
         mapType: "saved",
         playerDefId: player.id,
         // Always send the encounter's mapId, even if the client's registry hasn't
@@ -424,5 +450,43 @@ export class EncounterSetupScene extends Phaser.Scene {
         this.beginBg.setInteractive({ useHandCursor: true });
       });
     });
+  }
+
+  /**
+   * SAVE AS PREMADE — only enabled when the currently selected encounter
+   * carries the `generated` flag. Strips the `gen_*` namespace from the
+   * encounter (and, when reachable, its map) so the encounter is no longer
+   * subject to the "Delete all generated maps" dev cleanup.
+   */
+  private buildPromoteButton(cx: number, cy: number): void {
+    this.promoteBg = this.add.rectangle(cx, cy, 200, 36, 0x2a2a1a).setStrokeStyle(1, 0x556677).setAlpha(0.4);
+    this.promoteLabel = this.add.text(cx, cy, "SAVE AS PREMADE", { fontSize: "13px", color: "#e2b96f", fontFamily: "monospace", resolution: DPR }).setOrigin(0.5).setAlpha(0.4);
+    this.promoteBg.setInteractive({ useHandCursor: true });
+    this.promoteBg.on("pointerdown", async () => {
+      const enc = this.selectedEncounter as (EncounterDef & { generated?: boolean }) | null;
+      if (!enc?.generated) return;
+      this.promoteBg.disableInteractive();
+      this.promoteLabel.setText("SAVING…");
+      try {
+        const { encounterId } = await gameClient.promoteEncounter(enc.id);
+        // Re-fetch the encounters list so the renamed encounter replaces the
+        // old `gen_*` card. Restart the scene so any cached references to
+        // the old id are dropped cleanly.
+        const fresh = await gameClient.listEncounters();
+        this.registry.set("encounters", fresh);
+        this.scene.restart({ presetEncounterId: encounterId });
+      } catch (err) {
+        console.error("[promote encounter] failed", err);
+        this.promoteLabel.setText("SAVE AS PREMADE");
+        this.promoteBg.setInteractive({ useHandCursor: true });
+      }
+    });
+  }
+
+  private refreshPromoteButton(): void {
+    const enc = this.selectedEncounter as (EncounterDef & { generated?: boolean }) | null;
+    const enabled = !!enc?.generated;
+    this.promoteBg.setAlpha(enabled ? 1 : 0.4);
+    this.promoteLabel.setAlpha(enabled ? 1 : 0.4);
   }
 }

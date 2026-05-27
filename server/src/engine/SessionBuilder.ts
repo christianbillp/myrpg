@@ -1,14 +1,13 @@
 import {
   GameState, GameMap, GameDefs, EquipmentSlots, NpcState, MapItemState,
   SecretState, QuestState, NpcPersona, CreateSessionRequest, EncounterTileProperty,
-  TileLegend,
+  MapTilesetInfo, LogEntry,
 } from './types.js';
 import type { EncounterContext } from '../encounterService.js';
 import { generateMap } from './MapGenerator.js';
 import { generateRoomsMap } from './RoomsMapGenerator.js';
 import {
-  ZoneMap, parseStartingZones, findPlayerSpawn,
-  spawnEnemies, spawnItems, spawnNpc, spawnSecrets,
+  ZoneMap, parseStartingZones, findPlayerSpawn, populateNpcs,
 } from './SpawnHelpers.js';
 import { stripTileFlipBits } from '../../../shared/tileGid.js';
 
@@ -18,13 +17,14 @@ export type SavedMapRecord = import('./types.js').SavedMapDef;
 
 /**
  * Resolve the passability of a single GID against (1) the encounter's explicit
- * tileProperties, (2) the tileset legend, and (3) a default of `false`
- * (impassable). Encounter overrides win over the legend.
+ * tileProperties, (2) the source tileset's `tiles[].properties[].passable`
+ * carried on `MapTilesetInfo.tilePassability`, and (3) a default of `true`
+ * (Tiled's convention: unmarked tiles are passable). Encounter overrides win.
  */
 function resolveGidPassable(
   rawGid: number,
   byGid: Map<number, EncounterTileProperty>,
-  legend: TileLegend,
+  tilesets: MapTilesetInfo[],
 ): boolean {
   if (rawGid === 0) return true; // empty object-layer cell — no obstacle here.
   // Strip Tiled's flip/rotation bits before looking up — orientation never
@@ -32,29 +32,35 @@ function resolveGidPassable(
   const gid = stripTileFlipBits(rawGid);
   const explicit = byGid.get(gid);
   if (explicit?.passable !== undefined) return explicit.passable;
-  const legendEntry = legend.tiles[String(gid)];
-  if (legendEntry) return legendEntry.passable;
-  return false;
+  // Find the tileset this GID belongs to — the one with the greatest
+  // firstgid that is still ≤ gid. (Tilesets in a map have disjoint GID ranges.)
+  let owner: MapTilesetInfo | undefined;
+  for (const ts of tilesets) {
+    if (ts.firstgid <= gid && (!owner || ts.firstgid > owner.firstgid)) owner = ts;
+  }
+  if (!owner) return true;
+  const local = gid - owner.firstgid;
+  const declared = owner.tilePassability[local];
+  return declared ?? true;
 }
 
 /**
  * Combine a saved map's GID grid(s) with the encounter's per-GID tile
- * properties and the tileset legend to produce the engine's `GameMap` (with
- * passability resolved). A cell is passable iff the ground GID is passable
- * AND any object GID at that cell is also passable.
+ * properties to produce the engine's `GameMap` (with passability resolved).
+ * A cell is passable iff the ground GID is passable AND any object GID at
+ * that cell is also passable.
  */
 function buildGameMapFromSaved(
   saved: SavedMapRecord,
   tileProperties: EncounterTileProperty[] | undefined,
-  legend: TileLegend,
 ): GameMap {
   const byGid = new Map<number, EncounterTileProperty>();
   for (const tp of tileProperties ?? []) byGid.set(tp.gid, tp);
   const passable: boolean[][] = saved.gidGrid.map((row, y) =>
     row.map((groundGid, x) => {
-      if (!resolveGidPassable(groundGid, byGid, legend)) return false;
+      if (!resolveGidPassable(groundGid, byGid, saved.tilesets)) return false;
       const objectGid = saved.objectGidGrid?.[y]?.[x] ?? 0;
-      return resolveGidPassable(objectGid, byGid, legend);
+      return resolveGidPassable(objectGid, byGid, saved.tilesets);
     }),
   );
   return {
@@ -82,7 +88,7 @@ export function buildSessionState(
   if (!playerDef) throw new Error(`Unknown playerDefId: ${req.playerDefId}`);
 
   const map: GameMap = savedMap
-    ? buildGameMapFromSaved(savedMap, req.tileProperties, defs.tileLegend)
+    ? buildGameMapFromSaved(savedMap, req.tileProperties)
     : (req.mapType === 'rooms' ? generateRoomsMap() : generateMap());
 
   const equippedSlots: EquipmentSlots = req.resumeEquippedSlots ?? { ...playerDef.defaultEquipment };
@@ -133,40 +139,29 @@ export function buildSessionState(
     preparedSpellIds: req.resumePreparedSpellIds ?? [...(playerDef.defaultPreparedSpellIds ?? [])],
     concentratingOn: req.resumeConcentratingOn ?? null,
     mageArmor: req.resumeMageArmor ?? false,
+    ongoingEffects: [],
   };
-
-  const isCombat = req.encounterTypes.includes('simple_combat');
 
   const npcs: NpcState[] = [];
   const mapItems: MapItemState[] = [];
   const secrets: SecretState[] = [];
 
-  for (const defId of (req.allyIds ?? req.encounterContext.allyIds ?? [])) {
-    spawnNpc(npcs, map, defs.npcs, defs.monsters, defId, player.tileX, player.tileY, 'ally', allyZone);
-  }
-  // Hand-picked enemies (deterministic compose-encounter flow). These spawn
-  // regardless of encounter type — the player explicitly chose them, so they
-  // belong in the scene whether or not it was tagged "simple_combat".
-  for (const defId of (req.enemyIds ?? [])) {
-    spawnNpc(npcs, map, defs.npcs, defs.monsters, defId, player.tileX, player.tileY, 'enemy', enemyZone);
-  }
-  if (isCombat) {
-    // Legacy random-roster spawn — only fires if no explicit enemyIds were
-    // given. Otherwise the explicit list above already populated the map and
-    // we'd be doubling up with random extras.
-    if ((req.enemyIds ?? []).length === 0) {
-      spawnEnemies(npcs, map, defs.monsters, player.tileX, player.tileY, req.encounterContext.enemyCount ?? 2, enemyZone);
-    }
-    spawnItems(mapItems, map, defs.equipment, player.tileX, player.tileY, npcs);
-  }
-  if (req.encounterTypes.includes('social_interaction')) {
-    for (const defId of (req.npcIds ?? req.encounterContext.npcIds ?? [])) {
-      spawnNpc(npcs, map, defs.npcs, defs.monsters, defId, player.tileX, player.tileY, 'neutral', npcZone);
-    }
-  }
-  if (req.encounterTypes.includes('exploration')) {
-    spawnSecrets(secrets, map, req.encounterContext.secrets ?? [], player.tileX, player.tileY, npcs);
-  }
+  populateNpcs(
+    { npcs, mapItems, secrets },
+    map,
+    { npcs: defs.npcs, monsters: defs.monsters, equipment: defs.equipment },
+    {
+      allyIds: req.allyIds ?? req.encounterContext.allyIds,
+      enemyIds: req.enemyIds ?? req.encounterContext.enemyIds,
+      npcIds:   req.npcIds  ?? req.encounterContext.npcIds,
+      secretDefs: req.encounterContext.secrets,
+      playerX: player.tileX,
+      playerY: player.tileY,
+      allyZone,
+      enemyZone,
+      npcZone,
+    },
+  );
 
   const npcPersonas: NpcPersona[] = npcs
     .filter((n) => n.disposition === 'neutral')
@@ -186,6 +181,24 @@ export function buildSessionState(
     completed: false,
   }));
 
+  // Seed the event log with the encounter header + introduction prose so a
+  // player who runs the encounter without the GM tab has a scrollable record
+  // of what the scene is. Authored intro prose is split into lines so wider
+  // paragraphs render as multiple log entries rather than a single long row.
+  const seedLog: LogEntry[] = [];
+  if (req.encounterTitle) {
+    seedLog.push({ left: `── ${req.encounterTitle} ──`, style: 'header' });
+  }
+  const introText = req.encounterContext.introduction?.trim();
+  if (introText) {
+    for (const line of introText.split(/\n+/).map((s) => s.trim()).filter(Boolean)) {
+      seedLog.push({ left: line, style: 'status' });
+    }
+  }
+  if (req.encounterContext.objective) {
+    seedLog.push({ left: `Objective: ${req.encounterContext.objective}`, style: 'status' });
+  }
+
   const state: GameState = {
     sessionId,
     phase: 'exploring',
@@ -194,9 +207,8 @@ export function buildSessionState(
     npcs,
     mapItems,
     secrets,
-    combatLog: [],
+    eventLog: seedLog,
     logScrollOffset: 0,
-    encounterTypes: req.encounterTypes,
     mapName: req.encounterContext.mapName ?? 'Unknown',
     encounterTitle: req.encounterTitle ?? '',
     objective: req.encounterContext.objective ?? '',
@@ -212,11 +224,12 @@ export function buildSessionState(
       canHide: false, usableFeatureIds: [], canDash: false,
       canDodge: false, canDisengage: false, canShortRest: false,
       castableSpellIds: [],
+      canDetach: false,
     },
     pendingReaction: null,
     triggers: req.triggers ?? [],
     firedTriggerIds: [],
-    pendingAidmEvents: [],
+    pendingAigmEvents: [],
     worldFlags: req.adventureSeed?.seedWorldFlags ?? {},
     narrationLastUsed: {},
     factionStandings: req.adventureSeed?.seedFactionStandings ?? {},
@@ -231,6 +244,7 @@ export function buildSessionState(
       priorChapterSummaries: req.adventureSeed.priorChapterSummaries,
     } : null,
     chapterComplete: false,
+    environment: req.encounterContext.environment ?? {},
   };
 
   return state;

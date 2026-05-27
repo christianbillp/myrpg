@@ -2,7 +2,7 @@ import type { WebSocket } from '@fastify/websocket';
 import { GameEngine } from './engine/GameEngine.js';
 import type { ServerWSMessage, GameEvent, GameState } from './engine/types.js';
 
-export interface AidmMessage { role: 'user' | 'assistant'; content: string; }
+export interface AigmMessage { role: 'user' | 'assistant'; content: string; }
 
 export interface EncounterLogLine {
   type: 'combat' | 'dm_player' | 'dm_reply';
@@ -20,11 +20,11 @@ interface AdventureMeta {
 interface Session {
   engine: GameEngine;
   ws: WebSocket | null;
-  aidmHistory: AidmMessage[];
-  aidmArchive: AidmMessage[];   // full history (pre-summarization); for the memory tool
+  aigmHistory: AigmMessage[];
+  aigmArchive: AigmMessage[];   // full history (pre-summarization); for the memory tool
   adventureLines: EncounterLogLine[];
   adventureMeta: AdventureMeta;
-  aidmBusy: boolean;             // simple mutex flag
+  aigmBusy: boolean;             // simple mutex flag
 }
 
 const sessions = new Map<string, Session>();
@@ -34,8 +34,8 @@ export function createSession(sessionId: string, engine: GameEngine): void {
   sessions.set(sessionId, {
     engine,
     ws: null,
-    aidmHistory: [],
-    aidmArchive: [],
+    aigmHistory: [],
+    aigmArchive: [],
     adventureLines: [],
     adventureMeta: {
       timestamp: new Date().toISOString(),
@@ -44,28 +44,28 @@ export function createSession(sessionId: string, engine: GameEngine): void {
       xpStart: s.player.xp,
       goldStart: s.player.gold,
     },
-    aidmBusy: false,
+    aigmBusy: false,
   });
 }
 
-export function getAidmArchive(sessionId: string): AidmMessage[] | undefined {
-  return sessions.get(sessionId)?.aidmArchive;
+export function getAigmArchive(sessionId: string): AigmMessage[] | undefined {
+  return sessions.get(sessionId)?.aigmArchive;
 }
 
 /**
- * Acquire the per-session AIDM mutex. Returns true if acquired (caller must
- * call releaseAidmLock when done), false if another request is already running.
+ * Acquire the per-session AIGM mutex. Returns true if acquired (caller must
+ * call releaseAigmLock when done), false if another request is already running.
  */
-export function tryAcquireAidmLock(sessionId: string): boolean {
+export function tryAcquireAigmLock(sessionId: string): boolean {
   const session = sessions.get(sessionId);
-  if (!session || session.aidmBusy) return false;
-  session.aidmBusy = true;
+  if (!session || session.aigmBusy) return false;
+  session.aigmBusy = true;
   return true;
 }
 
-export function releaseAidmLock(sessionId: string): void {
+export function releaseAigmLock(sessionId: string): void {
   const session = sessions.get(sessionId);
-  if (session) session.aidmBusy = false;
+  if (session) session.aigmBusy = false;
 }
 
 export function pushAdventureLines(sessionId: string, lines: EncounterLogLine[]): void {
@@ -79,13 +79,13 @@ export function getAdventureData(sessionId: string): { meta: AdventureMeta; line
   return { meta: session.adventureMeta, lines: session.adventureLines, state: session.engine.getState() };
 }
 
-export function getAidmHistory(sessionId: string): AidmMessage[] | undefined {
-  return sessions.get(sessionId)?.aidmHistory;
+export function getAigmHistory(sessionId: string): AigmMessage[] | undefined {
+  return sessions.get(sessionId)?.aigmHistory;
 }
 
-export function setAidmHistory(sessionId: string, history: AidmMessage[]): void {
+export function setAigmHistory(sessionId: string, history: AigmMessage[]): void {
   const session = sessions.get(sessionId);
-  if (session) session.aidmHistory = history;
+  if (session) session.aigmHistory = history;
 }
 
 export function getSession(sessionId: string): Session | undefined {

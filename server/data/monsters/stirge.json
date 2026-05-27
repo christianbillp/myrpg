@@ -1,0 +1,49 @@
+{
+  "id": "stirge",
+  "name": "Stirge",
+  "type": "Tiny Monstrosity, Unaligned",
+  "maxHp": 5,
+  "hpFormula": "2d4",
+  "ac": 13,
+  "str": 4,
+  "dex": 16,
+  "con": 11,
+  "int": 2,
+  "wis": 8,
+  "cha": 6,
+  "proficiencyBonus": 2,
+  "savingThrows": {
+    "str": -3,
+    "dex": 3,
+    "con": 0,
+    "int": -4,
+    "wis": -1,
+    "cha": -2
+  },
+  "initiativeBonus": 3,
+  "stealthBonus": 3,
+  "passivePerception": 9,
+  "speed": 40,
+  "attacks": [
+    {
+      "name": "Proboscis",
+      "attackType": "melee",
+      "bonus": 5,
+      "reach": 5,
+      "damageDice": 1,
+      "damageSides": 6,
+      "damageBonus": 3,
+      "damageType": "piercing",
+      "onHit": [
+        {
+          "kind": "attach",
+          "dot": { "dice": 2, "sides": 4, "bonus": 0, "damageType": "necrotic" }
+        }
+      ]
+    }
+  ],
+  "xp": 25,
+  "cr": "1/8",
+  "color": 10040268,
+  "tokenAsset": "/tokens/monster_stirge.svg"
+}

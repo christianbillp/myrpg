@@ -13,7 +13,7 @@ import {
 } from './CombatSystem.js';
 import { applyEquipment, computeEquippedSlotLabels } from './EquipmentSystem.js';
 import { chebyshev } from './EnemyAI.js';
-import { buildAIDMTools } from './AIDMTools.js';
+import { buildAIGMTools } from './AIGMTools.js';
 import * as Guard from './ActionGuards.js';
 import type { GameContext } from './GameContext.js';
 import {
@@ -25,7 +25,7 @@ import {
 import {
   doAttack as caDoAttack, throwItem as caThrowItem,
   doHide as caDoHide, doDash as caDoDash, doDodge as caDoDodge,
-  doDisengage as caDoDisengage,
+  doDisengage as caDoDisengage, doDetach as caDoDetach,
   doPlayerOpportunityAttack as caDoPlayerOA,
 } from './CombatActions.js';
 import {
@@ -118,6 +118,7 @@ export class GameEngine {
       bus: this.bus,
       publish: (event) => this.bus.publish(event),
       removeNpc: (id) => this.removeNpcFromEncounter(id),
+      eventSink: null,
     };
   }
 
@@ -136,7 +137,7 @@ export class GameEngine {
   getState(): GameState { this.computeAvailableActions(); return this.state; }
   getMonsterDef(defId: string): MonsterDef | undefined { return this.resolveMonsterDef(defId); }
   getSpellDef(spellId: string) { return this.defs.spells.find((sp) => sp.id === spellId); }
-  getAIDMTools() { return buildAIDMTools(); }
+  getAIGMTools() { return buildAIGMTools(); }
   getItemIds(): string[] { return this.defs.equipment.map((i) => i.id); }
   getMonsterIds(): string[] { return this.defs.monsters.map((m) => m.id); }
 
@@ -151,6 +152,12 @@ export class GameEngine {
     const events: GameEvent[] = [];
     const s = this.state;
     this.computeAvailableActions();
+    // Expose the events buffer to engine subsystems that don't receive it
+    // explicitly (TriggerSystem actions, in particular). Cleared in finally
+    // so AIGM-tool / direct-engine callers don't accidentally accumulate
+    // entity_move events into the wrong outer call.
+    this.ctx.eventSink = events;
+    try {
 
     switch (action.type) {
       case 'move':         exDoMove(this.ctx, action.dx, action.dy, events); break;
@@ -169,6 +176,7 @@ export class GameEngine {
       case 'dash':         caDoDash(this.ctx); break;
       case 'dodge':        caDoDodge(this.ctx); break;
       case 'disengage':    caDoDisengage(this.ctx); break;
+      case 'detach':       caDoDetach(this.ctx); break;
       case 'endTurn':
         if (s.phase === 'player_turn') cfEnterEnemyPhase(this.ctx, events);
         break;
@@ -180,7 +188,7 @@ export class GameEngine {
       case 'unequip':      ivDoUnequip(this.ctx, action.slot); break;
       case 'selectTarget': s.selectedTargetId = action.entityId; break;
       case 'scrollLog': {
-        const maxOffset = Math.max(0, s.combatLog.length - 6);
+        const maxOffset = Math.max(0, s.eventLog.length - 6);
         s.logScrollOffset = Math.max(0, Math.min(maxOffset, s.logScrollOffset + (action.delta > 0 ? -1 : 1)));
         break;
       }
@@ -188,9 +196,12 @@ export class GameEngine {
 
     this.computeAvailableActions();
     return { events, state: this.state };
+    } finally {
+      this.ctx.eventSink = null;
+    }
   }
 
-  // ── AIDM tool handlers ──────────────────────────────────────────────────────
+  // ── AIGM tool handlers ──────────────────────────────────────────────────────
 
   adjustPlayerHp(delta: number): GameEvent[] {
     const s = this.state;
@@ -261,7 +272,7 @@ export class GameEngine {
   }
 
   addLog(entry: LogEntry | string): void {
-    this.state.combatLog.push(typeof entry === 'string' ? { left: entry } : entry);
+    this.state.eventLog.push(typeof entry === 'string' ? { left: entry } : entry);
     this.state.logScrollOffset = 0;
   }
 
@@ -368,7 +379,7 @@ export class GameEngine {
       disposition: 'enemy', factionId: def.id,
       hp: def.maxHp, maxHp: def.maxHp,
       isActive: false,
-      reactionUsed: false, conditions: [], inventoryIds: [],
+      reactionUsed: false, conditions: [], inventoryIds: [], ongoingEffects: [],
     };
     s.npcs.push(npc);
     if (s.phase !== 'exploring') s.turnOrderIds.push(npc.id);
@@ -378,7 +389,7 @@ export class GameEngine {
   endCombat(): GameEvent[] { return cfEndCombat(this.ctx); }
   triggerCombat(): GameEvent[] { return cfTriggerCombat(this.ctx); }
 
-  // ── Faction & rumor surfaces (AIDM-tool wiring) ────────────────────────────
+  // ── Faction & rumor surfaces (AIGM-tool wiring) ────────────────────────────
   getFactionStanding(factionId: string): number {
     return this.state.factionStandings[factionId] ?? 0;
   }
@@ -565,6 +576,12 @@ export class GameEngine {
     dying.inventoryIds = [];
     dying.isActive = false;
     dying.conditions = dying.conditions.filter((c) => c !== 'hidden');
+    // A dead source can't sustain its periodic effects — drop any attach
+    // effects it had on the player or other NPCs.
+    s.player.ongoingEffects = s.player.ongoingEffects.filter((oe) => oe.sourceNpcId !== id);
+    for (const n of s.npcs) {
+      n.ongoingEffects = n.ongoingEffects.filter((oe) => oe.sourceNpcId !== id);
+    }
     // NOTE: do NOT remove from turnOrderIds. The advance loop in CombatFlow
     // skips any combatant whose hp <= 0; mutating the array mid-iteration
     // would shift indices and could cause a still-alive combatant to skip
@@ -627,6 +644,7 @@ export class GameEngine {
       canDisengage: Guard.canDisengage(this.ctx),
       canShortRest: Guard.canShortRest(this.ctx),
       castableSpellIds: Guard.castableSpellIds(this.ctx),
+      canDetach: Guard.canDetach(this.ctx),
     };
   }
 
@@ -661,18 +679,6 @@ export class GameEngine {
   ): GameEngine {
     const state = buildSessionState(sessionId, req, defs, savedMap);
     // The constructor clones playerDef internally to avoid mutating shared defs.
-    const engine = new GameEngine(state, defs);
-
-    // Auto-start combat when the encounter spawned any hostile creatures.
-    // The deterministic compose-encounter flow paints enemy zones + picks
-    // enemy creatures explicitly, so the player expects the encounter to
-    // begin in combat — without this, the phase stayed "exploring" and the
-    // turn-order UI never appeared even though enemies were on the map.
-    // Adventures that want a stealth / ambush opening should leave
-    // `enemyIds` empty and surface hostiles via triggers instead.
-    if (state.npcs.some((n) => n.disposition === 'enemy' && n.hp > 0)) {
-      engine.triggerCombat();
-    }
-    return engine;
+    return new GameEngine(state, defs);
   }
 }

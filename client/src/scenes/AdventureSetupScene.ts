@@ -4,6 +4,8 @@ import { ItemDef } from "../data/equipment";
 import { gameClient } from "../net/GameClient";
 import type { GameState, AdventureDef, AdventureSave, EquipmentSlots, EncounterRecord, StorylogEntry } from "../net/types";
 import { StorylogOverlay } from "../ui/StorylogOverlay";
+import { tokenTextureKey } from "./BootScene";
+import { tokenAssetForPlayer } from "../data/tokens";
 import {
   TILE_SIZE,
   GRID_COLS,
@@ -161,7 +163,7 @@ export class AdventureSetupScene extends Phaser.Scene {
 
     const top = cy - cardH / 2;
 
-    this.add.rectangle(cx, top + 50, 48, 48, def.color);
+    this.buildCharAvatar(def, cx, top + 50, 48);
     this.add.text(cx, top + 90, def.name, { fontSize: "15px", color: "#ffffff", fontFamily: "monospace", resolution: DPR }).setOrigin(0.5, 0);
     this.add.text(cx, top + 114, `${def.speciesName}  ${def.className} ${def.level}`, { fontSize: "11px", color: "#8899aa", fontFamily: "monospace", resolution: DPR }).setOrigin(0.5, 0);
     this.add.rectangle(cx, top + 140, cardW - 32, 1, 0x334455);
@@ -274,6 +276,18 @@ export class AdventureSetupScene extends Phaser.Scene {
     const armor  = save.equippedSlots?.armorId  ? byId[save.equippedSlots.armorId]?.name  : null;
     const shield = save.equippedSlots?.shieldId ? byId[save.equippedSlots.shieldId]?.name : null;
     return [weapon, armor, shield].filter(Boolean).join("  ·  ") || "—";
+  }
+
+  /** Render the character's SVG token as a card avatar; falls back to a
+   *  coloured square if the SVG texture isn't loaded yet. Mirror of the
+   *  helper on EncounterSetupScene. */
+  private buildCharAvatar(def: PlayerDef, cx: number, cy: number, size: number): void {
+    const key = tokenTextureKey(tokenAssetForPlayer(def));
+    if (this.textures.exists(key)) {
+      this.add.image(cx, cy, key).setDisplaySize(size, size);
+    } else {
+      this.add.rectangle(cx, cy, size, size, def.color);
+    }
   }
 
   private buildAdventureCard(adv: AdventureDef, cx: number, cy: number): void {

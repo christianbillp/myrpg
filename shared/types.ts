@@ -87,12 +87,41 @@ export interface SpeciesDef {
 
 // ── Entity definitions (characters, monsters, NPCs) ──────────────────────────
 
+/**
+ * A secondary damage component riding along with an attack. Used for SRD
+ * attacks like the Cultist's *Ritual Sickle* (1d4+1 slashing **+ 1 necrotic**)
+ * or Cockatrice's beak (piercing + petrification). Each component rolls its
+ * own dice, applies its own damage type through the resistance / vulnerability
+ * / immunity lookup, and contributes a distinct log line. On a crit the dice
+ * double (matching SRD), the flat bonus does not.
+ */
+export interface BonusDamage {
+  dice: number;
+  sides: number;
+  bonus: number;
+  damageType: string;
+}
+
+/**
+ * The result of rolling a single bonus-damage rider on an attack — the value
+ * resolvers thread through to callers so each rider gets applied with its own
+ * per-type resistance lookup and log line.
+ */
+export interface RolledBonusDamage {
+  damage: number;
+  damageType: string;
+  /** Log-table right-hand side, e.g. `1d4[3]+0`. */
+  rollStr: string;
+}
+
 export interface PlayerAttack {
   name: string;
   statKey: 'str' | 'dex';
   damageDice: number;
   damageSides: number;
   damageType: string;
+  /** Optional secondary damage riders applied alongside the primary roll. */
+  bonusDamage?: BonusDamage[];
   savageAttacker: boolean;
   graze: boolean;
   vex: boolean;
@@ -157,6 +186,10 @@ export interface PlayerDef {
   defaultSpellSlots?: number[];
   mainAttack: PlayerAttack;
   description?: string;
+  /** Path to the SVG used as this character's token sprite. Required — every
+   *  character JSON must declare its token explicitly (no naming-convention
+   *  fallback). */
+  tokenAsset: string;
 }
 
 export interface MonsterAttack {
@@ -170,6 +203,39 @@ export interface MonsterAttack {
   damageSides: number;
   damageBonus: number;
   damageType: string;
+  /** Optional secondary damage riders — see `BonusDamage`. */
+  bonusDamage?: BonusDamage[];
+  /** Optional on-hit effects applied after damage lands (attach, grapple, etc.). */
+  onHit?: AttackOnHitEffect[];
+}
+
+/**
+ * An effect triggered when this attack lands a hit. The `kind` discriminates:
+ *   - `attach` — the attacker latches onto the target. Each time the
+ *     attacker's turn begins, the target takes the `dot` damage. While
+ *     attached, the attacker skips its normal attack action. The effect ends
+ *     when the target (or an adjacent ally) takes the Detach action.
+ */
+export type AttackOnHitEffect =
+  | { kind: 'attach'; dot: PeriodicDamage };
+
+export interface PeriodicDamage {
+  dice: number;
+  sides: number;
+  bonus: number;
+  damageType: string;
+}
+
+/**
+ * A periodic damage effect currently active on a creature. The `sourceNpcId`
+ * field names the NPC that authored the effect — periodic damage fires at the
+ * start of that NPC's turn (or when the source is removed from the encounter).
+ */
+export interface OngoingEffect {
+  id: string;
+  kind: 'attach';
+  sourceNpcId: string;
+  dot: PeriodicDamage;
 }
 
 export interface MonsterDef {
@@ -196,7 +262,37 @@ export interface MonsterDef {
   conditionImmunities?: string[];
   nimbleEscape?: boolean;
   combatSpawn?: boolean;
+  /** Trait identifiers that adjust how this monster's attacks resolve. Each
+   *  trait is interpreted by the engine (see CombatSystem.collectAttackModifiers).
+   *  Supported today:
+   *    - 'pack_tactics' — Advantage on an attack if at least one of the
+   *      attacker's allies is within 5 ft of the target and not incapacitated.
+   *    - 'sunlight_sensitivity' — Disadvantage on attacks while in direct
+   *      sunlight (governed by EncounterDef.environment.sunlit).
+   */
+  traits?: MonsterTrait[];
+  /** Authored defensive reactions the creature may trigger when targeted.
+   *  Resolved automatically by the engine — there is no NPC reaction prompt.
+   *  See CombatActions.tryNpcDefensiveReaction.
+   */
+  reactions?: MonsterReaction[];
+  /** Path to the SVG used as this monster's token sprite. Required — every
+   *  monster JSON must declare its token explicitly (no naming-convention
+   *  fallback). */
+  tokenAsset: string;
 }
+
+export type MonsterTrait = 'pack_tactics' | 'sunlight_sensitivity';
+
+/**
+ * A defensive reaction the engine may trigger on behalf of an NPC. The
+ * `kind` discriminates the effect:
+ *   - `parry` — when hit by a melee attack roll while not incapacitated, the
+ *     NPC adds `acBonus` to its AC against that attack (possibly turning the
+ *     hit into a miss). One reaction per round per SRD.
+ */
+export type MonsterReaction =
+  | { kind: 'parry'; acBonus: number };
 
 export interface NPCDef {
   id: string;
@@ -204,6 +300,9 @@ export interface NPCDef {
   monsterClass: string;
   color: number;
   persona?: string;
+  /** Optional per-NPC SVG override. When unset, the NPC falls back to the
+   *  token of its `monsterClass`. */
+  tokenAsset?: string;
 }
 
 // ── Equipment item types ─────────────────────────────────────────────────────
@@ -376,7 +475,6 @@ export interface SpellDef {
 
 // ── Encounter / quest types ──────────────────────────────────────────────────
 
-export type EncounterType = 'simple_combat' | 'social_interaction' | 'exploration';
 export type QuestGoalType = 'kill' | 'collect' | 'explore' | 'talk';
 
 export type SecretReward =
@@ -410,6 +508,13 @@ export interface MapTilesetInfo {
   spacing: number;
   margin: number;
   columns: number;
+  /**
+   * Per-tile passability extracted from the source .tsj's `tiles[].properties`.
+   * Keyed by tileset-local tile id (i.e. `gid - firstgid`). Tiles absent from
+   * this map default to passable, matching Tiled's convention that unmarked
+   * tiles have no restrictions.
+   */
+  tilePassability: Record<number, boolean>;
 }
 
 // Map definition as served by the API. Maps are pure geometry now:
@@ -444,8 +549,9 @@ export interface SavedMapDef {
  *
  * Lookup priority for a tile's `passable` flag:
  *   1. Encounter's tileProperties (this type) — explicit override.
- *   2. The matching entry in the tileset legend (`TileLegend`).
- *   3. Default `false` (impassable).
+ *   2. The source tileset's per-tile passability declared in its .tsj
+ *      and carried on `MapTilesetInfo.tilePassability`.
+ *   3. Default `true` (Tiled convention: unmarked tiles have no restrictions).
  */
 export interface EncounterTileProperty {
   gid: number;
@@ -504,7 +610,6 @@ export interface EncounterDef {
   id: string;
   encounterTitle: string;
   description: string;
-  encounterTypes: EncounterType[];
   mapId: string;
   npcIds?: string[];
   allyIds?: string[];
@@ -539,8 +644,8 @@ export interface EncounterDef {
   /**
    * Player-facing one-line objective shown at the top of the Quests panel
    * ("OBJECTIVE: Defeat the bandits", "OBJECTIVE: Investigate the dungeon").
-   * Optional — when omitted, a default is derived from `encounterTypes` by
-   * `buildEncounter` in `encounterService.ts`.
+   * Optional — when omitted, a generic "Complete the encounter" default is
+   * supplied by `buildEncounter` in `encounterService.ts`.
    */
   objective?: string;
   /**
@@ -550,6 +655,17 @@ export interface EncounterDef {
    * scenarios from one-offs.
    */
   generated?: boolean;
+  /**
+   * Environmental flags consulted by combat resolvers. Today only `sunlit`
+   * is used — it triggers Sunlight Sensitivity (Disadvantage on attacks) for
+   * creatures whose `traits` include `sunlight_sensitivity`.
+   */
+  environment?: EncounterEnvironment;
+}
+
+export interface EncounterEnvironment {
+  /** True if the encounter takes place in direct sunlight. */
+  sunlit?: boolean;
 }
 
 // ── Engine event bus ─────────────────────────────────────────────────────────
@@ -623,8 +739,8 @@ export type TriggerAction =
   | { type: 'spawn_enemy_near_player'; monsterId: string; minDist?: number; maxDist?: number }
   | { type: 'spawn_enemy_at'; monsterId: string; x: number; y: number }
   | { type: 'show_log'; message: string }
-  | { type: 'send_aidm_message'; message: string }
-  /** Picks a canned variant from `server/data/narration/{narrationId}.json` and pushes it into the Combat Log. The picker avoids repeating the last-used variant per id. */
+  | { type: 'send_aigm_message'; message: string }
+  /** Picks a canned variant from `server/data/narration/{narrationId}.json` and pushes it into the Event Log. The picker avoids repeating the last-used variant per id. */
   | { type: 'narrate'; narrationId: string }
   | { type: 'set_flag'; name: string; value: WorldFlagValue }
   /** Applies a 5e condition to the player. Future scope: arbitrary target selectors. */
@@ -636,7 +752,9 @@ export type TriggerAction =
   /** Promotes (or demotes) every NPC currently in the encounter whose `defId` matches. Faction-mates of a newly hostile NPC are auto-aggroed via the existing `aggroFaction` path. Use together with `trigger_combat` to turn a peaceful scene hostile when the player crosses a threshold. */
   | { type: 'set_disposition_by_def_id'; defId: string; disposition: 'ally' | 'neutral' | 'enemy' }
   /** Kicks off combat when the engine is in the exploring phase and at least one enemy is alive. Idempotent — no-ops if either precondition fails. */
-  | { type: 'trigger_combat' };
+  | { type: 'trigger_combat' }
+  /** Roll a player ability check server-side (d20 + the player's `skills[<skill>]` bonus) against `dc`. Fires `onPass` actions if the total ≥ DC, otherwise `onFail`. Either branch may be empty — an empty `onFail` is the standard way to write "perception check that silently does nothing on a miss". The roll itself is NOT logged so failed perception/stealth checks don't leak information about hidden content. */
+  | { type: 'player_ability_check'; skill: string; dc: number; onPass: TriggerAction[]; onFail: TriggerAction[] };
 
 export interface EncounterTrigger {
   /** Unique within the encounter; used as the dedupe key in `firedTriggerIds`. */
@@ -656,7 +774,7 @@ export interface EncounterTrigger {
 // One JSON file per narratable moment in server/data/narration/. The
 // `narrate(narrationId)` trigger action picks a variant — avoiding the
 // last-used index when more than one exists — so ordinary deterministic
-// prose feels different on each play without invoking the generative DM.
+// prose feels different on each play without invoking the generative GM.
 
 export interface NarrationDef {
   id: string;
@@ -669,26 +787,26 @@ export interface NarrationDef {
 //
 // Factions are referenced by string id on `NpcState.factionId` and tracked
 // as numeric standings on the player. Authors can read standings via the
-// `faction_standing` guard; the AIDM adjusts them via `adjust_faction_standing`.
+// `faction_standing` guard; the AIGM adjusts them via `adjust_faction_standing`.
 // Rumors are timestamped world events recorded into a global memory log so
-// the DM and triggers can reference them later ("the bandit captain heard
+// the GM and triggers can reference them later ("the bandit captain heard
 // what you did to her brothers").
 
 export interface Rumor {
   /** Stable id — used as the dedupe key when authoring triggers off `rumor_propagated`. */
   id: string;
-  /** Short human-readable text shown to the DM in CURRENT STATE. */
+  /** Short human-readable text shown to the GM in CURRENT STATE. */
   text: string;
-  /** 1–10 importance score. Determines whether the DM should reference it in narration. */
+  /** 1–10 importance score. Determines whether the GM should reference it in narration. */
   salience: number;
-  /** Server-relative timestamp (Date.now() at creation). Lets the DM order references chronologically. */
+  /** Server-relative timestamp (Date.now() at creation). Lets the GM order references chronologically. */
   recordedAt: number;
 }
 
 // ── Adventures ───────────────────────────────────────────────────────────────
 //
 // An adventure is a string of encounters with overarching narrative and
-// cross-chapter state (world flags, faction standings, rumors, DM-summary
+// cross-chapter state (world flags, faction standings, rumors, GM-summary
 // memory). Each chapter references an existing `EncounterDef`; chapters are
 // linear by default and an optional `unlockedBy` guard lets later chapters
 // gate on world flags for soft branching. Authored in
@@ -742,7 +860,7 @@ export interface AdventureSave {
   factionStandings: Record<string, number>;
   /** Cross-chapter rumors. Seeds `GameState.rumors`. */
   rumors: Rumor[];
-  /** Short DM-authored summaries of completed chapters, surfaced to the AIDM in later chapters under PRIOR CHAPTERS. */
+  /** Short GM-authored summaries of completed chapters, surfaced to the AIGM in later chapters under PRIOR CHAPTERS. */
   priorChapterSummaries: Array<{ chapterId: string; chapterTitle: string; summary: string }>;
 }
 
@@ -804,6 +922,8 @@ export interface PlayerState {
   concentratingOn: string | null;
   /** Flag set by Mage Armor — `applyEquipment`-equivalent uses base AC 13 + DEX while no armor is worn. */
   mageArmor: boolean;
+  /** Currently active periodic effects (DoTs, attach bites, …). Each fires at the start of its `sourceNpcId`'s turn — see OngoingEffectsSystem. */
+  ongoingEffects: OngoingEffect[];
 }
 
 export interface AvailableActions {
@@ -818,6 +938,10 @@ export interface AvailableActions {
   canShortRest: boolean;
   /** Subset of `preparedSpellIds` + known cantrips that the player can cast *right now* given action economy and slot pool. Empty when the player isn't a caster or no spell is castable. */
   castableSpellIds: string[];
+  /** True when the player has at least one attached creature they could
+   *  Detach as an action (consumes the action and removes the attach effects
+   *  from that source). */
+  canDetach: boolean;
 }
 
 // Unified NPC state — covers neutral social NPCs, allied combatants, and enemies.
@@ -842,6 +966,8 @@ export interface NpcState {
   // Initiative roll total for the current combat (d20 + initiativeBonus, with
   // optional Disadvantage if Surprised). Cleared when combat ends.
   initiativeRoll?: number;
+  /** Currently active periodic effects (DoTs, attach bites, …). See OngoingEffectsSystem. */
+  ongoingEffects: OngoingEffect[];
 }
 
 export interface MapItemState {
@@ -890,9 +1016,8 @@ export interface GameState {
   npcs: NpcState[];
   mapItems: MapItemState[];
   secrets: SecretState[];
-  combatLog: LogEntry[];
+  eventLog: LogEntry[];
   logScrollOffset: number;
-  encounterTypes: EncounterType[];
   mapName: string;
   encounterTitle: string;
   /** Player-facing one-line goal for this encounter, shown atop the Quests panel. */
@@ -911,20 +1036,22 @@ export interface GameState {
   triggers: EncounterTrigger[];
   /** Ids of triggers that have already fired. Persisted in `world.json` so `once` semantics survive save/load. */
   firedTriggerIds: string[];
-  /** Scripted-event lines queued by `send_aidm_message` actions. Surfaced to the next AIDM turn under the SCRIPTED EVENTS block and cleared once consumed. */
-  pendingAidmEvents: string[];
+  /** Scripted-event lines queued by `send_aigm_message` actions. Surfaced to the next AIGM turn under the SCRIPTED EVENTS block and cleared once consumed. */
+  pendingAigmEvents: string[];
   /** Authored world flags keyed by name. Written by `set_flag` trigger actions, read by `flag_set` / `flag_unset` / `flag_equals` guards. Persisted with the world save. */
   worldFlags: Record<string, WorldFlagValue>;
   /** Last variant index picked per `narrationId`. Used by NarrationSystem to avoid back-to-back repeats. */
   narrationLastUsed: Record<string, number>;
-  /** Player's standing with each faction (−100..+100). Read by `faction_standing` guards; written by `adjust_faction_standing` AIDM tool. Unknown faction → 0. */
+  /** Player's standing with each faction (−100..+100). Read by `faction_standing` guards; written by `adjust_faction_standing` AIGM tool. Unknown faction → 0. */
   factionStandings: Record<string, number>;
-  /** World memory log of significant events, recorded by AIDM `create_rumor` tool or trigger `record_rumor` action. Surfaced to the DM in CURRENT STATE. */
+  /** World memory log of significant events, recorded by AIGM `create_rumor` tool or trigger `record_rumor` action. Surfaced to the GM in CURRENT STATE. */
   rumors: Rumor[];
   /** Set when the current session is a chapter of an adventure. Drives the END CHAPTER button and the chapter-advance flow. Null for single-encounter sessions. */
   adventureContext: AdventureSessionContext | null;
   /** Set true when the active chapter has been resolved (combat-ended or `completionFlag` set). Drives the END CHAPTER button. */
   chapterComplete: boolean;
+  /** Environmental flags consulted by combat resolvers — sourced from EncounterDef.environment at session creation. */
+  environment: EncounterEnvironment;
 }
 
 export interface AdventureSessionContext {
@@ -934,7 +1061,7 @@ export interface AdventureSessionContext {
   chapterTitle: string;
   chapterIndex: number;
   totalChapters: number;
-  /** Short summaries of previously completed chapters; surfaced to the AIDM under PRIOR CHAPTERS. Empty for chapter 1. */
+  /** Short summaries of previously completed chapters; surfaced to the AIGM under PRIOR CHAPTERS. Empty for chapter 1. */
   priorChapterSummaries: Array<{ chapterId: string; chapterTitle: string; summary: string }>;
   /** Optional named flag that, when set, marks the chapter complete in addition to the default combat-ended detection. Mirrors `AdventureChapter.completionFlag`. */
   completionFlag?: string;
@@ -965,6 +1092,8 @@ export interface PendingReactionShield {
   attackerName: string;
   /** Damage that lands if the player declines Shield. */
   incomingDamage: number;
+  /** Secondary damage riders that also land if Shield is declined. */
+  incomingBonusComponents: RolledBonusDamage[];
   /** The attack roll total — exposed so the UI can explain what Shield would convert. */
   attackTotal: number;
   /** What the player's AC would become with Shield up. */
@@ -993,6 +1122,7 @@ export type PlayerAction =
   | { type: 'dash' }
   | { type: 'dodge' }
   | { type: 'disengage' }
+  | { type: 'detach' }
   | { type: 'endTurn' }
   | { type: 'rollDeathSave' }
   | { type: 'shortRest' }
@@ -1007,28 +1137,27 @@ export type PlayerAction =
 
 export type ServerWSMessage =
   | { type: 'state_update'; state: GameState; events: GameEvent[] }
-  | { type: 'aidm_reply'; reply: string }
-  // Streaming AIDM protocol — emitted during processAIDMChat:
-  //   aidm_start: a new AIDM turn has begun; the client opens a fresh
+  | { type: 'aigm_reply'; reply: string }
+  // Streaming AIGM protocol — emitted during processAIGMChat:
+  //   aigm_start: a new AIGM turn has begun; the client opens a fresh
   //     assistant bubble (baseline = 0).
-  //   aidm_chunk: text delta appended to the current assistant bubble.
-  //   aidm_checkpoint: the chunks since the last checkpoint are canonical —
+  //   aigm_chunk: text delta appended to the current assistant bubble.
+  //   aigm_checkpoint: the chunks since the last checkpoint are canonical —
   //     the client advances its discard baseline to the current text length.
-  //   aidm_speculative_discard: the chunks since the last checkpoint were
+  //   aigm_speculative_discard: the chunks since the last checkpoint were
   //     written before a roll-requesting tool and must be removed from the
   //     visible bubble. Client rolls back to the discard baseline.
-  //   aidm_done: the final, persisted reply text + roll-result strings.
-  | { type: 'aidm_start' }
-  | { type: 'aidm_chunk'; text: string }
-  | { type: 'aidm_checkpoint' }
-  | { type: 'aidm_speculative_discard' }
-  | { type: 'aidm_done'; reply: string; rollResults: string[] }
+  //   aigm_done: the final, persisted reply text + roll-result strings.
+  | { type: 'aigm_start' }
+  | { type: 'aigm_chunk'; text: string }
+  | { type: 'aigm_checkpoint' }
+  | { type: 'aigm_speculative_discard' }
+  | { type: 'aigm_done'; reply: string; rollResults: string[] }
   | { type: 'error'; message: string };
 
 // ── Session creation ─────────────────────────────────────────────────────────
 
 export interface CreateSessionRequest {
-  encounterTypes: EncounterType[];
   mapType: 'open' | 'rooms' | 'saved';
   playerDefId: string;
   savedMapId?: string;

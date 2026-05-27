@@ -102,8 +102,8 @@ A review checks whether the codebase needs refactoring. It considers three thing
 ## Working with Claude
 
 - Keep changes focused — one feature or fix per session where possible.
-- "Update documentation" means updating `ui.md`, `requirements.md`, `data_structure.md`, and `AIDM.md`.
-- Before creating a commit, ensure `ui.md`, `requirements.md`, `data_structure.md`, and `AIDM.md` are up to date with any changes made.
+- "Update documentation" means updating `ui.md`, `requirements.md`, `data_structure.md`, and `AIGM.md`.
+- Before creating a commit, ensure `ui.md`, `requirements.md`, `data_structure.md`, and `AIGM.md` are up to date with any changes made.
 - Update `requirements.md` as features are completed.
 - When adding a new system (combat, inventory, etc.), discuss the design in a few sentences before implementing.
 - Prefer editing existing files over creating new ones.

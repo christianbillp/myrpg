@@ -1,4 +1,4 @@
 export type {
-  EncounterType, QuestGoalType, QuestDef,
+  QuestGoalType, QuestDef,
   SecretDef, SecretReward, EncounterDef,
 } from '../../../shared/types';

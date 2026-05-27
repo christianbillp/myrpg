@@ -1,12 +1,15 @@
 {
   "id": "miriel",
   "name": "Miriel Duskwhisper",
+  "tokenAsset": "/tokens/player_rogue_woodelf.svg",
   "speciesName": "Wood Elf",
   "speciesId": "elf",
   "speciesLineage": "wood-elf",
   "className": "Rogue",
   "backgroundId": "criminal",
-  "featIds": ["alert"],
+  "featIds": [
+    "alert"
+  ],
   "level": 1,
   "maxHp": 9,
   "str": 12,
@@ -16,7 +19,10 @@
   "wis": 10,
   "cha": 8,
   "proficiencyBonus": 2,
-  "savingThrowProficiencies": ["dex", "int"],
+  "savingThrowProficiencies": [
+    "dex",
+    "int"
+  ],
   "skills": {
     "acrobatics": 5,
     "animalHandling": 0,
@@ -46,7 +52,33 @@
     "weaponId": "shortbow",
     "shieldId": null
   },
-  "defaultInventoryIds": ["dagger", "dagger", "dagger", "dagger", "shortsword", "arrow", "arrow", "arrow", "arrow", "arrow", "arrow", "arrow", "arrow", "arrow", "arrow", "arrow", "arrow", "arrow", "arrow", "arrow", "arrow", "arrow", "arrow", "arrow", "arrow"],
+  "defaultInventoryIds": [
+    "dagger",
+    "dagger",
+    "dagger",
+    "dagger",
+    "shortsword",
+    "arrow",
+    "arrow",
+    "arrow",
+    "arrow",
+    "arrow",
+    "arrow",
+    "arrow",
+    "arrow",
+    "arrow",
+    "arrow",
+    "arrow",
+    "arrow",
+    "arrow",
+    "arrow",
+    "arrow",
+    "arrow",
+    "arrow",
+    "arrow",
+    "arrow",
+    "arrow"
+  ],
   "defaultGold": 24,
   "description": "Raised in a border woodland traded between two lords who never thought to ask the elves. She learned early that information and silence outvalue swords. Wry, observant, privately principled — she'll pick a pocket but never break a promise."
 }

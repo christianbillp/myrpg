@@ -4,7 +4,7 @@ import type { NarrationDef } from './types.js';
 /**
  * NarrationSystem — picks a canned text variant for a `narrationId`, avoiding
  * the variant used last time (when more than one exists). Lets deterministic
- * triggers feel different across plays without invoking the generative DM.
+ * triggers feel different across plays without invoking the generative GM.
  *
  * State: `GameState.narrationLastUsed[narrationId]` stores the last picked
  * index. Persisted in the world save so a save/load doesn't reset the

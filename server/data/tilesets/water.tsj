@@ -1,0 +1,241 @@
+{
+  "name": "water",
+  "type": "tileset",
+  "tiledversion": "1.11.0",
+  "version": "1.10",
+  "image": "water.png",
+  "imagewidth": 512,
+  "imageheight": 512,
+  "tilewidth": 128,
+  "tileheight": 128,
+  "columns": 4,
+  "tilecount": 16,
+  "margin": 0,
+  "spacing": 0,
+  "tiles": [
+    {
+      "id": 0,
+      "type": "water",
+      "properties": [
+        {
+          "name": "passable",
+          "type": "bool",
+          "value": false
+        },
+        {
+          "name": "layer",
+          "type": "string",
+          "value": "ground"
+        }
+      ]
+    },
+    {
+      "id": 1,
+      "type": "grass",
+      "properties": [
+        {
+          "name": "passable",
+          "type": "bool",
+          "value": true
+        },
+        {
+          "name": "layer",
+          "type": "string",
+          "value": "ground"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "water_edge_n",
+      "properties": [
+        {
+          "name": "passable",
+          "type": "bool",
+          "value": false
+        },
+        {
+          "name": "layer",
+          "type": "string",
+          "value": "ground"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "type": "water_edge_e",
+      "properties": [
+        {
+          "name": "passable",
+          "type": "bool",
+          "value": false
+        },
+        {
+          "name": "layer",
+          "type": "string",
+          "value": "ground"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "type": "water_edge_s",
+      "properties": [
+        {
+          "name": "passable",
+          "type": "bool",
+          "value": false
+        },
+        {
+          "name": "layer",
+          "type": "string",
+          "value": "ground"
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "type": "water_edge_w",
+      "properties": [
+        {
+          "name": "passable",
+          "type": "bool",
+          "value": false
+        },
+        {
+          "name": "layer",
+          "type": "string",
+          "value": "ground"
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "type": "water_outer_nw",
+      "properties": [
+        {
+          "name": "passable",
+          "type": "bool",
+          "value": false
+        },
+        {
+          "name": "layer",
+          "type": "string",
+          "value": "ground"
+        }
+      ]
+    },
+    {
+      "id": 9,
+      "type": "water_outer_ne",
+      "properties": [
+        {
+          "name": "passable",
+          "type": "bool",
+          "value": false
+        },
+        {
+          "name": "layer",
+          "type": "string",
+          "value": "ground"
+        }
+      ]
+    },
+    {
+      "id": 10,
+      "type": "water_outer_se",
+      "properties": [
+        {
+          "name": "passable",
+          "type": "bool",
+          "value": false
+        },
+        {
+          "name": "layer",
+          "type": "string",
+          "value": "ground"
+        }
+      ]
+    },
+    {
+      "id": 11,
+      "type": "water_outer_sw",
+      "properties": [
+        {
+          "name": "passable",
+          "type": "bool",
+          "value": false
+        },
+        {
+          "name": "layer",
+          "type": "string",
+          "value": "ground"
+        }
+      ]
+    },
+    {
+      "id": 12,
+      "type": "water_inner_nw",
+      "properties": [
+        {
+          "name": "passable",
+          "type": "bool",
+          "value": false
+        },
+        {
+          "name": "layer",
+          "type": "string",
+          "value": "ground"
+        }
+      ]
+    },
+    {
+      "id": 13,
+      "type": "water_inner_ne",
+      "properties": [
+        {
+          "name": "passable",
+          "type": "bool",
+          "value": false
+        },
+        {
+          "name": "layer",
+          "type": "string",
+          "value": "ground"
+        }
+      ]
+    },
+    {
+      "id": 14,
+      "type": "water_inner_se",
+      "properties": [
+        {
+          "name": "passable",
+          "type": "bool",
+          "value": false
+        },
+        {
+          "name": "layer",
+          "type": "string",
+          "value": "ground"
+        }
+      ]
+    },
+    {
+      "id": 15,
+      "type": "water_inner_sw",
+      "properties": [
+        {
+          "name": "passable",
+          "type": "bool",
+          "value": false
+        },
+        {
+          "name": "layer",
+          "type": "string",
+          "value": "ground"
+        }
+      ]
+    }
+  ]
+}

@@ -1,10 +1,28 @@
 import { d, d20, mod, rollAdvantage, rollDisadvantage } from './Dice.js';
-import { PlayerDef, PlayerAttack, MonsterDef, MonsterAttack, ConsumableDef, LogEntry } from './types.js';
+import { PlayerDef, PlayerAttack, MonsterDef, MonsterAttack, ConsumableDef, LogEntry, BonusDamage, RolledBonusDamage } from './types.js';
+
+export type { RolledBonusDamage };
 
 function rollDice(count: number, sides: number): { total: number; rolls: number[] } {
   const rolls: number[] = [];
   for (let i = 0; i < count; i++) rolls.push(d(sides));
   return { total: rolls.reduce((a, b) => a + b, 0), rolls };
+}
+
+/**
+ * Roll every bonus-damage rider attached to an attack. Crits double the
+ * dice (matching SRD); the flat bonus is never doubled.
+ */
+function rollAllBonusDamage(riders: BonusDamage[] | undefined, isCrit: boolean): RolledBonusDamage[] {
+  if (!riders || riders.length === 0) return [];
+  return riders.map((r) => {
+    const diceCount = isCrit ? r.dice * 2 : r.dice;
+    const { total: diceTot, rolls } = rollDice(diceCount, r.sides);
+    const damage = Math.max(0, diceTot + r.bonus);
+    const diceLabel = isCrit ? `2×${r.dice}d${r.sides}` : `${r.dice}d${r.sides}`;
+    const bonusPart = r.bonus ? (r.bonus >= 0 ? `+${r.bonus}` : `${r.bonus}`) : '';
+    return { damage, damageType: r.damageType, rollStr: `${diceLabel}[${rolls.join(',')}]${bonusPart}` };
+  });
 }
 
 /**
@@ -50,7 +68,7 @@ function resolvePlayerAttack(
   profBonus = player.proficiencyBonus,
   autoCrit = false,
   playerHidden = false,
-): { damage: number; isHit: boolean; logs: LogEntry[]; vexApplied: boolean; slowApplied: boolean } {
+): { damage: number; isHit: boolean; isCrit: boolean; attackTotal: number; naturalRoll: number; logs: LogEntry[]; vexApplied: boolean; slowApplied: boolean; bonusComponents: RolledBonusDamage[] } {
   const statMod = attack.statKey === 'str' ? mod(player.str) : mod(player.dex);
   const attackBonus = statMod + profBonus;
   const logs: LogEntry[] = [];
@@ -133,7 +151,15 @@ function resolvePlayerAttack(
     }
   }
 
-  return { damage, isHit, logs, vexApplied, slowApplied };
+  // Roll secondary damage riders (e.g. weapon-with-fire-enchant, future
+  // monk Open Hand riders). Only fires on a Hit or Crit — misses with `graze`
+  // still skip bonusDamage since they're flavour residue from missing
+  // entirely, not a full "the weapon connected" outcome.
+  const bonusComponents = (isHit || isCrit)
+    ? rollAllBonusDamage(attack.bonusDamage, isCrit)
+    : [];
+
+  return { damage, isHit, isCrit, attackTotal: total, naturalRoll, logs, vexApplied, slowApplied, bonusComponents };
 }
 
 export function playerMeleeAttack(
@@ -143,7 +169,7 @@ export function playerMeleeAttack(
   withDisadvantage = false,
   autoCrit = false,
   playerHidden = false,
-): { damage: number; logs: LogEntry[]; vexApplied: boolean; slowApplied: boolean } {
+): { damage: number; isHit: boolean; isCrit: boolean; attackTotal: number; naturalRoll: number; logs: LogEntry[]; vexApplied: boolean; slowApplied: boolean; bonusComponents: RolledBonusDamage[] } {
   return resolvePlayerAttack(player, player.mainAttack, enemy, withAdvantage, withDisadvantage, player.proficiencyBonus, autoCrit, playerHidden);
 }
 
@@ -156,7 +182,7 @@ export function playerThrowAttack(
   profBonus?: number,
   autoCrit = false,
   playerHidden = false,
-): { damage: number; isHit: boolean; logs: LogEntry[]; vexApplied: boolean; slowApplied: boolean } {
+): { damage: number; isHit: boolean; isCrit: boolean; attackTotal: number; naturalRoll: number; logs: LogEntry[]; vexApplied: boolean; slowApplied: boolean; bonusComponents: RolledBonusDamage[] } {
   return resolvePlayerAttack(player, attack, enemy, withAdvantage, withDisadvantage, profBonus ?? player.proficiencyBonus, autoCrit, playerHidden);
 }
 
@@ -179,7 +205,7 @@ export function enemyAttack(
   playerAc: number,
   withAdvantage: boolean,
   withDisadvantage = false,
-): { damage: number; isHit: boolean; isCrit: boolean; attackTotal: number; naturalRoll: number; logs: LogEntry[] } {
+): { damage: number; isHit: boolean; isCrit: boolean; attackTotal: number; naturalRoll: number; logs: LogEntry[]; bonusComponents: RolledBonusDamage[] } {
   const logs: LogEntry[] = [];
   const effAdv = withAdvantage && !withDisadvantage;
   const effDis = withDisadvantage && !withAdvantage;
@@ -214,7 +240,9 @@ export function enemyAttack(
     logs.push({ left: `Miss with ${attack.name}`, right: atkPart, style: 'miss' });
   }
 
-  return { damage, isHit, isCrit, attackTotal, naturalRoll, logs };
+  const bonusComponents = isHit ? rollAllBonusDamage(attack.bonusDamage, isCrit) : [];
+
+  return { damage, isHit, isCrit, attackTotal, naturalRoll, logs, bonusComponents };
 }
 
 export function tryNimbleEscape(

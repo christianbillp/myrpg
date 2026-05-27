@@ -45,4 +45,13 @@ export interface GameContext {
    * out of `state.npcs`; combat auto-ends if no enemies remain.
    */
   removeNpc(id: string): void;
+
+  /**
+   * The events array for the *current* outer call (typically `processAction`
+   * or an AIGM tool invocation). Synchronous engine subsystems that don't
+   * receive an explicit `events` parameter (notably TriggerSystem actions)
+   * append to this so their `entity_move` / animation events make it back to
+   * the client. Null when no outer call is in flight.
+   */
+  eventSink: GameEvent[] | null;
 }

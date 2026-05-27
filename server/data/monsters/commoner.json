@@ -12,7 +12,14 @@
   "wis": 10,
   "cha": 10,
   "proficiencyBonus": 2,
-  "savingThrows": { "str": 0, "dex": 0, "con": 0, "int": 0, "wis": 0, "cha": 0 },
+  "savingThrows": {
+    "str": 0,
+    "dex": 0,
+    "con": 0,
+    "int": 0,
+    "wis": 0,
+    "cha": 0
+  },
   "initiativeBonus": 0,
   "stealthBonus": 0,
   "passivePerception": 10,
@@ -32,5 +39,6 @@
   "xp": 10,
   "cr": "0",
   "combatSpawn": false,
-  "color": 13935994
+  "color": 13935994,
+  "tokenAsset": "/tokens/monster_commoner.svg"
 }

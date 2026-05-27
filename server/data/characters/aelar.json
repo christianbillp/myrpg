@@ -1,12 +1,15 @@
 {
   "id": "aelar",
   "name": "Aelar Quickflame",
+  "tokenAsset": "/tokens/player_wizard_highelf.svg",
   "speciesName": "High Elf",
   "speciesId": "elf",
   "speciesLineage": "high-elf",
   "className": "Wizard",
   "backgroundId": "sage",
-  "featIds": ["magic-initiate"],
+  "featIds": [
+    "magic-initiate"
+  ],
   "level": 1,
   "maxHp": 8,
   "str": 8,
@@ -16,7 +19,10 @@
   "wis": 12,
   "cha": 10,
   "proficiencyBonus": 2,
-  "savingThrowProficiencies": ["int", "wis"],
+  "savingThrowProficiencies": [
+    "int",
+    "wis"
+  ],
   "skills": {
     "acrobatics": 2,
     "animalHandling": 1,
@@ -46,7 +52,11 @@
     "weaponId": "quarterstaff",
     "shieldId": null
   },
-  "defaultInventoryIds": ["dagger", "dagger", "spellbook"],
+  "defaultInventoryIds": [
+    "dagger",
+    "dagger",
+    "spellbook"
+  ],
   "defaultGold": 13,
   "spellcastingAbility": "int",
   "defaultCantripIds": [
@@ -73,6 +83,8 @@
     "mage-armor",
     "detect-magic"
   ],
-  "defaultSpellSlots": [2],
+  "defaultSpellSlots": [
+    2
+  ],
   "description": "A high elf scholar trained at a prestigious arcane academy, where his impatience with long theoretical debate earned him both rivals and the nickname 'Quickflame'. Curious, sharp-tongued, and easily bored."
 }

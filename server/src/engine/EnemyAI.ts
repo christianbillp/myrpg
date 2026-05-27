@@ -1,5 +1,5 @@
-import { NpcState, MonsterDef, GameEvent, LogEntry } from './types.js';
-import { tryNimbleEscape, enemyAttack } from './CombatSystem.js';
+import { NpcState, MonsterDef, GameEvent, LogEntry, AttackOnHitEffect } from './types.js';
+import { tryNimbleEscape, enemyAttack, type RolledBonusDamage } from './CombatSystem.js';
 import { isIncapacitated, hasAttackDisadvantage, hasAttackAdvantage, hasSpeedZero, proneStandCost } from './ConditionSystem.js';
 
 export interface EnemyTurnConfig {
@@ -18,6 +18,10 @@ export interface EnemyTurnConfig {
   mapCols: number;
   mapRows: number;
   occupiedTiles: [number, number][];
+  /** Trait-derived attack-roll modifier (set by the caller — see CombatFlow.collectTraitModifiers). */
+  traitAdvantage?: boolean;
+  /** Trait-derived attack-roll modifier (set by the caller — see CombatFlow.collectTraitModifiers). */
+  traitDisadvantage?: boolean;
 }
 
 export interface EnemyTurnResult {
@@ -32,6 +36,13 @@ export interface EnemyTurnResult {
   finalTileX: number;
   finalTileY: number;
   hidden: boolean;
+  /** Secondary damage riders rolled from `MonsterAttack.bonusDamage`. The
+   *  caller is responsible for applying each (along with per-type
+   *  resistance) AFTER the primary damage lands. */
+  bonusComponents: RolledBonusDamage[];
+  /** On-hit effects authored on the attack (attach, etc.). The caller applies
+   *  these only when the attack actually lands. */
+  attackOnHit?: AttackOnHitEffect[];
 }
 
 export interface AllyTurnConfig {
@@ -54,6 +65,7 @@ export interface AllyTurnResult {
   events: GameEvent[];
   finalTileX: number;
   finalTileY: number;
+  bonusComponents: RolledBonusDamage[];
 }
 
 export function chebyshev(x1: number, y1: number, x2: number, y2: number): number {
@@ -72,7 +84,7 @@ export function runEnemyTurn(
 
   if (isIncapacitated(enemy.conditions)) {
     logs.push({ left: `${config.displayName} is incapacitated`, style: 'status' });
-    return { damage: 0, isHit: false, isCrit: false, attackTotal: 0, attacked: false, logs, events, finalTileX: tileX, finalTileY: tileY, hidden: enemyHidden };
+    return { damage: 0, isHit: false, isCrit: false, attackTotal: 0, attacked: false, logs, events, finalTileX: tileX, finalTileY: tileY, hidden: enemyHidden, bonusComponents: [] };
   }
 
   const belowHalf = enemy.hp <= enemy.maxHp / 2;
@@ -105,22 +117,22 @@ export function runEnemyTurn(
   const dist = chebyshev(tileX, tileY, config.playerTileX, config.playerTileY);
   if (dist > 1) {
     logs.push({ left: `${config.displayName} is out of reach`, style: 'normal' });
-    return { damage: 0, isHit: false, isCrit: false, attackTotal: 0, attacked: false, logs, events, finalTileX: tileX, finalTileY: tileY, hidden: enemyHidden };
+    return { damage: 0, isHit: false, isCrit: false, attackTotal: 0, attacked: false, logs, events, finalTileX: tileX, finalTileY: tileY, hidden: enemyHidden, bonusComponents: [] };
   }
 
   const meleeAttack = def.attacks.find((a) => a.attackType === 'melee' || a.attackType === 'both');
   if (!meleeAttack) {
     logs.push({ left: `${config.displayName} has no attack`, style: 'normal' });
-    return { damage: 0, isHit: false, isCrit: false, attackTotal: 0, attacked: false, logs, events, finalTileX: tileX, finalTileY: tileY, hidden: enemyHidden };
+    return { damage: 0, isHit: false, isCrit: false, attackTotal: 0, attacked: false, logs, events, finalTileX: tileX, finalTileY: tileY, hidden: enemyHidden, bonusComponents: [] };
   }
 
   const playerUnconscious = config.playerHp <= 0;
-  const withAdvantage = enemyHidden || playerUnconscious || hasAttackAdvantage(enemy.conditions);
-  const withDisadvantage = config.playerHidden || config.playerInvisible || hasAttackDisadvantage(enemy.conditions) || config.playerDodging;
-  const { damage, isHit, isCrit, attackTotal, logs: attackLogs } = enemyAttack(meleeAttack, config.playerAc, withAdvantage, withDisadvantage);
+  const withAdvantage = enemyHidden || playerUnconscious || hasAttackAdvantage(enemy.conditions) || !!config.traitAdvantage;
+  const withDisadvantage = config.playerHidden || config.playerInvisible || hasAttackDisadvantage(enemy.conditions) || config.playerDodging || !!config.traitDisadvantage;
+  const { damage, isHit, isCrit, attackTotal, logs: attackLogs, bonusComponents } = enemyAttack(meleeAttack, config.playerAc, withAdvantage, withDisadvantage);
   logs.push(...attackLogs);
 
-  return { damage, isHit, isCrit, attackTotal, attacked: true, logs, events, finalTileX: tileX, finalTileY: tileY, hidden: enemyHidden };
+  return { damage, isHit, isCrit, attackTotal, attacked: true, logs, events, finalTileX: tileX, finalTileY: tileY, hidden: enemyHidden, bonusComponents, attackOnHit: meleeAttack.onHit };
 }
 
 export function runAllyTurn(
@@ -134,7 +146,7 @@ export function runAllyTurn(
 
   if (config.enemyTargets.length === 0) {
     logs.push({ left: `${config.displayName} stands ready`, style: 'normal' });
-    return { attackedTargetId: null, damage: 0, isHit: false, isCrit: false, attacked: false, logs, events, finalTileX: tileX, finalTileY: tileY };
+    return { attackedTargetId: null, damage: 0, isHit: false, isCrit: false, attacked: false, logs, events, finalTileX: tileX, finalTileY: tileY, bonusComponents: [] };
   }
 
   // Find nearest enemy target by Chebyshev distance
@@ -164,19 +176,19 @@ export function runAllyTurn(
   const dist = chebyshev(tileX, tileY, nearest.tileX, nearest.tileY);
   if (dist > 1) {
     logs.push({ left: `${config.displayName} moves but cannot reach the enemy`, style: 'normal' });
-    return { attackedTargetId: null, damage: 0, isHit: false, isCrit: false, attacked: false, logs, events, finalTileX: tileX, finalTileY: tileY };
+    return { attackedTargetId: null, damage: 0, isHit: false, isCrit: false, attacked: false, logs, events, finalTileX: tileX, finalTileY: tileY, bonusComponents: [] };
   }
 
   const meleeAttack = def.attacks.find((a) => a.attackType === 'melee' || a.attackType === 'both');
   if (!meleeAttack) {
     logs.push({ left: `${config.displayName} has no melee attack`, style: 'normal' });
-    return { attackedTargetId: null, damage: 0, isHit: false, isCrit: false, attacked: false, logs, events, finalTileX: tileX, finalTileY: tileY };
+    return { attackedTargetId: null, damage: 0, isHit: false, isCrit: false, attacked: false, logs, events, finalTileX: tileX, finalTileY: tileY, bonusComponents: [] };
   }
 
-  const { damage, isHit, isCrit, logs: attackLogs } = enemyAttack(meleeAttack, nearest.ac, false, false);
+  const { damage, isHit, isCrit, logs: attackLogs, bonusComponents } = enemyAttack(meleeAttack, nearest.ac, false, false);
   logs.push(...attackLogs);
 
-  return { attackedTargetId: nearest.id, damage, isHit, isCrit, attacked: true, logs, events, finalTileX: tileX, finalTileY: tileY };
+  return { attackedTargetId: nearest.id, damage, isHit, isCrit, attacked: true, logs, events, finalTileX: tileX, finalTileY: tileY, bonusComponents };
 }
 
 export function nextStepToward(

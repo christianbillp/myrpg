@@ -13,8 +13,8 @@ import { fileURLToPath } from "url";
 import { randomUUID } from "crypto";
 import { buildEncounter } from "./encounterService.js";
 import { generateEncounter, generateMap } from "./encounterGenerator.js";
-import { composeMap, type Terrain, type Feature } from "./engine/MapComposer.js";
-import { processAIDMChat, AIDMChatRequest } from "./aidm.js";
+import { registerGenerateRoutes } from "./routes/generate.js";
+import { processAIGMChat, AIGMChatRequest } from "./aigm.js";
 import {
   generateStorylog,
   type EncounterRecord,
@@ -28,23 +28,24 @@ import {
   applySpecies,
 } from "./engine/EquipmentSystem.js";
 import { CreateSessionRequest } from "./engine/types.js";
+import type { MapTilesetInfo } from "../../shared/types.js";
 import {
   createSession,
   getEngine,
-  getAidmHistory,
-  setAidmHistory,
+  getAigmHistory,
+  setAigmHistory,
   registerWebSocket,
   pushStateUpdate,
   push,
   deleteSession,
   pushAdventureLines,
   getAdventureData,
-  tryAcquireAidmLock,
-  releaseAidmLock,
-  getAidmArchive,
+  tryAcquireAigmLock,
+  releaseAigmLock,
+  getAigmArchive,
   findSessionByCharacter,
 } from "./sessions.js";
-import type { AidmMessage } from "./sessions.js";
+import type { AigmMessage } from "./sessions.js";
 import type {
   PlayerAction,
   ServerWSMessage,
@@ -170,7 +171,8 @@ async function loadTileLegends(): Promise<GameDefs["tileLegend"]> {
 // but that grid is built at session-create time by combining the map's
 // GID grid with the encounter's `tileProperties` declarations.
 
-interface TiledTileDef { id: number }
+interface TiledTileProperty { name: string; type: string; value: unknown }
+interface TiledTileDef { id: number; type?: string; properties?: TiledTileProperty[] }
 
 // A tileset can be either inline (with `tiles`, `image` etc.) or an external
 // reference (`source: "../tilesets/xxx.tsj"`) that the loader must resolve.
@@ -205,20 +207,22 @@ interface TiledMapFile {
 // Tileset metadata surfaced to the client so it can preload the image and
 // slice it correctly. The `imageUrl` is a relative URL the server serves
 // from /tilesets/<filename> (see the static route below).
-interface ClientTilesetInfo {
-  firstgid: number;
-  name: string;
-  imageUrl: string;
-  imagewidth: number;
-  imageheight: number;
-  tilewidth: number;
-  tileheight: number;
-  spacing: number;
-  margin: number;
-  columns: number;
+/**
+ * Build a tileset-local `{ tileId → passable }` map from a Tiled .tsj's
+ * `tiles[].properties[]`. Tiles without a `passable` property are omitted —
+ * SessionBuilder treats absence as passable (Tiled's convention).
+ */
+function extractTilePassability(tiles: TiledTileDef[] | undefined): Record<number, boolean> {
+  const out: Record<number, boolean> = {};
+  for (const t of tiles ?? []) {
+    const prop = t.properties?.find((p) => p.name === "passable");
+    if (prop && typeof prop.value === "boolean") out[t.id] = prop.value;
+  }
+  return out;
 }
 
 const TILESETS_DIR = join(DATA_DIR, "tilesets");
+const TOKENS_DIR = join(DATA_DIR, "tokens");
 
 /**
  * Resolve an inline-or-external tileset entry to the merged inline form,
@@ -269,7 +273,7 @@ async function loadTiledMap(file: TiledMapFile) {
   const objectGidGrid = objects ? toGrid(objects.data) : undefined;
 
   // Resolve external tilesets and produce client-facing metadata for each one.
-  const tilesetInfo: ClientTilesetInfo[] = [];
+  const tilesetInfo: MapTilesetInfo[] = [];
   for (const ts of file.tilesets) {
     const inline = await resolveTileset(ts);
     if (!inline.image || !inline.imagewidth || !inline.imageheight || !inline.tilewidth || !inline.tileheight || !inline.columns) {
@@ -287,6 +291,7 @@ async function loadTiledMap(file: TiledMapFile) {
       spacing: inline.spacing ?? 0,
       margin: inline.margin ?? 0,
       columns: inline.columns,
+      tilePassability: extractTilePassability(inline.tiles),
     });
   }
 
@@ -322,318 +327,14 @@ server.get("/features", async () => defs.features);
 server.get("/encounters", async () => readDir(join(DATA_DIR, "encounters")));
 server.get("/adventures", async () => readDir(join(DATA_DIR, "adventures")));
 
-/**
- * Generate a brand-new encounter (map + EncounterDef) via the AI generator
- * and persist both files under `server/data/maps/` and `server/data/encounters/`
- * with `gen_<timestamp>_<slug>` ids. After writing, `loadDefs()` is re-run so
- * the new map is available for the next session-create. Returns the new
- * `encounterId` (and `mapId`) on success; 400 with an error string on
- * validation failure.
- */
-/**
- * Compose a map from deterministic toggles (terrain + features) — the
- * Adjudicator-layer alternative to the AI map generator. Uses the support
- * primitives in `engine/MapComposer.ts` and writes the result to disk under
- * the same `gen_<timestamp>_<slug>` namespace so it shows up in the encounter
- * setup screen alongside AI-generated maps.
- */
-server.post<{
-  Body: { terrain: Terrain; features: Feature[]; width?: number; height?: number; seed?: number };
-}>("/generate/map/composed", async (req, reply) => {
-  const { terrain, features, width = 30, height = 22, seed } = req.body;
-  if (!terrain || (terrain !== 'grassland' && terrain !== 'forest')) {
-    return reply.code(400).send({ error: "terrain must be 'grassland' or 'forest'" });
-  }
-  try {
-    const composed = composeMap({ width, height, terrain, features: features ?? [], seed });
-    const stamp = Date.now();
-    const slug = composed.name.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 32) || 'map';
-    const mapId = `gen_${stamp}_${slug}`;
-    const hasObjects = composed.objectData.some((g) => g !== 0);
-    const layers: unknown[] = [
-      { type: 'tilelayer', name: 'terrain', width: composed.width, height: composed.height, data: composed.terrainData },
-    ];
-    if (hasObjects) {
-      layers.push({ type: 'tilelayer', name: 'objects', width: composed.width, height: composed.height, data: composed.objectData });
-    }
-    const mapJson = {
-      id: mapId,
-      name: composed.name,
-      mapdescription: composed.description,
-      width: composed.width,
-      height: composed.height,
-      tilesets: [{ firstgid: 1, source: '../tilesets/scribble.tsj' }],
-      layers,
-    };
-    await mkdir(join(DATA_DIR, 'maps'), { recursive: true });
-    await writeFile(join(DATA_DIR, 'maps', `${mapId}.json`), JSON.stringify(mapJson, null, 2));
-    await loadDefs();
-    return reply.send({
-      mapId,
-      width: composed.width,
-      height: composed.height,
-      terrainData: composed.terrainData,
-      objectData: composed.objectData,
-      name: composed.name,
-      description: composed.description,
-    });
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    console.error('[generate/map/composed] failed', msg);
-    return reply.code(400).send({ error: msg });
-  }
+// All /generate/* routes live in their own module — see routes/generate.ts.
+registerGenerateRoutes(server, {
+  anthropic,
+  getDefs: () => defs,
+  loadDefs,
+  dataDir: DATA_DIR,
 });
 
-/**
- * Compose a full encounter (map + encounter shell) deterministically — no
- * Claude call. The encounter wrapper is a minimal JSON that references the
- * freshly composed map: the player spawns on a passable tile, no NPCs or
- * monsters are placed, and the `customContext` carries whatever description
- * the player typed so the in-game AIDM can take it from there. Used by the
- * Deterministic tab on `GenerateSetupScene`.
- */
-server.post<{
-  Body: {
-    existingMapId?: string;
-    terrain?: Terrain;
-    features?: Feature[];
-    width?: number;
-    height?: number;
-    seed?: number;
-    encounterTypes?: import("./encounterService.js").EncounterType[];
-    description?: string;
-    /** Flat row-major starting zones array (length = w*h). Values 0..4 per
-     * the standard zone encoding (1 = player, 2 = ally, 4 = enemy). When
-     * omitted the server picks the first passable cell as the lone player
-     * zone (fallback path used by older callers / direct API hits). */
-    startingZonesData?: number[];
-    /** Monster def ids spawned as allies (friendly disposition). */
-    allyIds?: string[];
-    /** Monster / NPC def ids spawned as enemies. */
-    enemyIds?: string[];
-  };
-}>("/generate/encounter/composed", async (req, reply) => {
-  const { existingMapId, terrain, features, width = 30, height = 22, seed, encounterTypes, description, startingZonesData, allyIds, enemyIds } = req.body;
-  const types = (encounterTypes && encounterTypes.length > 0)
-    ? encounterTypes
-    : (['exploration'] as import("./encounterService.js").EncounterType[]);
-  const isCombat = types.includes('simple_combat');
-  try {
-    // Resolve the map: either reuse an existing one (gen_* or hand-authored)
-    // or compose a fresh one with the supplied toggles.
-    let mapId: string;
-    let mapWidth: number;
-    let mapHeight: number;
-    let terrainData: number[];
-    let objectData: number[];
-    let mapName: string;
-    let mapDescription: string;
-    let slug: string;
-
-    if (existingMapId) {
-      const existing = defs.maps.find((m) => m.id === existingMapId);
-      if (!existing) {
-        return reply.code(400).send({ error: `Unknown existingMapId "${existingMapId}"` });
-      }
-      mapId = existing.id;
-      mapWidth = existing.cols;
-      mapHeight = existing.rows;
-      // Flatten the loaded grid arrays into row-major flat arrays so we can
-      // re-use the same per-cell logic as the freshly-composed branch.
-      terrainData = existing.gidGrid.flat();
-      objectData = existing.objectGidGrid?.flat() ?? new Array<number>(mapWidth * mapHeight).fill(0);
-      mapName = existing.name ?? mapId;
-      mapDescription = existing.mapdescription ?? "";
-      slug = mapId.replace(/^gen_\d+_/, '').slice(0, 32) || 'scene';
-    } else {
-      if (!terrain || (terrain !== 'grassland' && terrain !== 'forest')) {
-        return reply.code(400).send({ error: "terrain must be 'grassland' or 'forest'" });
-      }
-      const composed = composeMap({ width, height, terrain, features: features ?? [], seed });
-      const stamp = Date.now();
-      slug = composed.name.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 32) || 'scene';
-      mapId = `gen_${stamp}_${slug}`;
-      mapWidth = composed.width;
-      mapHeight = composed.height;
-      terrainData = composed.terrainData;
-      objectData = composed.objectData;
-      mapName = composed.name;
-      mapDescription = composed.description;
-      const hasObjects = composed.objectData.some((g) => g !== 0);
-      const layers: unknown[] = [
-        { type: 'tilelayer', name: 'terrain', width: composed.width, height: composed.height, data: composed.terrainData },
-      ];
-      if (hasObjects) {
-        layers.push({ type: 'tilelayer', name: 'objects', width: composed.width, height: composed.height, data: composed.objectData });
-      }
-      const mapJson = {
-        id: mapId,
-        name: composed.name,
-        mapdescription: composed.description,
-        width: composed.width,
-        height: composed.height,
-        tilesets: [{ firstgid: 1, source: '../tilesets/scribble.tsj' }],
-        layers,
-      };
-      await mkdir(join(DATA_DIR, 'maps'), { recursive: true });
-      await writeFile(join(DATA_DIR, 'maps', `${mapId}.json`), JSON.stringify(mapJson, null, 2));
-    }
-
-    // Build startingZones. If the caller supplied a zone array, validate +
-    // use it as-is; otherwise fall back to the legacy first-passable rule.
-    const cells = mapWidth * mapHeight;
-    let zoneData: number[];
-    if (startingZonesData && startingZonesData.length > 0) {
-      if (startingZonesData.length !== cells) {
-        return reply.code(400).send({ error: `startingZonesData length ${startingZonesData.length} ≠ width*height (${cells})` });
-      }
-      if (!startingZonesData.some((z) => z === 1)) {
-        return reply.code(400).send({ error: "startingZonesData must include at least one player-start (value 1) cell" });
-      }
-      zoneData = startingZonesData;
-    } else {
-      zoneData = new Array<number>(cells).fill(0);
-      const legend = defs.tileLegend.tiles;
-      for (let i = 0; i < terrainData.length; i++) {
-        const gid = terrainData[i] & 0x1fffffff;
-        const objGid = (objectData[i] ?? 0) & 0x1fffffff;
-        const groundPassable = (legend[String(gid)] as { passable?: boolean } | undefined)?.passable === true;
-        const objectPassable = objGid === 0 || (legend[String(objGid)] as { passable?: boolean } | undefined)?.passable === true;
-        if (groundPassable && objectPassable) { zoneData[i] = 1; break; }
-      }
-    }
-
-    // Validate ally/enemy ids against the monster + NPC rosters.
-    const validIds = new Set([...defs.monsters.map((m) => m.id), ...defs.npcs.map((n) => n.id)]);
-    const safeAlly = (allyIds ?? []).filter((id) => validIds.has(id));
-    const safeEnemy = (enemyIds ?? []).filter((id) => validIds.has(id));
-    for (const id of [...(allyIds ?? []), ...(enemyIds ?? [])]) {
-      if (!validIds.has(id)) {
-        return reply.code(400).send({ error: `Unknown creature id "${id}" — not in monsters/ or npcs/` });
-      }
-    }
-
-    const stamp = Date.now();
-    const encounterId = `gen_${stamp}_${slug}`;
-    const encounterJson = {
-      id: encounterId,
-      encounterTitle: mapName,
-      description: mapDescription,
-      encounterTypes: types,
-      mapId,
-      npcIds: [] as string[],     // reserved for neutral NPCs (social encounters)
-      allyIds: safeAlly,
-      enemyIds: safeEnemy,
-      customIntroduction: "",
-      customContext: description?.trim() ?? "",
-      objective: description?.trim() ? description.trim().split(/[.!?]/)[0].slice(0, 80) : (isCombat ? "Survive the encounter." : "Explore the area."),
-      completionFlag: isCombat ? undefined : `${slug}_resolved`,
-      generated: true,
-      startingZones: { width: mapWidth, height: mapHeight, data: zoneData },
-    };
-
-    await mkdir(join(DATA_DIR, 'encounters'), { recursive: true });
-    await writeFile(join(DATA_DIR, 'encounters', `${encounterId}.json`), JSON.stringify(encounterJson, null, 2));
-    await loadDefs();
-    return reply.send({
-      mapId,
-      encounterId,
-      width: mapWidth,
-      height: mapHeight,
-      terrainData,
-      objectData,
-      name: mapName,
-      description: mapDescription,
-    });
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    console.error('[generate/encounter/composed] failed', msg);
-    return reply.code(400).send({ error: msg });
-  }
-});
-
-/**
- * Generate just a map (no encounter wrapper). Used by the GENERATE MAP
- * iteration flow on `GenerateSetupScene` — the player can preview the
- * layout and regenerate until satisfied. The map is written to disk
- * (`server/data/maps/gen_<timestamp>_<slug>.json`) and `loadDefs()` is
- * re-run so the new map is immediately available for use in custom
- * encounters. Returns the full map payload so the client can render the
- * preview without an extra fetch.
- */
-server.post<{
-  Body: { prompt: string };
-}>("/generate/map", async (req, reply) => {
-  const { prompt } = req.body;
-  if (!prompt || prompt.trim().length < 8) {
-    return reply.code(400).send({ error: "prompt must be at least 8 characters" });
-  }
-  try {
-    const result = await generateMap(anthropic, defs, { prompt });
-    await loadDefs();
-    return reply.send(result);
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    console.error("[generate/map] failed", msg);
-    return reply.code(400).send({ error: msg });
-  }
-});
-
-server.post<{
-  Body: { prompt: string; encounterTypes?: import("./encounterService.js").EncounterType[]; playerName?: string; playerClassName?: string };
-}>("/generate/encounter", async (req, reply) => {
-  const { prompt, encounterTypes, playerName, playerClassName } = req.body;
-  if (!prompt || prompt.trim().length < 8) {
-    return reply.code(400).send({ error: "prompt must be at least 8 characters" });
-  }
-  try {
-    const result = await generateEncounter(anthropic, defs, { prompt, encounterTypes, playerName, playerClassName });
-    // Refresh in-memory defs so the new map joins `defs.maps`; encounters are
-    // read from disk on demand by the session-create path so no extra wiring
-    // is needed for them.
-    await loadDefs();
-    return reply.send(result);
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    console.error("[generate/encounter] failed", msg);
-    return reply.code(400).send({ error: msg });
-  }
-});
-
-/**
- * Delete every generated map and encounter — the `gen_*` namespace. Used by
- * the dev-mode "Delete all generated maps" button on `GenerateSetupScene` so
- * the maps list doesn't accumulate clutter while iterating on prompts.
- * Returns the count of files deleted in each namespace.
- */
-server.delete("/generate/maps/all", async (_req, reply) => {
-  const mapsDir = join(DATA_DIR, "maps");
-  const encDir = join(DATA_DIR, "encounters");
-  let mapsDeleted = 0;
-  let encountersDeleted = 0;
-  try {
-    const mapFiles = await readdir(mapsDir);
-    for (const f of mapFiles) {
-      if (f.startsWith("gen_") && f.endsWith(".json")) {
-        await unlink(join(mapsDir, f));
-        mapsDeleted++;
-      }
-    }
-    const encFiles = await readdir(encDir);
-    for (const f of encFiles) {
-      if (f.startsWith("gen_") && f.endsWith(".json")) {
-        await unlink(join(encDir, f));
-        encountersDeleted++;
-      }
-    }
-    await loadDefs();
-    return reply.send({ mapsDeleted, encountersDeleted });
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    console.error("[generate/maps/all] failed", msg);
-    return reply.code(500).send({ error: msg });
-  }
-});
 
 // Adventure routes — see types AdventureDef / AdventureSave in shared/types.ts.
 server.get<{ Params: { characterId: string } }>(
@@ -677,11 +378,11 @@ server.post<{ Params: { characterId: string } }>(
     const chapter = adv.chapters[save.currentChapterIndex];
     if (!chapter) return reply.code(400).send({ error: "No current chapter" });
 
-    // Pull the AIDM history of the just-completed chapter from the active
+    // Pull the AIGM history of the just-completed chapter from the active
     // session (if still in memory) for summarization, and capture the final
     // state of cross-chapter fields so they carry forward.
     const found = findSessionByCharacter(characterId);
-    const aidmHistory = found?.session.aidmHistory ?? [];
+    const aigmHistory = found?.session.aigmHistory ?? [];
     if (found) {
       const finishedState = found.session.engine.getState();
       save.worldFlags = { ...finishedState.worldFlags };
@@ -691,7 +392,7 @@ server.post<{ Params: { characterId: string } }>(
     }
 
     // Summarize + mark complete.
-    const summary = await summarizeChapter(chapter.title, aidmHistory);
+    const summary = await summarizeChapter(chapter.title, aigmHistory);
     save.priorChapterSummaries.push({ chapterId: chapter.id, chapterTitle: chapter.title, summary });
     if (!save.completedChapterIds.includes(chapter.id)) save.completedChapterIds.push(chapter.id);
     save.currentChapterIndex += 1;
@@ -715,6 +416,36 @@ server.post<{ Params: { characterId: string } }>(
 server.get("/maps", async () => defs.maps);
 server.get("/health", async () => ({ ok: true }));
 
+// Directory listing — returns image metadata for every .tsj in the tilesets
+// dir so the client can preload every spritesheet at boot (including ones
+// not yet referenced by any saved map, e.g. a fresh tileset that's only
+// going to be used by the next composed preview).
+server.get("/tilesets", async (_req, reply) => {
+  try {
+    const files = await readdir(TILESETS_DIR);
+    const out: Array<{
+      imageUrl: string; tilewidth: number; tileheight: number;
+      margin: number; spacing: number; columns: number;
+    }> = [];
+    for (const file of files) {
+      if (!file.endsWith(".tsj")) continue;
+      const raw = JSON.parse(await readFile(join(TILESETS_DIR, file), "utf-8")) as TiledTilesetInline;
+      if (!raw.image || !raw.tilewidth || !raw.tileheight || !raw.columns) continue;
+      out.push({
+        imageUrl: `/tilesets/${raw.image.split("/").pop()}`,
+        tilewidth: raw.tilewidth,
+        tileheight: raw.tileheight,
+        margin: raw.margin ?? 0,
+        spacing: raw.spacing ?? 0,
+        columns: raw.columns,
+      });
+    }
+    return reply.send(out);
+  } catch {
+    return reply.send([]);
+  }
+});
+
 // Static tileset images. Whitelisted by filename pattern so this can't be
 // turned into a directory traversal. Currently only `.png` is served from
 // the canonical tilesets directory.
@@ -730,6 +461,25 @@ server.get<{ Params: { filename: string } }>(
       return reply.type("image/png").send(data);
     } catch {
       return reply.code(404).send({ error: "tileset not found" });
+    }
+  },
+);
+
+// Static token SVGs — referenced from `PlayerDef.tokenAsset`,
+// `MonsterDef.tokenAsset`, and optionally `NPCDef.tokenAsset`. Loaded by the
+// client's `BootScene.preload` and rendered by Player + NpcToken.
+server.get<{ Params: { filename: string } }>(
+  "/tokens/:filename",
+  async (req, reply) => {
+    const { filename } = req.params;
+    if (!/^[A-Za-z0-9_-]+\.svg$/.test(filename)) {
+      return reply.code(400).send({ error: "invalid token filename" });
+    }
+    try {
+      const data = await readFile(join(TOKENS_DIR, filename));
+      return reply.type("image/svg+xml").send(data);
+    } catch {
+      return reply.code(404).send({ error: "token not found" });
     }
   },
 );
@@ -766,7 +516,7 @@ type SessionPlayerState = Pick<
 type WorldSave = Omit<GameState, "player"> & {
   player: SessionPlayerState;
   enemies?: unknown;
-  aidmHistory?: AidmMessage[];
+  aigmHistory?: AigmMessage[];
 };
 
 interface CharSave {
@@ -786,7 +536,7 @@ interface CharSave {
 
 async function saveWorldState(
   state: GameState,
-  aidmHistory: AidmMessage[] = [],
+  aigmHistory: AigmMessage[] = [],
 ): Promise<void> {
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const {
@@ -800,20 +550,28 @@ async function saveWorldState(
     preparedSpellIds: _ps,
     ...sessionPlayer
   } = state.player;
-  const worldSave: WorldSave = { ...state, player: sessionPlayer, aidmHistory };
+  const worldSave: WorldSave = { ...state, player: sessionPlayer, aigmHistory };
   await mkdir(SAVES_DIR, { recursive: true });
   await writeFile(WORLD_SAVE_PATH, JSON.stringify(worldSave));
 }
 
 async function loadWorldState(): Promise<{
   state: GameState;
-  aidmHistory: AidmMessage[];
+  aigmHistory: AigmMessage[];
 } | null> {
   let worldSave: WorldSave;
   try {
-    worldSave = JSON.parse(
+    const rawJson = JSON.parse(
       await readFile(WORLD_SAVE_PATH, "utf-8"),
-    ) as WorldSave;
+    ) as Record<string, unknown>;
+    // Migrate older saves authored before `combatLog` → `eventLog` rename.
+    // Reading state always carries the new field name so downstream code
+    // (HUD, AIGM context builder, etc.) doesn't blow up on undefined.
+    if ("combatLog" in rawJson && !("eventLog" in rawJson)) {
+      rawJson.eventLog = rawJson.combatLog;
+      delete rawJson.combatLog;
+    }
+    worldSave = rawJson as unknown as WorldSave;
   } catch {
     return null;
   }
@@ -849,8 +607,9 @@ async function loadWorldState(): Promise<{
     preparedSpellIds: charSave.preparedSpellIds ?? [],
     concentratingOn: null,
     mageArmor: false,
+    ongoingEffects: [],
   };
-  const aidmHistory = worldSave.aidmHistory ?? [];
+  const aigmHistory = worldSave.aigmHistory ?? [];
   // Backfill GameState fields added since the save was written. World saves
   // from before the living-world layer landed lack these — without defaults,
   // first publish on the bus would crash on undefined.
@@ -860,7 +619,7 @@ async function loadWorldState(): Promise<{
     pendingReaction: worldSave.pendingReaction ?? null,
     triggers: worldSave.triggers ?? [],
     firedTriggerIds: worldSave.firedTriggerIds ?? [],
-    pendingAidmEvents: worldSave.pendingAidmEvents ?? [],
+    pendingAigmEvents: worldSave.pendingAigmEvents ?? [],
     worldFlags: worldSave.worldFlags ?? {},
     narrationLastUsed: worldSave.narrationLastUsed ?? {},
     factionStandings: worldSave.factionStandings ?? {},
@@ -868,8 +627,10 @@ async function loadWorldState(): Promise<{
     adventureContext: worldSave.adventureContext ?? null,
     chapterComplete: worldSave.chapterComplete ?? false,
     objective: worldSave.objective ?? '',
+    environment: worldSave.environment ?? {},
+    npcs: (worldSave.npcs ?? []).map((n) => ({ ...n, ongoingEffects: n.ongoingEffects ?? [] })),
   };
-  return { state, aidmHistory };
+  return { state, aigmHistory };
 }
 
 async function deleteWorldSave(): Promise<void> {
@@ -991,16 +752,17 @@ interface EncounterDefJson {
   id: string;
   encounterTitle: string;
   description?: string;
-  encounterTypes: import("./engine/types.js").EncounterType[];
   mapId: string;
   npcIds?: string[];
   allyIds?: string[];
+  enemyIds?: string[];
   customIntroduction?: string;
   customContext?: string;
   objective?: string;
   tileProperties?: import("./engine/types.js").EncounterTileProperty[];
   startingZones?: import("./engine/types.js").StartingZonesLayer;
   triggers?: import("./engine/types.js").EncounterTrigger[];
+  environment?: import("./engine/types.js").EncounterEnvironment;
 }
 
 async function loadAdventureDef(adventureId: string): Promise<AdventureDef | null> {
@@ -1035,7 +797,6 @@ async function startAdventureChapter(
   const charSave = await readSaveIfExists(characterId);
 
   const encounterContext = buildEncounter({
-    encounterTypes: encDef.encounterTypes,
     mapType: "saved",
     playerDefId: playerDef.id,
     playerName: playerDef.name,
@@ -1048,17 +809,18 @@ async function startAdventureChapter(
     savedMapDescription: savedMap?.mapdescription,
     npcIds: encDef.npcIds,
     allyIds: encDef.allyIds,
+    enemyIds: encDef.enemyIds,
     customIntroduction: encDef.customIntroduction,
     customContext: encDef.customContext,
     customObjective: encDef.objective,
     startingZones: encDef.startingZones,
+    environment: encDef.environment,
   });
 
   const adventureSeed = buildAdventureSeed(adv, save.currentChapterIndex, save);
 
   const sessionId = randomUUID();
   const req: CreateSessionRequest = {
-    encounterTypes: encDef.encounterTypes,
     mapType: "saved",
     playerDefId: playerDef.id,
     savedMapId: savedMap?.id,
@@ -1067,6 +829,7 @@ async function startAdventureChapter(
     savedMapDescription: savedMap?.mapdescription,
     npcIds: encDef.npcIds,
     allyIds: encDef.allyIds,
+    enemyIds: encDef.enemyIds,
     customIntroduction: encDef.customIntroduction,
     customContext: encDef.customContext,
     customObjective: encDef.objective,
@@ -1087,23 +850,27 @@ async function startAdventureChapter(
   const engine = GameEngine.createSession(sessionId, { ...req, encounterContext }, defs, savedMap);
   createSession(sessionId, engine);
   await ensureSaveExists(playerDef.id);
+  // Auto-start combat — see comment on the main session-create route above.
+  if (engine.getState().npcs.some((n) => n.disposition === 'enemy' && n.hp > 0)) {
+    engine.triggerCombat();
+  }
   return { sessionId, state: engine.getState() };
 }
 
 /**
- * Generate a short prose summary of a completed chapter from its AIDM history.
+ * Generate a short prose summary of a completed chapter from its AIGM history.
  * Uses Haiku for speed/cost. On failure, falls back to a static placeholder so
  * the adventure flow never blocks on summarization.
  */
 async function summarizeChapter(
   chapterTitle: string,
-  aidmHistory: AidmMessage[],
+  aigmHistory: AigmMessage[],
 ): Promise<string> {
-  if (aidmHistory.length === 0) {
+  if (aigmHistory.length === 0) {
     return `${chapterTitle} was resolved with no recorded dialogue.`;
   }
   try {
-    const transcript = aidmHistory
+    const transcript = aigmHistory
       .map((m) => {
         const text = m.role === "user"
           ? (/\[PLAYER\]\n([\s\S]+)$/.exec(m.content)?.[1]?.trim() ?? m.content)
@@ -1114,7 +881,7 @@ async function summarizeChapter(
     const resp = await anthropic.messages.create({
       model: "claude-haiku-4-5-20251001",
       max_tokens: 160,
-      system: "Summarize the following D&D chapter transcript in 2 short sentences for a later chapter's DM context. Focus on outcomes, NPCs involved, and any moral / political choices the player made. Use past tense, third-person. Do not use mechanical numbers.",
+      system: "Summarize the following D&D chapter transcript in 2 short sentences for a later chapter's GM context. Focus on outcomes, NPCs involved, and any moral / political choices the player made. Use past tense, third-person. Do not use mechanical numbers.",
       messages: [{ role: "user", content: transcript.slice(-8000) }],
     });
     const block = resp.content.find((b) => b.type === "text");
@@ -1152,24 +919,24 @@ server.get("/world", async (_req, reply) => {
   const loaded = await loadWorldState();
   if (!loaded) return reply.code(404).send({ error: "No world save" });
 
-  const { state, aidmHistory } = loaded;
+  const { state, aigmHistory } = loaded;
   // Re-use the existing engine if the session is still alive (e.g. hot-reload),
   // otherwise restore from the saved GameState.
   let engine = getEngine(state.sessionId);
   if (!engine) {
     engine = new GameEngine(state, defs);
     createSession(state.sessionId, engine);
-    setAidmHistory(state.sessionId, aidmHistory);
+    setAigmHistory(state.sessionId, aigmHistory);
   }
   return reply.send({
     sessionId: state.sessionId,
     state: engine.getState(),
-    dmHistory: buildDmDisplayHistory(aidmHistory),
+    gmHistory: buildGmDisplayHistory(aigmHistory),
   });
 });
 
-function buildDmDisplayHistory(
-  history: AidmMessage[],
+function buildGmDisplayHistory(
+  history: AigmMessage[],
 ): { role: "user" | "assistant"; content: string }[] {
   const result: { role: "user" | "assistant"; content: string }[] = [];
   for (const msg of history) {
@@ -1203,7 +970,6 @@ server.post("/game/session", async (req, reply) => {
   if (!playerDef) return reply.code(400).send({ error: "Unknown playerDefId" });
 
   const encounterContext = buildEncounter({
-    encounterTypes: body.encounterTypes,
     mapType: body.mapType,
     playerDefId: body.playerDefId,
     playerName: playerDef.name,
@@ -1216,6 +982,7 @@ server.post("/game/session", async (req, reply) => {
     savedMapDescription: body.savedMapDescription,
     npcIds: body.npcIds,
     allyIds: body.allyIds,
+    enemyIds: body.enemyIds,
     customIntroduction: body.customIntroduction,
     customContext: body.customContext,
     customObjective: body.customObjective,
@@ -1236,6 +1003,18 @@ server.post("/game/session", async (req, reply) => {
   createSession(sessionId, engine);
   await ensureSaveExists(playerDef.id);
 
+  // Auto-start combat when the encounter spawned any hostile creatures, so the
+  // player lands directly in the turn-order UI as soon as the introduction
+  // overlay is dismissed. Deferred to *after* the engine is registered in the
+  // sessions map so any bus events published during the transition have
+  // somewhere to land (today the events are unsubscribed-to; this guards the
+  // ordering for future bus consumers). Encounters that want a delayed
+  // hostile reveal should keep all NPCs neutral at spawn and use triggers to
+  // flip dispositions later.
+  if (engine.getState().npcs.some((n) => n.disposition === 'enemy' && n.hp > 0)) {
+    engine.triggerCombat();
+  }
+
   return reply.send({ sessionId, state: engine.getState() });
 });
 
@@ -1244,14 +1023,14 @@ server.post("/game/session/:id/action", async (req, reply) => {
   const engine = getEngine(id);
   if (!engine) return reply.code(404).send({ error: "Session not found" });
 
-  const logLengthBefore = engine.getState().combatLog.length;
+  const logLengthBefore = engine.getState().eventLog.length;
   const action = req.body as PlayerAction;
   const { events, state } = engine.processAction(action);
 
-  const newCombatEntries = state.combatLog.slice(logLengthBefore);
+  const newEventEntries = state.eventLog.slice(logLengthBefore);
   pushAdventureLines(
     id,
-    newCombatEntries.map((e) => ({
+    newEventEntries.map((e) => ({
       type: "combat" as const,
       text: e.right ? `${e.left}  [${e.right}]` : e.left,
     })),
@@ -1274,65 +1053,65 @@ server.post("/game/session/:id/action", async (req, reply) => {
   });
 
   pushStateUpdate(id, events, state);
-  await saveWorldState(state, getAidmHistory(id) ?? []);
+  await saveWorldState(state, getAigmHistory(id) ?? []);
   return reply.send({ events, state });
 });
 
-server.post("/game/session/:id/aidm", async (req, reply) => {
+server.post("/game/session/:id/aigm", async (req, reply) => {
   const { id } = req.params as { id: string };
   const engine = getEngine(id);
   if (!engine) return reply.code(404).send({ error: "Session not found" });
 
-  const body = req.body as AIDMChatRequest;
+  const body = req.body as AIGMChatRequest;
   if (!body.playerMessage)
     return reply.code(400).send({ error: "Missing playerMessage" });
 
-  const history = getAidmHistory(id);
+  const history = getAigmHistory(id);
   if (!history) return reply.code(404).send({ error: "Session not found" });
 
-  // Per-session mutex — defends against concurrent AIDM requests on the same
+  // Per-session mutex — defends against concurrent AIGM requests on the same
   // session (double-clicks, dueling tabs) which would otherwise interleave
   // engine mutations and history writes.
-  if (!tryAcquireAidmLock(id)) {
-    return reply.code(429).send({ error: "An AIDM request is already in progress for this session." });
+  if (!tryAcquireAigmLock(id)) {
+    return reply.code(429).send({ error: "An AIGM request is already in progress for this session." });
   }
 
   try {
     pushAdventureLines(id, [{ type: "dm_player", text: body.playerMessage }]);
-    const logLengthBefore = engine.getState().combatLog.length;
-    const archive = getAidmArchive(id);
+    const logLengthBefore = engine.getState().eventLog.length;
+    const archive = getAigmArchive(id);
 
-    // E. Open the streaming AIDM channel on the WebSocket.
-    push(id, { type: "aidm_start" });
+    // E. Open the streaming AIGM channel on the WebSocket.
+    push(id, { type: "aigm_start" });
 
     const {
-      reply: aidmReply,
+      reply: aigmReply,
       events,
       rollResults,
-    } = await processAIDMChat(engine, body, anthropic, history, archive, {
-      onChunk: (text) => push(id, { type: "aidm_chunk", text }),
-      onCheckpoint: () => push(id, { type: "aidm_checkpoint" }),
-      onSpeculativeDiscard: () => push(id, { type: "aidm_speculative_discard" }),
+    } = await processAIGMChat(engine, body, anthropic, history, archive, {
+      onChunk: (text) => push(id, { type: "aigm_chunk", text }),
+      onCheckpoint: () => push(id, { type: "aigm_checkpoint" }),
+      onSpeculativeDiscard: () => push(id, { type: "aigm_speculative_discard" }),
     });
     const state = engine.getState();
-    const newCombatEntries = state.combatLog.slice(logLengthBefore);
+    const newEventEntries = state.eventLog.slice(logLengthBefore);
     pushAdventureLines(id, [
-      ...newCombatEntries.map((e) => ({
+      ...newEventEntries.map((e) => ({
         type: "combat" as const,
         text: e.right ? `${e.left}  [${e.right}]` : e.left,
       })),
-      { type: "dm_reply" as const, text: aidmReply },
+      { type: "dm_reply" as const, text: aigmReply },
     ]);
     pushStateUpdate(id, events, state);
-    push(id, { type: "aidm_done", reply: aidmReply, rollResults });
+    push(id, { type: "aigm_done", reply: aigmReply, rollResults });
     await saveWorldState(state, history);
-    return reply.send({ reply: aidmReply, rollResults });
+    return reply.send({ reply: aigmReply, rollResults });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    console.error("AIDM API error:", message);
+    console.error("AIGM API error:", message);
     return reply.code(502).send({ error: message });
   } finally {
-    releaseAidmLock(id);
+    releaseAigmLock(id);
   }
 });
 

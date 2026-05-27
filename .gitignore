@@ -38,3 +38,5 @@ server/data/saves/*
 server/data/maps/gen_*
 .gitignore
 server/data/encounters/gen_*
+
+dnd.srd.5.2.1/

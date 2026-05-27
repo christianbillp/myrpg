@@ -1,4 +1,5 @@
-import { GameEvent, NpcState, PlayerAttack, ItemDef, WeaponDef } from './types.js';
+import { GameEvent, NpcState, PlayerAttack, ItemDef, WeaponDef, MonsterDef, LogEntry } from './types.js';
+import type { RolledBonusDamage } from './CombatSystem.js';
 import type { GameContext } from './GameContext.js';
 import {
   playerMeleeAttack, playerThrowAttack, playerHide, playerSecondWind, enemyAttack,
@@ -13,6 +14,7 @@ import {
   canSpendAction, canDash as guardCanDash, canDodge as guardCanDodge,
   canDisengage as guardCanDisengage, canHide as guardCanHide,
   canAttackTarget, playerAttackReachTiles, hasCunningAction,
+  canDetach as guardCanDetach,
 } from './ActionGuards.js';
 import { publishNpcDamage } from './ThresholdPublisher.js';
 
@@ -78,27 +80,43 @@ export function doAttack(ctx: GameContext, targetId: string | undefined, events:
   const withAdvantage = playerHidden || hasAttackAdvantage(s.player.conditions) || grantsAdvantageAgainst(target.conditions, dist);
   const withDisadvantage = hasAttackDisadvantage(s.player.conditions) || grantsDisadvantageAgainst(target.conditions, dist) || rangedDisadvantage;
   const autoCrit = isAutoCrit(target.conditions, dist);
-  const { damage, isHit, logs, vexApplied, slowApplied } = playerThrowAttack(
+  const resolved = playerThrowAttack(
     ctx.playerDef, atk, targetDef, withAdvantage, withDisadvantage, ctx.playerDef.proficiencyBonus, autoCrit, playerHidden,
   );
   s.player.conditions = s.player.conditions.filter((c) => c !== 'hidden');
-  // Use playerThrowAttack as a generic "attack with this PlayerAttack" — it's
-  // the only resolver that returns isHit. For melee, it's equivalent to
-  // playerMeleeAttack which simply delegates to the same shared resolver.
+
+  // Defensive reactions (e.g. Noble's Parry): trigger when the NPC was hit by
+  // a melee attack roll. If the +AC bump turns the hit into a miss, suppress
+  // the resolver's hit log and emit a clean parry-miss line. Crits ignore
+  // defensive AC (nat 20 always hits) — match the Shield convention.
+  const parry = tryNpcParry(target, targetDef, dist, resolved);
+  const { damage, isHit, logs, vexApplied, slowApplied, bonusComponents } = parry.applied
+    ? parry.replaced
+    : resolved;
   ctx.addLogs(logs);
 
-  const { finalDamage, log: resistLog } = ctx.resistMod(damage, atk.damageType, targetDef, target.name);
-  if (resistLog) ctx.addLog(resistLog);
-  const hpBeforeAtk = target.hp;
-  target.hp = Math.max(0, target.hp - finalDamage);
-  publishNpcDamage(ctx, target, hpBeforeAtk, target.hp);
-  ctx.applyMasteryConditions(target, vexApplied, slowApplied);
+  if (!isHit) {
+    void bonusComponents; void vexApplied; void slowApplied; void damage;
+  } else {
+    const { finalDamage, log: resistLog } = ctx.resistMod(damage, atk.damageType, targetDef, target.name);
+    if (resistLog) ctx.addLog(resistLog);
+    const hpBeforeAtk = target.hp;
+    target.hp = Math.max(0, target.hp - finalDamage);
+    for (const bd of bonusComponents) {
+      const { finalDamage: bdFinal, log: bdResistLog } = ctx.resistMod(bd.damage, bd.damageType, targetDef, target.name);
+      ctx.addLog({ left: `+ ${bdFinal} ${bd.damageType}`, right: bd.rollStr, style: 'hit' });
+      if (bdResistLog) ctx.addLog(bdResistLog);
+      target.hp = Math.max(0, target.hp - bdFinal);
+    }
+    publishNpcDamage(ctx, target, hpBeforeAtk, target.hp);
+    ctx.applyMasteryConditions(target, vexApplied, slowApplied);
+  }
 
   // SRD ammunition recovery: per-shot 50% chance the ammo lands recoverable on
   // the target's tile (or where the target was before it died). Hits embed the
   // arrow in the target; misses skip into the dirt nearby — same odds for our
   // model. Only applies to ranged attacks that consumed ammo.
-  if (isRangedWeapon && atk.ammunitionType && Math.random() < 0.5) {
+  if (isHit && isRangedWeapon && atk.ammunitionType && Math.random() < 0.5) {
     s.mapItems.push({
       id: ctx.uid(),
       defId: atk.ammunitionType,
@@ -106,7 +124,6 @@ export function doAttack(ctx: GameContext, targetId: string | undefined, events:
       tileY: target.tileY,
     });
   }
-  void isHit;
 
   if (target.hp <= 0) ctx.killWithReward(target, targetDef, `☠ ${target.name} is slain!`);
 
@@ -196,7 +213,7 @@ function executeThrowOnTarget(
     || hasAttackDisadvantage(s.player.conditions) || adjacentEnemy;
   const autoCrit = isAutoCrit(target.conditions, dist);
   ctx.addLog({ left: `${ctx.playerDef.name} throws ${itemDef.name}`, style: 'normal' });
-  const { damage, isHit, logs, vexApplied, slowApplied } = playerThrowAttack(
+  const { damage, isHit, logs, vexApplied, slowApplied, bonusComponents } = playerThrowAttack(
     ctx.playerDef, attack, targetDef, withAdvantage, withDisadvantage, profBonus, autoCrit, playerHidden,
   );
   s.player.conditions = s.player.conditions.filter((c) => c !== 'hidden');
@@ -212,6 +229,12 @@ function executeThrowOnTarget(
   if (resistLog) ctx.addLog(resistLog);
   const hpBeforeThr = target.hp;
   target.hp = Math.max(0, target.hp - finalDamage);
+  for (const bd of bonusComponents) {
+    const { finalDamage: bdFinal, log: bdResistLog } = ctx.resistMod(bd.damage, bd.damageType, targetDef, target.name);
+    ctx.addLog({ left: `+ ${bdFinal} ${bd.damageType}`, right: bd.rollStr, style: 'hit' });
+    if (bdResistLog) ctx.addLog(bdResistLog);
+    target.hp = Math.max(0, target.hp - bdFinal);
+  }
   publishNpcDamage(ctx, target, hpBeforeThr, target.hp);
   ctx.applyMasteryConditions(target, vexApplied, slowApplied);
   if (target.hp <= 0) ctx.killWithReward(target, targetDef, `☠ ${target.name} is slain!`);
@@ -272,6 +295,26 @@ export function doDisengage(ctx: GameContext): void {
   ctx.addLog({ left: `${ctx.playerDef.name} Disengages — no Opportunity Attacks this turn`, style: 'status' });
 }
 
+/**
+ * Detach all currently-attached creatures from the player. Per SRD: "The
+ * target or a creature within 5 feet of it can detach the stirge as an
+ * action." We model this as one action that removes every attach effect
+ * currently on the player — the player can re-engage the freed sources
+ * normally on their next move.
+ */
+export function doDetach(ctx: GameContext): void {
+  const s = ctx.state;
+  if (!guardCanDetach(ctx)) return;
+  const attached = s.player.ongoingEffects.filter((oe) => oe.kind === 'attach');
+  s.player.ongoingEffects = s.player.ongoingEffects.filter((oe) => oe.kind !== 'attach');
+  s.player.actionUsed = true;
+  const names = attached
+    .map((oe) => s.npcs.find((n) => n.id === oe.sourceNpcId)?.name)
+    .filter((n): n is string => !!n);
+  const what = names.length ? names.join(', ') : 'attached creature';
+  ctx.addLog({ left: `${ctx.playerDef.name} pries off ${what}`, style: 'status' });
+}
+
 export function doEnemyOpportunityAttack(ctx: GameContext, npc: NpcState, events: GameEvent[]): void {
   const s = ctx.state;
   const def = ctx.resolveMonsterDef(npc.defId);
@@ -280,9 +323,15 @@ export function doEnemyOpportunityAttack(ctx: GameContext, npc: NpcState, events
   if (!meleeAtk) return;
   npc.reactionUsed = true;
   const withDisadvantage = s.player.conditions.includes('dodging');
-  const { damage, isHit, isCrit, logs } = enemyAttack(meleeAtk, ctx.playerDef.ac, false, withDisadvantage);
+  const { damage, isHit, isCrit, logs, bonusComponents } = enemyAttack(meleeAtk, ctx.playerDef.ac, false, withDisadvantage);
   ctx.addLogs([{ left: `⚡ ${npc.name} makes an Opportunity Attack!`, style: 'header' }, ...logs]);
-  if (isHit) ctx.applyDamageToPlayer(damage, events);
+  if (isHit) {
+    ctx.applyDamageToPlayer(damage, events);
+    for (const bd of bonusComponents) {
+      ctx.addLog({ left: `+ ${bd.damage} ${bd.damageType}`, right: bd.rollStr, style: 'hit' });
+      ctx.applyDamageToPlayer(bd.damage, events);
+    }
+  }
   void isCrit;
 }
 
@@ -295,12 +344,18 @@ export function doPlayerOpportunityAttack(ctx: GameContext, npc: NpcState): void
   s.player.reactionUsed = true;
   const dist = chebyshev(s.player.tileX, s.player.tileY, npc.tileX, npc.tileY);
   const oaAutoCrit = isAutoCrit(npc.conditions, dist);
-  const { damage, logs, vexApplied, slowApplied } = playerMeleeAttack(ctx.playerDef, targetDef, false, false, oaAutoCrit);
+  const { damage, logs, vexApplied, slowApplied, bonusComponents } = playerMeleeAttack(ctx.playerDef, targetDef, false, false, oaAutoCrit);
   ctx.addLogs([{ left: `⚡ ${ctx.playerDef.name} makes an Opportunity Attack!`, style: 'header' }, ...logs]);
   const { finalDamage, log: oaResistLog } = ctx.resistMod(damage, ctx.playerDef.mainAttack.damageType, targetDef, npc.name);
   if (oaResistLog) ctx.addLog(oaResistLog);
   const hpBeforeOa = npc.hp;
   npc.hp = Math.max(0, npc.hp - finalDamage);
+  for (const bd of bonusComponents) {
+    const { finalDamage: bdFinal, log: bdResistLog } = ctx.resistMod(bd.damage, bd.damageType, targetDef, npc.name);
+    ctx.addLog({ left: `+ ${bdFinal} ${bd.damageType}`, right: bd.rollStr, style: 'hit' });
+    if (bdResistLog) ctx.addLog(bdResistLog);
+    npc.hp = Math.max(0, npc.hp - bdFinal);
+  }
   publishNpcDamage(ctx, npc, hpBeforeOa, npc.hp);
   ctx.applyMasteryConditions(npc, vexApplied, slowApplied);
   if (npc.hp <= 0) ctx.killWithReward(npc, targetDef, `☠ ${npc.name} slain by Opportunity Attack!`, false);
@@ -333,15 +388,88 @@ export function doNpcOpportunityAttack(
   const targetDodging = target.conditions.includes('dodging');
   const withDisadvantage = targetDodging || (target.conditions.includes('prone') && dist > 1);
   const withAdvantage = target.conditions.includes('prone') && dist <= 1;
-  const { damage, isHit, isCrit, logs } = enemyAttack(meleeAtk, targetDef.ac, withAdvantage, withDisadvantage);
+  const { damage, isHit, isCrit, logs, bonusComponents } = enemyAttack(meleeAtk, targetDef.ac, withAdvantage, withDisadvantage);
   ctx.addLogs([{ left: `⚡ ${attackerDisplayName} makes an Opportunity Attack on ${targetDisplayName}!`, style: 'header' }, ...logs]);
   if (isHit) {
     const { finalDamage, log: resistLog } = ctx.resistMod(damage, meleeAtk.damageType, targetDef, target.name);
     if (resistLog) ctx.addLog(resistLog);
     const hpBeforeNpcOa = target.hp;
     target.hp = Math.max(0, target.hp - finalDamage);
+    for (const bd of bonusComponents) {
+      const { finalDamage: bdFinal, log: bdResistLog } = ctx.resistMod(bd.damage, bd.damageType, targetDef, target.name);
+      ctx.addLog({ left: `+ ${bdFinal} ${bd.damageType}`, right: bd.rollStr, style: 'hit' });
+      if (bdResistLog) ctx.addLog(bdResistLog);
+      target.hp = Math.max(0, target.hp - bdFinal);
+    }
     publishNpcDamage(ctx, target, hpBeforeNpcOa, target.hp);
     if (target.hp <= 0) ctx.killWithReward(target, targetDef, `☠ ${target.name} slain by Opportunity Attack!`, false);
   }
   void isCrit;
+}
+
+interface ResolvedAttack {
+  damage: number;
+  isHit: boolean;
+  isCrit: boolean;
+  attackTotal: number;
+  naturalRoll: number;
+  logs: LogEntry[];
+  vexApplied: boolean;
+  slowApplied: boolean;
+  bonusComponents: RolledBonusDamage[];
+}
+
+/**
+ * SRD Parry: when an NPC is hit by a melee attack roll while holding a weapon,
+ * they may use their reaction to add `acBonus` to their AC against that attack.
+ * The reaction is only consumed when the trigger fires — i.e. the attack must
+ * have landed at base AC. Crits ignore Parry's AC bonus (nat 20 hits regardless,
+ * matching the engine's Shield convention). If the bumped AC turns the hit into
+ * a miss, the caller substitutes a clean parry-miss log; otherwise it logs that
+ * the parry was attempted but the strike still landed.
+ */
+function tryNpcParry(
+  target: NpcState,
+  targetDef: MonsterDef,
+  dist: number,
+  resolved: ResolvedAttack,
+): { applied: false } | { applied: true; replaced: ResolvedAttack } {
+  if (dist > 1) return { applied: false };
+  if (!resolved.isHit || resolved.isCrit) return { applied: false };
+  if (target.reactionUsed) return { applied: false };
+  if (isIncapacitated(target.conditions)) return { applied: false };
+  const parry = (targetDef.reactions ?? []).find((r) => r.kind === 'parry');
+  if (!parry) return { applied: false };
+
+  target.reactionUsed = true;
+  const newAc = targetDef.ac + parry.acBonus;
+  const stillHits = resolved.naturalRoll === 20 || resolved.attackTotal >= newAc;
+
+  if (stillHits) {
+    return {
+      applied: true,
+      replaced: {
+        ...resolved,
+        logs: [
+          ...resolved.logs,
+          { left: `${target.name} parries — +${parry.acBonus} AC, but the strike lands anyway`, style: 'status' },
+        ],
+      },
+    };
+  }
+
+  return {
+    applied: true,
+    replaced: {
+      ...resolved,
+      damage: 0,
+      isHit: false,
+      vexApplied: false,
+      slowApplied: false,
+      bonusComponents: [],
+      logs: [
+        { left: `${target.name} parries — +${parry.acBonus} AC turns the strike aside`, right: `vs AC ${newAc}`, style: 'miss' },
+      ],
+    },
+  };
 }

@@ -40,7 +40,7 @@ export class MainMenuScene extends Phaser.Scene {
       this.scene.start("EncounterSetupScene");
     });
 
-    this.makeMenuButton(w / 2, h * 0.73, "GENERATE ENCOUNTER", "Describe a scene; the DM authors a one-off encounter just for you", () => {
+    this.makeMenuButton(w / 2, h * 0.73, "GENERATE ENCOUNTER", "Describe a scene; the GM authors a one-off encounter just for you", () => {
       this.scene.start("GenerateSetupScene");
     });
   }

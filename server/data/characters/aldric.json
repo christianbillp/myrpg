@@ -1,12 +1,16 @@
 {
   "id": "aldric",
   "name": "Aldric Vane",
+  "tokenAsset": "/tokens/player_fighter_human.svg",
   "speciesName": "Human",
   "speciesId": "human",
   "speciesLineage": null,
   "className": "Fighter",
   "backgroundId": "soldier",
-  "featIds": ["savage-attacker", "defense"],
+  "featIds": [
+    "savage-attacker",
+    "defense"
+  ],
   "level": 1,
   "maxHp": 12,
   "str": 17,
@@ -16,7 +20,10 @@
   "wis": 10,
   "cha": 12,
   "proficiencyBonus": 2,
-  "savingThrowProficiencies": ["str", "con"],
+  "savingThrowProficiencies": [
+    "str",
+    "con"
+  ],
   "skills": {
     "acrobatics": 2,
     "animalHandling": 0,
@@ -37,17 +44,29 @@
     "stealth": 2,
     "survival": 2
   },
-  "defaultFeatureIds": ["second-wind"],
+  "defaultFeatureIds": [
+    "second-wind"
+  ],
   "hitDieType": 10,
   "sneakAttackDice": 0,
-  "color": 5227511,
+  "color": 3377407,
   "xp": 0,
   "defaultEquipment": {
     "armorId": "chain_mail",
     "weaponId": "greatsword",
     "shieldId": null
   },
-  "defaultInventoryIds": ["flail", "javelin", "javelin", "javelin", "javelin", "javelin", "javelin", "javelin", "javelin"],
+  "defaultInventoryIds": [
+    "flail",
+    "javelin",
+    "javelin",
+    "javelin",
+    "javelin",
+    "javelin",
+    "javelin",
+    "javelin",
+    "javelin"
+  ],
   "defaultGold": 4,
   "description": "A former city watchman who left after witnessing corruption he couldn't abide. Blunt, dependable, and slow to trust — but fiercely loyal once earned. He leads from the front and speaks plainly. Rarely the first to talk, always the last to leave."
 }

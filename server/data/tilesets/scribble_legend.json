@@ -1,5 +1,5 @@
 {
-  "notes": "AI-facing tile legend for the scribble tileset (128\u00d7128 hand-drawn art over a 14-column \u00d7 11-row sheet, 154 tiles total). Generate a map as a Tiled tile layer: an object with \"type\": \"tilelayer\", a \"name\", integer \"width\" and \"height\", and a flat \"data\" array of length width*height. Each entry in \"data\" is the GID of a tile defined below (use the id shown as each tile's key, e.g. 8 for grass). GIDs assume the tileset is referenced at firstgid: 1 (the only configuration this codebase uses); GID = row*14 + col + 1 over the 14\u00d711 tilesheet. The array is row-major: the first \"width\" entries are the top row, left to right, then the next row. Only use ids listed below; do not invent ids. ROTATION / FLIP: most directional tiles (wall edges, corners, bridges, paths) ship only in one orientation; to render them at other angles, OR the GID with one of Tiled's standard flip flags: 0x80000000 (flip H), 0x40000000 (flip V), 0x20000000 (anti-diagonal flip, used for 90\u00b0 rotations). Common combinations: rotate 90\u00b0 CW = 0x20000000|0x80000000 = 0xA0000000 (added to GID = +2684354560); rotate 180\u00b0 = 0x80000000|0x40000000 = 0xC0000000 (+3221225472); rotate 270\u00b0 CW = 0x20000000|0x40000000 = 0x60000000 (+1610612736). Maps may have two stacked tile layers: a \"ground\" layer (one of the \"layer\": \"ground\" tiles below per cell) and an optional \"object\" layer (one of the \"layer\": \"object\" tiles per cell, or 0 for empty) drawn on top. \"passable\" is authoritative for reachability/validation \u2014 a cell is passable iff both its ground tile and its object tile (if any) are passable. Impassable terrain (chasm) can be crossed by placing a bridge or walkway tile over it.",
+  "notes": "AI-facing tile legend for the scribble tileset (128×128 hand-drawn art over a 14-column × 11-row sheet, 154 tiles total). Generate a map as a Tiled tile layer: an object with \"type\": \"tilelayer\", a \"name\", integer \"width\" and \"height\", and a flat \"data\" array of length width*height. Each entry in \"data\" is the GID of a tile defined below (use the id shown as each tile's key, e.g. 8 for grass). GIDs assume the tileset is referenced at firstgid: 1 (the only configuration this codebase uses); GID = row*14 + col + 1 over the 14×11 tilesheet. The array is row-major: the first \"width\" entries are the top row, left to right, then the next row. Only use ids listed below; do not invent ids. TRANSPARENT TWINS: columns 8-13 (GIDs in the gaps 9-14, 23-28, 37-42, 51-56, 65-70, 79-84, 93-98, 107-112) are transparent-background copies of the tiles in columns 1-6 of the same row (shifted +7 columns; e.g. the tile at col 8 is the transparent version of the tile at col 1). Their names end in \"_transparent\". They are \"layer\": \"object\" overlays with no floor of their own — place them on top of a ground tile (e.g. a transparent wall over grass). Passability is copied from their floored twin. ROTATION / FLIP: most directional tiles (wall edges, corners, bridges, paths) ship only in one orientation; to render them at other angles, OR the GID with one of Tiled's standard flip flags: 0x80000000 (flip H), 0x40000000 (flip V), 0x20000000 (anti-diagonal flip, used for 90° rotations). Common combinations: rotate 90° CW = 0xA0000000 (+2684354560); rotate 180° = 0xC0000000 (+3221225472); rotate 270° CW = 0x60000000 (+1610612736). Maps may have two stacked tile layers: a \"ground\" layer (one of the \"layer\": \"ground\" tiles below per cell) and an optional \"object\" layer (one of the \"layer\": \"object\" tiles per cell, or 0 for empty) drawn on top. \"passable\" is authoritative for reachability/validation — a cell is passable iff both its ground tile and its object tile (if any) are passable. Impassable terrain (chasm) can be crossed by placing a bridge or walkway tile over it.",
   "tiles": {
     "1": {
       "name": "blank",
@@ -64,6 +64,105 @@
       "description": "Solid medium-green grass. Default outdoor ground fill.",
       "tags": ["nature", "outdoor", "fill"]
     },
+    "9": {
+      "name": "path_corner_se_transparent",
+      "passable": true,
+      "layer": "object",
+      "description": "Dirt path corner; the path enters from the bottom edge and turns to exit on the right. Transparent background (no floor); overlay on top of a ground tile. Twin of path_corner_se.",
+      "tags": [
+        "path",
+        "road",
+        "outdoor",
+        "corner",
+        "connect_s",
+        "connect_e",
+        "transparent",
+        "overlay",
+        "no_background"
+      ]
+    },
+    "10": {
+      "name": "stone_wall_corner_tl_transparent",
+      "passable": false,
+      "layer": "object",
+      "description": "Solid stone wall corner piece (top-left). Blocks movement and sight. Transparent background (no floor); overlay on top of a ground tile. Twin of stone_wall_corner_tl.",
+      "tags": [
+        "stone",
+        "wall",
+        "dungeon",
+        "indoor",
+        "barrier",
+        "corner",
+        "transparent",
+        "overlay",
+        "no_background"
+      ]
+    },
+    "11": {
+      "name": "stone_wall_top_transparent",
+      "passable": false,
+      "layer": "object",
+      "description": "Solid stone wall segment placed along the top of the tile. Blocks movement and sight. Transparent background (no floor); overlay on top of a ground tile. Twin of stone_wall_top.",
+      "tags": [
+        "stone",
+        "wall",
+        "dungeon",
+        "indoor",
+        "barrier",
+        "transparent",
+        "overlay",
+        "no_background"
+      ]
+    },
+    "12": {
+      "name": "doorway_top_transparent",
+      "passable": true,
+      "layer": "object",
+      "description": "An open doorway (no door) set in the top part of the tile. Passable opening; place over a wall tile. Transparent background (no floor); overlay on top of a ground tile. Twin of doorway_top.",
+      "tags": [
+        "door",
+        "entrance",
+        "dungeon",
+        "indoor",
+        "passage",
+        "transparent",
+        "overlay",
+        "no_background"
+      ]
+    },
+    "13": {
+      "name": "crate_transparent",
+      "passable": false,
+      "layer": "object",
+      "description": "A wooden crate marked with an X. Blocks movement; searchable for loot. Transparent background (no floor); overlay on top of a ground tile. Twin of crate.",
+      "tags": [
+        "crate",
+        "container",
+        "furniture",
+        "loot",
+        "searchable",
+        "indoor",
+        "transparent",
+        "overlay",
+        "no_background"
+      ]
+    },
+    "14": {
+      "name": "wood_wall_top_transparent",
+      "passable": false,
+      "layer": "object",
+      "description": "Light wooden plank wall segment along the top of the tile. Blocks movement and sight. Transparent background (no floor); overlay on top of a ground tile. Twin of wood_wall_top.",
+      "tags": [
+        "wood",
+        "wall",
+        "tavern",
+        "indoor",
+        "barrier",
+        "transparent",
+        "overlay",
+        "no_background"
+      ]
+    },
     "15": {
       "name": "stone_floor",
       "passable": true,
@@ -125,6 +224,103 @@
         "loot",
         "searchable",
         "indoor"
+      ]
+    },
+    "23": {
+      "name": "path_straight_v_transparent",
+      "passable": true,
+      "layer": "object",
+      "description": "Straight vertical dirt path running from the bottom edge to the top edge. Transparent background (no floor); overlay on top of a ground tile. Twin of path_straight_v.",
+      "tags": [
+        "path",
+        "road",
+        "outdoor",
+        "straight",
+        "connect_n",
+        "connect_s",
+        "transparent",
+        "overlay",
+        "no_background"
+      ]
+    },
+    "24": {
+      "name": "stone_wall_corner_curved_transparent",
+      "passable": false,
+      "layer": "object",
+      "description": "Curved stone wall corner piece. Blocks movement and sight. Transparent background (no floor); overlay on top of a ground tile. Twin of stone_wall_corner_curved.",
+      "tags": [
+        "stone",
+        "wall",
+        "dungeon",
+        "indoor",
+        "barrier",
+        "corner",
+        "transparent",
+        "overlay",
+        "no_background"
+      ]
+    },
+    "25": {
+      "name": "half_wall_ul_transparent",
+      "passable": true,
+      "layer": "object",
+      "description": "A low half-wall in the upper-left of the tile. Passable; provides cover but does not block line of sight. Transparent background (no floor); overlay on top of a ground tile. Twin of half_wall_ul.",
+      "tags": [
+        "wall",
+        "half_wall",
+        "cover",
+        "passable",
+        "indoor",
+        "transparent",
+        "overlay",
+        "no_background"
+      ]
+    },
+    "26": {
+      "name": "doorway_open_top_transparent",
+      "passable": true,
+      "layer": "object",
+      "description": "An open doorway with no door, set in the upper part of the tile. Passable opening. Transparent background (no floor); overlay on top of a ground tile. Twin of doorway_open_top.",
+      "tags": [
+        "door",
+        "entrance",
+        "passage",
+        "indoor",
+        "transparent",
+        "overlay",
+        "no_background"
+      ]
+    },
+    "27": {
+      "name": "brazier_transparent",
+      "passable": false,
+      "layer": "object",
+      "description": "A standing lit brazier. Blocks movement; emits light. Transparent background (no floor); overlay on top of a ground tile. Twin of brazier.",
+      "tags": [
+        "brazier",
+        "light",
+        "fixture",
+        "furniture",
+        "indoor",
+        "transparent",
+        "overlay",
+        "no_background"
+      ]
+    },
+    "28": {
+      "name": "chair_n_transparent",
+      "passable": true,
+      "layer": "object",
+      "description": "A wooden chair, centered, facing north. Passable seat a character can occupy. Transparent background (no floor); overlay on top of a ground tile. Twin of chair_n.",
+      "tags": [
+        "chair",
+        "seat",
+        "furniture",
+        "indoor",
+        "facing_n",
+        "transparent",
+        "overlay",
+        "no_background"
       ]
     },
     "29": {
@@ -199,6 +395,108 @@
       "description": "A trapdoor set into the floor that opens toward the right. Passable; acts as a level transition.",
       "tags": ["trapdoor", "transition", "passage", "floor", "indoor"]
     },
+    "37": {
+      "name": "path_intersection_transparent",
+      "passable": true,
+      "layer": "object",
+      "description": "A four-way dirt path intersection; paths meet in the center of the tile. Transparent background (no floor); overlay on top of a ground tile. Twin of path_intersection.",
+      "tags": [
+        "path",
+        "road",
+        "outdoor",
+        "intersection",
+        "connect_n",
+        "connect_s",
+        "connect_e",
+        "connect_w",
+        "transparent",
+        "overlay",
+        "no_background"
+      ]
+    },
+    "38": {
+      "name": "stone_wall_corner_pit_transparent",
+      "passable": false,
+      "layer": "object",
+      "description": "Stone wall corner beside a void. Blocks movement and sight. Transparent background (no floor); overlay on top of a ground tile. Twin of stone_wall_corner_pit.",
+      "tags": [
+        "stone",
+        "wall",
+        "dungeon",
+        "indoor",
+        "barrier",
+        "corner",
+        "transparent",
+        "overlay",
+        "no_background"
+      ]
+    },
+    "39": {
+      "name": "half_wall_cracked_ul_transparent",
+      "passable": true,
+      "layer": "object",
+      "description": "A cracked low half-wall in the upper part of the tile. Passable; provides cover but does not block line of sight. Transparent background (no floor); overlay on top of a ground tile. Twin of half_wall_cracked_ul.",
+      "tags": [
+        "wall",
+        "half_wall",
+        "cracked",
+        "cover",
+        "passable",
+        "indoor",
+        "transparent",
+        "overlay",
+        "no_background"
+      ]
+    },
+    "40": {
+      "name": "door_open_top_transparent",
+      "passable": true,
+      "layer": "object",
+      "description": "An open door; frame in the upper part of the tile, door swung open toward the lower right. Passable. Transparent background (no floor); overlay on top of a ground tile. Twin of door_open_top.",
+      "tags": [
+        "door",
+        "entrance",
+        "passage",
+        "indoor",
+        "open",
+        "transparent",
+        "overlay",
+        "no_background"
+      ]
+    },
+    "41": {
+      "name": "barrels_two_transparent",
+      "passable": false,
+      "layer": "object",
+      "description": "Two barrels in the center; one upright at top-right, one lying on its side at lower-left. Blocks movement; searchable. Transparent background (no floor); overlay on top of a ground tile. Twin of barrels_two.",
+      "tags": [
+        "barrel",
+        "container",
+        "furniture",
+        "loot",
+        "searchable",
+        "indoor",
+        "transparent",
+        "overlay",
+        "no_background"
+      ]
+    },
+    "42": {
+      "name": "firewood_transparent",
+      "passable": false,
+      "layer": "object",
+      "description": "A pile of planks or firewood. Blocks movement; searchable. Transparent background (no floor); overlay on top of a ground tile. Twin of firewood.",
+      "tags": [
+        "firewood",
+        "planks",
+        "wood",
+        "searchable",
+        "decoration",
+        "transparent",
+        "overlay",
+        "no_background"
+      ]
+    },
     "43": {
       "name": "stone_floor_diamond",
       "passable": true,
@@ -261,6 +559,104 @@
       "layer": "object",
       "description": "A staircase leading up. Passable; acts as a level transition.",
       "tags": ["stairs", "up", "transition", "passage", "dungeon", "indoor"]
+    },
+    "51": {
+      "name": "rail_corner_se_transparent",
+      "passable": true,
+      "layer": "object",
+      "description": "Railway track curving from the bottom edge to the right edge. Transparent background (no floor); overlay on top of a ground tile. Twin of rail_corner_se.",
+      "tags": [
+        "rail",
+        "track",
+        "corner",
+        "connect_s",
+        "connect_e",
+        "outdoor",
+        "transparent",
+        "overlay",
+        "no_background"
+      ]
+    },
+    "52": {
+      "name": "stone_wall_conduit_corner_transparent",
+      "passable": false,
+      "layer": "object",
+      "description": "Curved stone wall corner with a conduit/pipe. Blocks movement and sight. Transparent background (no floor); overlay on top of a ground tile. Twin of stone_wall_conduit_corner.",
+      "tags": [
+        "stone",
+        "wall",
+        "dungeon",
+        "indoor",
+        "barrier",
+        "corner",
+        "transparent",
+        "overlay",
+        "no_background"
+      ]
+    },
+    "53": {
+      "name": "window_top_transparent",
+      "passable": false,
+      "layer": "object",
+      "description": "A horizontal window set into the top part of a wall. Blocks movement. Transparent background (no floor); overlay on top of a ground tile. Twin of window_top.",
+      "tags": [
+        "window",
+        "wall",
+        "dungeon",
+        "indoor",
+        "barrier",
+        "transparent",
+        "overlay",
+        "no_background"
+      ]
+    },
+    "54": {
+      "name": "brazier_b_transparent",
+      "passable": false,
+      "layer": "object",
+      "description": "A standing lit brazier. Blocks movement; emits light. Transparent background (no floor); overlay on top of a ground tile. Twin of brazier_b.",
+      "tags": [
+        "brazier",
+        "light",
+        "fixture",
+        "furniture",
+        "indoor",
+        "transparent",
+        "overlay",
+        "no_background"
+      ]
+    },
+    "55": {
+      "name": "barrels_three_transparent",
+      "passable": false,
+      "layer": "object",
+      "description": "Three barrels arranged along the vertical center of the tile. Blocks movement; searchable. Transparent background (no floor); overlay on top of a ground tile. Twin of barrels_three.",
+      "tags": [
+        "barrel",
+        "container",
+        "furniture",
+        "loot",
+        "searchable",
+        "indoor",
+        "transparent",
+        "overlay",
+        "no_background"
+      ]
+    },
+    "56": {
+      "name": "bed_n_transparent",
+      "passable": false,
+      "layer": "object",
+      "description": "A bed, centered, vertical, facing north. Blocks movement. Transparent background (no floor); overlay on top of a ground tile. Twin of bed_n.",
+      "tags": [
+        "bed",
+        "furniture",
+        "indoor",
+        "facing_n",
+        "transparent",
+        "overlay",
+        "no_background"
+      ]
     },
     "57": {
       "name": "stone_floor_inlay",
@@ -333,6 +729,106 @@
       "description": "A staircase leading down. Passable; acts as a level transition.",
       "tags": ["stairs", "down", "transition", "passage", "dungeon", "indoor"]
     },
+    "65": {
+      "name": "rail_straight_v_transparent",
+      "passable": true,
+      "layer": "object",
+      "description": "Straight railway track running from the bottom edge to the top edge. Transparent background (no floor); overlay on top of a ground tile. Twin of rail_straight_v.",
+      "tags": [
+        "rail",
+        "track",
+        "straight",
+        "connect_n",
+        "connect_s",
+        "outdoor",
+        "transparent",
+        "overlay",
+        "no_background"
+      ]
+    },
+    "66": {
+      "name": "stone_wall_corner_ul_transparent",
+      "passable": false,
+      "layer": "object",
+      "description": "Stone wall placed in the upper-left part of the tile. Blocks movement and sight. Transparent background (no floor); overlay on top of a ground tile. Twin of stone_wall_corner_ul.",
+      "tags": [
+        "stone",
+        "wall",
+        "dungeon",
+        "indoor",
+        "barrier",
+        "corner",
+        "transparent",
+        "overlay",
+        "no_background"
+      ]
+    },
+    "67": {
+      "name": "wall_spikes_top_transparent",
+      "passable": false,
+      "layer": "object",
+      "description": "A horizontal wall along the top of the tile with spikes facing toward the center. Blocks movement and deals contact damage. Transparent background (no floor); overlay on top of a ground tile. Twin of wall_spikes_top.",
+      "tags": [
+        "wall",
+        "spikes",
+        "trap",
+        "hazard",
+        "barrier",
+        "trap_spikes",
+        "indoor",
+        "transparent",
+        "overlay",
+        "no_background"
+      ]
+    },
+    "68": {
+      "name": "chest_s_transparent",
+      "passable": false,
+      "layer": "object",
+      "description": "A chest, facing south. Blocks movement; searchable for loot. Transparent background (no floor); overlay on top of a ground tile. Twin of chest_s.",
+      "tags": [
+        "chest",
+        "container",
+        "furniture",
+        "loot",
+        "searchable",
+        "indoor",
+        "transparent",
+        "overlay",
+        "no_background"
+      ]
+    },
+    "69": {
+      "name": "arrow_body_se_transparent",
+      "passable": true,
+      "layer": "object",
+      "description": "Marker: arrow body curving from the center-bottom toward the center-right. Part of a multi-tile directional arrow overlay. Transparent background (no floor); overlay on top of a ground tile. Twin of arrow_body_se.",
+      "tags": [
+        "marker",
+        "arrow",
+        "ui",
+        "overlay",
+        "connect_s",
+        "connect_e",
+        "transparent",
+        "no_background"
+      ]
+    },
+    "70": {
+      "name": "bed_unmade_transparent",
+      "passable": false,
+      "layer": "object",
+      "description": "An unmade bed. Blocks movement. Transparent background (no floor); overlay on top of a ground tile. Twin of bed_unmade.",
+      "tags": [
+        "bed",
+        "furniture",
+        "indoor",
+        "unmade",
+        "transparent",
+        "overlay",
+        "no_background"
+      ]
+    },
     "71": {
       "name": "stone_floor_cracked",
       "passable": true,
@@ -398,6 +894,107 @@
       "description": "A straight bridge segment running from top to bottom. Passable; lay across water or chasm to cross.",
       "tags": ["bridge", "wood", "crossing", "connect_n", "connect_s"]
     },
+    "79": {
+      "name": "rail_intersection_transparent",
+      "passable": true,
+      "layer": "object",
+      "description": "A railway intersection; tracks meet in the center of the tile. Transparent background (no floor); overlay on top of a ground tile. Twin of rail_intersection.",
+      "tags": [
+        "rail",
+        "track",
+        "intersection",
+        "connect_n",
+        "connect_s",
+        "connect_e",
+        "connect_w",
+        "outdoor",
+        "transparent",
+        "overlay",
+        "no_background"
+      ]
+    },
+    "80": {
+      "name": "stone_wall_corner_ul_b_transparent",
+      "passable": false,
+      "layer": "object",
+      "description": "Stone wall placed in the upper-left part of the tile. Blocks movement and sight. Transparent background (no floor); overlay on top of a ground tile. Twin of stone_wall_corner_ul_b.",
+      "tags": [
+        "stone",
+        "wall",
+        "dungeon",
+        "indoor",
+        "barrier",
+        "corner",
+        "transparent",
+        "overlay",
+        "no_background"
+      ]
+    },
+    "81": {
+      "name": "wall_broken_top_transparent",
+      "passable": true,
+      "layer": "object",
+      "description": "A broken-down wall along the top of the tile, rubble spilling toward the center. Passable over the rubble. Transparent background (no floor); overlay on top of a ground tile. Twin of wall_broken_top.",
+      "tags": [
+        "wall",
+        "broken",
+        "rubble",
+        "passable",
+        "indoor",
+        "transparent",
+        "overlay",
+        "no_background"
+      ]
+    },
+    "82": {
+      "name": "campfire_transparent",
+      "passable": false,
+      "layer": "object",
+      "description": "A lit campfire. Blocks movement; emits light. Transparent background (no floor); overlay on top of a ground tile. Twin of campfire.",
+      "tags": [
+        "campfire",
+        "fire",
+        "light",
+        "camp",
+        "fixture",
+        "outdoor",
+        "transparent",
+        "overlay",
+        "no_background"
+      ]
+    },
+    "83": {
+      "name": "arrow_body_v_transparent",
+      "passable": true,
+      "layer": "object",
+      "description": "Marker: vertical arrow body, centered, running from top to bottom. Part of a multi-tile directional arrow overlay. Transparent background (no floor); overlay on top of a ground tile. Twin of arrow_body_v.",
+      "tags": [
+        "marker",
+        "arrow",
+        "ui",
+        "overlay",
+        "connect_n",
+        "connect_s",
+        "transparent",
+        "no_background"
+      ]
+    },
+    "84": {
+      "name": "coffin_transparent",
+      "passable": false,
+      "layer": "object",
+      "description": "A coffin or tomb marked with a cross. Blocks movement; searchable. Transparent background (no floor); overlay on top of a ground tile. Twin of coffin.",
+      "tags": [
+        "coffin",
+        "tomb",
+        "furniture",
+        "searchable",
+        "indoor",
+        "transparent",
+        "overlay",
+        "no_background"
+      ]
+    },
     "85": {
       "name": "wood_floor",
       "passable": true,
@@ -453,6 +1050,100 @@
       "layer": "ground",
       "description": "A bridge segment with a missing board at the bottom. Passable but broken at the south edge.",
       "tags": ["bridge", "wood", "crossing", "broken", "connect_n"]
+    },
+    "93": {
+      "name": "minecart_n_transparent",
+      "passable": false,
+      "layer": "object",
+      "description": "A minecart on a railway track, facing north. Blocks movement. Transparent background (no floor); overlay on top of a ground tile. Twin of minecart_n.",
+      "tags": [
+        "minecart",
+        "rail",
+        "cart",
+        "furniture",
+        "facing_n",
+        "transparent",
+        "overlay",
+        "no_background"
+      ]
+    },
+    "94": {
+      "name": "stone_wall_curve_top_transparent",
+      "passable": false,
+      "layer": "object",
+      "description": "A horizontal stone wall in the upper part of the tile, curved on the right side. Blocks movement and sight. Transparent background (no floor); overlay on top of a ground tile. Twin of stone_wall_curve_top.",
+      "tags": [
+        "stone",
+        "wall",
+        "dungeon",
+        "indoor",
+        "barrier",
+        "curve",
+        "transparent",
+        "overlay",
+        "no_background"
+      ]
+    },
+    "95": {
+      "name": "grate_square_transparent",
+      "passable": true,
+      "layer": "object",
+      "description": "A square floor grate. Passable. Transparent background (no floor); overlay on top of a ground tile. Twin of grate_square.",
+      "tags": [
+        "grate",
+        "floor",
+        "decoration",
+        "indoor",
+        "transparent",
+        "overlay",
+        "no_background"
+      ]
+    },
+    "96": {
+      "name": "flowers_transparent",
+      "passable": true,
+      "layer": "object",
+      "description": "A patch of flowers. Low decoration; does not block movement. Transparent background (no floor); overlay on top of a ground tile. Twin of flowers.",
+      "tags": [
+        "flowers",
+        "nature",
+        "outdoor",
+        "decoration",
+        "transparent",
+        "overlay",
+        "no_background"
+      ]
+    },
+    "97": {
+      "name": "arrow_head_n_transparent",
+      "passable": true,
+      "layer": "object",
+      "description": "Marker: arrowhead pointing up (north). Endpoint of a multi-tile directional arrow overlay. Transparent background (no floor); overlay on top of a ground tile. Twin of arrow_head_n.",
+      "tags": [
+        "marker",
+        "arrow",
+        "arrowhead",
+        "ui",
+        "overlay",
+        "connect_s",
+        "transparent",
+        "no_background"
+      ]
+    },
+    "98": {
+      "name": "liquid_floor_transparent",
+      "passable": true,
+      "layer": "object",
+      "description": "A pool of liquid on the ground. Passable. Transparent background (no floor); overlay on top of a ground tile. Twin of liquid_floor.",
+      "tags": [
+        "liquid",
+        "water",
+        "floor",
+        "outdoor",
+        "transparent",
+        "overlay",
+        "no_background"
+      ]
     },
     "99": {
       "name": "terrain_bumpy",
@@ -515,6 +1206,100 @@
         "crossing",
         "connect_n",
         "connect_s"
+      ]
+    },
+    "107": {
+      "name": "minecart_offrail_n_transparent",
+      "passable": false,
+      "layer": "object",
+      "description": "A minecart off the tracks, centered, facing north. Blocks movement. Transparent background (no floor); overlay on top of a ground tile. Twin of minecart_offrail_n.",
+      "tags": [
+        "minecart",
+        "cart",
+        "furniture",
+        "facing_n",
+        "transparent",
+        "overlay",
+        "no_background"
+      ]
+    },
+    "108": {
+      "name": "stone_wall_corner_ul_top_transparent",
+      "passable": false,
+      "layer": "object",
+      "description": "A horizontal stone wall in the upper-left part of the tile. Blocks movement and sight. Transparent background (no floor); overlay on top of a ground tile. Twin of stone_wall_corner_ul_top.",
+      "tags": [
+        "stone",
+        "wall",
+        "dungeon",
+        "indoor",
+        "barrier",
+        "corner",
+        "transparent",
+        "overlay",
+        "no_background"
+      ]
+    },
+    "109": {
+      "name": "grate_round_transparent",
+      "passable": true,
+      "layer": "object",
+      "description": "A round floor grate. Passable. Transparent background (no floor); overlay on top of a ground tile. Twin of grate_round.",
+      "tags": [
+        "grate",
+        "floor",
+        "decoration",
+        "indoor",
+        "transparent",
+        "overlay",
+        "no_background"
+      ]
+    },
+    "110": {
+      "name": "tree_transparent",
+      "passable": false,
+      "layer": "object",
+      "description": "A tree placed on top of a ground tile. Blocks movement. Transparent background (no floor); overlay on top of a ground tile. Twin of tree.",
+      "tags": [
+        "tree",
+        "nature",
+        "forest",
+        "outdoor",
+        "transparent",
+        "overlay",
+        "no_background"
+      ]
+    },
+    "111": {
+      "name": "arrow_start_n_transparent",
+      "passable": true,
+      "layer": "object",
+      "description": "Marker: start of a multi-tile arrow, beginning at center and continuing north. Part of a directional arrow overlay. Transparent background (no floor); overlay on top of a ground tile. Twin of arrow_start_n.",
+      "tags": [
+        "marker",
+        "arrow",
+        "start",
+        "ui",
+        "overlay",
+        "connect_n",
+        "transparent",
+        "no_background"
+      ]
+    },
+    "112": {
+      "name": "dragon_skull_transparent",
+      "passable": false,
+      "layer": "object",
+      "description": "The skull of a dragon. Blocks movement; searchable. Transparent background (no floor); overlay on top of a ground tile. Twin of dragon_skull.",
+      "tags": [
+        "skull",
+        "dragon",
+        "bones",
+        "decoration",
+        "searchable",
+        "transparent",
+        "overlay",
+        "no_background"
       ]
     },
     "65534": {

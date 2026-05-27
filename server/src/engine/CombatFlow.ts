@@ -1,12 +1,13 @@
-import { GameEvent, NpcState, LogEntry, CombatMode } from './types.js';
+import { GameEvent, NpcState, LogEntry, CombatMode, MonsterDef } from './types.js';
 import type { GameContext } from './GameContext.js';
-import { rollOneInitiative, rollDeathSave } from './CombatSystem.js';
+import { rollOneInitiative, rollDeathSave, type RolledBonusDamage } from './CombatSystem.js';
 import { runEnemyTurn, runAllyTurn, chebyshev } from './EnemyAI.js';
 import { isIncapacitated, isVisible, hasSpeedZero, proneStandCost, TURN_CONDITIONS } from './ConditionSystem.js';
 import { mod, d20 as d20Local } from './Dice.js';
 import { doNpcOpportunityAttack } from './CombatActions.js';
 import { publishNpcDamage } from './ThresholdPublisher.js';
 import { chooseNpcBehavior, fleeFromThreat, isMapEdge } from './NpcBrain.js';
+import { applyTurnStartPeriodicDamage, isAttacker, applyMonsterAttachToPlayer } from './OngoingEffectsSystem.js';
 
 // ── Combat lifecycle ────────────────────────────────────────────────────────
 
@@ -178,12 +179,11 @@ export function enterPlayerTurn(ctx: GameContext): void {
   s.phase = s.player.hp <= 0 ? 'death_saves' : 'player_turn';
   s.npcs.filter((n) => n.disposition !== 'neutral' && n.hp > 0).forEach((n) => {
     n.isActive = false;
-    // NOTE: NPC reactions reset at the START of THAT NPC's own turn — see
-    // runSingleEnemyTurn / runSingleAllyTurn. Resetting here would let an NPC
-    // that already burned its reaction (e.g. an Opportunity Attack against an
-    // ally during its own turn) get it back as soon as the player's turn
-    // begins, regardless of whether the NPC has acted again.
-    n.conditions = n.conditions.filter((c) => !TURN_CONDITIONS.includes(c));
+    // NOTE: NPC reactions AND turn-scoped conditions (Dodge / Dash /
+    // Disengage / Slowed) reset at the START of THAT NPC's own next turn —
+    // see runSingleEnemyTurn / runSingleAllyTurn. Clearing those here would
+    // cut Dodge / Disengage short before the player's attacks resolve,
+    // making them useless against the player.
   });
   s.player.actionUsed = false;
   s.player.bonusActionUsed = false;
@@ -292,18 +292,82 @@ export function combatantDisplayName(npc: NpcState, allNpcs: NpcState[]): string
   return base;
 }
 
+/**
+ * Compute trait-driven attack-roll modifiers for the given enemy. Pack Tactics
+ * grants Advantage when at least one other non-incapacitated enemy stands
+ * adjacent to the target (the player). Sunlight Sensitivity imposes
+ * Disadvantage when the encounter is flagged as sunlit. The two booleans are
+ * threaded into EnemyAI's existing withAdvantage/withDisadvantage logic, where
+ * the standard SRD cancellation rule still applies.
+ */
+function collectEnemyTraitModifiers(
+  ctx: GameContext,
+  attacker: NpcState,
+  def: MonsterDef,
+): { advantage: boolean; disadvantage: boolean } {
+  const traits = def.traits ?? [];
+  let advantage = false;
+  let disadvantage = false;
+  if (traits.includes('pack_tactics')) {
+    const s = ctx.state;
+    const allyAdjacent = s.npcs.some((n) =>
+      n !== attacker
+      && n.disposition === 'enemy'
+      && n.hp > 0
+      && !isIncapacitated(n.conditions)
+      && chebyshev(n.tileX, n.tileY, s.player.tileX, s.player.tileY) <= 1,
+    );
+    if (allyAdjacent) advantage = true;
+  }
+  if (traits.includes('sunlight_sensitivity') && ctx.state.environment.sunlit) {
+    disadvantage = true;
+  }
+  return { advantage, disadvantage };
+}
+
 function runSingleEnemyTurn(ctx: GameContext, npc: NpcState, events: GameEvent[]): void {
   const s = ctx.state;
   const def = ctx.resolveMonsterDef(npc.defId);
   if (!def) { npc.isActive = false; return; }
-  // Per SRD: a creature's Reaction refreshes at the start of its own turn.
+  // Per SRD: a creature's Reaction refreshes at the start of its own turn,
+  // and turn-scoped conditions (Dodge / Dash / Disengage / Slowed) expire
+  // at the start of that creature's next turn — clear them here so they
+  // actually protect the NPC against incoming attacks during the round.
   npc.reactionUsed = false;
+  npc.conditions = npc.conditions.filter((c) => !TURN_CONDITIONS.includes(c));
   ctx.publish({ type: 'turn_started', combatantId: npc.id });
+
+  // Periodic damage authored by this NPC (e.g. stirge attach DoT) fires now.
+  applyTurnStartPeriodicDamage(ctx, npc.id, events);
+  if (s.player.hp <= 0) {
+    // The DoT downed the player — let the normal flow handle the unconscious
+    // state at the next turn boundary; for this NPC's turn we still finalise.
+    finalizeNpcTurn(ctx, npc);
+    ctx.publish({ type: 'turn_ended', combatantId: npc.id });
+    return;
+  }
+  // If this NPC is currently attached to a target, it can't make its
+  // Proboscis-style attack — skip the attack phase entirely. The DoT fired
+  // above is the only thing it accomplishes this turn.
+  if (isAttacker(npc, ctx)) {
+    finalizeNpcTurn(ctx, npc);
+    ctx.publish({ type: 'turn_ended', combatantId: npc.id });
+    return;
+  }
 
   // ── NpcBrain — decide behavior ─────────────────────────────────────────
   const behavior = chooseNpcBehavior(ctx, npc, def);
   if (behavior === 'hold') {
-    ctx.addLog({ left: `${combatantDisplayName(npc, s.npcs)} holds its ground`, style: 'status' });
+    // An NPC with nothing useful to do takes the Dodge action — attacks
+    // against them have Disadvantage until the start of their next turn
+    // (when this condition is cleared above). Incapacitated creatures
+    // can't take actions at all, so skip the dodge for them.
+    if (!isIncapacitated(npc.conditions)) {
+      npc.conditions.push('dodging');
+      ctx.addLog({ left: `${combatantDisplayName(npc, s.npcs)} Dodges — attackers have Disadvantage`, style: 'status' });
+    } else {
+      ctx.addLog({ left: `${combatantDisplayName(npc, s.npcs)} holds its ground`, style: 'status' });
+    }
     finalizeNpcTurn(ctx, npc);
     ctx.publish({ type: 'turn_ended', combatantId: npc.id });
     return;
@@ -331,6 +395,8 @@ function runSingleEnemyTurn(ctx: GameContext, npc: NpcState, events: GameEvent[]
 
   const startedAdjacentToPlayer = chebyshev(npc.tileX, npc.tileY, s.player.tileX, s.player.tileY) <= 1;
 
+  const { advantage: traitAdvantage, disadvantage: traitDisadvantage } = collectEnemyTraitModifiers(ctx, npc, def);
+
   const result = runEnemyTurn(npc, def, {
     displayName: combatantDisplayName(npc, s.npcs),
     playerTileX: s.player.tileX,
@@ -345,6 +411,8 @@ function runSingleEnemyTurn(ctx: GameContext, npc: NpcState, events: GameEvent[]
     mapCols: s.map.cols,
     mapRows: s.map.rows,
     occupiedTiles: occupied,
+    traitAdvantage,
+    traitDisadvantage,
   });
 
   const endedAdjacentToPlayer = chebyshev(result.finalTileX, result.finalTileY, s.player.tileX, s.player.tileY) <= 1;
@@ -422,6 +490,7 @@ function runSingleEnemyTurn(ctx: GameContext, npc: NpcState, events: GameEvent[]
       attackerId: npc.id,
       attackerName: combatantDisplayName(npc, s.npcs),
       incomingDamage: result.damage,
+      incomingBonusComponents: result.bonusComponents,
       attackTotal: result.attackTotal,
       shieldedAc: ctx.state.player.ac + 5,
     };
@@ -458,7 +527,7 @@ function shieldAvailable(ctx: GameContext): boolean {
 function applyEnemyHitToPlayer(
   ctx: GameContext,
   npc: NpcState,
-  result: { damage: number; isCrit: boolean; finalTileX: number; finalTileY: number },
+  result: { damage: number; isCrit: boolean; finalTileX: number; finalTileY: number; bonusComponents: RolledBonusDamage[]; attackOnHit?: import('./types.js').AttackOnHitEffect[] },
   events: GameEvent[],
 ): void {
   const s = ctx.state;
@@ -479,8 +548,17 @@ function applyEnemyHitToPlayer(
     }
   } else {
     ctx.applyDamageToPlayer(result.damage, events);
+    // Secondary damage riders from the attack (e.g. cultist's necrotic add-on).
+    // The player has no per-type resistance lookup today, so each component
+    // applies in full — but it's logged separately so the player sees exactly
+    // what hit them, and the engine path is ready for future player resistances.
+    for (const bd of result.bonusComponents) {
+      ctx.addLog({ left: `+ ${bd.damage} ${bd.damageType}`, right: bd.rollStr, style: 'hit' });
+      ctx.applyDamageToPlayer(bd.damage, events);
+    }
+    // Apply on-hit effects (attach, etc.) authored on the attack.
+    applyMonsterAttachToPlayer(ctx, npc, result.attackOnHit);
   }
-  void npc;
 }
 
 /**
@@ -530,8 +608,11 @@ function runSingleAllyTurn(ctx: GameContext, ally: NpcState, events: GameEvent[]
   const s = ctx.state;
   const def = ctx.resolveMonsterDef(ally.defId);
   if (!def) return;
-  // Per SRD: a creature's Reaction refreshes at the start of its own turn.
+  // Per SRD: a creature's Reaction refreshes at the start of its own turn,
+  // and turn-scoped conditions (Dodge / Dash / Disengage / Slowed) expire
+  // at the start of the creature's next turn — clear them here.
   ally.reactionUsed = false;
+  ally.conditions = ally.conditions.filter((c) => !TURN_CONDITIONS.includes(c));
   ctx.publish({ type: 'turn_started', combatantId: ally.id });
 
   // Allies use the same NpcBrain — they break and flee under the same
@@ -558,7 +639,12 @@ function runSingleAllyTurn(ctx: GameContext, ally: NpcState, events: GameEvent[]
     }
   }
   if (allyBehavior === 'hold') {
-    ctx.addLog({ left: `${combatantDisplayName(ally, s.npcs)} holds position`, style: 'status' });
+    if (!isIncapacitated(ally.conditions)) {
+      ally.conditions.push('dodging');
+      ctx.addLog({ left: `${combatantDisplayName(ally, s.npcs)} Dodges — attackers have Disadvantage`, style: 'status' });
+    } else {
+      ctx.addLog({ left: `${combatantDisplayName(ally, s.npcs)} holds position`, style: 'status' });
+    }
     ctx.publish({ type: 'turn_ended', combatantId: ally.id });
     return;
   }
@@ -620,6 +706,12 @@ function runSingleAllyTurn(ctx: GameContext, ally: NpcState, events: GameEvent[]
         if (resistLog) ctx.addLog(resistLog);
         const hpBeforeAlly = target.hp;
         target.hp = Math.max(0, target.hp - finalDamage);
+        for (const bd of result.bonusComponents) {
+          const { finalDamage: bdFinal, log: bdResistLog } = ctx.resistMod(bd.damage, bd.damageType, targetDef, target.name);
+          ctx.addLog({ left: `+ ${bdFinal} ${bd.damageType}`, right: bd.rollStr, style: 'hit' });
+          if (bdResistLog) ctx.addLog(bdResistLog);
+          target.hp = Math.max(0, target.hp - bdFinal);
+        }
         publishNpcDamage(ctx, target, hpBeforeAlly, target.hp);
         if (target.hp <= 0) ctx.killWithReward(target, targetDef, `☠ ${target.name} is slain!`);
       }
@@ -665,6 +757,7 @@ export function doResolveReaction(ctx: GameContext, accept: boolean, events: Gam
         isCrit: false,
         finalTileX: attacker.tileX,
         finalTileY: attacker.tileY,
+        bonusComponents: pending.incomingBonusComponents,
       };
       applyEnemyHitToPlayer(ctx, attacker, synthResult, events);
     }

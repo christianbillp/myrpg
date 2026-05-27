@@ -506,6 +506,6 @@ export function spellLabel(spell: SpellDef): string {
   return spell.level === 0 ? `${spell.name} (cantrip)` : `${spell.name} (L${spell.level})`;
 }
 
-// Expose a simple "log opener" for narrative DM hooks if needed later.
+// Expose a simple "log opener" for narrative GM hooks if needed later.
 function _logOpenerStub(_log: LogEntry): void { /* intentionally empty */ }
 void _logOpenerStub;

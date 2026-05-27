@@ -1,0 +1,46 @@
+{
+  "id": "kobold_warrior",
+  "name": "Kobold Warrior",
+  "type": "Small Dragon, Neutral",
+  "maxHp": 7,
+  "hpFormula": "3d6-3",
+  "ac": 14,
+  "str": 7,
+  "dex": 15,
+  "con": 9,
+  "int": 8,
+  "wis": 7,
+  "cha": 8,
+  "proficiencyBonus": 2,
+  "savingThrows": {
+    "str": -2,
+    "dex": 2,
+    "con": -1,
+    "int": -1,
+    "wis": -2,
+    "cha": -1
+  },
+  "initiativeBonus": 2,
+  "stealthBonus": 2,
+  "passivePerception": 8,
+  "speed": 30,
+  "attacks": [
+    {
+      "name": "Dagger",
+      "attackType": "both",
+      "bonus": 4,
+      "reach": 5,
+      "rangeNormal": 20,
+      "rangeLong": 60,
+      "damageDice": 1,
+      "damageSides": 4,
+      "damageBonus": 2,
+      "damageType": "piercing"
+    }
+  ],
+  "xp": 25,
+  "cr": "1/8",
+  "color": 7493969,
+  "traits": ["pack_tactics", "sunlight_sensitivity"],
+  "tokenAsset": "/tokens/monster_kobold_warrior.svg"
+}

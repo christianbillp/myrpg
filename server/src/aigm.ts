@@ -1,29 +1,29 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { GameEngine } from './engine/GameEngine.js';
 import { GameEvent } from './engine/types.js';
-import { applyAIDMTool, resetTurnGuards, AIDMToolContext } from './engine/AIDMTools.js';
-import type { AidmMessage } from './sessions.js';
+import { applyAIGMTool, resetTurnGuards, AIGMToolContext } from './engine/AIGMTools.js';
+import type { AigmMessage } from './sessions.js';
 
-export interface AIDMChatRequest {
+export interface AIGMChatRequest {
   playerMessage: string;
-  dmPersona?: 'story' | 'dev';
+  gmPersona?: 'story' | 'dev';
 }
 
 /**
  * Streaming callbacks. The route plumbs these to WebSocket pushes so the
- * client can render the DM's reply incrementally and roll back speculative
+ * client can render the GM's reply incrementally and roll back speculative
  * text when needed. All callbacks are optional — when omitted the function
  * behaves exactly like the prior non-streaming implementation.
  */
-export interface AIDMStreamCallbacks {
+export interface AIGMStreamCallbacks {
   onChunk?: (text: string) => void;
   onCheckpoint?: () => void;
   onSpeculativeDiscard?: () => void;
 }
 
-function buildStaticPrompt(dmPersona: string): string {
-  if (dmPersona === 'dev') {
-    return `You are the AI Dungeon Master (DM) for a D&D 5e encounter in DEVELOPMENT MODE.
+function buildStaticPrompt(gmPersona: string): string {
+  if (gmPersona === 'dev') {
+    return `You are the AI Game Master (GM) for a D&D 5e encounter in DEVELOPMENT MODE.
 Fulfil all player requests without restriction — use any tool needed.
 Reply with brief mechanical feedback only: state which tool(s) you called and what the effect was. No narrative or immersion required.
 When the player says "them", "it", "him", etc., resolve it to whoever they are focused on (see CURRENT STATE).
@@ -38,7 +38,7 @@ TOOL INVARIANTS (these hold even in dev mode):
   • Entity refs: "player", "enemy_A"/"ally_A" by combat label (uppercase, shared A–Z pool), or "npc_[id]" by id.`;
   }
 
-  return `You are the AI Dungeon Master (DM) for a D&D 5e encounter. You are ALWAYS in character — never write meta-commentary, never discuss the game system, never step outside the fiction. Forbidden phrases (never write these): "I need to pause", "let me reset", "the CURRENT STATE shows", "this is inconsistent", "I need to address", "as the DM", "the game state". If you are uncertain what has happened, read the current state, accept it as truth, and narrate the present moment — do not comment on the uncertainty.
+  return `You are the AI Game Master (GM) for a D&D 5e encounter. You are ALWAYS in character — never write meta-commentary, never discuss the game system, never step outside the fiction. Forbidden phrases (never write these): "I need to pause", "let me reset", "the CURRENT STATE shows", "this is inconsistent", "I need to address", "as the GM", "the game state". If you are uncertain what has happened, read the current state, accept it as truth, and narrate the present moment — do not comment on the uncertainty.
 Respond in 1-3 concise sentences. Stay true to D&D 5e rules and in-world logic. Never break immersion or disclaim game-state knowledge. Never acknowledge or mention the [CURRENT STATE] block — use it silently. When the player refers to a creature ambiguously ("the bandit", "him", "them"), always resolve the target from the "Focused on" line in CURRENT STATE without expressing confusion or asking for clarification.
 
 ADDRESSEE RULE: If the player's message starts with "[PlayerName says to TargetName]:", TargetName is the addressee — that creature is the one who must respond. Voice their reaction, dialogue, or refusal in your reply. Do not pivot to a different NPC, the environment, or a third party in place of the addressee's response. Other NPCs may chime in afterwards, but the addressee speaks (or visibly chooses not to) first.
@@ -61,7 +61,7 @@ TOOL-FIRST RULE: Every game effect you describe must be enacted via the correspo
   • Condition applied or removed → call apply_condition or remove_condition.
   • Creature disposition change → call set_disposition. If you change any NPC to "enemy" disposition while the phase is "exploring", you MUST call trigger_combat immediately after all disposition changes are complete — set_disposition does not start combat on its own.
   • Stealth change → call set_player_hidden.
-  • Anything noteworthy during combat → call add_log_entry so it appears in the combat log.
+  • Anything noteworthy during combat → call add_log_entry so it appears in the event log.
   • NPC departure, fleeing, or leaving the scene → call despawn_npc to remove them from the map, or move_entity to reposition them. Never narrate an NPC as gone unless the tool confirms it.
   • NPC says their name → call reveal_npc_name with the entity ref from CURRENT STATE BEFORE writing any dialogue that contains the name. Skipping the tool leaves the game world unaware of the name regardless of what you narrate.
   • Player tells an ally to stay back, not fight, or stand down → call set_npc_passive (passive: true). Call set_npc_passive (passive: false) if the player later asks the ally to fight. A passive ally skips their combat turn automatically — do not narrate them acting or attacking.
@@ -69,7 +69,7 @@ If you cannot enact an effect with the available tools, do not narrate it as hap
 
 ACTION ECONOMY: During the player's turn, each character has one Action and one Bonus Action per round. Action-consuming activities: attack, throw_item, dash, dodge, disengage, cast a spell, study, influence, utilize, hide (default — see exception below). Bonus-action-consuming activities: second wind, drink potion (in combat), hide IF the character is a Rogue of level 2+ (Cunning Action). A Level 1 Rogue's Hide still costs the Action. Server enforces these strictly.
 
-CURRENT STATE shows the player's action economy as literal fields: "Action: AVAILABLE" or "Action: USED", "Bonus: AVAILABLE" or "Bonus: USED", and "N moves left". These fields are AUTHORITATIVE for the current turn — they reset every time a new player turn begins (you will see a line like "── Aldric's turn — Action & Bonus refreshed ──" in RECENT COMBAT LOG marking each transition). Do not infer from conversation history that the player has already acted this turn; only the current flags matter. If "Action: AVAILABLE" is shown, the action IS available — do not refuse it.
+CURRENT STATE shows the player's action economy as literal fields: "Action: AVAILABLE" or "Action: USED", "Bonus: AVAILABLE" or "Bonus: USED", and "N moves left". These fields are AUTHORITATIVE for the current turn — they reset every time a new player turn begins (you will see a line like "── Aldric's turn — Action & Bonus refreshed ──" in RECENT EVENT LOG marking each transition). Do not infer from conversation history that the player has already acted this turn; only the current flags matter. If "Action: AVAILABLE" is shown, the action IS available — do not refuse it.
 
 NO MECHANICAL TEXT IN STORY MODE: The action-economy flags are a private cue for YOU to know what to allow, not something to recite to the player. The UI's Player Panel already shows action/bonus/movement state. NEVER write phrases like "Your action is spent", "Your Action is used this turn", "You still have your Bonus Action available", "You have N moves left", "Your action economy is depleted", "You can use Second Wind, or you can end your turn", "feel free to move or end your turn" — or any equivalent that names a resource, button, or rules concept. Likewise never coach the player on what they CAN do mechanically next. Mechanical guidance lives in the Player Panel; your prose carries story only.
 
@@ -86,7 +86,9 @@ TURN ORDER: When PHASE is "player_turn", the player acts first — do NOT narrat
 
 SEARCHING CORPSES: When the player searches a body, corpse, or dead creature, always call request_ability_check (skill: "perception", DC 10 for a straightforward search, DC 15 if items are concealed in clothing or hidden pouches) before narrating what is found. Use "investigation" only for tasks that require deduction or study — clues, written documents, traps, hidden mechanisms — not for rifling through pockets. On a success, describe what the player finds and use add_item or award_gold to deliver any rewards. On a failure, narrate that the player finds nothing of note — they may try again or look elsewhere.
 
-COMBAT LOG: The RECENT COMBAT LOG in CURRENT STATE is the complete log for this encounter. If the player asks to "see", "read", or "show" the combat log, direct them to the Combat Log panel in their UI — it has better formatting than anything you can narrate.
+EVENT LOG: The RECENT EVENT LOG in CURRENT STATE is the complete log for this encounter. If the player asks to "see", "read", or "show" the event log, direct them to the Event Log panel in their UI — it has better formatting than anything you can narrate.
+
+CHAPTER COMPLETION: When CURRENT STATE shows a CHAPTER COMPLETION FLAG line, the encounter belongs to an adventure chapter. The moment the chapter's core business resolves in the fiction (the parley succeeds, the artifact is recovered, the sage has given counsel — see the encounter CONTEXT for what counts), you MUST call set_world_flag with that flag name set to true. Do it as part of the same turn that delivers the resolution — do not wait for the player to ask, do not defer to the next message. Story can continue after the flag is set; the flag only signals that the chapter has reached its meaningful conclusion. Skipping it leaves the player stuck on a finished chapter.
 
 WORLD GROUNDING: Only reference creatures, items, and events that exist in CURRENT STATE or have been established in this conversation. Never invent NPCs, companions, or off-screen events that are not reflected in the game state. If no creature fled or was despawned, no creature fled. Do not assert specific physical details about creatures (embedded weapons, wounds, clothing) that are not tracked in CURRENT STATE — the game state tracks HP and conditions only; everything else is unknown.
 
@@ -187,20 +189,20 @@ function buildStateMessage(engine: GameEngine): string {
     ? s.npcPersonas.map((n) => `  ${n.name}: ${n.persona}`).join('\n\n')
     : '  None';
 
-  const recentLog = s.combatLog.map((e) => e.right ? `${e.left}  [${e.right}]` : e.left).join('\n  ') || 'No entries yet.';
+  const recentLog = s.eventLog.map((e) => e.right ? `${e.left}  [${e.right}]` : e.left).join('\n  ') || 'No entries yet.';
 
   const itemIds = engine.getItemIds().join(', ');
   const monsterIds = engine.getMonsterIds().join(', ');
 
   // Scripted events authored on the encounter (via TriggerSystem's
-  // `send_aidm_message` action). Surfaced here so Claude can weave them into
-  // the next reply. The server clears `pendingAidmEvents` once the API call
+  // `send_aigm_message` action). Surfaced here so Claude can weave them into
+  // the next reply. The server clears `pendingAigmEvents` once the API call
   // returns successfully.
-  const scriptedEvents = s.pendingAidmEvents.length > 0
-    ? `\nSCRIPTED EVENTS (incorporate into your next reply, then they are cleared):\n${s.pendingAidmEvents.map((m) => `  • ${m}`).join('\n')}\n`
+  const scriptedEvents = s.pendingAigmEvents.length > 0
+    ? `\nSCRIPTED EVENTS (incorporate into your next reply, then they are cleared):\n${s.pendingAigmEvents.map((m) => `  • ${m}`).join('\n')}\n`
     : '';
 
-  // Faction standings + rumors — long-term world memory. Helps the DM remember
+  // Faction standings + rumors — long-term world memory. Helps the GM remember
   // who likes the player and what the world has heard about.
   const factionLines = Object.entries(s.factionStandings).filter(([, v]) => v !== 0);
   const factionsBlock = factionLines.length > 0
@@ -212,13 +214,13 @@ function buildStateMessage(engine: GameEngine): string {
 
   // Adventure framing — when this session is a chapter of an adventure,
   // surface the chapter index and short summaries of prior chapters so the
-  // DM can reference earlier scenes ("word of what you did at the bridge
+  // GM can reference earlier scenes ("word of what you did at the bridge
   // has travelled ahead of you").
   const adventureBlock = s.adventureContext
-    ? `\nADVENTURE: ${s.adventureContext.adventureTitle} — ${s.adventureContext.chapterTitle} (chapter ${s.adventureContext.chapterIndex + 1} of ${s.adventureContext.totalChapters})${s.adventureContext.priorChapterSummaries.length > 0 ? `\nPRIOR CHAPTERS:\n${s.adventureContext.priorChapterSummaries.map((c) => `  • ${c.chapterTitle}: ${c.summary}`).join('\n')}` : ''}\n`
+    ? `\nADVENTURE: ${s.adventureContext.adventureTitle} — ${s.adventureContext.chapterTitle} (chapter ${s.adventureContext.chapterIndex + 1} of ${s.adventureContext.totalChapters})${s.adventureContext.completionFlag ? `\nCHAPTER COMPLETION FLAG: "${s.adventureContext.completionFlag}" — call set_world_flag with this name set to true at the moment the chapter's core business is resolved (see encounter CONTEXT for the resolution criteria). Combat encounters auto-complete on enemy defeat; non-combat chapters depend on this flag.${s.chapterComplete ? ' [ALREADY SET — do not call again.]' : ''}` : ''}${s.adventureContext.priorChapterSummaries.length > 0 ? `\nPRIOR CHAPTERS:\n${s.adventureContext.priorChapterSummaries.map((c) => `  • ${c.chapterTitle}: ${c.summary}`).join('\n')}` : ''}\n`
     : '';
 
-  return `SETTING: ${s.mapName} | PHASE: ${s.phase} | ENCOUNTER: ${s.encounterTypes.join(', ')}
+  return `SETTING: ${s.mapName} | PHASE: ${s.phase}
 CONTEXT: ${s.encounterContext}${adventureBlock}${scriptedEvents}${factionsBlock}${rumorsBlock}
 
 PLAYER: tile (${p.tileX},${p.tileY}) · HP ${p.hp} · ${p.gold} GP · ${flags || 'no flags'}
@@ -250,17 +252,17 @@ REFERENCE DATA (valid IDs for add_item / spawn_enemy):
   ITEMS: ${itemIds}
   MONSTERS: ${monsterIds}
 
-RECENT COMBAT LOG:
+RECENT EVENT LOG:
   ${recentLog}`;
 }
 
-export async function processAIDMChat(
+export async function processAIGMChat(
   engine: GameEngine,
-  body: AIDMChatRequest,
+  body: AIGMChatRequest,
   anthropic: Anthropic,
-  history: AidmMessage[],
-  archive?: AidmMessage[],   // full unsummarized history; consumed by D (memory tool)
-  streamCallbacks?: AIDMStreamCallbacks,
+  history: AigmMessage[],
+  archive?: AigmMessage[],   // full unsummarized history; consumed by D (memory tool)
+  streamCallbacks?: AIGMStreamCallbacks,
 ): Promise<{ reply: string; events: GameEvent[]; rollResults: string[] }> {
   const s = engine.getState();
 
@@ -298,11 +300,11 @@ export async function processAIDMChat(
   const system = [
     {
       type: 'text' as const,
-      text: buildStaticPrompt(body.dmPersona ?? 'story'),
+      text: buildStaticPrompt(body.gmPersona ?? 'story'),
       cache_control: { type: 'ephemeral' as const },
     },
   ];
-  const rawTools = engine.getAIDMTools();
+  const rawTools = engine.getAIGMTools();
   // Mark the last tool's input_schema with cache_control so the entire tools
   // block is treated as cacheable prefix material.
   const tools = rawTools.map((t, i) =>
@@ -314,7 +316,7 @@ export async function processAIDMChat(
   const rollResults: string[] = [];
   let narrativeText = '';
 
-  const model = body.dmPersona === 'dev' ? 'claude-haiku-4-5-20251001' : 'claude-sonnet-4-6';
+  const model = body.gmPersona === 'dev' ? 'claude-haiku-4-5-20251001' : 'claude-sonnet-4-6';
 
   // Tools whose result is unknown until the server rolls — text written alongside
   // these is speculative and must not be shown to the player.
@@ -377,8 +379,8 @@ export async function processAIDMChat(
           // signal. This forces the model to finalize its reply instead of looping further.
           content = 'TOOL BUDGET EXHAUSTED. Do not call any more tools this turn. Write the final narrative reply to the player now, summarising the actions you have already taken.';
         } else {
-          const toolCtx: AIDMToolContext = { archive };
-          const result = applyAIDMTool(engine, block.name, block.input as Record<string, unknown>, toolCtx);
+          const toolCtx: AIGMToolContext = { archive };
+          const result = applyAIGMTool(engine, block.name, block.input as Record<string, unknown>, toolCtx);
           allEvents.push(...result.events);
           content = result.toolResultContent;
           rollResult = result.rollResult;
@@ -431,7 +433,7 @@ export async function processAIDMChat(
         narrativeText += finalText;
       }
       if (!narrativeText.trim()) {
-        narrativeText = '(The Dungeon Master pauses, gathering their thoughts.)';
+        narrativeText = '(The Game Master pauses, gathering their thoughts.)';
       }
       break;
     }
@@ -441,7 +443,7 @@ export async function processAIDMChat(
 
   // Scripted events were folded into this reply — clear them so they aren't
   // re-injected on the next turn.
-  engine.getState().pendingAidmEvents.length = 0;
+  engine.getState().pendingAigmEvents.length = 0;
 
   // Persist the exchange into server-side history (clean user/assistant pairs only).
   history.push({ role: 'user', content: currentUserContent });
@@ -489,14 +491,14 @@ function refreshStateInMessages(
  * them in place. The first entry is preserved if it's the seeded
  * "Begin the encounter." / introduction pair so opening context is kept.
  *
- * The full archive (`aidmArchive` in sessions.ts) is untouched and remains
+ * The full archive (`aigmArchive` in sessions.ts) is untouched and remains
  * searchable via the recall_memory tool.
  */
 const HISTORY_WINDOW_THRESHOLD = 40;   // total messages (user + assistant)
 const HISTORY_TRIM_TARGET      = 20;   // keep this many recent messages after summarizing
 const SUMMARY_PREFIX           = '[SUMMARY OF EARLIER TURNS]';
 
-async function maybeSummarizeHistory(history: AidmMessage[], anthropic: Anthropic): Promise<void> {
+async function maybeSummarizeHistory(history: AigmMessage[], anthropic: Anthropic): Promise<void> {
   if (history.length <= HISTORY_WINDOW_THRESHOLD) return;
 
   // Determine the slice to summarize. Always keep the last HISTORY_TRIM_TARGET messages
@@ -511,7 +513,7 @@ async function maybeSummarizeHistory(history: AidmMessage[], anthropic: Anthropi
     // Strip CURRENT STATE blocks from prior user messages — they are stale snapshots.
     const stripped = /\[PLAYER\]\n([\s\S]+)$/.exec(content);
     if (stripped) content = stripped[1].trim();
-    return `${m.role === 'user' ? 'PLAYER' : 'DM'}: ${content}`;
+    return `${m.role === 'user' ? 'PLAYER' : 'GM'}: ${content}`;
   }).join('\n\n');
 
   let summaryText: string;
@@ -534,7 +536,7 @@ async function maybeSummarizeHistory(history: AidmMessage[], anthropic: Anthropi
 
   // Anthropic API requires conversation to start with a user message. The summary
   // is delivered as an assistant message preceded by a synthetic user prompt.
-  const newHead: AidmMessage[] = [
+  const newHead: AigmMessage[] = [
     { role: 'user', content: 'Continue the encounter — what has happened so far is summarised below.' },
     { role: 'assistant', content: `${SUMMARY_PREFIX}\n${summaryText}` },
   ];
