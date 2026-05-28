@@ -4,8 +4,8 @@ import { ItemDef } from "../data/equipment";
 import { gameClient } from "../net/GameClient";
 import type { GameState, AdventureDef, AdventureSave, EquipmentSlots, EncounterRecord, StorylogEntry } from "../net/types";
 import { StorylogOverlay } from "../ui/StorylogOverlay";
-import { tokenTextureKey } from "./BootScene";
 import { tokenAssetForPlayer } from "../data/tokens";
+import { createHtmlButton, createHtmlText, type HtmlButtonHandle, type HtmlTextHandle } from "../ui/htmlButtons";
 import {
   TILE_SIZE,
   GRID_COLS,
@@ -17,16 +17,18 @@ import {
 
 const W = PLAYER_PANEL_WIDTH + GRID_COLS * TILE_SIZE + TARGET_PANEL_WIDTH;
 const H = GRID_ROWS * TILE_SIZE + HUD_HEIGHT;
-const DPR = window.devicePixelRatio;
+
+const API_URL = "http://localhost:3000";
 
 const CHAR_DIVIDER_X = 920;
 const CHAR_CXS = [155, 460, 765];
+const CHAR_CARD_W = 270;
+const CHAR_CARD_H = 550;
 const CARD_CY = Math.round(80 + (H - 80 - 100) / 2);
 
 const ADV_CARD_CX = (CHAR_DIVIDER_X + W) / 2;
 const ADV_CARD_W = W - CHAR_DIVIDER_X - 64;
 const ADV_CARD_H = 180;
-/** Center y of the first adventure card. Matches the EncounterSetupScene's first card row (cy=211) so the two screens share visual rhythm. */
 const ADV_FIRST_CY = 211;
 const ADV_GAP = 24;
 
@@ -42,11 +44,17 @@ interface LocalSave {
   storylog?: StorylogEntry[];
 }
 
-interface SaveDisplay {
-  deleteBg: Phaser.GameObjects.Rectangle;
-  deleteLabel: Phaser.GameObjects.Text;
-  storylogBg: Phaser.GameObjects.Rectangle;
-  storylogLabel: Phaser.GameObjects.Text;
+interface CharCardElems {
+  cardBtn: HtmlButtonHandle;
+  infoEl: HTMLDivElement;
+  equippedEl: HTMLDivElement;
+  deleteBtn: HtmlButtonHandle;
+  storylogBtn: HtmlButtonHandle;
+}
+
+interface AdvCardElems {
+  cardBtn: HtmlButtonHandle;
+  progressEl: HTMLDivElement;
 }
 
 /**
@@ -58,18 +66,16 @@ interface SaveDisplay {
 export class AdventureSetupScene extends Phaser.Scene {
   private characters: PlayerDef[] = [];
   private adventures: AdventureDef[] = [];
-  private adventureSaves: Map<string, AdventureSave> = new Map(); // keyed by characterId
-  private charSaves: Map<string, LocalSave> = new Map(); // keyed by characterId — the persistent character save
+  private adventureSaves: Map<string, AdventureSave> = new Map();
+  private charSaves: Map<string, LocalSave> = new Map();
   private selectedPlayer: PlayerDef | null = null;
   private selectedAdventure: AdventureDef | null = null;
 
-  private charCardBgs = new Map<string, Phaser.GameObjects.Rectangle>();
-  private saveDisplays = new Map<string, SaveDisplay>();
-  private advCardBgs = new Map<string, Phaser.GameObjects.Rectangle>();
-  private advCardLabels = new Map<string, Phaser.GameObjects.Text>();
-  private advCardProgress = new Map<string, Phaser.GameObjects.Text>();
-  private beginBg!: Phaser.GameObjects.Rectangle;
-  private beginLabel!: Phaser.GameObjects.Text;
+  private charCards = new Map<string, CharCardElems>();
+  private advCards = new Map<string, AdvCardElems>();
+  private htmlTexts: HtmlTextHandle[] = [];
+  private htmlButtons: HtmlButtonHandle[] = [];
+  private beginBtn!: HtmlButtonHandle;
 
   constructor() {
     super({ key: "AdventureSetupScene" });
@@ -78,11 +84,8 @@ export class AdventureSetupScene extends Phaser.Scene {
   init(): void {
     this.selectedPlayer = null;
     this.selectedAdventure = null;
-    this.charCardBgs.clear();
-    this.saveDisplays.clear();
-    this.advCardBgs.clear();
-    this.advCardLabels.clear();
-    this.advCardProgress.clear();
+    this.charCards.clear();
+    this.advCards.clear();
     this.adventureSaves.clear();
     this.charSaves.clear();
   }
@@ -91,8 +94,6 @@ export class AdventureSetupScene extends Phaser.Scene {
     this.characters = this.registry.get("characters") as PlayerDef[];
     this.adventures = (this.registry.get("adventures") as AdventureDef[]) ?? [];
 
-    // Seed character saves from localStorage so cards render with HP/XP/GP
-    // immediately on first paint; the server sync below corrects any drift.
     for (const char of this.characters) {
       const raw = localStorage.getItem(saveKey(char.id));
       if (raw) {
@@ -101,19 +102,30 @@ export class AdventureSetupScene extends Phaser.Scene {
     }
 
     this.add.rectangle(W / 2, H / 2, W, H, 0x0d0d1e);
-    this.add.text(W / 2, 28, "ADVENTURE SETUP", {
-      fontSize: "22px", color: "#e2b96f", fontFamily: "monospace", resolution: DPR,
-    }).setOrigin(0.5, 0);
-
     this.add.rectangle(W / 2, 66, W - 64, 1, 0x334455);
     this.add.rectangle(CHAR_DIVIDER_X, H / 2, 1, H - 140, 0x334455).setOrigin(0.5, 0.5);
+    this.add.rectangle(W / 2, H - 58, W - 64, 1, 0x334455);
 
-    this.add.text(CHAR_DIVIDER_X / 2, 78, "CHARACTER", {
-      fontSize: "11px", color: "#556677", fontFamily: "monospace", resolution: DPR, letterSpacing: 2,
-    }).setOrigin(0.5, 0);
-    this.add.text(CHAR_DIVIDER_X + (W - CHAR_DIVIDER_X) / 2, 78, "ADVENTURE", {
-      fontSize: "11px", color: "#556677", fontFamily: "monospace", resolution: DPR, letterSpacing: 2,
-    }).setOrigin(0.5, 0);
+    this.htmlTexts.push(createHtmlText({
+      scene: this, sceneWidth: W,
+      x: 0, y: 22, w: W, h: 28,
+      text: "ADVENTURE SETUP",
+      fontSize: 22, color: "#e2b96f", align: "center", letterSpacing: 1,
+    }));
+
+    this.htmlTexts.push(createHtmlText({
+      scene: this, sceneWidth: W,
+      x: 0, y: 78, w: CHAR_DIVIDER_X, h: 14,
+      text: "CHARACTER",
+      fontSize: 11, color: "#556677", align: "center", letterSpacing: 2,
+    }));
+
+    this.htmlTexts.push(createHtmlText({
+      scene: this, sceneWidth: W,
+      x: CHAR_DIVIDER_X, y: 78, w: W - CHAR_DIVIDER_X, h: 14,
+      text: "ADVENTURE",
+      fontSize: 11, color: "#556677", align: "center", letterSpacing: 2,
+    }));
 
     this.characters.forEach((char, i) => {
       const cx = CHAR_CXS[i] ?? CHAR_CXS[CHAR_CXS.length - 1];
@@ -124,7 +136,6 @@ export class AdventureSetupScene extends Phaser.Scene {
       this.buildAdventureCard(adv, ADV_CARD_CX, ADV_FIRST_CY + i * (ADV_CARD_H + ADV_GAP));
     });
 
-    this.add.rectangle(W / 2, H - 58, W - 64, 1, 0x334455);
     this.buildBackButton(120, H - 36);
     this.buildBeginButton(W / 2, H - 36);
     this.refreshBeginButton();
@@ -135,7 +146,6 @@ export class AdventureSetupScene extends Phaser.Scene {
       if (def) this.selectChar(def);
     }
 
-    // Sync adventure saves for every character so cards show progress.
     for (const char of this.characters) {
       gameClient.loadAdventureSave(char.id).then((save) => {
         if (!this.scene.isActive()) return;
@@ -145,86 +155,146 @@ export class AdventureSetupScene extends Phaser.Scene {
         }
       }).catch(() => {});
     }
+
+    this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => this.teardown());
+    this.events.once(Phaser.Scenes.Events.DESTROY, () => this.teardown());
   }
 
   private buildCharCard(def: PlayerDef, cx: number, cy: number): void {
-    const cardW = 270;
-    const cardH = 550;
     const colorHex = "#" + def.color.toString(16).padStart(6, "0");
     const statMod = (v: number) => Math.floor((v - 10) / 2);
     const items = this.registry.get("equipment") as ItemDef[];
     const save = this.charSaves.get(def.id) ?? null;
-
-    const bg = this.add.rectangle(cx, cy, cardW, cardH, 0x111122).setStrokeStyle(2, 0x334455).setInteractive({ useHandCursor: true });
-    this.charCardBgs.set(def.id, bg);
-    bg.on("pointerover", () => { if (this.selectedPlayer?.id !== def.id) bg.setStrokeStyle(2, def.color & 0x7f7f7f); });
-    bg.on("pointerout",  () => { if (this.selectedPlayer?.id !== def.id) bg.setStrokeStyle(2, 0x334455); });
-    bg.on("pointerdown", () => this.selectChar(def));
-
-    const top = cy - cardH / 2;
-
-    this.buildCharAvatar(def, cx, top + 50, 48);
-    this.add.text(cx, top + 90, def.name, { fontSize: "15px", color: "#ffffff", fontFamily: "monospace", resolution: DPR }).setOrigin(0.5, 0);
-    this.add.text(cx, top + 114, `${def.speciesName}  ${def.className} ${def.level}`, { fontSize: "11px", color: "#8899aa", fontFamily: "monospace", resolution: DPR }).setOrigin(0.5, 0);
-    this.add.rectangle(cx, top + 140, cardW - 32, 1, 0x334455);
-
     const atkMod = def.mainAttack.statKey === "str" ? statMod(def.str) : statMod(def.dex);
     const atkBonus = atkMod + def.proficiencyBonus;
-    this.add.text(cx, top + 152, [
-      `HP ${def.maxHp}   AC ${def.ac}   Speed ${def.speed} ft`,
-      `Attack +${atkBonus}   Initiative ${statMod(def.dex) >= 0 ? "+" : ""}${statMod(def.dex)}`,
-    ].join("\n"), { fontSize: "11px", color: "#aabbcc", fontFamily: "monospace", resolution: DPR, align: "center", lineSpacing: 6 }).setOrigin(0.5, 0);
+    const initMod = statMod(def.dex);
 
-    this.add.rectangle(cx, top + 200, cardW - 32, 1, 0x334455);
-    this.add.text(cx, top + 212, def.description ?? '', {
-      fontSize: "11px", color: "#99bbcc", fontFamily: "monospace", resolution: DPR,
-      align: "center", lineSpacing: 8, wordWrap: { width: cardW - 48 },
-    }).setOrigin(0.5, 0);
+    const left = cx - CHAR_CARD_W / 2;
+    const top = cy - CHAR_CARD_H / 2;
 
-    this.add.rectangle(cx, top + 410, cardW - 32, 1, 0x223344);
+    const cardBtn = createHtmlButton({
+      scene: this, sceneWidth: W,
+      x: left, y: top, w: CHAR_CARD_W, h: CHAR_CARD_H,
+      label: "", variant: "ghost",
+      onClick: () => this.selectChar(def),
+    });
+    cardBtn.el.textContent = "";
+    cardBtn.el.style.padding = "0";
+    cardBtn.el.style.background = "#111122";
+    cardBtn.el.style.borderColor = "#334455";
+    cardBtn.el.style.borderWidth = "2px";
+    cardBtn.el.style.display = "flex";
+    cardBtn.el.style.flexDirection = "column";
+    cardBtn.el.style.alignItems = "center";
+    cardBtn.el.style.justifyContent = "flex-start";
+    cardBtn.el.style.fontFamily = "monospace";
+    cardBtn.el.style.whiteSpace = "normal";
+    cardBtn.el.style.overflow = "hidden";
 
-    this.add.text(cx, top + 422, save ? this.saveInfoLine(save, def) : "No save data", {
-      fontSize: "10px", color: save ? "#aabbcc" : "#445566", fontFamily: "monospace", resolution: DPR,
-    }).setOrigin(0.5, 0);
-    this.add.text(cx, top + 440, save ? this.equippedLine(save, items) : "", {
-      fontSize: "10px", color: "#667788", fontFamily: "monospace", resolution: DPR,
-    }).setOrigin(0.5, 0);
+    // Layout: a top section (avatar / name / stats / description) that fills
+    // the free vertical space, and a bottom section (info / equipped + the
+    // two action buttons + SELECT footer) pinned to the bottom. Padding-bottom
+    // reserves a fixed band for the action buttons so the inner text never
+    // creeps under them.
+    const BOTTOM_BAND = 130;
 
-    // DELETE SAVE — clears both the character save AND the adventure save so
-    // the player can replay the adventure from chapter 1 with default gear.
-    const deleteBg = this.add.rectangle(cx, top + 470, 110, 22, 0x1a0808)
-      .setStrokeStyle(1, save ? 0x663333 : 0x222222).setAlpha(save ? 1 : 0.3);
-    const deleteLabel = this.add.text(cx, top + 470, "DELETE SAVE", {
-      fontSize: "10px", color: save ? "#995555" : "#445566", fontFamily: "monospace", resolution: DPR,
-    }).setOrigin(0.5).setAlpha(save ? 1 : 0.3);
-    if (save) {
-      deleteBg.setInteractive({ useHandCursor: true });
-      deleteBg.on("pointerover", () => { deleteBg.setStrokeStyle(1, 0xaa4444); deleteLabel.setColor("#cc6666"); });
-      deleteBg.on("pointerout",  () => { deleteBg.setStrokeStyle(1, 0x663333); deleteLabel.setColor("#995555"); });
-      deleteBg.on("pointerdown", (pointer: Phaser.Input.Pointer) => {
-        pointer.event.stopPropagation();
-        this.deleteSaves(def);
-      });
+    const inner = document.createElement("div");
+    inner.style.cssText = `
+      display: flex; flex-direction: column; align-items: center;
+      width: 100%; height: 100%; padding: 18px 14px ${BOTTOM_BAND}px; box-sizing: border-box;
+      pointer-events: none;
+    `;
+    cardBtn.el.appendChild(inner);
+
+    const avatar = document.createElement("img");
+    avatar.src = `${API_URL}${tokenAssetForPlayer(def)}`;
+    avatar.alt = def.name;
+    avatar.style.cssText = "display: block; width: 64px; height: 64px;";
+    inner.appendChild(avatar);
+
+    const nameEl = document.createElement("div");
+    nameEl.textContent = def.name;
+    nameEl.style.cssText = "margin-top: 8px; font-size: 15px; color: #ffffff; text-align: center;";
+    inner.appendChild(nameEl);
+
+    const subEl = document.createElement("div");
+    subEl.textContent = `${def.speciesName}  ${def.className} ${def.level}`;
+    subEl.style.cssText = "margin-top: 6px; font-size: 11px; color: #8899aa; text-align: center;";
+    inner.appendChild(subEl);
+
+    const divider1 = document.createElement("div");
+    divider1.style.cssText = "width: 88%; height: 1px; background: #334455; margin-top: 14px;";
+    inner.appendChild(divider1);
+
+    const statsEl = document.createElement("div");
+    statsEl.textContent = `HP ${def.maxHp}   AC ${def.ac}   Speed ${def.speed} ft\nAttack +${atkBonus}   Initiative ${initMod >= 0 ? "+" : ""}${initMod}`;
+    statsEl.style.cssText = "margin-top: 10px; width: 88%; font-size: 11px; color: #aabbcc; text-align: center; line-height: 1.7; white-space: pre-line;";
+    inner.appendChild(statsEl);
+
+    const divider2 = document.createElement("div");
+    divider2.style.cssText = "width: 88%; height: 1px; background: #334455; margin-top: 8px;";
+    inner.appendChild(divider2);
+
+    const descEl = document.createElement("div");
+    descEl.textContent = def.description ?? "";
+    descEl.style.cssText = "margin-top: 10px; width: 88%; font-size: 11px; color: #99bbcc; text-align: center; line-height: 1.55; overflow: hidden;";
+    inner.appendChild(descEl);
+
+    const divider3 = document.createElement("div");
+    divider3.style.cssText = "width: 88%; height: 1px; background: #223344; margin-top: auto;";
+    inner.appendChild(divider3);
+
+    const infoEl = document.createElement("div");
+    infoEl.textContent = save ? this.saveInfoLine(save, def) : "No save data";
+    infoEl.style.cssText = `margin-top: 8px; width: 88%; font-size: 10px; color: ${save ? "#aabbcc" : "#445566"}; text-align: center;`;
+    inner.appendChild(infoEl);
+
+    const equippedEl = document.createElement("div");
+    equippedEl.textContent = save ? this.equippedLine(save, items) : "";
+    equippedEl.style.cssText = "margin-top: 4px; width: 88%; font-size: 10px; color: #667788; text-align: center;";
+    inner.appendChild(equippedEl);
+
+    const selectFooter = document.createElement("div");
+    selectFooter.textContent = "SELECT";
+    selectFooter.style.cssText = `
+      position: absolute; left: 0; right: 0; bottom: 14px;
+      text-align: center; font-size: 13px; color: ${colorHex}; pointer-events: none;
+      letter-spacing: 2px;
+    `;
+    cardBtn.el.style.position = "absolute";
+    cardBtn.el.appendChild(selectFooter);
+
+    const btnW = 130;
+    const btnH = 22;
+    const deleteX = cx - btnW / 2;
+    const deleteY = top + CHAR_CARD_H - 80;
+    const deleteBtn = createHtmlButton({
+      scene: this, sceneWidth: W,
+      x: deleteX, y: deleteY, w: btnW, h: btnH,
+      label: "DELETE SAVE",
+      variant: "danger",
+      fontSize: 10,
+      onClick: () => this.deleteSaves(def),
+    });
+    deleteBtn.el.addEventListener("click", (e) => e.stopPropagation());
+
+    const storylogY = deleteY + btnH + 7;
+    const storylogBtn = createHtmlButton({
+      scene: this, sceneWidth: W,
+      x: deleteX, y: storylogY, w: btnW, h: btnH,
+      label: "STORY LOG",
+      variant: "primary",
+      fontSize: 10,
+      onClick: () => this.openStorylogOverlay(def),
+    });
+    storylogBtn.el.addEventListener("click", (e) => e.stopPropagation());
+
+    if (!save) {
+      deleteBtn.setDisabled(true);
+      storylogBtn.setDisabled(true);
     }
 
-    // STORY LOG — opens the same overlay used by EncounterSetupScene.
-    const storylogBg = this.add.rectangle(cx, top + 498, 110, 22, 0x0d1a1a)
-      .setStrokeStyle(1, save ? 0x2a7766 : 0x222222).setAlpha(save ? 1 : 0.3);
-    const storylogLabel = this.add.text(cx, top + 498, "STORY LOG", {
-      fontSize: "10px", color: save ? "#44aa88" : "#445566", fontFamily: "monospace", resolution: DPR,
-    }).setOrigin(0.5).setAlpha(save ? 1 : 0.3);
-    if (save) {
-      storylogBg.setInteractive({ useHandCursor: true });
-      storylogBg.on("pointerover", () => { storylogBg.setStrokeStyle(1, 0x44aa88); storylogLabel.setColor("#66ccaa"); });
-      storylogBg.on("pointerout",  () => { storylogBg.setStrokeStyle(1, 0x2a7766); storylogLabel.setColor("#44aa88"); });
-      storylogBg.on("pointerdown", (pointer: Phaser.Input.Pointer) => {
-        pointer.event.stopPropagation();
-        this.openStorylogOverlay(def);
-      });
-    }
-    this.saveDisplays.set(def.id, { deleteBg, deleteLabel, storylogBg, storylogLabel });
-
-    this.add.text(cx, top + cardH - 24, "SELECT", { fontSize: "13px", color: colorHex, fontFamily: "monospace", resolution: DPR }).setOrigin(0.5, 0);
+    this.charCards.set(def.id, { cardBtn, infoEl, equippedEl, deleteBtn, storylogBtn });
   }
 
   /**
@@ -238,12 +308,13 @@ export class AdventureSetupScene extends Phaser.Scene {
     this.adventureSaves.delete(def.id);
     gameClient.deleteSave(def.id).catch(() => {});
     gameClient.deleteAdventureSave(def.id).catch(() => {});
-    const display = this.saveDisplays.get(def.id);
-    if (display) {
-      display.deleteBg.disableInteractive().setStrokeStyle(1, 0x222222).setAlpha(0.3);
-      display.deleteLabel.setColor("#445566").setAlpha(0.3);
-      display.storylogBg.disableInteractive().setStrokeStyle(1, 0x222222).setAlpha(0.3);
-      display.storylogLabel.setColor("#445566").setAlpha(0.3);
+    const elems = this.charCards.get(def.id);
+    if (elems) {
+      elems.infoEl.textContent = "No save data";
+      elems.infoEl.style.color = "#445566";
+      elems.equippedEl.textContent = "";
+      elems.deleteBtn.setDisabled(true);
+      elems.storylogBtn.setDisabled(true);
     }
     this.refreshAdventureCards();
   }
@@ -278,60 +349,66 @@ export class AdventureSetupScene extends Phaser.Scene {
     return [weapon, armor, shield].filter(Boolean).join("  ·  ") || "—";
   }
 
-  /** Render the character's SVG token as a card avatar; falls back to a
-   *  coloured square if the SVG texture isn't loaded yet. Mirror of the
-   *  helper on EncounterSetupScene. */
-  private buildCharAvatar(def: PlayerDef, cx: number, cy: number, size: number): void {
-    const key = tokenTextureKey(tokenAssetForPlayer(def));
-    if (this.textures.exists(key)) {
-      this.add.image(cx, cy, key).setDisplaySize(size, size);
-    } else {
-      this.add.rectangle(cx, cy, size, size, def.color);
-    }
-  }
-
   private buildAdventureCard(adv: AdventureDef, cx: number, cy: number): void {
-    const bg = this.add.rectangle(cx, cy, ADV_CARD_W, ADV_CARD_H, 0x141426).setStrokeStyle(2, 0x334455).setInteractive({ useHandCursor: true });
-    this.advCardBgs.set(adv.id, bg);
-    bg.on("pointerover", () => { if (this.selectedAdventure?.id !== adv.id) bg.setStrokeStyle(2, 0x6688aa); });
-    bg.on("pointerout",  () => { if (this.selectedAdventure?.id !== adv.id) bg.setStrokeStyle(2, 0x334455); });
-    bg.on("pointerdown", () => this.selectAdventure(adv));
-
-    const top = cy - ADV_CARD_H / 2;
     const left = cx - ADV_CARD_W / 2;
+    const top = cy - ADV_CARD_H / 2;
 
-    this.add.text(left + 16, top + 14, adv.title, {
-      fontSize: "16px", color: "#e2b96f", fontFamily: "monospace", resolution: DPR,
-    }).setOrigin(0, 0);
-
-    const progressText = this.add.text(left + ADV_CARD_W - 16, top + 14, "", {
-      fontSize: "11px", color: "#88aacc", fontFamily: "monospace", resolution: DPR, align: "right",
-    }).setOrigin(1, 0);
-    this.advCardProgress.set(adv.id, progressText);
-
-    this.add.text(left + 16, top + 44, `${adv.chapters.length} chapters`, {
-      fontSize: "11px", color: "#778899", fontFamily: "monospace", resolution: DPR,
-    }).setOrigin(0, 0);
-
-    const desc = this.add.text(left + 16, top + 72, adv.description, {
-      fontSize: "12px", color: "#bbccdd", fontFamily: "sans-serif", resolution: DPR,
-      wordWrap: { width: ADV_CARD_W - 32 },
+    const cardBtn = createHtmlButton({
+      scene: this, sceneWidth: W,
+      x: left, y: top, w: ADV_CARD_W, h: ADV_CARD_H,
+      label: "", variant: "ghost",
+      onClick: () => this.selectAdventure(adv),
     });
-    this.advCardLabels.set(adv.id, desc);
+    cardBtn.el.textContent = "";
+    cardBtn.el.style.padding = "0";
+    cardBtn.el.style.background = "#141426";
+    cardBtn.el.style.borderColor = "#334455";
+    cardBtn.el.style.borderWidth = "2px";
+    cardBtn.el.style.whiteSpace = "normal";
+    cardBtn.el.style.overflow = "hidden";
+
+    const inner = document.createElement("div");
+    inner.style.cssText = `
+      position: relative; display: flex; flex-direction: column;
+      width: 100%; height: 100%; padding: 14px 16px; box-sizing: border-box;
+      font-family: monospace; color: #bbccdd; pointer-events: none;
+    `;
+    cardBtn.el.appendChild(inner);
+
+    const title = document.createElement("div");
+    title.textContent = adv.title;
+    title.style.cssText = "font-size: 16px; color: #e2b96f;";
+    inner.appendChild(title);
+
+    const progressEl = document.createElement("div");
+    progressEl.style.cssText = "position: absolute; right: 16px; top: 14px; font-size: 11px; color: #88aacc; text-align: right;";
+    inner.appendChild(progressEl);
+
+    const chapters = document.createElement("div");
+    chapters.textContent = `${adv.chapters.length} chapters`;
+    chapters.style.cssText = "margin-top: 14px; font-size: 11px; color: #778899;";
+    inner.appendChild(chapters);
+
+    const desc = document.createElement("div");
+    desc.textContent = adv.description;
+    desc.style.cssText = "margin-top: 14px; font-size: 12px; color: #bbccdd; font-family: sans-serif; line-height: 1.5;";
+    inner.appendChild(desc);
+
+    this.advCards.set(adv.id, { cardBtn, progressEl });
   }
 
   private refreshAdventureCards(): void {
     if (!this.selectedPlayer) return;
     const save = this.adventureSaves.get(this.selectedPlayer.id);
     for (const adv of this.adventures) {
-      const text = this.advCardProgress.get(adv.id);
-      if (!text) continue;
+      const elems = this.advCards.get(adv.id);
+      if (!elems) continue;
       if (save && save.adventureId === adv.id) {
         const completed = save.completedChapterIds.length;
-        text.setText(`IN PROGRESS · ${completed}/${adv.chapters.length}`);
-        text.setColor("#88ccaa");
+        elems.progressEl.textContent = `IN PROGRESS · ${completed}/${adv.chapters.length}`;
+        elems.progressEl.style.color = "#88ccaa";
       } else {
-        text.setText("");
+        elems.progressEl.textContent = "";
       }
     }
     this.refreshBeginButton();
@@ -340,8 +417,11 @@ export class AdventureSetupScene extends Phaser.Scene {
   private selectChar(def: PlayerDef): void {
     this.selectedPlayer = def;
     localStorage.setItem(LAST_CHAR_KEY, def.id);
-    for (const [id, bg] of this.charCardBgs) {
-      bg.setStrokeStyle(2, id === def.id ? def.color : 0x334455);
+    for (const [id, elems] of this.charCards) {
+      const active = id === def.id;
+      elems.cardBtn.el.style.borderColor = active
+        ? "#" + def.color.toString(16).padStart(6, "0")
+        : "#334455";
     }
     this.refreshAdventureCards();
     this.refreshBeginButton();
@@ -349,25 +429,38 @@ export class AdventureSetupScene extends Phaser.Scene {
 
   private selectAdventure(adv: AdventureDef): void {
     this.selectedAdventure = adv;
-    for (const [id, bg] of this.advCardBgs) {
-      bg.setStrokeStyle(2, id === adv.id ? 0xe2b96f : 0x334455);
+    for (const [id, elems] of this.advCards) {
+      const active = id === adv.id;
+      elems.cardBtn.el.style.borderColor = active ? "#e2b96f" : "#334455";
     }
     this.refreshBeginButton();
   }
 
   private buildBackButton(cx: number, cy: number): void {
-    const bg = this.add.rectangle(cx, cy, 160, 36, 0x222233).setStrokeStyle(1, 0x556677).setInteractive({ useHandCursor: true });
-    this.add.text(cx, cy, "BACK", {
-      fontSize: "13px", color: "#aabbcc", fontFamily: "monospace", resolution: DPR,
-    }).setOrigin(0.5);
-    bg.on("pointerdown", () => this.scene.start("MainMenuScene"));
+    const w = 160;
+    const h = 36;
+    const btn = createHtmlButton({
+      scene: this, sceneWidth: W,
+      x: cx - w / 2, y: cy - h / 2, w, h,
+      label: "BACK",
+      variant: "secondary",
+      onClick: () => this.scene.start("MainMenuScene"),
+    });
+    this.htmlButtons.push(btn);
   }
 
   private buildBeginButton(cx: number, cy: number): void {
-    this.beginBg = this.add.rectangle(cx, cy, 240, 44, 0x1a3a2a).setStrokeStyle(2, 0x2a6655);
-    this.beginLabel = this.add.text(cx, cy, "BEGIN ADVENTURE", {
-      fontSize: "14px", color: "#ffe9a8", fontFamily: "monospace", resolution: DPR,
-    }).setOrigin(0.5);
+    const w = 240;
+    const h = 44;
+    this.beginBtn = createHtmlButton({
+      scene: this, sceneWidth: W,
+      x: cx - w / 2, y: cy - h / 2, w, h,
+      label: "BEGIN ADVENTURE",
+      variant: "primary",
+      fontSize: 14,
+      onClick: () => this.beginAdventure(),
+    });
+    this.htmlButtons.push(this.beginBtn);
   }
 
   private refreshBeginButton(): void {
@@ -377,25 +470,33 @@ export class AdventureSetupScene extends Phaser.Scene {
       : null;
     const continuing = !!save && save.adventureId === this.selectedAdventure?.id && save.completedChapterIds.length > 0;
 
-    this.beginLabel.setText(continuing ? "CONTINUE ADVENTURE" : "BEGIN ADVENTURE");
-    if (ready) {
-      this.beginBg.setFillStyle(0x1a3a2a).setStrokeStyle(2, 0x2a6655).setInteractive({ useHandCursor: true });
-      this.beginLabel.setColor("#ffe9a8");
-      this.beginBg.removeAllListeners("pointerdown").on("pointerdown", () => this.beginAdventure());
-    } else {
-      this.beginBg.disableInteractive().setFillStyle(0x1a2222).setStrokeStyle(2, 0x334455);
-      this.beginLabel.setColor("#556677");
-    }
+    this.beginBtn.setLabel(continuing ? "CONTINUE ADVENTURE" : "BEGIN ADVENTURE");
+    this.beginBtn.setDisabled(!ready);
   }
 
   private beginAdventure(): void {
     if (!this.selectedPlayer || !this.selectedAdventure) return;
-    this.beginBg.disableInteractive();
+    this.beginBtn.setDisabled(true);
     gameClient.startAdventure(this.selectedPlayer.id, this.selectedAdventure.id).then((initialState: GameState) => {
       this.scene.start("GameScene", { sessionId: initialState.sessionId, playerDef: this.selectedPlayer! });
     }).catch((err: unknown) => {
       console.error("Failed to start adventure:", err);
-      this.beginBg.setInteractive({ useHandCursor: true });
+      this.beginBtn.setDisabled(false);
     });
+  }
+
+  private teardown(): void {
+    for (const t of this.htmlTexts) t.dispose();
+    for (const b of this.htmlButtons) b.dispose();
+    for (const c of this.charCards.values()) {
+      c.cardBtn.dispose();
+      c.deleteBtn.dispose();
+      c.storylogBtn.dispose();
+    }
+    for (const c of this.advCards.values()) c.cardBtn.dispose();
+    this.htmlTexts = [];
+    this.htmlButtons = [];
+    this.charCards.clear();
+    this.advCards.clear();
   }
 }

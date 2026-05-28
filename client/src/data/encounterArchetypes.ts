@@ -55,7 +55,7 @@ export type PlacementAnchor =
  *   • `perception` — kicks off a Perception check at `dc`. On pass the player
  *     sees `passMessage` in the event log.
  *   • `log`        — pushes `message` into the event log (atmospheric beat).
- *   • `aigm`       — feeds `message` to the AIDM as a private cue.
+ *   • `aigm`       — feeds `message` to the AIGM as a private cue.
  *   • `combat`     — flips `defId` (or all unaligned NPCs) to enemy and starts
  *     initiative.
  */
@@ -71,6 +71,7 @@ export interface TriggerTemplate {
   passMessage?: string;
   /** Log / AIGM cue text; required for `log` and `aigm`. */
   message?: string;
+
   /** Combat defId override; optional for `combat`. */
   defId?: string;
 }
@@ -92,7 +93,7 @@ export interface EncounterArchetype {
   titles: string[];
   /** Optional opening narration shown in the event log. One picked per encounter. */
   introductions?: string[];
-  /** Hidden context the AIDM sees silently. One picked per encounter. */
+  /** Hidden context the AIGM sees silently. One picked per encounter. */
   descriptions: string[];
   /** Player-facing one-line objective. One picked per encounter. */
   objectives: string[];
@@ -122,8 +123,10 @@ export interface EncounterArchetype {
    * Optional trigger templates the randomizer rolls into concrete encounter
    * triggers. Each template is anchored to a map region (see `PlacementAnchor`)
    * and templates whose anchor doesn't resolve on the rolled map are silently
-   * dropped. The TriggerEditor caps at two triggers, so an archetype declaring
-   * more is fine — only the first two that resolve are kept.
+   * dropped. The randomizer caps each roll at `MAX_TRIGGERS` (today 2) of the
+   * resolved templates, so an archetype declaring more is fine — only the
+   * first that-many that resolve are seeded into the editor. The editor
+   * itself has no cap and the user can add more by hand.
    */
   triggerTemplates?: TriggerTemplate[];
 }
@@ -149,7 +152,7 @@ export const ENCOUNTER_ARCHETYPES: EncounterArchetype[] = [
       'The wind dies. Birds stop. Whatever was watching has decided you are close enough.',
     ],
     descriptions: [
-      'A wooded ambush — hostile figures hide in the undergrowth. The AIDM should foreshadow movement among the trees and reward perception.',
+      'A wooded ambush — hostile figures hide in the undergrowth. The AIGM should foreshadow movement among the trees and reward perception.',
     ],
     objectives: [
       'Survive the ambush in the woods',
@@ -197,7 +200,7 @@ export const ENCOUNTER_ARCHETYPES: EncounterArchetype[] = [
       "Tethered horses huff softly in the dark. A laugh, cut short. The camp is closer than you thought.",
     ],
     descriptions: [
-      "A bandit camp glimpsed through the trees. The AIDM should describe low fires, propped weapons, and an unwary watch — surprise is possible.",
+      "A bandit camp glimpsed through the trees. The AIGM should describe low fires, propped weapons, and an unwary watch — surprise is possible.",
     ],
     objectives: [
       'Drive off or defeat the bandits',
@@ -240,7 +243,7 @@ export const ENCOUNTER_ARCHETYPES: EncounterArchetype[] = [
       "The smell of brine and old earth hangs thick. Somewhere among the broken walls, wings stir that shouldn't.",
     ],
     descriptions: [
-      'Old ruins half-claimed by water. Stirges nest in the broken arches; risen things stir in the wet earth. The AIDM should lean into the briny, abandoned atmosphere.',
+      'Old ruins half-claimed by water. Stirges nest in the broken arches; risen things stir in the wet earth. The AIGM should lean into the briny, abandoned atmosphere.',
     ],
     objectives: [
       'Clear the ruined shoreline',
@@ -282,7 +285,7 @@ export const ENCOUNTER_ARCHETYPES: EncounterArchetype[] = [
       'The crossroads should be quiet at this hour. It is not.',
     ],
     descriptions: [
-      'A flare-up at a rural crossroads — outlaws shaking down a traveller. The AIDM should give the bystander a voice and let the party choose to intervene.',
+      'A flare-up at a rural crossroads — outlaws shaking down a traveller. The AIGM should give the bystander a voice and let the party choose to intervene.',
     ],
     objectives: [
       'Resolve the quarrel at the crossroads',
@@ -328,7 +331,7 @@ export const ENCOUNTER_ARCHETYPES: EncounterArchetype[] = [
       'The air is thicker here. The first chamber yawns open ahead — and you can hear something dragging across the floor in the next one.',
     ],
     descriptions: [
-      'A sealed crypt or warren — skeletons or kobolds garrison the deeper chambers. The AIDM should emphasise echoes, dripping water, and old bones; reward cautious movement.',
+      'A sealed crypt or warren — skeletons or kobolds garrison the deeper chambers. The AIGM should emphasise echoes, dripping water, and old bones; reward cautious movement.',
     ],
     objectives: [
       'Clear the chambers',

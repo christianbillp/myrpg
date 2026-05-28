@@ -6,8 +6,8 @@ import { SavedMapDef } from "../data/maps";
 import { gameClient } from "../net/GameClient";
 import type { GameState, EquipmentSlots, EncounterRecord, StorylogEntry } from "../net/types";
 import { StorylogOverlay } from "../ui/StorylogOverlay";
-import { tokenTextureKey } from "./BootScene";
 import { tokenAssetForPlayer } from "../data/tokens";
+import { createHtmlButton, createHtmlText, type HtmlButtonHandle, type HtmlTextHandle } from "../ui/htmlButtons";
 import {
   TILE_SIZE,
   GRID_COLS,
@@ -19,13 +19,16 @@ import {
 
 const W = PLAYER_PANEL_WIDTH + GRID_COLS * TILE_SIZE + TARGET_PANEL_WIDTH;
 const H = GRID_ROWS * TILE_SIZE + HUD_HEIGHT;
-const DPR = window.devicePixelRatio;
+
+const API_URL = "http://localhost:3000";
 
 const CHAR_DIVIDER_X = 920;
 const CHAR1_CX = 155;
 const CHAR2_CX = 460;
 const CHAR3_CX = 765;
 const CHAR_CXS = [CHAR1_CX, CHAR2_CX, CHAR3_CX];
+const CHAR_CARD_W = 270;
+const CHAR_CARD_H = 550;
 const CONTENT_CY = Math.round(80 + (H - 80 - 100) / 2);
 
 const ENC_CARD_W = 360;
@@ -47,26 +50,28 @@ interface LocalSave {
   storylog?: StorylogEntry[];
 }
 
-interface SaveDisplay {
-  infoText: Phaser.GameObjects.Text;
-  equippedText: Phaser.GameObjects.Text;
-  deleteBg: Phaser.GameObjects.Rectangle;
-  deleteLabel: Phaser.GameObjects.Text;
-  storylogBg: Phaser.GameObjects.Rectangle;
-  storylogLabel: Phaser.GameObjects.Text;
+interface CharCardElems {
+  cardBtn: HtmlButtonHandle;
+  infoEl: HTMLDivElement;
+  equippedEl: HTMLDivElement;
+  deleteBtn: HtmlButtonHandle;
+  storylogBtn: HtmlButtonHandle;
+}
+
+interface EncCardElems {
+  cardBtn: HtmlButtonHandle;
 }
 
 export class EncounterSetupScene extends Phaser.Scene {
   private selectedPlayer: PlayerDef | null = null;
   private selectedEncounter: EncounterDef | null = null;
 
-  private charCardBgs: Map<string, Phaser.GameObjects.Rectangle> = new Map();
-  private encounterCardBgs: Map<string, Phaser.GameObjects.Rectangle> = new Map();
-  private saveDisplays: Map<string, SaveDisplay> = new Map();
-  private beginBg!: Phaser.GameObjects.Rectangle;
-  private beginLabel!: Phaser.GameObjects.Text;
-  private promoteBg!: Phaser.GameObjects.Rectangle;
-  private promoteLabel!: Phaser.GameObjects.Text;
+  private charCards: Map<string, CharCardElems> = new Map();
+  private encounterCards: Map<string, EncCardElems> = new Map();
+  private htmlTexts: HtmlTextHandle[] = [];
+  private htmlButtons: HtmlButtonHandle[] = [];
+  private beginBtn!: HtmlButtonHandle;
+  private promoteBtn!: HtmlButtonHandle;
 
   private characters: PlayerDef[] = [];
   private encounters: EncounterDef[] = [];
@@ -87,9 +92,8 @@ export class EncounterSetupScene extends Phaser.Scene {
     this.selectedEncounter = null;
     this.selectedSave = null;
     this.allSaves.clear();
-    this.charCardBgs.clear();
-    this.encounterCardBgs.clear();
-    this.saveDisplays.clear();
+    this.charCards.clear();
+    this.encounterCards.clear();
     this.pendingEncounterId = data?.presetEncounterId ?? null;
   }
 
@@ -97,18 +101,11 @@ export class EncounterSetupScene extends Phaser.Scene {
     this.characters = this.registry.get("characters") as PlayerDef[];
     this.encounters = this.registry.get("encounters") as EncounterDef[];
 
-    // If we arrived here with a pre-selected encounter id but it isn't in the
-    // cached registry (typical when the user just generated a brand-new one),
-    // refresh both encounters AND maps from the server before rendering. The
-    // maps refresh is critical so the BEGIN button's `savedMap` lookup finds
-    // the freshly-generated map.
     if (this.pendingEncounterId && !this.encounters.find((e) => e.id === this.pendingEncounterId)) {
       Promise.all([gameClient.listEncounters(), gameClient.listMaps()]).then(([encs, maps]) => {
         if (!this.scene.isActive()) return;
         this.registry.set("encounters", encs as EncounterDef[]);
         this.registry.set("maps", maps as SavedMapDef[]);
-        // Restart the scene so the new lists render through the normal
-        // create() path — cheaper than re-doing the card layout inline.
         this.scene.restart({ presetEncounterId: this.pendingEncounterId });
       }).catch(() => { /* fall through to render existing list */ });
     }
@@ -121,19 +118,31 @@ export class EncounterSetupScene extends Phaser.Scene {
     }
 
     this.add.rectangle(W / 2, H / 2, W, H, 0x0d0d1e);
-    this.add.text(W / 2, 28, "ENCOUNTER SETUP", {
-      fontSize: "22px", color: "#e2b96f", fontFamily: "monospace", resolution: DPR,
-    }).setOrigin(0.5, 0);
-
     this.add.rectangle(W / 2, 66, W - 64, 1, 0x334455);
     this.add.rectangle(CHAR_DIVIDER_X, H / 2, 1, H - 140, 0x334455).setOrigin(0.5, 0.5);
+    this.add.rectangle(W / 2, H - 58, W - 64, 1, 0x334455);
 
-    this.add.text(CHAR_DIVIDER_X / 2, 78, "CHARACTER", {
-      fontSize: "11px", color: "#556677", fontFamily: "monospace", resolution: DPR, letterSpacing: 2,
-    }).setOrigin(0.5, 0);
-    this.add.text(CHAR_DIVIDER_X + (W - CHAR_DIVIDER_X) / 2, 78, "ENCOUNTER", {
-      fontSize: "11px", color: "#556677", fontFamily: "monospace", resolution: DPR, letterSpacing: 2,
-    }).setOrigin(0.5, 0);
+    this.htmlTexts.push(createHtmlText({
+      scene: this, sceneWidth: W,
+      x: 0, y: 22, w: W, h: 28,
+      text: "ENCOUNTER SETUP",
+      fontSize: 22, color: "#e2b96f", align: "center",
+      letterSpacing: 1,
+    }));
+
+    this.htmlTexts.push(createHtmlText({
+      scene: this, sceneWidth: W,
+      x: 0, y: 78, w: CHAR_DIVIDER_X, h: 14,
+      text: "CHARACTER",
+      fontSize: 11, color: "#556677", align: "center", letterSpacing: 2,
+    }));
+
+    this.htmlTexts.push(createHtmlText({
+      scene: this, sceneWidth: W,
+      x: CHAR_DIVIDER_X, y: 78, w: W - CHAR_DIVIDER_X, h: 14,
+      text: "ENCOUNTER",
+      fontSize: 11, color: "#556677", align: "center", letterSpacing: 2,
+    }));
 
     this.characters.forEach((char, i) => {
       const cx = CHAR_CXS[i] ?? CHAR_CXS[CHAR_CXS.length - 1];
@@ -151,7 +160,6 @@ export class EncounterSetupScene extends Phaser.Scene {
       this.buildEncounterCard(enc, cx, cy);
     });
 
-    this.add.rectangle(W / 2, H - 58, W - 64, 1, 0x334455);
     this.buildBackButton(120, H - 36);
     this.buildBeginButton(W / 2, H - 36);
     this.buildPromoteButton(W - 200, H - 36);
@@ -169,10 +177,6 @@ export class EncounterSetupScene extends Phaser.Scene {
       if (enc) this.selectEncounter(enc);
     }
 
-    // Sync all characters from server. Server is the source of truth — if
-    // the save file no longer exists (e.g. it was deleted on disk between
-    // sessions), clear the stale localStorage entry so the card stops
-    // showing "saved" HP/XP/GP that no longer reflect reality.
     for (const char of this.characters) {
       gameClient.loadSave(char.id).then((data) => {
         if (!this.scene.isActive()) return;
@@ -186,6 +190,9 @@ export class EncounterSetupScene extends Phaser.Scene {
         this.updateSaveDisplay(char, save);
       }).catch(() => {});
     }
+
+    this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => this.teardown());
+    this.events.once(Phaser.Scenes.Events.DESTROY, () => this.teardown());
   }
 
   /** Server reports no save for this character — purge the stale local mirror. */
@@ -193,28 +200,24 @@ export class EncounterSetupScene extends Phaser.Scene {
     localStorage.removeItem(saveKey(def.id));
     this.allSaves.delete(def.id);
     if (this.selectedPlayer?.id === def.id) this.selectedSave = null;
-    const display = this.saveDisplays.get(def.id);
-    if (!display) return;
-    display.infoText.setText("No save data").setColor("#445566");
-    display.equippedText.setText("");
-    display.deleteBg.disableInteractive().setStrokeStyle(1, 0x222222).setAlpha(0.3);
-    display.deleteLabel.setColor("#445566").setAlpha(0.3);
-    display.storylogBg.disableInteractive().setStrokeStyle(1, 0x222222).setAlpha(0.3);
-    display.storylogLabel.setColor("#445566").setAlpha(0.3);
+    const elems = this.charCards.get(def.id);
+    if (!elems) return;
+    elems.infoEl.textContent = "No save data";
+    elems.infoEl.style.color = "#445566";
+    elems.equippedEl.textContent = "";
+    elems.deleteBtn.setDisabled(true);
+    elems.storylogBtn.setDisabled(true);
   }
 
   private updateSaveDisplay(def: PlayerDef, save: LocalSave): void {
-    const display = this.saveDisplays.get(def.id);
-    if (!display) return;
+    const elems = this.charCards.get(def.id);
+    if (!elems) return;
     const items = this.registry.get("equipment") as ItemDef[];
-    display.infoText.setText(this.saveInfoLine(save, def));
-    display.equippedText.setText(this.equippedLine(save, items));
-    display.deleteBg.setInteractive({ useHandCursor: true });
-    display.deleteBg.setAlpha(1);
-    display.deleteLabel.setAlpha(1);
-
-    display.storylogBg.setStrokeStyle(1, 0x2a7766).setAlpha(1).setInteractive({ useHandCursor: true });
-    display.storylogLabel.setColor("#44aa88").setAlpha(1);
+    elems.infoEl.textContent = this.saveInfoLine(save, def);
+    elems.infoEl.style.color = "#aabbcc";
+    elems.equippedEl.textContent = this.equippedLine(save, items);
+    elems.deleteBtn.setDisabled(false);
+    elems.storylogBtn.setDisabled(false);
   }
 
   private saveInfoLine(save: LocalSave, def: PlayerDef): string {
@@ -230,91 +233,166 @@ export class EncounterSetupScene extends Phaser.Scene {
   }
 
   private buildCharCard(def: PlayerDef, cx: number, cy: number): void {
-    const cardW = 270;
-    const cardH = 550;
     const colorHex = "#" + def.color.toString(16).padStart(6, "0");
     const statMod = (v: number) => Math.floor((v - 10) / 2);
     const items = this.registry.get("equipment") as ItemDef[];
     const save = this.allSaves.get(def.id) ?? null;
-
-    const bg = this.add.rectangle(cx, cy, cardW, cardH, 0x111122).setStrokeStyle(2, 0x334455).setInteractive({ useHandCursor: true });
-    this.charCardBgs.set(def.id, bg);
-    bg.on("pointerover", () => { if (this.selectedPlayer?.id !== def.id) bg.setStrokeStyle(2, def.color & 0x7f7f7f); });
-    bg.on("pointerout",  () => { if (this.selectedPlayer?.id !== def.id) bg.setStrokeStyle(2, 0x334455); });
-    bg.on("pointerdown", () => this.selectChar(def));
-
-    const top = cy - cardH / 2;
-
-    this.buildCharAvatar(def, cx, top + 50, 48);
-    this.add.text(cx, top + 90, def.name, { fontSize: "15px", color: "#ffffff", fontFamily: "monospace", resolution: DPR }).setOrigin(0.5, 0);
-    this.add.text(cx, top + 114, `${def.speciesName}  ${def.className} ${def.level}`, { fontSize: "11px", color: "#8899aa", fontFamily: "monospace", resolution: DPR }).setOrigin(0.5, 0);
-    this.add.rectangle(cx, top + 140, cardW - 32, 1, 0x334455);
-
     const atkMod = def.mainAttack.statKey === "str" ? statMod(def.str) : statMod(def.dex);
     const atkBonus = atkMod + def.proficiencyBonus;
-    this.add.text(cx, top + 152, [
-      `HP ${def.maxHp}   AC ${def.ac}   Speed ${def.speed} ft`,
-      `Attack +${atkBonus}   Initiative ${statMod(def.dex) >= 0 ? "+" : ""}${statMod(def.dex)}`,
-    ].join("\n"), { fontSize: "11px", color: "#aabbcc", fontFamily: "monospace", resolution: DPR, align: "center", lineSpacing: 6 }).setOrigin(0.5, 0);
+    const initMod = statMod(def.dex);
 
-    this.add.rectangle(cx, top + 200, cardW - 32, 1, 0x334455);
-    this.add.text(cx, top + 212, def.description ?? '', { fontSize: "11px", color: "#99bbcc", fontFamily: "monospace", resolution: DPR, align: "center", lineSpacing: 8, wordWrap: { width: cardW - 48 } }).setOrigin(0.5, 0);
+    const left = cx - CHAR_CARD_W / 2;
+    const top = cy - CHAR_CARD_H / 2;
 
-    this.add.rectangle(cx, top + 368, cardW - 32, 1, 0x223344);
-
-    const infoText = this.add.text(cx, top + 380, save ? this.saveInfoLine(save, def) : "No save data", {
-      fontSize: "10px", color: save ? "#aabbcc" : "#445566", fontFamily: "monospace", resolution: DPR,
-    }).setOrigin(0.5, 0);
-    const equippedText = this.add.text(cx, top + 398, save ? this.equippedLine(save, items) : "", {
-      fontSize: "10px", color: "#667788", fontFamily: "monospace", resolution: DPR,
-    }).setOrigin(0.5, 0);
-
-    const deleteBg = this.add.rectangle(cx, top + 426, 110, 22, 0x1a0808).setStrokeStyle(1, save ? 0x663333 : 0x222222).setAlpha(save ? 1 : 0.3);
-    const deleteLabel = this.add.text(cx, top + 426, "DELETE SAVE", {
-      fontSize: "10px", color: save ? "#995555" : "#445566", fontFamily: "monospace", resolution: DPR,
-    }).setOrigin(0.5).setAlpha(save ? 1 : 0.3);
-
-    deleteBg.setInteractive({ useHandCursor: true });
-    deleteBg.on("pointerover", () => { deleteBg.setStrokeStyle(1, 0xaa4444); deleteLabel.setColor("#cc6666"); });
-    deleteBg.on("pointerout",  () => { deleteBg.setStrokeStyle(1, 0x663333); deleteLabel.setColor("#995555"); });
-    deleteBg.on("pointerdown", (pointer: Phaser.Input.Pointer) => {
-      pointer.event.stopPropagation();
-      localStorage.removeItem(saveKey(def.id));
-      this.allSaves.delete(def.id);
-      if (this.selectedPlayer?.id === def.id) this.selectedSave = null;
-      gameClient.deleteSave(def.id).catch(() => {});
-      infoText.setText("No save data").setColor("#445566");
-      equippedText.setText("");
-      deleteBg.disableInteractive().setStrokeStyle(1, 0x222222).setAlpha(0.3);
-      deleteLabel.setColor("#445566").setAlpha(0.3);
-      storylogBg.disableInteractive().setStrokeStyle(1, 0x222222).setAlpha(0.3);
-      storylogLabel.setColor("#445566").setAlpha(0.3);
+    // The card itself is a clickable ghost button — we replace its inner DOM
+    // with structured content (avatar, name, stats, save block, two child
+    // buttons). The two child buttons are sibling HTML buttons absolutely-
+    // positioned over the card so their click handlers don't fire the card.
+    const cardBtn = createHtmlButton({
+      scene: this, sceneWidth: W,
+      x: left, y: top, w: CHAR_CARD_W, h: CHAR_CARD_H,
+      label: "", variant: "ghost",
+      onClick: () => this.selectChar(def),
     });
+    cardBtn.el.textContent = "";
+    cardBtn.el.style.padding = "0";
+    cardBtn.el.style.background = "#111122";
+    cardBtn.el.style.borderColor = "#334455";
+    cardBtn.el.style.borderWidth = "2px";
+    cardBtn.el.style.display = "flex";
+    cardBtn.el.style.flexDirection = "column";
+    cardBtn.el.style.alignItems = "center";
+    cardBtn.el.style.justifyContent = "flex-start";
+    cardBtn.el.style.color = "#aabbcc";
+    cardBtn.el.style.fontFamily = "monospace";
+    cardBtn.el.style.whiteSpace = "normal";
+    cardBtn.el.style.overflow = "hidden";
 
-    const storylogBg = this.add.rectangle(cx, top + 455, 110, 22, 0x0d1a1a)
-      .setStrokeStyle(1, save ? 0x2a7766 : 0x222222)
-      .setAlpha(save ? 1 : 0.3);
-    const storylogLabel = this.add.text(cx, top + 455, "STORY LOG", {
-      fontSize: "10px", color: save ? "#44aa88" : "#445566", fontFamily: "monospace", resolution: DPR,
-    }).setOrigin(0.5).setAlpha(save ? 1 : 0.3);
+    // Layout: a top section (avatar / name / stats / description) that fills
+    // the free vertical space, and a bottom section (info / equipped + the
+    // two action buttons + SELECT footer) pinned to the bottom. Padding-bottom
+    // reserves a fixed band for the action buttons so the inner text never
+    // creeps under them.
+    const BOTTOM_BAND = 130;
 
-    storylogBg.setInteractive({ useHandCursor: true });
-    storylogBg.on("pointerover", () => { storylogBg.setStrokeStyle(1, 0x44aa88); storylogLabel.setColor("#66ccaa"); });
-    storylogBg.on("pointerout",  () => { storylogBg.setStrokeStyle(1, 0x2a7766); storylogLabel.setColor("#44aa88"); });
-    storylogBg.on("pointerdown", (pointer: Phaser.Input.Pointer) => {
-      pointer.event.stopPropagation();
-      this.openStorylogOverlay(def, storylogBg, storylogLabel);
+    const inner = document.createElement("div");
+    inner.style.cssText = `
+      display: flex; flex-direction: column; align-items: center;
+      width: 100%; height: 100%; padding: 18px 14px ${BOTTOM_BAND}px; box-sizing: border-box;
+      pointer-events: none;
+    `;
+    cardBtn.el.appendChild(inner);
+
+    // Avatar (SVG token loaded straight from the API).
+    const avatar = document.createElement("img");
+    avatar.src = `${API_URL}${tokenAssetForPlayer(def)}`;
+    avatar.alt = def.name;
+    avatar.style.cssText = "display: block; width: 64px; height: 64px;";
+    inner.appendChild(avatar);
+
+    const nameEl = document.createElement("div");
+    nameEl.textContent = def.name;
+    nameEl.style.cssText = "margin-top: 8px; font-size: 15px; color: #ffffff; text-align: center;";
+    inner.appendChild(nameEl);
+
+    const subEl = document.createElement("div");
+    subEl.textContent = `${def.speciesName}  ${def.className} ${def.level}`;
+    subEl.style.cssText = "margin-top: 6px; font-size: 11px; color: #8899aa; text-align: center;";
+    inner.appendChild(subEl);
+
+    const divider1 = document.createElement("div");
+    divider1.style.cssText = "width: 88%; height: 1px; background: #334455; margin-top: 14px;";
+    inner.appendChild(divider1);
+
+    const statsEl = document.createElement("div");
+    statsEl.textContent = `HP ${def.maxHp}   AC ${def.ac}   Speed ${def.speed} ft\nAttack +${atkBonus}   Initiative ${initMod >= 0 ? "+" : ""}${initMod}`;
+    statsEl.style.cssText = "margin-top: 10px; width: 88%; font-size: 11px; color: #aabbcc; text-align: center; line-height: 1.7; white-space: pre-line;";
+    inner.appendChild(statsEl);
+
+    const divider2 = document.createElement("div");
+    divider2.style.cssText = "width: 88%; height: 1px; background: #334455; margin-top: 8px;";
+    inner.appendChild(divider2);
+
+    const descEl = document.createElement("div");
+    descEl.textContent = def.description ?? "";
+    descEl.style.cssText = "margin-top: 10px; width: 88%; font-size: 11px; color: #99bbcc; text-align: center; line-height: 1.55; overflow: hidden;";
+    inner.appendChild(descEl);
+
+    // Bottom info/equipped section pinned just above the reserved button band.
+    const divider3 = document.createElement("div");
+    divider3.style.cssText = "width: 88%; height: 1px; background: #223344; margin-top: auto;";
+    inner.appendChild(divider3);
+
+    const infoEl = document.createElement("div");
+    infoEl.textContent = save ? this.saveInfoLine(save, def) : "No save data";
+    infoEl.style.cssText = `margin-top: 8px; width: 88%; font-size: 10px; color: ${save ? "#aabbcc" : "#445566"}; text-align: center;`;
+    inner.appendChild(infoEl);
+
+    const equippedEl = document.createElement("div");
+    equippedEl.textContent = save ? this.equippedLine(save, items) : "";
+    equippedEl.style.cssText = "margin-top: 4px; width: 88%; font-size: 10px; color: #667788; text-align: center;";
+    inner.appendChild(equippedEl);
+
+    const selectFooter = document.createElement("div");
+    selectFooter.textContent = "SELECT";
+    selectFooter.style.cssText = `
+      position: absolute; left: 0; right: 0; bottom: 14px;
+      text-align: center; font-size: 13px; color: ${colorHex}; pointer-events: none;
+      letter-spacing: 2px;
+    `;
+    cardBtn.el.style.position = "absolute";
+    cardBtn.el.appendChild(selectFooter);
+
+    // The two action buttons. They sit just above the SELECT footer inside
+    // the reserved bottom band and need to absorb their own clicks so the
+    // card click handler doesn't also fire.
+    const btnW = 130;
+    const btnH = 22;
+    const deleteX = cx - btnW / 2;
+    const deleteY = top + CHAR_CARD_H - 80;
+    const deleteBtn = createHtmlButton({
+      scene: this, sceneWidth: W,
+      x: deleteX, y: deleteY, w: btnW, h: btnH,
+      label: "DELETE SAVE",
+      variant: "danger",
+      fontSize: 10,
+      onClick: () => {
+        localStorage.removeItem(saveKey(def.id));
+        this.allSaves.delete(def.id);
+        if (this.selectedPlayer?.id === def.id) this.selectedSave = null;
+        gameClient.deleteSave(def.id).catch(() => {});
+        const cur = this.charCards.get(def.id);
+        if (cur) {
+          cur.infoEl.textContent = "No save data";
+          cur.infoEl.style.color = "#445566";
+          cur.equippedEl.textContent = "";
+          cur.deleteBtn.setDisabled(true);
+          cur.storylogBtn.setDisabled(true);
+        }
+      },
     });
+    deleteBtn.el.addEventListener("click", (e) => e.stopPropagation());
 
-    this.saveDisplays.set(def.id, { infoText, equippedText, deleteBg, deleteLabel, storylogBg, storylogLabel });
-    this.add.text(cx, top + cardH - 24, "SELECT", { fontSize: "13px", color: colorHex, fontFamily: "monospace", resolution: DPR }).setOrigin(0.5, 0);
+    const storylogY = deleteY + btnH + 7;
+    const storylogBtn = createHtmlButton({
+      scene: this, sceneWidth: W,
+      x: deleteX, y: storylogY, w: btnW, h: btnH,
+      label: "STORY LOG",
+      variant: "primary",
+      fontSize: 10,
+      onClick: () => this.openStorylogOverlay(def),
+    });
+    storylogBtn.el.addEventListener("click", (e) => e.stopPropagation());
+
+    if (!save) {
+      deleteBtn.setDisabled(true);
+      storylogBtn.setDisabled(true);
+    }
+
+    this.charCards.set(def.id, { cardBtn, infoEl, equippedEl, deleteBtn, storylogBtn });
   }
 
-  private openStorylogOverlay(
-    def: PlayerDef,
-    storylogBg: Phaser.GameObjects.Rectangle,
-    storylogLabel: Phaser.GameObjects.Text,
-  ): void {
+  private openStorylogOverlay(def: PlayerDef): void {
     const save = this.allSaves.get(def.id);
     if (!save) return;
     const handleUpdated = (updated: StorylogEntry[]) => {
@@ -333,49 +411,73 @@ export class EncounterSetupScene extends Phaser.Scene {
   }
 
   private selectChar(def: PlayerDef): void {
-    for (const [id, b] of this.charCardBgs)
-      b.setStrokeStyle(2, id === def.id ? def.color : 0x334455);
+    for (const [id, elems] of this.charCards) {
+      const active = id === def.id;
+      elems.cardBtn.el.style.borderColor = active
+        ? "#" + def.color.toString(16).padStart(6, "0")
+        : "#334455";
+    }
     this.selectedPlayer = def;
     this.selectedSave = this.allSaves.get(def.id) ?? null;
     localStorage.setItem(LAST_CHAR_KEY, def.id);
     this.refreshBeginButton();
   }
 
-  /** Render the character's SVG token as a card avatar; falls back to a
-   *  coloured square if the SVG texture isn't loaded yet (e.g. asset missing). */
-  private buildCharAvatar(def: PlayerDef, cx: number, cy: number, size: number): void {
-    const key = tokenTextureKey(tokenAssetForPlayer(def));
-    if (this.textures.exists(key)) {
-      this.add.image(cx, cy, key).setDisplaySize(size, size);
-    } else {
-      this.add.rectangle(cx, cy, size, size, def.color);
-    }
-  }
-
   private buildEncounterCard(def: EncounterDef, cx: number, cy: number): void {
-    const top = cy - ENC_CARD_H / 2;
     const left = cx - ENC_CARD_W / 2;
+    const top = cy - ENC_CARD_H / 2;
 
-    const bg = this.add.rectangle(cx, cy, ENC_CARD_W, ENC_CARD_H, 0x111122).setStrokeStyle(1, 0x334455).setInteractive({ useHandCursor: true });
-    this.encounterCardBgs.set(def.id, bg);
-    bg.on("pointerover", () => { if (this.selectedEncounter?.id !== def.id) bg.setStrokeStyle(1, 0x556677); });
-    bg.on("pointerout",  () => { if (this.selectedEncounter?.id !== def.id) bg.setStrokeStyle(1, 0x334455); });
-    bg.on("pointerdown", () => this.selectEncounter(def));
+    const cardBtn = createHtmlButton({
+      scene: this, sceneWidth: W,
+      x: left, y: top, w: ENC_CARD_W, h: ENC_CARD_H,
+      label: "", variant: "ghost",
+      onClick: () => this.selectEncounter(def),
+    });
+    cardBtn.el.textContent = "";
+    cardBtn.el.style.padding = "0";
+    cardBtn.el.style.background = "#111122";
+    cardBtn.el.style.borderColor = "#334455";
+    cardBtn.el.style.whiteSpace = "normal";
+    cardBtn.el.style.overflow = "hidden";
 
-    this.add.text(left + 14, top + 10, def.mapId.toUpperCase(), { fontSize: "9px", color: "#445566", fontFamily: "monospace", resolution: DPR, letterSpacing: 1 }).setOrigin(0, 0);
+    const inner = document.createElement("div");
+    inner.style.cssText = `
+      position: relative; display: flex; flex-direction: column;
+      width: 100%; height: 100%; padding: 10px 14px; box-sizing: border-box;
+      font-family: monospace; color: #aabbcc; pointer-events: none;
+    `;
+    cardBtn.el.appendChild(inner);
+
+    const mapTag = document.createElement("div");
+    mapTag.textContent = def.mapId.toUpperCase();
+    mapTag.style.cssText = "font-size: 9px; color: #445566; letter-spacing: 1px;";
+    inner.appendChild(mapTag);
+
     if ((def as { generated?: boolean }).generated) {
-      this.add.text(left + ENC_CARD_W - 14, top + 10, "✦ GENERATED", {
-        fontSize: "9px", color: "#88ccaa", fontFamily: "monospace", resolution: DPR, letterSpacing: 1,
-      }).setOrigin(1, 0);
+      const tag = document.createElement("div");
+      tag.textContent = "✦ GENERATED";
+      tag.style.cssText = "position: absolute; right: 14px; top: 10px; font-size: 9px; color: #88ccaa; letter-spacing: 1px;";
+      inner.appendChild(tag);
     }
-    this.add.text(cx, top + 26, def.encounterTitle, { fontSize: "14px", color: "#e8e8f8", fontFamily: "monospace", resolution: DPR }).setOrigin(0.5, 0);
 
-    this.add.text(cx, top + 48, def.description, { fontSize: "10px", color: "#8899aa", fontFamily: "monospace", resolution: DPR, wordWrap: { width: ENC_CARD_W - 28 }, lineSpacing: 4, align: "left" }).setOrigin(0.5, 0);
+    const title = document.createElement("div");
+    title.textContent = def.encounterTitle;
+    title.style.cssText = "margin-top: 6px; text-align: center; font-size: 14px; color: #e8e8f8;";
+    inner.appendChild(title);
+
+    const desc = document.createElement("div");
+    desc.textContent = def.description;
+    desc.style.cssText = "margin-top: 10px; font-size: 10px; color: #8899aa; line-height: 1.5;";
+    inner.appendChild(desc);
+
+    this.encounterCards.set(def.id, { cardBtn });
   }
 
   private selectEncounter(def: EncounterDef): void {
-    for (const [id, b] of this.encounterCardBgs)
-      b.setStrokeStyle(1, id === def.id ? 0xe2b96f : 0x334455);
+    for (const [id, elems] of this.encounterCards) {
+      const active = id === def.id;
+      elems.cardBtn.el.style.borderColor = active ? "#e2b96f" : "#334455";
+    }
     this.selectedEncounter = def;
     this.refreshBeginButton();
     this.refreshPromoteButton();
@@ -386,70 +488,72 @@ export class EncounterSetupScene extends Phaser.Scene {
   }
 
   private refreshBeginButton(): void {
-    const ready = this.isReady();
-    this.beginBg.setAlpha(ready ? 1 : 0.4);
-    this.beginLabel.setAlpha(ready ? 1 : 0.4);
+    this.beginBtn.setDisabled(!this.isReady());
   }
 
   private buildBackButton(cx: number, cy: number): void {
-    const bg = this.add.rectangle(cx, cy, 160, 36, 0x222233).setStrokeStyle(1, 0x556677).setInteractive({ useHandCursor: true });
-    this.add.text(cx, cy, "BACK", {
-      fontSize: "13px", color: "#aabbcc", fontFamily: "monospace", resolution: DPR,
-    }).setOrigin(0.5);
-    bg.on("pointerdown", () => this.scene.start("MainMenuScene"));
+    const w = 160;
+    const h = 36;
+    const btn = createHtmlButton({
+      scene: this, sceneWidth: W,
+      x: cx - w / 2, y: cy - h / 2, w, h,
+      label: "BACK",
+      variant: "secondary",
+      onClick: () => this.scene.start("MainMenuScene"),
+    });
+    this.htmlButtons.push(btn);
   }
 
   private buildBeginButton(cx: number, cy: number): void {
-    this.beginBg = this.add.rectangle(cx, cy, 260, 36, 0x1a3a20).setStrokeStyle(1, 0x556677).setAlpha(0.4);
-    this.beginLabel = this.add.text(cx, cy, "BEGIN ENCOUNTER", { fontSize: "14px", color: "#ffffff", fontFamily: "monospace", resolution: DPR }).setOrigin(0.5).setAlpha(0.4);
+    const w = 260;
+    const h = 36;
+    this.beginBtn = createHtmlButton({
+      scene: this, sceneWidth: W,
+      x: cx - w / 2, y: cy - h / 2, w, h,
+      label: "BEGIN ENCOUNTER",
+      variant: "primary",
+      fontSize: 14,
+      onClick: () => {
+        if (!this.isReady()) return;
+        this.beginBtn.setDisabled(true);
 
-    this.beginBg.setInteractive({ useHandCursor: true });
-    this.beginBg.on("pointerover", () => { if (this.isReady()) this.beginBg.setAlpha(0.75); });
-    this.beginBg.on("pointerout",  () => { if (this.isReady()) this.beginBg.setAlpha(1); });
-    this.beginBg.on("pointerdown", () => {
-      if (!this.isReady()) return;
-      this.beginBg.disableInteractive();
+        const enc = this.selectedEncounter!;
+        const player = this.selectedPlayer!;
+        const maps = this.registry.get("maps") as SavedMapDef[];
+        const savedMap = maps.find((m) => m.id === enc.mapId);
+        const save = this.selectedSave;
 
-      const enc = this.selectedEncounter!;
-      const player = this.selectedPlayer!;
-      const maps = this.registry.get("maps") as SavedMapDef[];
-      const savedMap = maps.find((m) => m.id === enc.mapId);
-      const save = this.selectedSave;
-
-      gameClient.createSession({
-        mapType: "saved",
-        playerDefId: player.id,
-        // Always send the encounter's mapId, even if the client's registry hasn't
-        // picked up the map yet (typical for freshly-generated encounters that
-        // were authored after BootScene cached the maps list). The server holds
-        // the authoritative `defs.maps` and will resolve it there — sending
-        // `undefined` here would silently fall back to a random procedural map.
-        savedMapId: enc.mapId,
-        encounterTitle: enc.encounterTitle,
-        savedMapName: savedMap?.name,
-        savedMapDescription: savedMap?.mapdescription,
-        npcIds: enc.npcIds,
-        allyIds: enc.allyIds,
-        enemyIds: enc.enemyIds,
-        customIntroduction: enc.customIntroduction,
-        customContext: enc.customContext,
-        customObjective: enc.objective,
-        tileProperties: enc.tileProperties,
-        startingZones: enc.startingZones,
-        triggers: enc.triggers,
-        resumeHp:            save?.hp,
-        resumeXp:            save?.xp,
-        resumeGold:          save?.gold,
-        resumeInventoryIds:  save?.inventoryIds,
-        resumeEquippedSlots: save?.equippedSlots,
-        resumeResources:     save?.resources,
-      }).then((initialState: GameState) => {
-        this.scene.start("GameScene", { sessionId: initialState.sessionId, playerDef: player });
-      }).catch((err: unknown) => {
-        console.error('Failed to create session:', err);
-        this.beginBg.setInteractive({ useHandCursor: true });
-      });
+        gameClient.createSession({
+          mapType: "saved",
+          playerDefId: player.id,
+          savedMapId: enc.mapId,
+          encounterTitle: enc.encounterTitle,
+          savedMapName: savedMap?.name,
+          savedMapDescription: savedMap?.mapdescription,
+          npcIds: enc.npcIds,
+          allyIds: enc.allyIds,
+          enemyIds: enc.enemyIds,
+          customIntroduction: enc.customIntroduction,
+          customContext: enc.customContext,
+          customObjective: enc.objective,
+          tileProperties: enc.tileProperties,
+          startingZones: enc.startingZones,
+          triggers: enc.triggers,
+          resumeHp:            save?.hp,
+          resumeXp:            save?.xp,
+          resumeGold:          save?.gold,
+          resumeInventoryIds:  save?.inventoryIds,
+          resumeEquippedSlots: save?.equippedSlots,
+          resumeResources:     save?.resources,
+        }).then((initialState: GameState) => {
+          this.scene.start("GameScene", { sessionId: initialState.sessionId, playerDef: player });
+        }).catch((err: unknown) => {
+          console.error('Failed to create session:', err);
+          this.beginBtn.setDisabled(false);
+        });
+      },
     });
+    this.htmlButtons.push(this.beginBtn);
   }
 
   /**
@@ -459,34 +563,51 @@ export class EncounterSetupScene extends Phaser.Scene {
    * subject to the "Delete all generated maps" dev cleanup.
    */
   private buildPromoteButton(cx: number, cy: number): void {
-    this.promoteBg = this.add.rectangle(cx, cy, 200, 36, 0x2a2a1a).setStrokeStyle(1, 0x556677).setAlpha(0.4);
-    this.promoteLabel = this.add.text(cx, cy, "SAVE AS PREMADE", { fontSize: "13px", color: "#e2b96f", fontFamily: "monospace", resolution: DPR }).setOrigin(0.5).setAlpha(0.4);
-    this.promoteBg.setInteractive({ useHandCursor: true });
-    this.promoteBg.on("pointerdown", async () => {
-      const enc = this.selectedEncounter as (EncounterDef & { generated?: boolean }) | null;
-      if (!enc?.generated) return;
-      this.promoteBg.disableInteractive();
-      this.promoteLabel.setText("SAVING…");
-      try {
-        const { encounterId } = await gameClient.promoteEncounter(enc.id);
-        // Re-fetch the encounters list so the renamed encounter replaces the
-        // old `gen_*` card. Restart the scene so any cached references to
-        // the old id are dropped cleanly.
-        const fresh = await gameClient.listEncounters();
-        this.registry.set("encounters", fresh);
-        this.scene.restart({ presetEncounterId: encounterId });
-      } catch (err) {
-        console.error("[promote encounter] failed", err);
-        this.promoteLabel.setText("SAVE AS PREMADE");
-        this.promoteBg.setInteractive({ useHandCursor: true });
-      }
+    const w = 200;
+    const h = 36;
+    this.promoteBtn = createHtmlButton({
+      scene: this, sceneWidth: W,
+      x: cx - w / 2, y: cy - h / 2, w, h,
+      label: "SAVE AS PREMADE",
+      variant: "warn",
+      fontSize: 13,
+      onClick: async () => {
+        const enc = this.selectedEncounter as (EncounterDef & { generated?: boolean }) | null;
+        if (!enc?.generated) return;
+        this.promoteBtn.setDisabled(true);
+        this.promoteBtn.setLabel("SAVING…");
+        try {
+          const { encounterId } = await gameClient.promoteEncounter(enc.id);
+          const fresh = await gameClient.listEncounters();
+          this.registry.set("encounters", fresh);
+          this.scene.restart({ presetEncounterId: encounterId });
+        } catch (err) {
+          console.error("[promote encounter] failed", err);
+          this.promoteBtn.setLabel("SAVE AS PREMADE");
+          this.promoteBtn.setDisabled(false);
+        }
+      },
     });
+    this.htmlButtons.push(this.promoteBtn);
   }
 
   private refreshPromoteButton(): void {
     const enc = this.selectedEncounter as (EncounterDef & { generated?: boolean }) | null;
-    const enabled = !!enc?.generated;
-    this.promoteBg.setAlpha(enabled ? 1 : 0.4);
-    this.promoteLabel.setAlpha(enabled ? 1 : 0.4);
+    this.promoteBtn.setDisabled(!enc?.generated);
+  }
+
+  private teardown(): void {
+    for (const t of this.htmlTexts) t.dispose();
+    for (const b of this.htmlButtons) b.dispose();
+    for (const c of this.charCards.values()) {
+      c.cardBtn.dispose();
+      c.deleteBtn.dispose();
+      c.storylogBtn.dispose();
+    }
+    for (const c of this.encounterCards.values()) c.cardBtn.dispose();
+    this.htmlTexts = [];
+    this.htmlButtons = [];
+    this.charCards.clear();
+    this.encounterCards.clear();
   }
 }

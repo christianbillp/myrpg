@@ -1,4 +1,6 @@
 import type { GameContext } from './GameContext.js';
+import { isHostileTo } from './FactionRelations.js';
+import { PLAYER_FACTION_ID } from '../../../shared/types.js';
 
 /**
  * AdventureProgress — subscribes to the engine event bus and flips
@@ -22,8 +24,11 @@ export function registerAdventureProgress(ctx: GameContext): void {
   ctx.bus.subscribe('combat_ended', () => {
     // The bus fires this from `endCombat` AFTER enemies have been filtered
     // out. If no enemies remain alive, the chapter is resolved.
-    const enemiesAlive = ctx.state.npcs.some((n) => n.disposition === 'enemy' && n.hp > 0);
-    if (!enemiesAlive) ctx.state.chapterComplete = true;
+    const s = ctx.state;
+    const partyView = { factionId: PLAYER_FACTION_ID } as const;
+    const enemiesAlive = s.npcs.some((n) => n.hp > 0
+      && isHostileTo(s, partyView, { factionId: n.factionId, disposition: n.disposition }));
+    if (!enemiesAlive) s.chapterComplete = true;
   }, /*priority*/ 40);
 
   if (completionFlag) {

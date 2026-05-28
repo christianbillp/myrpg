@@ -361,7 +361,7 @@ export class EncounterEditorScene extends Phaser.Scene {
     this.formLabels.push(this.makeSubLabel(LEFT_X, descY, inputW, "DESCRIPTION"));
     this.detDescInput = this.buildTextarea(
       LEFT_X, descY + 22, inputW, textareaH,
-      "Scene context (the AIDM sees this silently)…",
+      "Scene context (the AIGM sees this silently)…",
       (val) => { this.detDescription = val; },
       this.detDescription,
     );

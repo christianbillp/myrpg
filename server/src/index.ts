@@ -22,6 +22,8 @@ import {
 } from "./storylog.js";
 import { GameEngine } from "./engine/GameEngine.js";
 import { GameDefs } from "./engine/types.js";
+import { isHostileTo } from "./engine/FactionRelations.js";
+import { PLAYER_FACTION_ID } from "../../shared/types.js";
 import {
   applyEquipment,
   applyFeats,
@@ -887,10 +889,22 @@ async function startAdventureChapter(
   installWorldTick(sessionId, engine);
   await ensureSaveExists(playerDef.id);
   // Auto-start combat — see comment on the main session-create route above.
-  if (engine.getState().npcs.some((n) => n.disposition === 'enemy' && n.hp > 0)) {
+  if (anyHostileToParty(engine.getState())) {
     engine.triggerCombat();
   }
   return { sessionId, state: engine.getState() };
+}
+
+/**
+ * True when any living NPC in the state is hostile to the player party. Used
+ * by the auto-start-combat guards on session creation — reads through the
+ * faction matrix (with legacy `disposition` fallback) so encounter content
+ * authored with either source-of-truth lands the player in combat correctly.
+ */
+function anyHostileToParty(state: GameState): boolean {
+  const partyView = { factionId: PLAYER_FACTION_ID } as const;
+  return state.npcs.some((n) => n.hp > 0
+    && isHostileTo(state, partyView, { factionId: n.factionId, disposition: n.disposition }));
 }
 
 /**
@@ -1048,7 +1062,7 @@ server.post("/game/session", async (req, reply) => {
   // ordering for future bus consumers). Encounters that want a delayed
   // hostile reveal should keep all NPCs neutral at spawn and use triggers to
   // flip dispositions later.
-  if (engine.getState().npcs.some((n) => n.disposition === 'enemy' && n.hp > 0)) {
+  if (anyHostileToParty(engine.getState())) {
     engine.triggerCombat();
   }
 

@@ -5,6 +5,8 @@
 import type { GameContext } from './GameContext.js';
 import { isIncapacitated } from './ConditionSystem.js';
 import { chebyshev } from './EnemyAI.js';
+import { isHostileTo } from './FactionRelations.js';
+import { PLAYER_FACTION_ID } from '../../../shared/types.js';
 
 /** Can the player spend their Action right now (any Action — Attack, Dash, etc.)? */
 export function canSpendAction(ctx: GameContext): boolean {
@@ -24,7 +26,10 @@ export function canSpendBonusAction(ctx: GameContext): boolean {
 
 /** Are there any living enemies the player can be targeted by / can target? */
 export function hasLivingEnemies(ctx: GameContext): boolean {
-  return ctx.state.npcs.some((n) => n.disposition === 'enemy' && n.hp > 0);
+  const s = ctx.state;
+  const partyView = { factionId: PLAYER_FACTION_ID } as const;
+  return s.npcs.some((n) => n.hp > 0
+    && isHostileTo(s, partyView, { factionId: n.factionId, disposition: n.disposition }));
 }
 
 /**

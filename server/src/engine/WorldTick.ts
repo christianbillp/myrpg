@@ -2,12 +2,16 @@
  * WorldTick — Pass 3c real-time off-camera resolve loop.
  *
  * Runs one SRD round (6 seconds of game-world time per real-time tick) of
- * NPC-vs-NPC combat during exploration phase. The player isn't a candidate
- * here — if the player is hostile to anyone, combat phase already handles
- * that via the existing initiative-tracked path. This loop is strictly for
- * "the bandits are fighting the guards while the party watches from cover."
+ * NPC-vs-NPC combat during exploration phase. NPC-vs-player hostility is
+ * detected before the NPC-vs-NPC pass runs — if any living NPC considers the
+ * party hostile, the tick escalates straight to turn-based combat via
+ * `doStartCombat` instead of resolving NPC-vs-NPC. This keeps a single
+ * authoritative path for player combat (the initiative-tracked one) and
+ * means a faction shift performed by the AIGM mid-exploration auto-engages
+ * on the next tick without the caller needing to also call `trigger_combat`.
  *
- * Each tick, for every living NPC in random order:
+ * Each tick, when no party-hostile NPC exists, for every living NPC in
+ * random order:
  *   • Pick the nearest hostile NON-PLAYER target via `isHostileTo`.
  *   • Run one full turn through `runEnemyTurn` (move up to speed + one attack).
  *   • Apply damage via `applyEnemyHitToNpc`-equivalent inline logic.
@@ -21,7 +25,8 @@ import type { GameContext } from './GameContext.js';
 import type { GameEvent, NpcState } from './types.js';
 import { runEnemyTurn, chebyshev, type EnemyAttackTarget } from './EnemyAI.js';
 import { isHostileTo } from './FactionRelations.js';
-import { publishNpcDamage } from './ThresholdPublisher.js';
+import { PLAYER_FACTION_ID } from '../../../shared/types.js';
+import { applyNpcAttackHit } from './NpcDamage.js';
 
 /**
  * Run one round of off-camera NPC-vs-NPC combat. Returns the events the
@@ -31,6 +36,16 @@ import { publishNpcDamage } from './ThresholdPublisher.js';
 export function runOffCameraTick(ctx: GameContext): GameEvent[] {
   const s = ctx.state;
   const events: GameEvent[] = [];
+
+  // Escalate to combat if any living NPC turns hostile to the party while
+  // the world was running off-camera (most likely an AIGM faction shift or a
+  // trigger that flipped relations). The initiative-tracked combat path is
+  // the single source of truth for player-engaged fights — the NPC-vs-NPC
+  // pass below only runs while the party has no enemies on the map.
+  if (s.phase === 'exploring' && anyHostileToParty(ctx)) {
+    ctx.doStartCombat(events);
+    return events;
+  }
 
   // Sort by initiative-equivalent deterministic key so the same NPC doesn't
   // always get the first swing each tick (would feel rigged). Shuffle by a
@@ -89,28 +104,27 @@ export function runOffCameraTick(ctx: GameContext): GameEvent[] {
     if (result.attacked && result.isHit && result.attackedTargetId && result.attackedTargetId !== 'player') {
       const live = s.npcs.find((n) => n.id === result.attackedTargetId);
       if (live && live.hp > 0) {
-        const meleeAttack = def.attacks.find((a) => a.attackType === 'melee' || a.attackType === 'both');
-        const damageType = meleeAttack?.damageType ?? '';
-        const { finalDamage, log: resistLog } = ctx.resistMod(result.damage, damageType, targetDef, live.name);
-        if (resistLog) ctx.addLog(resistLog);
-        const hpBefore = live.hp;
-        live.hp = Math.max(0, live.hp - finalDamage);
-        for (const bd of result.bonusComponents) {
-          const { finalDamage: bdFinal, log: bdResistLog } = ctx.resistMod(bd.damage, bd.damageType, targetDef, live.name);
-          ctx.addLog({ left: `+ ${bdFinal} ${bd.damageType}`, right: bd.rollStr, style: 'hit' });
-          if (bdResistLog) ctx.addLog(bdResistLog);
-          live.hp = Math.max(0, live.hp - bdFinal);
-        }
-        publishNpcDamage(ctx, live, hpBefore, live.hp);
-        if (live.hp <= 0) {
-          ctx.addLog({ left: `☠ ${live.name} is slain by ${npc.name}!`, style: 'kill' });
-          ctx.killNpc(live.id);
-        }
+        applyNpcAttackHit({
+          ctx, attacker: npc, target: live, attackerDef: def, targetDef, result,
+          awardXp: false,
+        });
       }
     }
   }
 
   return events;
+}
+
+/**
+ * True when any living NPC considers the party hostile. Used to detect the
+ * "an off-camera faction shift turned an NPC against the player" case and
+ * escalate to turn-based combat instead of running the NPC-vs-NPC pass.
+ */
+function anyHostileToParty(ctx: GameContext): boolean {
+  const s = ctx.state;
+  const partyView = { factionId: PLAYER_FACTION_ID } as const;
+  return s.npcs.some((n) => n.hp > 0
+    && isHostileTo(s, partyView, { factionId: n.factionId, disposition: n.disposition }));
 }
 
 /**

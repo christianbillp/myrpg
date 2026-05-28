@@ -2,6 +2,9 @@ import Anthropic from '@anthropic-ai/sdk';
 import { GameEngine } from './engine/GameEngine.js';
 import { GameEvent } from './engine/types.js';
 import { applyAIGMTool, resetTurnGuards, AIGMToolContext } from './engine/AIGMTools.js';
+import { isHostileTo, isFriendlyTo } from './engine/FactionRelations.js';
+import { PLAYER_FACTION_ID } from '../../shared/types.js';
+import type { NpcState } from '../../shared/types.js';
 import type { AigmMessage } from './sessions.js';
 
 export interface AIGMChatRequest {
@@ -126,25 +129,33 @@ function buildStateMessage(engine: GameEngine): string {
     p.concentratingOn ? `Concentrating: ${p.concentratingOn}` : '',
   ].filter(Boolean).join(' · ');
 
+  const partyView = { factionId: PLAYER_FACTION_ID } as const;
+  const isHostileNpc = (n: NpcState) =>
+    isHostileTo(s, partyView, { factionId: n.factionId, disposition: n.disposition });
+  const isFriendlyNpc = (n: NpcState) =>
+    isFriendlyTo(s, partyView, { factionId: n.factionId, disposition: n.disposition });
+  const entityRefFor = (n: NpcState): string => {
+    if (isHostileNpc(n) && n.combatLabel) return `enemy_${n.combatLabel}`;
+    if (isFriendlyNpc(n) && n.combatLabel) return `ally_${n.combatLabel}`;
+    return `npc_${n.id}`;
+  };
+
   const focusLine = s.selectedTargetId
     ? (() => {
         const npc = s.npcs.find((n) => n.id === s.selectedTargetId);
         if (npc) {
-          const entityRef = npc.disposition === 'enemy' ? `enemy_${npc.combatLabel}`
-            : npc.disposition === 'ally' ? `ally_${npc.combatLabel}`
-            : `npc_${npc.id}`;
-          return `Focused on: ${npc.defId} [${entityRef}] (${npc.disposition})`;
+          return `Focused on: ${npc.defId} [${entityRefFor(npc)}] (${npc.disposition})`;
         }
         return 'Focused on: nothing';
       })()
     : 'Focused on: nothing';
 
-  const livingCombatants = s.npcs.filter((n) => n.disposition !== 'neutral' && n.hp > 0);
+  const livingCombatants = s.npcs.filter((n) => n.hp > 0 && (isHostileNpc(n) || isFriendlyNpc(n)));
   const combatantLines = livingCombatants.length > 0
     ? livingCombatants.map((n) => {
-        const entityRef = n.disposition === 'enemy' ? `enemy_${n.combatLabel}`
-          : n.combatLabel ? `ally_${n.combatLabel}` : `npc_${n.id}`;
-        const knownAs = n.revealedName ? ` (known as: ${n.revealedName})` : n.disposition !== 'enemy' ? ' [NAME UNKNOWN — call reveal_npc_name if they give their name]' : '';
+        const entityRef = entityRefFor(n);
+        const hostile = isHostileNpc(n);
+        const knownAs = n.revealedName ? ` (known as: ${n.revealedName})` : !hostile ? ' [NAME UNKNOWN — call reveal_npc_name if they give their name]' : '';
         const cFlags = [
           n.isActive ? 'ACTIVE TURN' : '',
           n.combatPassive ? 'PASSIVE (skips combat turn)' : '',
@@ -164,7 +175,7 @@ function buildStateMessage(engine: GameEngine): string {
       }).join('\n')
     : '  None';
 
-  const livingNeutrals = s.npcs.filter((n) => n.disposition === 'neutral' && n.hp > 0);
+  const livingNeutrals = s.npcs.filter((n) => n.hp > 0 && !isHostileNpc(n) && !isFriendlyNpc(n));
   const neutralNpcLines = livingNeutrals.length > 0
     ? livingNeutrals.map((n) => {
         const knownAs = n.revealedName ? ` (known as: ${n.revealedName})` : '';

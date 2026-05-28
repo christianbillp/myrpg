@@ -3,7 +3,7 @@
  * Adjudicator-tab of `GenerateSetupScene` and from `EncounterEditorScene`.
  *
  * Each trigger is a rectangular region on the map plus one of four action
- * templates (perception check, log message, AIDM cue, start combat). The
+ * templates (perception check, log message, AIGM cue, start combat). The
  * component owns its trigger list; the parent scene reads it via
  * `getTriggers()` when composing or updating the encounter.
  *
@@ -54,7 +54,7 @@ export interface TriggerEditorOptions {
 const KIND_LABEL: Record<TriggerActionKind, string> = {
   perception: "PERCEPTION",
   log: "LOG",
-  aigm: "AIDM CUE",
+  aigm: "AIGM CUE",
   combat: "START COMBAT",
 };
 
@@ -303,7 +303,7 @@ export class TriggerEditor {
     row.appendChild(logBlock);
 
     const aigmBlock = document.createElement("div");
-    aigmBlock.appendChild(this.makeLabel("AIDM CUE"));
+    aigmBlock.appendChild(this.makeLabel("AIGM CUE"));
     aigmBlock.appendChild(this.makeTextarea(trig.message, (val) => {
       trig.message = val;
       this.opts.onChange?.();

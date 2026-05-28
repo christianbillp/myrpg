@@ -103,6 +103,16 @@ export class ZonePainter {
   }
 
   /**
+   * Hide/show the HTML paint-mode buttons. The Phaser objects (thumbnail,
+   * zone-overlay cells, trigger overlay) follow their parent container's
+   * visibility; the HTML buttons live on `document.body` and need explicit
+   * toggling when the deterministic tab is hidden.
+   */
+  setVisible(visible: boolean): void {
+    for (const { handle } of this.paintBtns) handle.setVisible(visible);
+  }
+
+  /**
    * Build the four-button paint mode toolbar below the thumbnail. PLAYER /
    * ENEMY / NEUTRAL toggle the active paint mode (clicking the active mode
    * deactivates); CLEAR wipes every painted zone.

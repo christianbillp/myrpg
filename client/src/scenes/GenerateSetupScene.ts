@@ -12,6 +12,10 @@ import { TriggerEditor, type ComposedTrigger } from "../ui/generate/TriggerEdito
 import { MapSelectorOverlay } from "../ui/generate/MapSelectorOverlay";
 import { ENCOUNTER_ARCHETYPES } from "../data/encounterArchetypes";
 import { pickArchetype, rollArchetype, buildStartingZonesFromAnchors, rollTriggersFromAnchors } from "../encounterRandomizer";
+import { createHtmlButton, createHtmlText, type HtmlButtonHandle, type HtmlTextHandle } from "../ui/htmlButtons";
+
+type BucketName = "always" | "det" | "gen" | "detRight";
+type Disposable = HtmlButtonHandle | HtmlTextHandle;
 import {
   TILE_SIZE,
   GRID_COLS,
@@ -131,16 +135,20 @@ export class GenerateSetupScene extends Phaser.Scene {
   private detContainer!: Phaser.GameObjects.Container;
   private genContainer!: Phaser.GameObjects.Container;
   private detRightContainer!: Phaser.GameObjects.Container;
-  private tabDetBg!: Phaser.GameObjects.Rectangle;
-  private tabGenBg!: Phaser.GameObjects.Rectangle;
-  private tabDetLabel!: Phaser.GameObjects.Text;
-  private tabGenLabel!: Phaser.GameObjects.Text;
+  private tabDetBtn!: HtmlButtonHandle;
+  private tabGenBtn!: HtmlButtonHandle;
+
+  // HTML element buckets — visibility tracked per bucket so we can
+  // hide all det/gen/detRight DOM at once on tab switch or preview open.
+  private buckets: Record<BucketName, Disposable[]> = {
+    always: [], det: [], gen: [], detRight: [],
+  };
 
   // Deterministic — left controls
   private selectedTerrain: Terrain | null = "grassland";
   private selectedFeatures: Set<Feature> = new Set();
-  private terrainChips: Map<Terrain, Phaser.GameObjects.Rectangle> = new Map();
-  private featureChips: Map<Feature, Phaser.GameObjects.Rectangle> = new Map();
+  private terrainChips: Map<Terrain, HtmlButtonHandle> = new Map();
+  private featureChips: Map<Feature, HtmlButtonHandle> = new Map();
 
   // Deterministic — right (encounter-builder) state. Zone painting and the
   // monster picker live in their own UI components; the scene only holds
@@ -178,26 +186,18 @@ export class GenerateSetupScene extends Phaser.Scene {
   private monsterSubContainer: Phaser.GameObjects.Container | null = null;
   private triggerSubContainer: Phaser.GameObjects.Container | null = null;
   private pickerTab: "monsters" | "triggers" = "monsters";
-  private monstersTabBg: Phaser.GameObjects.Rectangle | null = null;
-  private monstersTabLabel: Phaser.GameObjects.Text | null = null;
-  private triggersTabBg: Phaser.GameObjects.Rectangle | null = null;
-  private triggersTabLabel: Phaser.GameObjects.Text | null = null;
-  private detRandomBg!: Phaser.GameObjects.Rectangle;
-  private detRandomLabel!: Phaser.GameObjects.Text;
-  private detPickMapBg!: Phaser.GameObjects.Rectangle;
-  private detPickMapLabel!: Phaser.GameObjects.Text;
-  private detComposeMapBg!: Phaser.GameObjects.Rectangle;
-  private detComposeMapLabel!: Phaser.GameObjects.Text;
-  private detComposeEncBg!: Phaser.GameObjects.Rectangle;
-  private detComposeEncLabel!: Phaser.GameObjects.Text;
+  private monstersTabBtn: HtmlButtonHandle | null = null;
+  private triggersTabBtn: HtmlButtonHandle | null = null;
+  private detRandomBtn!: HtmlButtonHandle;
+  private detPickMapBtn!: HtmlButtonHandle;
+  private detComposeMapBtn!: HtmlButtonHandle;
+  private detComposeEncBtn!: HtmlButtonHandle;
   private mapSelector: MapSelectorOverlay | null = null;
 
   // Generative AI tab state
   private genPromptInput: HTMLTextAreaElement | null = null;
-  private genMapBg!: Phaser.GameObjects.Rectangle;
-  private genMapLabel!: Phaser.GameObjects.Text;
-  private genEncBg!: Phaser.GameObjects.Rectangle;
-  private genEncLabel!: Phaser.GameObjects.Text;
+  private genMapBtn!: HtmlButtonHandle;
+  private genEncBtn!: HtmlButtonHandle;
 
   // Shared
   private statusEl: HTMLDivElement | null = null;
@@ -216,6 +216,7 @@ export class GenerateSetupScene extends Phaser.Scene {
     this.detDescription = "";
     this.terrainChips.clear();
     this.featureChips.clear();
+    this.buckets = { always: [], det: [], gen: [], detRight: [] };
     this.acceptedMap = null;
     this.previewedMap = null;
     this.rightPanelDirty = false;
@@ -239,10 +240,14 @@ export class GenerateSetupScene extends Phaser.Scene {
     this.monsters = (this.registry.get("monsters") as MonsterDef[] | undefined) ?? [];
 
     this.add.rectangle(W / 2, H / 2, W, H, 0x0d0d1e);
-    this.add.text(W / 2, TITLE_Y, "GENERATE ENCOUNTER", {
-      fontSize: "22px", color: "#e2b96f", fontFamily: "monospace", resolution: DPR,
-    }).setOrigin(0.5, 0);
     this.add.rectangle(W / 2, TITLE_Y + 38, W - 64, 1, 0x334455);
+
+    this.addToBucket("always", createHtmlText({
+      scene: this, sceneWidth: W,
+      x: 0, y: TITLE_Y, w: W, h: 28,
+      text: "GENERATE ENCOUNTER",
+      fontSize: 22, color: "#e2b96f", align: "center", letterSpacing: 1,
+    }));
 
     this.buildTabBar();
 
@@ -273,40 +278,55 @@ export class GenerateSetupScene extends Phaser.Scene {
     const tabW = 240;
     const tabH = 36;
     const centerX = W / 2;
-    const detX = centerX - tabW / 2 - 6;
-    const genX = centerX + tabW / 2 + 6;
+    const detX = centerX - tabW - 6;
+    const genX = centerX + 6;
 
-    this.tabDetBg = this.add.rectangle(detX, TAB_BAR_Y, tabW, tabH, 0x1a1a2e).setStrokeStyle(2, 0x334455).setInteractive({ useHandCursor: true });
-    this.tabDetLabel = this.add.text(detX, TAB_BAR_Y, "DETERMINISTIC", {
-      fontSize: "13px", color: "#aabbcc", fontFamily: "monospace", resolution: DPR, letterSpacing: 1,
-    }).setOrigin(0.5);
-    this.tabDetBg.on("pointerdown", () => this.activateTab("deterministic"));
+    this.tabDetBtn = createHtmlButton({
+      scene: this, sceneWidth: W,
+      x: detX, y: TAB_BAR_Y - tabH / 2, w: tabW, h: tabH,
+      label: "DETERMINISTIC",
+      variant: "secondary",
+      fontSize: 13,
+      onClick: () => this.activateTab("deterministic"),
+    });
+    this.addToBucket("always", this.tabDetBtn);
 
-    this.tabGenBg = this.add.rectangle(genX, TAB_BAR_Y, tabW, tabH, 0x1a1a2e).setStrokeStyle(2, 0x334455).setInteractive({ useHandCursor: true });
-    this.tabGenLabel = this.add.text(genX, TAB_BAR_Y, "GENERATIVE AI", {
-      fontSize: "13px", color: "#aabbcc", fontFamily: "monospace", resolution: DPR, letterSpacing: 1,
-    }).setOrigin(0.5);
-    this.tabGenBg.on("pointerdown", () => this.activateTab("generative"));
+    this.tabGenBtn = createHtmlButton({
+      scene: this, sceneWidth: W,
+      x: genX, y: TAB_BAR_Y - tabH / 2, w: tabW, h: tabH,
+      label: "GENERATIVE AI",
+      variant: "secondary",
+      fontSize: 13,
+      onClick: () => this.activateTab("generative"),
+    });
+    this.addToBucket("always", this.tabGenBtn);
   }
 
   private activateTab(tab: Tab): void {
     this.tab = tab;
     const det = tab === "deterministic";
-    this.tabDetBg.setFillStyle(det ? 0x2a2a4a : 0x1a1a2e).setStrokeStyle(2, det ? 0xe2b96f : 0x334455);
-    this.tabDetLabel.setColor(det ? "#ffe9a8" : "#aabbcc");
-    this.tabGenBg.setFillStyle(!det ? 0x2a2a4a : 0x1a1a2e).setStrokeStyle(2, !det ? 0xe2b96f : 0x334455);
-    this.tabGenLabel.setColor(!det ? "#ffe9a8" : "#aabbcc");
+    this.styleTabBtn(this.tabDetBtn, det);
+    this.styleTabBtn(this.tabGenBtn, !det);
 
     this.detContainer.setVisible(det);
     this.genContainer.setVisible(!det);
+    this.setBucketVisible("det", det);
+    this.setBucketVisible("gen", !det);
+    this.setBucketVisible("detRight", det);
     this.setDomVisibility();
     this.refreshButtons();
+  }
+
+  private styleTabBtn(btn: HtmlButtonHandle, active: boolean): void {
+    btn.el.style.background = active ? "#2a2a4a" : "#1a1a2e";
+    btn.el.style.borderColor = active ? "#e2b96f" : "#334455";
+    btn.el.style.color = active ? "#ffe9a8" : "#aabbcc";
   }
 
   // ── Deterministic LEFT panel (always visible while tab is active) ──────
 
   private buildDeterministicLeft(): void {
-    this.detContainer.add(this.makeHeader(LEFT_PANEL_X + SIDE_PANEL_WIDTH / 2, CONTENT_TOP, "MAP CONTROLS"));
+    this.addHeader("det", LEFT_PANEL_X + SIDE_PANEL_WIDTH / 2, CONTENT_TOP, "MAP CONTROLS");
 
     // Single column: TERRAIN row first (all three terrains side by side),
     // FEATURES grid below (chips greyed out automatically when their column
@@ -318,22 +338,18 @@ export class GenerateSetupScene extends Phaser.Scene {
     const allFeatures: Feature[] = [...OUTSIDE_FEATURES, ...INSIDE_FEATURES];
 
     const terrainLabelY = CONTENT_TOP + 36;
-    this.detContainer.add(this.makeSubLabel(x, terrainLabelY, "TERRAIN"));
-    const terrainRowY = terrainLabelY + 22;
+    this.addSubLabel("det", x, terrainLabelY, "TERRAIN");
+    const terrainRowY = terrainLabelY + 22 - 13;
     allTerrains.forEach((t, i) => {
-      const chip = this.buildTerrainChip(t, x + i * (chipW + chipGap), terrainRowY);
-      this.detContainer.add(chip.bg);
-      this.detContainer.add(chip.label);
+      this.buildTerrainChip(t, x + i * (chipW + chipGap), terrainRowY);
     });
 
-    const featuresLabelY = terrainRowY + 40;
-    this.detContainer.add(this.makeSubLabel(x, featuresLabelY, "FEATURES"));
+    const featuresLabelY = terrainRowY + 40 + 13;
+    this.addSubLabel("det", x, featuresLabelY, "FEATURES");
     let fcx = x;
-    let fcy = featuresLabelY + 22;
+    let fcy = featuresLabelY + 22 - 13;
     allFeatures.forEach((f, j) => {
-      const chip = this.buildFeatureChip(f, fcx, fcy);
-      this.detContainer.add(chip.bg);
-      this.detContainer.add(chip.label);
+      this.buildFeatureChip(f, fcx, fcy);
       const col = (j + 1) % 2;
       if (col === 0) { fcx = x; fcy += 32; }
       else fcx += chipW + chipGap;
@@ -360,11 +376,13 @@ export class GenerateSetupScene extends Phaser.Scene {
     }
     this.monsterSubContainer = null;
     this.triggerSubContainer = null;
-    this.monstersTabBg = null;
-    this.monstersTabLabel = null;
-    this.triggersTabBg = null;
-    this.triggersTabLabel = null;
+    this.monstersTabBtn = null;
+    this.triggersTabBtn = null;
     this.pickerTab = "monsters";
+
+    // Drop and re-create the right-panel HTML bucket so the empty / filled
+    // variants start clean.
+    this.disposeBucket("detRight");
 
     // Hide the description textarea + story-field inputs while the right
     // panel is in its empty state — they're recreated when the map is saved.
@@ -374,7 +392,7 @@ export class GenerateSetupScene extends Phaser.Scene {
     if (this.detObjectiveInput)     { this.detObjectiveInput.remove();      this.detObjectiveInput = null; }
     if (this.detCompletionFlagInput){ this.detCompletionFlagInput.remove(); this.detCompletionFlagInput = null; }
 
-    this.detRightContainer.add(this.makeHeader(RIGHT_PANEL_X + SIDE_PANEL_WIDTH / 2, CONTENT_TOP, "ENCOUNTER SETTINGS"));
+    this.addHeader("detRight", RIGHT_PANEL_X + SIDE_PANEL_WIDTH / 2, CONTENT_TOP, "ENCOUNTER SETTINGS");
 
     if (!this.acceptedMap) {
       this.buildEmptyRightPanel();
@@ -386,17 +404,20 @@ export class GenerateSetupScene extends Phaser.Scene {
 
   private buildEmptyRightPanel(): void {
     const cy = (CONTENT_TOP + CONTENT_BOTTOM) / 2;
-    const cx = RIGHT_PANEL_X + SIDE_PANEL_WIDTH / 2;
-    this.detRightContainer.add(
-      this.add.text(cx, cy, "No map available", {
-        fontSize: "16px", color: "#556677", fontFamily: "monospace", resolution: DPR,
-      }).setOrigin(0.5),
-    );
-    this.detRightContainer.add(
-      this.add.text(cx, cy + 24, "Compose a map on the left, then press SAVE in the preview.", {
-        fontSize: "11px", color: "#445566", fontFamily: "monospace", resolution: DPR,
-      }).setOrigin(0.5),
-    );
+    const cx = RIGHT_PANEL_X;
+    const w = SIDE_PANEL_WIDTH;
+    this.addToBucket("detRight", createHtmlText({
+      scene: this, sceneWidth: W,
+      x: cx, y: cy - 12, w, h: 22,
+      text: "No map available",
+      fontSize: 16, color: "#556677", align: "center",
+    }));
+    this.addToBucket("detRight", createHtmlText({
+      scene: this, sceneWidth: W,
+      x: cx, y: cy + 14, w, h: 18,
+      text: "Compose a map on the left, then press SAVE in the preview.",
+      fontSize: 11, color: "#445566", align: "center",
+    }));
   }
 
   private buildFilledRightPanel(): void {
@@ -432,17 +453,16 @@ export class GenerateSetupScene extends Phaser.Scene {
 
     // Caption beneath the thumbnail.
     const footnoteY = thumbY + thumbH + 4;
-    this.detRightContainer.add(
-      this.add.text(thumbX + thumbW / 2, footnoteY, `${map.name}  ·  click to enlarge`, {
-        fontSize: "10px", color: "#667788", fontFamily: "monospace", resolution: DPR,
-      }).setOrigin(0.5, 0),
-    );
+    this.addToBucket("detRight", createHtmlText({
+      scene: this, sceneWidth: W,
+      x: thumbX, y: footnoteY, w: thumbW, h: 14,
+      text: `${map.name}  ·  click to enlarge`,
+      fontSize: 10, color: "#667788", align: "center",
+    }));
 
     // Paint-mode buttons row.
     const paintLabelY = footnoteY + 18;
-    this.detRightContainer.add(this.add.text(thumbX, paintLabelY, "STARTING ZONES", {
-      fontSize: "10px", color: "#778899", fontFamily: "monospace", resolution: DPR, letterSpacing: 1,
-    }).setOrigin(0, 0));
+    this.addSubLabel("detRight", thumbX, paintLabelY, "STARTING ZONES");
     const paintBtnY = paintLabelY + 28;
     this.zonePainter.buildPaintModeButtons(thumbX, paintBtnY, thumbW);
 
@@ -458,7 +478,7 @@ export class GenerateSetupScene extends Phaser.Scene {
     const oneLineH = 28;
 
     const titleY = CONTENT_TOP + 38;
-    this.detRightContainer.add(this.makeSubLabel(RIGHT_PANEL_X, titleY, "TITLE"));
+    this.addSubLabel("detRight", RIGHT_PANEL_X, titleY, "TITLE");
     this.detTitleInput = this.buildLineInput(
       RIGHT_PANEL_X, titleY + 22, inputW, oneLineH,
       "Encounter title (defaults to map name)",
@@ -467,7 +487,7 @@ export class GenerateSetupScene extends Phaser.Scene {
     );
 
     const introY = titleY + 22 + oneLineH + 14;
-    this.detRightContainer.add(this.makeSubLabel(RIGHT_PANEL_X, introY, "INTRODUCTION"));
+    this.addSubLabel("detRight", RIGHT_PANEL_X, introY, "INTRODUCTION");
     this.detIntroInput = this.buildTextarea(
       RIGHT_PANEL_X, introY + 22, inputW, introBoxH,
       "Optional opening narration shown to the player…",
@@ -476,7 +496,7 @@ export class GenerateSetupScene extends Phaser.Scene {
     );
 
     const descY = introY + 22 + introBoxH + 14;
-    this.detRightContainer.add(this.makeSubLabel(RIGHT_PANEL_X, descY, "DESCRIPTION"));
+    this.addSubLabel("detRight", RIGHT_PANEL_X, descY, "DESCRIPTION");
     this.detDescInput = this.buildTextarea(
       RIGHT_PANEL_X, descY + 22, inputW, descBoxH,
       "Optional scene context (the AIGM sees this silently)…",
@@ -486,14 +506,14 @@ export class GenerateSetupScene extends Phaser.Scene {
 
     const objFlagY = descY + 22 + descBoxH + 14;
     const halfW = Math.floor((inputW - 8) / 2);
-    this.detRightContainer.add(this.makeSubLabel(RIGHT_PANEL_X, objFlagY, "OBJECTIVE"));
+    this.addSubLabel("detRight", RIGHT_PANEL_X, objFlagY, "OBJECTIVE");
     this.detObjectiveInput = this.buildLineInput(
       RIGHT_PANEL_X, objFlagY + 22, halfW, oneLineH,
       "Player-facing one-liner",
       (val) => { this.detObjective = val; },
       this.detObjective,
     );
-    this.detRightContainer.add(this.makeSubLabel(RIGHT_PANEL_X + halfW + 8, objFlagY, "COMPLETION FLAG"));
+    this.addSubLabel("detRight", RIGHT_PANEL_X + halfW + 8, objFlagY, "COMPLETION FLAG");
     this.detCompletionFlagInput = this.buildLineInput(
       RIGHT_PANEL_X + halfW + 8, objFlagY + 22, halfW, oneLineH,
       "snake_case slug",
@@ -560,20 +580,20 @@ export class GenerateSetupScene extends Phaser.Scene {
   private buildPickerTabs(x: number, y: number, totalW: number): void {
     const tabW = (totalW - 8) / 2;
     const tabH = 26;
-    const mkTab = (cx: number, label: string, onClick: () => void): { bg: Phaser.GameObjects.Rectangle; lbl: Phaser.GameObjects.Text } => {
-      const bg = this.add.rectangle(cx + tabW / 2, y, tabW, tabH, 0x1a1a2a).setStrokeStyle(1, 0x445566).setInteractive({ useHandCursor: true });
-      const lbl = this.add.text(cx + tabW / 2, y, label, {
-        fontSize: "11px", color: "#aabbcc", fontFamily: "monospace", resolution: DPR, letterSpacing: 1,
-      }).setOrigin(0.5);
-      bg.on("pointerdown", onClick);
-      this.detRightContainer.add(bg);
-      this.detRightContainer.add(lbl);
-      return { bg, lbl };
+    const mkTab = (bx: number, label: string, onClick: () => void): HtmlButtonHandle => {
+      const btn = createHtmlButton({
+        scene: this, sceneWidth: W,
+        x: bx, y: y - tabH / 2, w: tabW, h: tabH,
+        label,
+        variant: "secondary",
+        fontSize: 11,
+        onClick,
+      });
+      this.addToBucket("detRight", btn);
+      return btn;
     };
-    const m = mkTab(x, "MONSTERS", () => this.activatePickerTab("monsters"));
-    const t = mkTab(x + tabW + 8, "TRIGGERS", () => this.activatePickerTab("triggers"));
-    this.monstersTabBg = m.bg; this.monstersTabLabel = m.lbl;
-    this.triggersTabBg = t.bg; this.triggersTabLabel = t.lbl;
+    this.monstersTabBtn = mkTab(x, "MONSTERS", () => this.activatePickerTab("monsters"));
+    this.triggersTabBtn = mkTab(x + tabW + 8, "TRIGGERS", () => this.activatePickerTab("triggers"));
   }
 
   private activatePickerTab(tab: "monsters" | "triggers"): void {
@@ -584,13 +604,14 @@ export class GenerateSetupScene extends Phaser.Scene {
     if (this.monsterPicker) this.monsterPicker.setVisible(showMon);
     if (this.triggerEditor) this.triggerEditor.setVisible(!showMon);
     // Tab visual state — active tab is brighter.
-    const paint = (bg: Phaser.GameObjects.Rectangle | null, lbl: Phaser.GameObjects.Text | null, active: boolean) => {
-      if (!bg || !lbl) return;
-      bg.setFillStyle(active ? 0x2a3a55 : 0x1a1a2a, 1).setStrokeStyle(2, active ? 0x5588aa : 0x445566);
-      lbl.setColor(active ? "#cce4ff" : "#aabbcc");
+    const paint = (btn: HtmlButtonHandle | null, active: boolean) => {
+      if (!btn) return;
+      btn.el.style.background = active ? "#2a3a55" : "#1a1a2a";
+      btn.el.style.borderColor = active ? "#5588aa" : "#445566";
+      btn.el.style.color = active ? "#cce4ff" : "#aabbcc";
     };
-    paint(this.monstersTabBg, this.monstersTabLabel, showMon);
-    paint(this.triggersTabBg, this.triggersTabLabel, !showMon);
+    paint(this.monstersTabBtn, showMon);
+    paint(this.triggersTabBtn, !showMon);
   }
 
   /** Drop any pending RANDOMIZE seeds so the next right-panel rebuild starts blank. */
@@ -649,11 +670,15 @@ export class GenerateSetupScene extends Phaser.Scene {
   // ── Generative AI panel ─────────────────────────────────────────────────
 
   private buildGenerativePanel(): void {
-    this.genContainer.add(this.makeHeader(LEFT_PANEL_X + SIDE_PANEL_WIDTH / 2, CONTENT_TOP, "DESCRIBE THE SCENE"));
-    this.genContainer.add(this.makeHeader(RIGHT_PANEL_X + SIDE_PANEL_WIDTH / 2, CONTENT_TOP, "EXAMPLE PROMPTS"));
+    this.addHeader("gen", LEFT_PANEL_X + SIDE_PANEL_WIDTH / 2, CONTENT_TOP, "DESCRIBE THE SCENE");
+    this.addHeader("gen", RIGHT_PANEL_X + SIDE_PANEL_WIDTH / 2, CONTENT_TOP, "EXAMPLE PROMPTS");
 
-    this.genContainer.add(this.makeBodyLine(LEFT_PANEL_X, CONTENT_TOP + 38,
-      "Describe the scene you want to play. Click an example on the right to start from."));
+    this.addToBucket("gen", createHtmlText({
+      scene: this, sceneWidth: W,
+      x: LEFT_PANEL_X, y: CONTENT_TOP + 38, w: SIDE_PANEL_WIDTH, h: 16,
+      text: "Describe the scene you want to play. Click an example on the right to start from.",
+      fontSize: 11, color: "#aabbcc", fontFamily: "sans-serif",
+    }));
     this.genPromptInput = this.buildTextarea(
       LEFT_PANEL_X, CONTENT_TOP + 78, SIDE_PANEL_WIDTH, 380,
       "A description of the scene…",
@@ -665,97 +690,126 @@ export class GenerateSetupScene extends Phaser.Scene {
     const startY = CONTENT_TOP + 50;
     PROMPT_EXAMPLES.forEach((ex, idx) => {
       const cy = startY + idx * (cardH + 8);
-      const cardCx = RIGHT_PANEL_X + cardW / 2;
-      const bg = this.add.rectangle(cardCx, cy + cardH / 2, cardW, cardH, 0x141426).setStrokeStyle(1, 0x334455).setInteractive({ useHandCursor: true });
-      bg.on("pointerover", () => bg.setStrokeStyle(1, 0x2a6655));
-      bg.on("pointerout",  () => bg.setStrokeStyle(1, 0x334455));
-      bg.on("pointerdown", () => {
-        if (this.genPromptInput) {
-          this.genPromptInput.value = ex.body;
-          this.genPromptInput.focus();
-          this.refreshButtons();
-        }
+      const cardBtn = createHtmlButton({
+        scene: this, sceneWidth: W,
+        x: RIGHT_PANEL_X, y: cy, w: cardW, h: cardH,
+        label: "", variant: "ghost",
+        onClick: () => {
+          if (this.genPromptInput) {
+            this.genPromptInput.value = ex.body;
+            this.genPromptInput.focus();
+            this.refreshButtons();
+          }
+        },
       });
-      const title = this.add.text(RIGHT_PANEL_X + 12, cy + 10, ex.title, {
-        fontSize: "13px", color: "#e2b96f", fontFamily: "monospace", resolution: DPR,
-      }).setOrigin(0, 0);
-      const body = this.add.text(RIGHT_PANEL_X + 12, cy + 32, ex.body, {
-        fontSize: "10px", color: "#8899aa", fontFamily: "sans-serif", resolution: DPR,
-        wordWrap: { width: cardW - 24 }, lineSpacing: 2,
-      }).setOrigin(0, 0);
-      this.genContainer.add(bg);
-      this.genContainer.add(title);
-      this.genContainer.add(body);
+      cardBtn.el.textContent = "";
+      cardBtn.el.style.padding = "10px 12px";
+      cardBtn.el.style.background = "#141426";
+      cardBtn.el.style.borderColor = "#334455";
+      cardBtn.el.style.display = "flex";
+      cardBtn.el.style.flexDirection = "column";
+      cardBtn.el.style.alignItems = "stretch";
+      cardBtn.el.style.justifyContent = "flex-start";
+      cardBtn.el.style.whiteSpace = "normal";
+      cardBtn.el.style.overflow = "hidden";
+
+      const title = document.createElement("div");
+      title.textContent = ex.title;
+      title.style.cssText = "font-size: 13px; color: #e2b96f; font-family: monospace; text-align: left;";
+      cardBtn.el.appendChild(title);
+
+      const body = document.createElement("div");
+      body.textContent = ex.body;
+      body.style.cssText = "margin-top: 8px; font-size: 10px; color: #8899aa; font-family: sans-serif; line-height: 1.45; text-align: left;";
+      cardBtn.el.appendChild(body);
+
+      this.addToBucket("gen", cardBtn);
     });
   }
 
   // ── Reusable chip + helper builders ─────────────────────────────────────
 
-  private makeHeader(cx: number, y: number, text: string): Phaser.GameObjects.Text {
-    return this.add.text(cx, y, text, {
-      fontSize: "11px", color: "#556677", fontFamily: "monospace", resolution: DPR, letterSpacing: 2,
-    }).setOrigin(0.5, 0);
+  private addToBucket(bucket: BucketName, handle: Disposable): void {
+    this.buckets[bucket].push(handle);
   }
 
-  private makeSubLabel(x: number, y: number, text: string): Phaser.GameObjects.Text {
-    return this.add.text(x, y, text, {
-      fontSize: "10px", color: "#778899", fontFamily: "monospace", resolution: DPR, letterSpacing: 1,
-    }).setOrigin(0, 0);
+  private setBucketVisible(bucket: BucketName, visible: boolean): void {
+    for (const h of this.buckets[bucket]) h.setVisible(visible);
   }
 
-  private makeBodyLine(x: number, y: number, text: string): Phaser.GameObjects.Text {
-    return this.add.text(x, y, text, {
-      fontSize: "11px", color: "#aabbcc", fontFamily: "sans-serif", resolution: DPR,
-    }).setOrigin(0, 0);
+  private disposeBucket(bucket: BucketName): void {
+    for (const h of this.buckets[bucket]) h.dispose();
+    this.buckets[bucket] = [];
   }
 
-  private buildTerrainChip(t: Terrain, x: number, y: number): { bg: Phaser.GameObjects.Rectangle; label: Phaser.GameObjects.Text } {
+  private addHeader(bucket: BucketName, cx: number, y: number, text: string): void {
+    this.addToBucket(bucket, createHtmlText({
+      scene: this, sceneWidth: W,
+      x: cx - 200, y, w: 400, h: 16,
+      text,
+      fontSize: 11, color: "#556677", align: "center", letterSpacing: 2,
+    }));
+  }
+
+  private addSubLabel(bucket: BucketName, x: number, y: number, text: string): void {
+    this.addToBucket(bucket, createHtmlText({
+      scene: this, sceneWidth: W,
+      x, y, w: 240, h: 14,
+      text,
+      fontSize: 10, color: "#778899", letterSpacing: 1,
+    }));
+  }
+
+  private buildTerrainChip(t: Terrain, x: number, y: number): void {
     const w = 120, h = 26;
-    const bg = this.add.rectangle(x + w / 2, y, w, h, 0x1a1a2a).setStrokeStyle(1, 0x445566).setInteractive({ useHandCursor: true });
-    const label = this.add.text(x + w / 2, y, TERRAIN_LABEL[t], {
-      fontSize: "10px", color: "#aabbcc", fontFamily: "monospace", resolution: DPR, letterSpacing: 1,
-    }).setOrigin(0.5);
-    this.terrainChips.set(t, bg);
-    bg.on("pointerdown", () => {
-      const wasSelected = this.selectedTerrain === t;
-      this.selectedTerrain = wasSelected ? null : t;
-      // Switching columns invalidates any features selected on the now-disabled
-      // side, so clear them rather than carry phantom toggles. Dungeon features
-      // are radio-like (only one of 3-room / 5-room), so we also enforce that
-      // here when switching INTO the inside column.
-      this.selectedFeatures.clear();
-      this.refreshTerrainChips();
-      this.refreshFeatureChips();
-      this.refreshButtons();
-    });
-    this.refreshTerrainChips();
-    return { bg, label };
-  }
-
-  private buildFeatureChip(f: Feature, x: number, y: number): { bg: Phaser.GameObjects.Rectangle; label: Phaser.GameObjects.Text } {
-    const w = 120, h = 26;
-    const bg = this.add.rectangle(x + w / 2, y, w, h, 0x1a1a2a).setStrokeStyle(1, 0x445566).setInteractive({ useHandCursor: true });
-    const label = this.add.text(x + w / 2, y, FEATURE_LABEL[f], {
-      fontSize: "10px", color: "#aabbcc", fontFamily: "monospace", resolution: DPR, letterSpacing: 1,
-    }).setOrigin(0.5);
-    this.featureChips.set(f, bg);
-    bg.on("pointerdown", () => {
-      // Disabled when the chip's column doesn't match the active terrain.
-      if (!this.featureChipEnabled(f)) return;
-      if (featureColumn(f) === "inside") {
-        // Inside features are radio-like — only one room-count active.
-        const wasOn = this.selectedFeatures.has(f);
+    const btn = createHtmlButton({
+      scene: this, sceneWidth: W,
+      x, y, w, h,
+      label: TERRAIN_LABEL[t],
+      variant: "secondary",
+      fontSize: 10,
+      onClick: () => {
+        const wasSelected = this.selectedTerrain === t;
+        this.selectedTerrain = wasSelected ? null : t;
+        // Switching columns invalidates any features selected on the now-disabled
+        // side, so clear them rather than carry phantom toggles.
         this.selectedFeatures.clear();
-        if (!wasOn) this.selectedFeatures.add(f);
-      } else {
-        if (this.selectedFeatures.has(f)) this.selectedFeatures.delete(f);
-        else this.selectedFeatures.add(f);
-      }
-      this.refreshFeatureChips();
-      this.refreshButtons();
+        this.refreshTerrainChips();
+        this.refreshFeatureChips();
+        this.refreshButtons();
+      },
     });
+    this.terrainChips.set(t, btn);
+    this.addToBucket("det", btn);
+    this.refreshTerrainChips();
+  }
+
+  private buildFeatureChip(f: Feature, x: number, y: number): void {
+    const w = 120, h = 26;
+    const btn = createHtmlButton({
+      scene: this, sceneWidth: W,
+      x, y, w, h,
+      label: FEATURE_LABEL[f],
+      variant: "secondary",
+      fontSize: 10,
+      onClick: () => {
+        if (!this.featureChipEnabled(f)) return;
+        if (featureColumn(f) === "inside") {
+          // Inside features are radio-like — only one room-count active.
+          const wasOn = this.selectedFeatures.has(f);
+          this.selectedFeatures.clear();
+          if (!wasOn) this.selectedFeatures.add(f);
+        } else {
+          if (this.selectedFeatures.has(f)) this.selectedFeatures.delete(f);
+          else this.selectedFeatures.add(f);
+        }
+        this.refreshFeatureChips();
+        this.refreshButtons();
+      },
+    });
+    this.featureChips.set(f, btn);
+    this.addToBucket("det", btn);
     this.refreshFeatureChips();
-    return { bg, label };
   }
 
   /** A feature chip is interactive only when its column matches the current terrain. */
@@ -765,23 +819,31 @@ export class GenerateSetupScene extends Phaser.Scene {
   }
 
   private refreshTerrainChips(): void {
-    for (const [t, bg] of this.terrainChips) {
+    for (const [t, btn] of this.terrainChips) {
       const on = this.selectedTerrain === t;
-      bg.setFillStyle(on ? 0x2a8866 : 0x1a1a2a, on ? 0.4 : 1);
-      bg.setStrokeStyle(2, on ? 0x2a8866 : 0x445566);
+      btn.el.style.background = on ? "#2a8866" : "#1a1a2a";
+      btn.el.style.borderColor = on ? "#2a8866" : "#445566";
+      btn.el.style.color = on ? "#ffffff" : "#aabbcc";
+      btn.el.style.opacity = on ? "0.85" : "1";
     }
   }
 
   private refreshFeatureChips(): void {
-    for (const [f, bg] of this.featureChips) {
+    for (const [f, btn] of this.featureChips) {
       const enabled = this.featureChipEnabled(f);
       const on = enabled && this.selectedFeatures.has(f);
       if (!enabled) {
-        bg.setFillStyle(0x14141e, 1);
-        bg.setStrokeStyle(1, 0x2a3340);
+        btn.el.style.background = "#14141e";
+        btn.el.style.borderColor = "#2a3340";
+        btn.el.style.color = "#3a4555";
+        btn.el.style.opacity = "1";
+        btn.el.style.cursor = "default";
       } else {
-        bg.setFillStyle(on ? 0xaa6633 : 0x1a1a2a, on ? 0.4 : 1);
-        bg.setStrokeStyle(2, on ? 0xaa6633 : 0x445566);
+        btn.el.style.background = on ? "#aa6633" : "#1a1a2a";
+        btn.el.style.borderColor = on ? "#aa6633" : "#445566";
+        btn.el.style.color = on ? "#ffffff" : "#aabbcc";
+        btn.el.style.opacity = on ? "0.85" : "1";
+        btn.el.style.cursor = "pointer";
       }
     }
   }
@@ -894,58 +956,75 @@ export class GenerateSetupScene extends Phaser.Scene {
     this.buildBackButton(120, H - 36);
 
     // Layout: BACK | RANDOMIZE | PICK MAP | COMPOSE MAP | COMPOSE ENCOUNTER.
-    // Centers spaced so each adjacent pair has ~30px between edges; dev
-    // button (added later) still has room at the right.
     const detRandCx = 360;
     const detPickCx = 580;
     const detMapCx  = 820;
     const detEncCx  = 1090;
+    const btnH = 44;
+    const y = H - 36 - btnH / 2;
 
-    this.detRandomBg = this.add.rectangle(detRandCx, H - 36, 180, 44, 0x3a2a1a).setStrokeStyle(2, 0xaa7733);
-    this.detRandomLabel = this.add.text(detRandCx, H - 36, "★ RANDOMIZE", {
-      fontSize: "14px", color: "#ffd699", fontFamily: "monospace", resolution: DPR,
-    }).setOrigin(0.5);
-    this.detPickMapBg = this.add.rectangle(detPickCx, H - 36, 180, 44, 0x2a1a3a).setStrokeStyle(2, 0x5a4480);
-    this.detPickMapLabel = this.add.text(detPickCx, H - 36, "PICK MAP", {
-      fontSize: "14px", color: "#d8c8e8", fontFamily: "monospace", resolution: DPR,
-    }).setOrigin(0.5);
-    this.detComposeMapBg = this.add.rectangle(detMapCx, H - 36, 240, 44, 0x1a2a3a).setStrokeStyle(2, 0x345566);
-    this.detComposeMapLabel = this.add.text(detMapCx, H - 36, "COMPOSE MAP", {
-      fontSize: "14px", color: "#c8d8e8", fontFamily: "monospace", resolution: DPR,
-    }).setOrigin(0.5);
-    this.detComposeEncBg = this.add.rectangle(detEncCx, H - 36, 240, 44, 0x1a3a2a).setStrokeStyle(2, 0x2a6655);
-    this.detComposeEncLabel = this.add.text(detEncCx, H - 36, "SAVE ENCOUNTER", {
-      fontSize: "14px", color: "#ffe9a8", fontFamily: "monospace", resolution: DPR,
-    }).setOrigin(0.5);
-    this.detContainer.add(this.detRandomBg);
-    this.detContainer.add(this.detRandomLabel);
-    this.detContainer.add(this.detPickMapBg);
-    this.detContainer.add(this.detPickMapLabel);
-    this.detContainer.add(this.detComposeMapBg);
-    this.detContainer.add(this.detComposeMapLabel);
-    this.detContainer.add(this.detComposeEncBg);
-    this.detContainer.add(this.detComposeEncLabel);
+    this.detRandomBtn = createHtmlButton({
+      scene: this, sceneWidth: W,
+      x: detRandCx - 90, y, w: 180, h: btnH,
+      label: "★ RANDOMIZE", variant: "warn", fontSize: 14,
+      onClick: () => this.runRandomizeEncounter(),
+    });
+    this.addToBucket("det", this.detRandomBtn);
+
+    this.detPickMapBtn = createHtmlButton({
+      scene: this, sceneWidth: W,
+      x: detPickCx - 90, y, w: 180, h: btnH,
+      label: "PICK MAP", variant: "secondary", fontSize: 14,
+      onClick: () => this.openMapSelector(),
+    });
+    this.detPickMapBtn.el.style.background = "#2a1a3a";
+    this.detPickMapBtn.el.style.borderColor = "#5a4480";
+    this.detPickMapBtn.el.style.color = "#d8c8e8";
+    this.addToBucket("det", this.detPickMapBtn);
+
+    this.detComposeMapBtn = createHtmlButton({
+      scene: this, sceneWidth: W,
+      x: detMapCx - 120, y, w: 240, h: btnH,
+      label: "COMPOSE MAP", variant: "secondary", fontSize: 14,
+      onClick: () => this.runComposeMap(),
+    });
+    this.addToBucket("det", this.detComposeMapBtn);
+
+    this.detComposeEncBtn = createHtmlButton({
+      scene: this, sceneWidth: W,
+      x: detEncCx - 120, y, w: 240, h: btnH,
+      label: "SAVE ENCOUNTER", variant: "primary", fontSize: 14,
+      onClick: () => this.runComposeEncounter(),
+    });
+    this.addToBucket("det", this.detComposeEncBtn);
 
     const genMapCx = W / 2 - 160;
     const genEncCx = W / 2 + 160;
-    this.genMapBg = this.add.rectangle(genMapCx, H - 36, 280, 44, 0x1a2a3a).setStrokeStyle(2, 0x345566);
-    this.genMapLabel = this.add.text(genMapCx, H - 36, "GENERATE MAP ONLY", {
-      fontSize: "14px", color: "#c8d8e8", fontFamily: "monospace", resolution: DPR,
-    }).setOrigin(0.5);
-    this.genEncBg = this.add.rectangle(genEncCx, H - 36, 280, 44, 0x1a3a2a).setStrokeStyle(2, 0x2a6655);
-    this.genEncLabel = this.add.text(genEncCx, H - 36, "GENERATE ENCOUNTER", {
-      fontSize: "14px", color: "#ffe9a8", fontFamily: "monospace", resolution: DPR,
-    }).setOrigin(0.5);
-    this.genContainer.add(this.genMapBg);
-    this.genContainer.add(this.genMapLabel);
-    this.genContainer.add(this.genEncBg);
-    this.genContainer.add(this.genEncLabel);
+    this.genMapBtn = createHtmlButton({
+      scene: this, sceneWidth: W,
+      x: genMapCx - 140, y, w: 280, h: btnH,
+      label: "GENERATE MAP ONLY", variant: "secondary", fontSize: 14,
+      onClick: () => this.runGenerateMap(),
+    });
+    this.addToBucket("gen", this.genMapBtn);
+
+    this.genEncBtn = createHtmlButton({
+      scene: this, sceneWidth: W,
+      x: genEncCx - 140, y, w: 280, h: btnH,
+      label: "GENERATE ENCOUNTER", variant: "primary", fontSize: 14,
+      onClick: () => this.runGenerateEncounter(),
+    });
+    this.addToBucket("gen", this.genEncBtn);
   }
 
   private buildBackButton(cx: number, cy: number): void {
-    const bg = this.add.rectangle(cx, cy, 160, 36, 0x222233).setStrokeStyle(1, 0x556677).setInteractive({ useHandCursor: true });
-    this.add.text(cx, cy, "BACK", { fontSize: "13px", color: "#aabbcc", fontFamily: "monospace", resolution: DPR }).setOrigin(0.5);
-    bg.on("pointerdown", () => this.scene.start("MainMenuScene"));
+    const btn = createHtmlButton({
+      scene: this, sceneWidth: W,
+      x: cx - 80, y: cy - 18, w: 160, h: 36,
+      label: "BACK", variant: "secondary", fontSize: 13,
+      onClick: () => this.scene.start("MainMenuScene"),
+    });
+    this.addToBucket("always", btn);
   }
 
   // ── Dev button: delete all generated maps ───────────────────────────────
@@ -953,30 +1032,33 @@ export class GenerateSetupScene extends Phaser.Scene {
   private buildDevButton(): void {
     const cx = W - 200;
     const cy = H - 36;
-    const bg = this.add.rectangle(cx, cy, 220, 28, 0x2a1818).setStrokeStyle(1, 0x663333).setInteractive({ useHandCursor: true });
-    const label = this.add.text(cx, cy, "DEV: DELETE ALL GEN MAPS", {
-      fontSize: "10px", color: "#cc8888", fontFamily: "monospace", resolution: DPR, letterSpacing: 1,
-    }).setOrigin(0.5);
-    bg.on("pointerdown", async () => {
-      if (this.busy) return;
-      this.busy = true;
-      label.setText("DELETING…");
-      try {
-        const { mapsDeleted, encountersDeleted } = await gameClient.deleteAllGeneratedMaps();
-        if (this.statusEl) this.statusEl.textContent = `Deleted ${mapsDeleted} maps and ${encountersDeleted} encounters.`;
-        if (this.acceptedMap) {
-          this.acceptedMap = null;
-          this.rebuildDeterministicRight();
+    const btn = createHtmlButton({
+      scene: this, sceneWidth: W,
+      x: cx - 110, y: cy - 14, w: 220, h: 28,
+      label: "DEV: DELETE ALL GEN MAPS",
+      variant: "danger", fontSize: 10,
+      onClick: async () => {
+        if (this.busy) return;
+        this.busy = true;
+        btn.setLabel("DELETING…");
+        try {
+          const { mapsDeleted, encountersDeleted } = await gameClient.deleteAllGeneratedMaps();
+          if (this.statusEl) this.statusEl.textContent = `Deleted ${mapsDeleted} maps and ${encountersDeleted} encounters.`;
+          if (this.acceptedMap) {
+            this.acceptedMap = null;
+            this.rebuildDeterministicRight();
+          }
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          if (this.statusEl) this.statusEl.textContent = `Delete failed: ${msg}`;
+        } finally {
+          btn.setLabel("DEV: DELETE ALL GEN MAPS");
+          this.busy = false;
+          this.refreshButtons();
         }
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        if (this.statusEl) this.statusEl.textContent = `Delete failed: ${msg}`;
-      } finally {
-        label.setText("DEV: DELETE ALL GEN MAPS");
-        this.busy = false;
-        this.refreshButtons();
-      }
+      },
     });
+    this.addToBucket("always", btn);
   }
 
   // ── Button state ────────────────────────────────────────────────────────
@@ -986,28 +1068,19 @@ export class GenerateSetupScene extends Phaser.Scene {
 
     if (det) {
       const randomReady = !this.busy;
-      this.setButton(
-        this.detRandomBg, this.detRandomLabel,
-        randomReady, "#ffd699", 0x3a2a1a, 0xaa7733,
+      this.setBtnState(this.detRandomBtn, randomReady, "#ffd699", "#3a2a1a", "#aa7733",
         () => this.runRandomizeEncounter(),
-        randomReady ? null : "Busy…",
-      );
+        randomReady ? null : "Busy…");
 
       const pickReady = !this.busy;
-      this.setButton(
-        this.detPickMapBg, this.detPickMapLabel,
-        pickReady, "#d8c8e8", 0x2a1a3a, 0x5a4480,
+      this.setBtnState(this.detPickMapBtn, pickReady, "#d8c8e8", "#2a1a3a", "#5a4480",
         () => this.openMapSelector(),
-        pickReady ? null : "Busy…",
-      );
+        pickReady ? null : "Busy…");
 
       const composeMapReady = !this.busy && this.selectedTerrain !== null;
-      this.setButton(
-        this.detComposeMapBg, this.detComposeMapLabel,
-        composeMapReady, "#c8d8e8", 0x1a2a3a, 0x345566,
+      this.setBtnState(this.detComposeMapBtn, composeMapReady, "#c8d8e8", "#1a2a3a", "#345566",
         () => this.runComposeMap(),
-        composeMapReady ? null : (this.busy ? "Busy…" : "Select a terrain first (Grassland or Forest)."),
-      );
+        composeMapReady ? null : (this.busy ? "Busy…" : "Select a terrain first (Grassland or Forest)."));
 
       // SAVE ENCOUNTER requires an accepted map AND at least one player-start cell.
       let encGuard: string | null = null;
@@ -1015,53 +1088,46 @@ export class GenerateSetupScene extends Phaser.Scene {
       else if (!this.acceptedMap) encGuard = "Compose a map and press SAVE in the preview first.";
       else if (!this.zonePainter || this.zonePainter.getPlayerZones().size === 0) encGuard = "Paint at least one player-start cell on the thumbnail (PAINT: PLAYER).";
       const composeEncReady = encGuard === null;
-      this.setButton(
-        this.detComposeEncBg, this.detComposeEncLabel,
-        composeEncReady, "#ffe9a8", 0x1a3a2a, 0x2a6655,
-        () => this.runComposeEncounter(),
-        encGuard,
-      );
+      this.setBtnState(this.detComposeEncBtn, composeEncReady, "#ffe9a8", "#1a3a2a", "#2a6655",
+        () => this.runComposeEncounter(), encGuard);
     } else {
       const hasPrompt = !!this.genPromptInput && this.genPromptInput.value.trim().length >= 8;
       const ready = !this.busy && hasPrompt;
       const guard = this.busy ? "Busy…" : (hasPrompt ? null : "Type a scene description (at least 8 characters), or click an example card on the right.");
-      this.setButton(
-        this.genMapBg, this.genMapLabel, ready, "#c8d8e8", 0x1a2a3a, 0x345566,
-        () => this.runGenerateMap(), guard,
-      );
-      this.setButton(
-        this.genEncBg, this.genEncLabel, ready, "#ffe9a8", 0x1a3a2a, 0x2a6655,
-        () => this.runGenerateEncounter(), guard,
-      );
+      this.setBtnState(this.genMapBtn, ready, "#c8d8e8", "#1a2a3a", "#345566",
+        () => this.runGenerateMap(), guard);
+      this.setBtnState(this.genEncBtn, ready, "#ffe9a8", "#1a3a2a", "#2a6655",
+        () => this.runGenerateEncounter(), guard);
     }
   }
 
   /**
-   * Wire a button's visual state and click behaviour. The button is ALWAYS
-   * interactive — when not "ready" it stays clickable but the pointerdown
-   * handler surfaces `guardMessage` in the status line instead of doing
-   * nothing, so the player can see why the button isn't proceeding.
+   * Wire an HTML button's visual state and click behaviour. The button is
+   * ALWAYS clickable — when not "ready" the click handler surfaces
+   * `guardMessage` in the status line instead of doing nothing, so the player
+   * can see why the button isn't proceeding.
    */
-  private setButton(
-    bg: Phaser.GameObjects.Rectangle,
-    label: Phaser.GameObjects.Text,
+  private setBtnState(
+    btn: HtmlButtonHandle,
     ready: boolean,
     activeColor: string,
-    activeFill: number,
-    activeStroke: number,
+    activeFill: string,
+    activeStroke: string,
     onClick: () => void,
     guardMessage: string | null,
   ): void {
-    bg.setInteractive({ useHandCursor: true });
-    bg.removeAllListeners("pointerdown");
     if (ready) {
-      bg.setFillStyle(activeFill).setStrokeStyle(2, activeStroke);
-      label.setColor(activeColor);
-      bg.on("pointerdown", onClick);
+      btn.el.style.background = activeFill;
+      btn.el.style.borderColor = activeStroke;
+      btn.el.style.color = activeColor;
+      btn.el.style.cursor = "pointer";
+      btn.setOnClick(onClick);
     } else {
-      bg.setFillStyle(0x1a2222).setStrokeStyle(2, 0x334455);
-      label.setColor("#556677");
-      bg.on("pointerdown", () => {
+      btn.el.style.background = "#1a2222";
+      btn.el.style.borderColor = "#334455";
+      btn.el.style.color = "#556677";
+      btn.el.style.cursor = "default";
+      btn.setOnClick(() => {
         if (this.statusEl && guardMessage) this.statusEl.textContent = guardMessage;
       });
     }
@@ -1407,10 +1473,11 @@ export class GenerateSetupScene extends Phaser.Scene {
     const detInputs = [this.detTitleInput, this.detDescInput, this.detIntroInput, this.detObjectiveInput, this.detCompletionFlagInput];
     for (const el of detInputs) if (el) el.style.display = det ? "" : "none";
     if (this.genPromptInput) this.genPromptInput.style.display = !det ? "" : "none";
-    // The sub-components (TriggerEditor, MonsterPicker) own absolutely-
-    // positioned DOM nodes; Phaser container visibility doesn't reach them,
-    // so toggle them explicitly. When det is true the picker sub-tab logic
-    // takes over via activatePickerTab.
+    // The sub-components (TriggerEditor, MonsterPicker, ZonePainter) own
+    // absolutely-positioned DOM nodes; Phaser container visibility doesn't
+    // reach them, so toggle them explicitly. When det is true the picker
+    // sub-tab logic takes over via activatePickerTab.
+    if (this.zonePainter) this.zonePainter.setVisible(det);
     if (!det) {
       if (this.triggerEditor) this.triggerEditor.setVisible(false);
       if (this.monsterPicker) this.monsterPicker.setVisible(false);
@@ -1425,6 +1492,7 @@ export class GenerateSetupScene extends Phaser.Scene {
       for (const el of detInputs) if (el) el.style.display = "none";
       if (this.genPromptInput) this.genPromptInput.style.display = "none";
       if (this.statusEl)       this.statusEl.style.display       = "none";
+      if (this.zonePainter)    this.zonePainter.setVisible(false);
       if (this.triggerEditor)  this.triggerEditor.setVisible(false);
       if (this.monsterPicker)  this.monsterPicker.setVisible(false);
     } else {
@@ -1450,6 +1518,12 @@ export class GenerateSetupScene extends Phaser.Scene {
     if (this.zonePainter)            { this.zonePainter.destroy();           this.zonePainter            = null; }
     if (this.triggerEditor)          { this.triggerEditor.destroy();         this.triggerEditor          = null; }
     if (this.monsterPicker)          { this.monsterPicker.destroy();         this.monsterPicker          = null; }
+    // Drop every HTML button + text registered with the bucket system.
+    for (const bucket of Object.keys(this.buckets) as BucketName[]) this.disposeBucket(bucket);
+    this.terrainChips.clear();
+    this.featureChips.clear();
+    this.monstersTabBtn = null;
+    this.triggersTabBtn = null;
   }
 }
 

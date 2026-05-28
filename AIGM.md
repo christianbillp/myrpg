@@ -350,7 +350,7 @@ Starts combat when the phase is `exploring` and enemies are present on the map. 
 | --------- | ------ | -------- |
 | `reason`  | string | yes      |
 
-> **Note.** `GameEngine.createSession` auto-calls `triggerCombat()` at session start whenever any NPC spawns with `disposition: 'enemy'` and live HP — so combat encounters (hand-authored with hostile spawns, AI-generated `simple_combat`, or deterministic-compose with `enemyIds`) land the player directly in combat without the GM having to call this tool on its first reply. The GM still needs to call `trigger_combat` when changing an NPC's disposition to `enemy` mid-scene (e.g. after a failed parley); see the **Creature disposition change** rule in the GM constraints.
+> **Note.** `GameEngine.createSession` auto-calls `triggerCombat()` at session start whenever any spawned NPC is hostile to the party (`isHostileTo` — matrix-first, legacy `disposition: 'enemy'` fallback), so combat encounters (hand-authored with hostile spawns, AI-generated `simple_combat`, or deterministic-compose with `enemyIds`) land the player directly in combat without the GM having to call this tool on its first reply. The off-camera world tick performs the same check every six seconds in exploration phase — `set_disposition` → `enemy` or `adjust_faction_relation` to a hostile value will auto-engage on the next tick if the GM forgets to call `trigger_combat`, but the GM should still call it explicitly for snappy timing; see the **Creature disposition change** rule in the GM constraints.
 
 #### `end_combat`
 

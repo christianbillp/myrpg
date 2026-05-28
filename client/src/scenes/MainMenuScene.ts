@@ -1,4 +1,5 @@
 import Phaser from "phaser";
+import { createHtmlButton, createHtmlText, type HtmlButtonHandle, type HtmlTextHandle } from "../ui/htmlButtons";
 
 /**
  * MainMenuScene — top-level entry point shown after Boot completes when there
@@ -6,10 +7,14 @@ import Phaser from "phaser";
  * of encounters with persistent cross-chapter state) or EncounterSetupScene
  * (run a single one-off encounter).
  *
- * Kept deliberately minimal: title + two large buttons. Adding settings,
- * credits, etc. happens here in future.
+ * Kept deliberately minimal: title + four large buttons. Adding settings,
+ * credits, etc. happens here in future. All chrome is HTML so titles + button
+ * labels stay crisp at non-integer canvas scale factors.
  */
 export class MainMenuScene extends Phaser.Scene {
+  private htmlTexts: HtmlTextHandle[] = [];
+  private htmlButtons: HtmlButtonHandle[] = [];
+
   constructor() {
     super({ key: "MainMenuScene" });
   }
@@ -20,17 +25,26 @@ export class MainMenuScene extends Phaser.Scene {
 
     this.add.rectangle(0, 0, w, h, 0x0a0e1a).setOrigin(0, 0);
 
-    this.add.text(w / 2, h * 0.22, "MyRPG", {
+    this.htmlTexts.push(createHtmlText({
+      scene: this, sceneWidth: w,
+      x: 0, y: h * 0.22 - 50, w, h: 80,
+      text: "MyRPG",
       fontFamily: "serif",
-      fontSize: "72px",
+      fontSize: 72,
       color: "#e8d8a8",
-    }).setOrigin(0.5);
+      align: "center",
+      fontWeight: "bold",
+    }));
 
-    this.add.text(w / 2, h * 0.32, "A browser RPG built on the SRD", {
+    this.htmlTexts.push(createHtmlText({
+      scene: this, sceneWidth: w,
+      x: 0, y: h * 0.32 - 12, w, h: 24,
+      text: "A browser RPG built on the SRD",
       fontFamily: "serif",
-      fontSize: "18px",
+      fontSize: 18,
       color: "#8a8270",
-    }).setOrigin(0.5);
+      align: "center",
+    }));
 
     this.makeMenuButton(w / 2, h * 0.40, "ADVENTURE", "A string of encounters with overarching narrative", () => {
       this.scene.start("AdventureSetupScene");
@@ -47,30 +61,65 @@ export class MainMenuScene extends Phaser.Scene {
     this.makeMenuButton(w / 2, h * 0.76, "ENCOUNTER EDITOR", "Open and edit an existing encounter — title, monsters, zones, triggers", () => {
       this.scene.start("EncounterEditorScene");
     });
+
+    this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => this.teardown());
+    this.events.once(Phaser.Scenes.Events.DESTROY, () => this.teardown());
   }
 
   private makeMenuButton(cx: number, cy: number, label: string, hint: string, onClick: () => void): void {
     const W = 460;
     const H = 92;
-    const bg = this.add.rectangle(cx, cy, W, H, 0x1a2238)
-      .setStrokeStyle(2, 0x4a6a9a)
-      .setInteractive({ useHandCursor: true });
+    const w = this.scale.width;
 
-    const text = this.add.text(cx, cy - 14, label, {
-      fontFamily: "sans-serif",
-      fontSize: "26px",
-      color: "#e8d8a8",
-      fontStyle: "bold",
-    }).setOrigin(0.5);
+    const btn = createHtmlButton({
+      scene: this, sceneWidth: w,
+      x: cx - W / 2, y: cy - H / 2, w: W, h: H,
+      label,
+      variant: "secondary",
+      fontSize: 22,
+      onClick,
+    });
+    // Override base styling: serif label, more padding, room for the hint.
+    btn.el.style.fontFamily = "sans-serif";
+    btn.el.style.fontWeight = "bold";
+    btn.el.style.letterSpacing = "1px";
+    btn.el.style.background = "#1a2238";
+    btn.el.style.borderColor = "#4a6a9a";
+    btn.el.style.color = "#e8d8a8";
+    btn.el.style.display = "flex";
+    btn.el.style.flexDirection = "column";
+    btn.el.style.justifyContent = "center";
+    btn.el.style.alignItems = "center";
+    btn.el.style.gap = "6px";
+    btn.el.textContent = "";
 
-    this.add.text(cx, cy + 20, hint, {
-      fontFamily: "sans-serif",
-      fontSize: "14px",
-      color: "#9aaad0",
-    }).setOrigin(0.5);
+    const labelEl = document.createElement("span");
+    labelEl.textContent = label;
+    labelEl.style.fontSize = "inherit";
+    labelEl.style.color = "inherit";
+    btn.el.appendChild(labelEl);
 
-    bg.on("pointerover", () => { bg.setFillStyle(0x243250); text.setColor("#fff4d8"); });
-    bg.on("pointerout",  () => { bg.setFillStyle(0x1a2238); text.setColor("#e8d8a8"); });
-    bg.on("pointerdown", onClick);
+    const hintEl = document.createElement("span");
+    hintEl.textContent = hint;
+    hintEl.style.fontSize = "0.55em";
+    hintEl.style.color = "#9aaad0";
+    hintEl.style.fontWeight = "normal";
+    hintEl.style.letterSpacing = "0";
+    hintEl.style.whiteSpace = "normal";
+    hintEl.style.textAlign = "center";
+    hintEl.style.lineHeight = "1.3";
+    btn.el.appendChild(hintEl);
+
+    btn.el.addEventListener("mouseenter", () => { btn.el.style.background = "#243250"; labelEl.style.color = "#fff4d8"; });
+    btn.el.addEventListener("mouseleave", () => { btn.el.style.background = "#1a2238"; labelEl.style.color = "#e8d8a8"; });
+
+    this.htmlButtons.push(btn);
+  }
+
+  private teardown(): void {
+    for (const t of this.htmlTexts) t.dispose();
+    for (const b of this.htmlButtons) b.dispose();
+    this.htmlTexts = [];
+    this.htmlButtons = [];
   }
 }
