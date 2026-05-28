@@ -5,6 +5,8 @@ import type {
 } from './types.js';
 import { pickNarrationVariant } from './NarrationSystem.js';
 import { d20 as d20Local } from './Dice.js';
+import { setRelation, adjustRelation } from './FactionRelations.js';
+import { PLAYER_FACTION_ID } from '../../../shared/types.js';
 
 /**
  * TriggerSystem (v2) — subscribes encounter triggers to the engine event bus.
@@ -173,7 +175,12 @@ function compare(a: number, op: ComparisonOp, b: number): boolean {
 
 // ── THEN (effects) ───────────────────────────────────────────────────────────
 
-function fireAction(ctx: GameContext, action: TriggerAction): void {
+/**
+ * Apply a single `TriggerAction`. Exported so AIGM tools that share the same
+ * mutation semantics (the new faction-relation tools, etc.) can route through
+ * the canonical handler instead of re-implementing it.
+ */
+export function fireAction(ctx: GameContext, action: TriggerAction): void {
   switch (action.type) {
     case 'spawn_enemy_near_player': {
       const spawned = ctx.spawnEnemyNearPlayer(action.monsterId, action.minDist, action.maxDist);
@@ -222,13 +229,50 @@ function fireAction(ctx: GameContext, action: TriggerAction): void {
       recordRumor(ctx, action.id, action.text, action.salience ?? 5);
       return;
     }
+    case 'adjust_faction_relation': {
+      const before = ctx.state.factionRelations[action.a]?.[action.b] ?? 0;
+      adjustRelation(ctx.state, action.a, action.b, action.delta, { mirror: action.mirror ?? true });
+      const after = ctx.state.factionRelations[action.a]?.[action.b] ?? 0;
+      // Surface a `faction_changed` event for any pair touching the player
+      // so existing `faction_changed` listeners stay correct without extra
+      // wiring. NPC-vs-NPC shifts don't publish (no existing listeners).
+      if (action.a === PLAYER_FACTION_ID) ctx.publish({ type: 'faction_changed', factionId: action.b, oldValue: before, newValue: after });
+      else if (action.b === PLAYER_FACTION_ID) ctx.publish({ type: 'faction_changed', factionId: action.a, oldValue: before, newValue: after });
+      return;
+    }
+    case 'set_faction_relation': {
+      const before = ctx.state.factionRelations[action.a]?.[action.b] ?? 0;
+      setRelation(ctx.state, action.a, action.b, action.value, { mirror: action.mirror ?? true });
+      const after = ctx.state.factionRelations[action.a]?.[action.b] ?? 0;
+      if (action.a === PLAYER_FACTION_ID) ctx.publish({ type: 'faction_changed', factionId: action.b, oldValue: before, newValue: after });
+      else if (action.b === PLAYER_FACTION_ID) ctx.publish({ type: 'faction_changed', factionId: action.a, oldValue: before, newValue: after });
+      return;
+    }
+    case 'reveal_faction': {
+      if (!ctx.state.discoveredFactions.includes(action.factionId)) {
+        ctx.state.discoveredFactions.push(action.factionId);
+      }
+      return;
+    }
     case 'set_disposition_by_def_id': {
+      // Disposition flips are sugar for setting the affected NPC's faction
+      // standing with `party` to the corresponding pole. Mirror to the matrix
+      // so Pass 3 readers (off-camera tick, NPC-vs-NPC AI) see the same view
+      // as the existing combat-start condition that still reads disposition.
+      const standingByDisp = action.disposition === 'enemy' ? -100
+                            : action.disposition === 'ally' ? 100
+                            : 0;
+      const touchedFactions = new Set<string>();
       for (const npc of ctx.state.npcs.filter((n) => n.defId === action.defId && n.hp > 0)) {
         npc.disposition = action.disposition;
         if ((action.disposition === 'ally' || action.disposition === 'enemy') && !npc.combatLabel) {
           ctx.assignCombatLabel(npc);
         }
         if (action.disposition === 'enemy') ctx.aggroFaction(npc);
+        touchedFactions.add(npc.factionId);
+      }
+      for (const factionId of touchedFactions) {
+        setRelation(ctx.state, factionId, PLAYER_FACTION_ID, standingByDisp);
       }
       return;
     }
@@ -261,11 +305,20 @@ function fireAction(ctx: GameContext, action: TriggerAction): void {
 
 // ── Faction & rumor helpers (also called from AIGMTools) ─────────────────────
 
+/**
+ * Adjust the player's standing with a faction. Writes go to both the legacy
+ * `factionStandings` projection AND the full `factionRelations` matrix (party
+ * row, mirrored — `setRelation` handles both) so the new matrix-driven
+ * readers see the same view as the existing `faction_standing` guards.
+ */
 export function adjustFactionStanding(ctx: GameContext, factionId: string, delta: number): void {
   const s = ctx.state;
   const oldValue = s.factionStandings[factionId] ?? 0;
   const newValue = Math.max(-100, Math.min(100, oldValue + delta));
   s.factionStandings[factionId] = newValue;
+  // Mirror into the full matrix (party row both ways). `setRelation` clamps
+  // again on the matrix side, but we've already clamped above.
+  setRelation(s, PLAYER_FACTION_ID, factionId, newValue);
   if (oldValue !== newValue) {
     ctx.publish({ type: 'faction_changed', factionId, oldValue, newValue });
   }

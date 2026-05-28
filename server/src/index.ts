@@ -40,6 +40,9 @@ import {
   deleteSession,
   pushAdventureLines,
   getAdventureData,
+  setWorldPaused,
+  setWorldTickHandle,
+  isWorldTickEligible,
   tryAcquireAigmLock,
   releaseAigmLock,
   getAigmArchive,
@@ -87,6 +90,7 @@ const defs: GameDefs = {
   spells: [],
   features: [],
   narration: [],
+  factions: [],
   tileLegend: { notes: "", tiles: {} },
 };
 
@@ -103,6 +107,7 @@ async function loadDefs(): Promise<void> {
     spells,
     features,
     narration,
+    factions,
   ] = await Promise.all([
     readDir<GameDefs["playerDefs"][0]>(join(DATA_DIR, "characters")),
     readDir<GameDefs["monsters"][0]>(join(DATA_DIR, "monsters")),
@@ -115,10 +120,11 @@ async function loadDefs(): Promise<void> {
     readDir<GameDefs["spells"][0]>(join(DATA_DIR, "spells")),
     readDir<GameDefs["features"][0]>(join(DATA_DIR, "features")),
     readDir<GameDefs["narration"][0]>(join(DATA_DIR, "narration")),
+    readDir<GameDefs["factions"][0]>(join(DATA_DIR, "factions")),
   ]) as [
     GameDefs["playerDefs"], GameDefs["monsters"], GameDefs["npcs"], GameDefs["equipment"],
     TiledMapFile[], GameDefs["feats"], GameDefs["backgrounds"], GameDefs["species"],
-    GameDefs["spells"], GameDefs["features"], GameDefs["narration"],
+    GameDefs["spells"], GameDefs["features"], GameDefs["narration"], GameDefs["factions"],
   ];
   defs.playerDefs = playerDefs;
   defs.monsters = monsters;
@@ -130,6 +136,7 @@ async function loadDefs(): Promise<void> {
   defs.spells = spells;
   defs.features = features;
   defs.narration = narration;
+  defs.factions = factions;
   for (const p of defs.playerDefs) {
     applySpecies(p, defs.species);
     applyFeats(p, defs.feats);
@@ -318,6 +325,7 @@ await server.register(websocket);
 server.get("/characters", async () => defs.playerDefs);
 server.get("/monsters", async () => defs.monsters);
 server.get("/npcs", async () => defs.npcs);
+server.get("/factions", async () => defs.factions);
 server.get("/equipment", async () => defs.equipment);
 server.get("/feats", async () => defs.feats);
 server.get("/backgrounds", async () => defs.backgrounds);
@@ -387,6 +395,8 @@ server.post<{ Params: { characterId: string } }>(
       const finishedState = found.session.engine.getState();
       save.worldFlags = { ...finishedState.worldFlags };
       save.factionStandings = { ...finishedState.factionStandings };
+      save.factionRelations = structuredClone(finishedState.factionRelations);
+      save.discoveredFactions = [...finishedState.discoveredFactions];
       save.rumors = [...finishedState.rumors];
       deleteSession(found.sessionId);
     }
@@ -623,6 +633,15 @@ async function loadWorldState(): Promise<{
     worldFlags: worldSave.worldFlags ?? {},
     narrationLastUsed: worldSave.narrationLastUsed ?? {},
     factionStandings: worldSave.factionStandings ?? {},
+    // New in Pass 1 — older saves migrate by projecting the legacy `factionStandings`
+    // into the party row of an otherwise-empty matrix. Pass 2 will use this matrix
+    // as the source of truth.
+    factionRelations: worldSave.factionRelations ?? (
+      worldSave.factionStandings && Object.keys(worldSave.factionStandings).length > 0
+        ? { party: { ...worldSave.factionStandings } }
+        : {}
+    ),
+    discoveredFactions: worldSave.discoveredFactions ?? [],
     rumors: worldSave.rumors ?? [],
     adventureContext: worldSave.adventureContext ?? null,
     chapterComplete: worldSave.chapterComplete ?? false,
@@ -717,6 +736,8 @@ async function deleteAdventureSave(characterId: string): Promise<void> {
 function buildAdventureSeed(adv: AdventureDef, chapterIndex: number, save: AdventureSave): AdventureSessionContext & {
   seedWorldFlags?: Record<string, WorldFlagValue>;
   seedFactionStandings?: Record<string, number>;
+  seedFactionRelations?: Record<string, Record<string, number>>;
+  seedDiscoveredFactions?: string[];
   seedRumors?: Rumor[];
 } {
   const chapter = adv.chapters[chapterIndex];
@@ -731,6 +752,15 @@ function buildAdventureSeed(adv: AdventureDef, chapterIndex: number, save: Adven
     priorChapterSummaries: save.priorChapterSummaries,
     seedWorldFlags: { ...save.worldFlags },
     seedFactionStandings: { ...save.factionStandings },
+    // Carry the full pair-wise faction matrix across chapters when present.
+    // Older saves without this field fall back to seeding the `party` row
+    // from `seedFactionStandings` + faction-def defaults.
+    seedFactionRelations: save.factionRelations
+      ? structuredClone(save.factionRelations)
+      : undefined,
+    seedDiscoveredFactions: save.discoveredFactions
+      ? [...save.discoveredFactions]
+      : undefined,
     seedRumors: [...save.rumors],
   };
 }
@@ -743,6 +773,8 @@ function makeAdventureSave(characterId: string, adventureId: string): AdventureS
     completedChapterIds: [],
     worldFlags: {},
     factionStandings: {},
+    factionRelations: {},
+    discoveredFactions: [],
     rumors: [],
     priorChapterSummaries: [],
   };
@@ -763,6 +795,8 @@ interface EncounterDefJson {
   startingZones?: import("./engine/types.js").StartingZonesLayer;
   triggers?: import("./engine/types.js").EncounterTrigger[];
   environment?: import("./engine/types.js").EncounterEnvironment;
+  /** Optional per-encounter override for the global faction-relation matrix. */
+  factionRelations?: Record<string, Record<string, number>>;
 }
 
 async function loadAdventureDef(adventureId: string): Promise<AdventureDef | null> {
@@ -815,6 +849,7 @@ async function startAdventureChapter(
     customObjective: encDef.objective,
     startingZones: encDef.startingZones,
     environment: encDef.environment,
+    factionRelations: encDef.factionRelations,
   });
 
   const adventureSeed = buildAdventureSeed(adv, save.currentChapterIndex, save);
@@ -849,6 +884,7 @@ async function startAdventureChapter(
 
   const engine = GameEngine.createSession(sessionId, { ...req, encounterContext }, defs, savedMap);
   createSession(sessionId, engine);
+  installWorldTick(sessionId, engine);
   await ensureSaveExists(playerDef.id);
   // Auto-start combat — see comment on the main session-create route above.
   if (engine.getState().npcs.some((n) => n.disposition === 'enemy' && n.hp > 0)) {
@@ -1001,6 +1037,7 @@ server.post("/game/session", async (req, reply) => {
     savedMap,
   );
   createSession(sessionId, engine);
+  installWorldTick(sessionId, engine);
   await ensureSaveExists(playerDef.id);
 
   // Auto-start combat when the encounter spawned any hostile creatures, so the
@@ -1017,6 +1054,39 @@ server.post("/game/session", async (req, reply) => {
 
   return reply.send({ sessionId, state: engine.getState() });
 });
+
+/**
+ * Pause / resume the off-camera world tick (Pass 3c). The client posts this
+ * whenever the player focuses the GM chat box or opens a blocking overlay —
+ * so the world doesn't advance under typing time or while a modal is up.
+ */
+server.post("/game/session/:id/world-paused", async (req, reply) => {
+  const { id } = req.params as { id: string };
+  const body = req.body as { paused?: boolean };
+  if (typeof body?.paused !== 'boolean') {
+    return reply.code(400).send({ error: "world-paused requires { paused: boolean }" });
+  }
+  if (!getEngine(id)) return reply.code(404).send({ error: "Session not found" });
+  setWorldPaused(id, body.paused);
+  return reply.send({ paused: body.paused });
+});
+
+/**
+ * Install the per-session 6-second world-tick interval. Called from every
+ * session-creation path (the manual `/game/session` route + the chapter
+ * advancer). The handle is cleared by `deleteSession`.
+ */
+function installWorldTick(sessionId: string, engine: GameEngine): void {
+  const tickMs = 6000;  // One SRD round per real-time tick.
+  const handle = setInterval(() => {
+    if (!isWorldTickEligible(sessionId)) return;
+    const events = engine.runOffCameraTick();
+    if (events.length > 0) {
+      pushStateUpdate(sessionId, events, engine.getState());
+    }
+  }, tickMs);
+  setWorldTickHandle(sessionId, handle);
+}
 
 server.post("/game/session/:id/action", async (req, reply) => {
   const { id } = req.params as { id: string };

@@ -1,0 +1,17 @@
+{
+  "id": "undead",
+  "name": "Undead",
+  "description": "Risen things — skeletons, husks, the lingering hostile dead. Hostile to most living factions.",
+  "displayColor": "#557766",
+  "renown": 1,
+  "defaultRelations": {
+    "party": -80,
+    "undead": 60,
+    "town_guard": -100,
+    "townsfolk": -100,
+    "bandits": -60,
+    "cultists": 40,
+    "monsters": -40,
+    "wildlife": -60
+  }
+}

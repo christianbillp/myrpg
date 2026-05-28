@@ -14,6 +14,9 @@ import {
 import { applyEquipment, computeEquippedSlotLabels } from './EquipmentSystem.js';
 import { chebyshev } from './EnemyAI.js';
 import { buildAIGMTools } from './AIGMTools.js';
+import { setRelation, getRelation } from './FactionRelations.js';
+import { runOffCameraTick as runOffCameraTickImpl } from './WorldTick.js';
+import { PLAYER_FACTION_ID } from '../../../shared/types.js';
 import * as Guard from './ActionGuards.js';
 import type { GameContext } from './GameContext.js';
 import {
@@ -37,7 +40,7 @@ import { doCastSpell as spDoCastSpell } from './SpellSystem.js';
 import { maybeBreakConcentration } from './ConcentrationSystem.js';
 import { doUseFeature } from './FeatureRegistry.js';
 import { buildSessionState, SavedMapRecord } from './SessionBuilder.js';
-import { registerTriggers, adjustFactionStanding, recordRumor } from './TriggerSystem.js';
+import { registerTriggers, adjustFactionStanding, recordRumor, fireAction as triggerFireAction } from './TriggerSystem.js';
 import { registerDirector } from './Director.js';
 import { registerAdventureProgress } from './AdventureProgress.js';
 import { EventBus } from './EventBus.js';
@@ -136,6 +139,15 @@ export class GameEngine {
 
   getState(): GameState { this.computeAvailableActions(); return this.state; }
   getMonsterDef(defId: string): MonsterDef | undefined { return this.resolveMonsterDef(defId); }
+  /**
+   * Run one off-camera world tick (Pass 3c). Resolves one round of NPC-vs-NPC
+   * combat in exploration phase. Returns the events the caller should
+   * broadcast — typically appended into a `state_update` WebSocket message.
+   * The session wrapper is responsible for pause gating before calling.
+   */
+  runOffCameraTick(): GameEvent[] {
+    return runOffCameraTickImpl(this.ctx);
+  }
   getSpellDef(spellId: string) { return this.defs.spells.find((sp) => sp.id === spellId); }
   getAIGMTools() { return buildAIGMTools(); }
   getItemIds(): string[] { return this.defs.equipment.map((i) => i.id); }
@@ -405,6 +417,25 @@ export class GameEngine {
     this.state.worldFlags[name] = value;
     this.bus.publish({ type: 'flag_set', name, value });
   }
+  /** Lookup the effective relation between two factions (worse-direction). Surfaced for AIGM tool result strings. */
+  getFactionRelation(a: string, b: string): number {
+    return getRelation(this.state, a, b);
+  }
+  /** Add `factionId` to `discoveredFactions` if not already present. Returns true on first reveal, false if a no-op. */
+  revealFaction(factionId: string): boolean {
+    if (this.state.discoveredFactions.includes(factionId)) return false;
+    this.state.discoveredFactions.push(factionId);
+    return true;
+  }
+  /**
+   * Fire a single `TriggerAction` through the engine's `fireAction` path —
+   * lets AIGM tools share the new matrix-mutating action handlers
+   * (`adjust_faction_relation`, `set_faction_relation`) without duplicating
+   * the clamp + event-publishing logic.
+   */
+  fireTriggerAction(action: import('./types.js').TriggerAction): void {
+    triggerFireAction(this.ctx, action);
+  }
 
   throwItem(itemId: string, targetId?: string): GameEvent[] {
     return caThrowItem(this.ctx, itemId, targetId);
@@ -439,6 +470,14 @@ export class GameEngine {
       if ((disposition === 'ally' || disposition === 'enemy') && !npc.combatLabel) this.assignCombatLabel(npc);
       if (disposition === 'enemy') this.aggroFaction(npc);
       else this.autoEndCombatIfNoEnemies();
+      // Mirror the player-relative disposition into the matrix: every NPC
+      // sharing this faction inherits the same standing with party. (For an
+      // enemy flip this is redundant with aggroFaction's matrix write — it
+      // still serves as the only path for 'ally' / 'neutral' transitions.)
+      if (disposition !== 'enemy') {
+        const standing = disposition === 'ally' ? 100 : 0;
+        setRelation(this.state, npc.factionId ?? npc.defId, PLAYER_FACTION_ID, standing);
+      }
     }
     return [];
   }
@@ -520,6 +559,10 @@ export class GameEngine {
       npc.disposition = 'enemy';
       if (!npc.combatLabel) this.assignCombatLabel(npc);
     }
+    // Mirror the aggro into the matrix: the instigator's faction is now
+    // hostile to the party. Pass 3's matrix-driven readers will see this
+    // alongside the legacy disposition flip.
+    setRelation(this.state, factionId, PLAYER_FACTION_ID, -100);
   }
 
   private advanceQuest(type: QuestGoalType): void {

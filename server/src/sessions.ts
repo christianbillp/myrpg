@@ -25,6 +25,16 @@ interface Session {
   adventureLines: EncounterLogLine[];
   adventureMeta: AdventureMeta;
   aigmBusy: boolean;             // simple mutex flag
+  /**
+   * Off-camera world tick state (Pass 3c). When `false` and the engine is
+   * in `exploring` phase, the per-session interval fires every 6 s and runs
+   * one round of NPC-vs-NPC combat for every hostile pair on the map. Set
+   * true by the client whenever the player is typing into the GM chat box
+   * or has a blocking overlay open — typing time should never affect the
+   * world clock.
+   */
+  worldPaused: boolean;
+  worldTickHandle: NodeJS.Timeout | null;
 }
 
 const sessions = new Map<string, Session>();
@@ -45,7 +55,36 @@ export function createSession(sessionId: string, engine: GameEngine): void {
       goldStart: s.player.gold,
     },
     aigmBusy: false,
+    worldPaused: false,
+    worldTickHandle: null,
   });
+}
+
+/** Toggle the per-session pause flag. Surfaced via `POST /game/session/:id/world-paused`. */
+export function setWorldPaused(sessionId: string, paused: boolean): void {
+  const session = sessions.get(sessionId);
+  if (session) session.worldPaused = paused;
+}
+
+/** True iff the off-camera tick is allowed to run this moment. */
+export function isWorldTickEligible(sessionId: string): boolean {
+  const session = sessions.get(sessionId);
+  if (!session) return false;
+  if (session.worldPaused) return false;
+  const s = session.engine.getState();
+  // Off-camera tick only runs in exploration; combat already drives initiative.
+  if (s.phase !== 'exploring') return false;
+  // A pending reaction prompt suspends everything — don't tick under the user's feet.
+  if (s.pendingReaction !== null) return false;
+  return true;
+}
+
+/** Per-session interval registration. Cleared on `deleteSession`. */
+export function setWorldTickHandle(sessionId: string, handle: NodeJS.Timeout | null): void {
+  const session = sessions.get(sessionId);
+  if (!session) return;
+  if (session.worldTickHandle) clearInterval(session.worldTickHandle);
+  session.worldTickHandle = handle;
 }
 
 export function getAigmArchive(sessionId: string): AigmMessage[] | undefined {
@@ -125,6 +164,7 @@ export function pushStateUpdate(sessionId: string, events: GameEvent[], state: G
 
 export function deleteSession(sessionId: string): void {
   const session = sessions.get(sessionId);
+  if (session?.worldTickHandle) clearInterval(session.worldTickHandle);
   if (session?.ws) { try { session.ws.close(); } catch { /* ignore */ } }
   sessions.delete(sessionId);
 }

@@ -172,6 +172,21 @@ function buildToolList() { return [
     input_schema: { type: 'object' as const, properties: { faction_id: { type: 'string' }, delta: { type: 'integer' }, reason: { type: 'string' } }, required: ['faction_id', 'delta', 'reason'] },
   },
   {
+    name: 'adjust_faction_relation',
+    description: 'Shift the standing between any two factions by `delta` (positive = friendlier, negative = more hostile). Standings are clamped to [-100, +100]. Use when an event durably changes how two NPC groups feel about each other — e.g. the bandits and the guards reach an understanding, or the cultists declare war on the townsfolk. Mirrors to both directions by default; pass mirror=false for a one-sided shift (one faction\'s opinion moves without reciprocation). For player-faction shifts prefer adjust_faction_standing.',
+    input_schema: { type: 'object' as const, properties: { faction_a: { type: 'string' }, faction_b: { type: 'string' }, delta: { type: 'integer' }, mirror: { type: 'boolean' }, reason: { type: 'string' } }, required: ['faction_a', 'faction_b', 'delta', 'reason'] },
+  },
+  {
+    name: 'set_faction_relation',
+    description: 'Set the standing between two factions to an absolute value (clamped to [-100, +100]). Use this for hard resets — e.g. forging an alliance (+80) or declaring blood feud (-100) — rather than incremental shifts (use adjust_faction_relation for those). Mirrors to both directions by default; pass mirror=false for asymmetric.',
+    input_schema: { type: 'object' as const, properties: { faction_a: { type: 'string' }, faction_b: { type: 'string' }, value: { type: 'integer' }, mirror: { type: 'boolean' }, reason: { type: 'string' } }, required: ['faction_a', 'faction_b', 'value', 'reason'] },
+  },
+  {
+    name: 'reveal_faction',
+    description: 'Mark a faction as identified by the player — from now on the Target Panel will render its name instead of "???" for every member. Use when the player learns who a group really is through dialogue, finding a sigil, an obvious uniform, etc. Idempotent: a second call with the same factionId is a no-op.',
+    input_schema: { type: 'object' as const, properties: { faction_id: { type: 'string' }, reason: { type: 'string' } }, required: ['faction_id', 'reason'] },
+  },
+  {
     name: 'create_rumor',
     description: 'Record a significant world event into long-term world memory. Use when something happens that NPCs in this world would plausibly hear about and reference later — a public defeat, a saved village, a treaty signed. The `id` is a stable short slug used by triggers; `text` is the human-readable summary the GM can reference; `salience` is 1–10 (default 5) where 10 = "everyone is talking about it." Idempotent: a second call with the same id is ignored.',
     input_schema: { type: 'object' as const, properties: { id: { type: 'string' }, text: { type: 'string' }, salience: { type: 'integer' }, reason: { type: 'string' } }, required: ['id', 'text', 'reason'] },
@@ -541,6 +556,38 @@ export function applyAIGMTool(
       engine.adjustFactionStanding(factionId, delta);
       const after = engine.getFactionStanding(factionId);
       toolResultContent = `Faction "${factionId}" standing: ${before} → ${after} (Δ ${delta >= 0 ? '+' : ''}${delta}).`;
+      break;
+    }
+    case 'adjust_faction_relation': {
+      const a = String(input['faction_a'] ?? '').trim();
+      const b = String(input['faction_b'] ?? '').trim();
+      const delta = Number(input['delta']) || 0;
+      const mirror = input['mirror'] === undefined ? true : !!input['mirror'];
+      if (!a || !b) { toolResultContent = 'adjust_faction_relation requires both faction_a and faction_b.'; break; }
+      engine.fireTriggerAction({ type: 'adjust_faction_relation', a, b, delta, mirror });
+      const after = engine.getFactionRelation(a, b);
+      toolResultContent = `Faction relation "${a}" ↔ "${b}" set to ${after} (Δ ${delta >= 0 ? '+' : ''}${delta}${mirror ? '' : ', one-sided'}).`;
+      break;
+    }
+    case 'set_faction_relation': {
+      const a = String(input['faction_a'] ?? '').trim();
+      const b = String(input['faction_b'] ?? '').trim();
+      const value = Number(input['value']);
+      const mirror = input['mirror'] === undefined ? true : !!input['mirror'];
+      if (!a || !b) { toolResultContent = 'set_faction_relation requires both faction_a and faction_b.'; break; }
+      if (Number.isNaN(value)) { toolResultContent = 'set_faction_relation value must be a number.'; break; }
+      engine.fireTriggerAction({ type: 'set_faction_relation', a, b, value, mirror });
+      const after = engine.getFactionRelation(a, b);
+      toolResultContent = `Faction relation "${a}" ↔ "${b}" set to ${after}${mirror ? '' : ' (one-sided)'}.`;
+      break;
+    }
+    case 'reveal_faction': {
+      const factionId = String(input['faction_id'] ?? '').trim();
+      if (!factionId) { toolResultContent = 'reveal_faction requires a non-empty faction_id.'; break; }
+      const newly = engine.revealFaction(factionId);
+      toolResultContent = newly
+        ? `Faction "${factionId}" is now identified — the Target Panel will show its name.`
+        : `Faction "${factionId}" was already identified.`;
       break;
     }
     case 'create_rumor': {

@@ -3,12 +3,14 @@ import {
   SecretState, QuestState, NpcPersona, CreateSessionRequest, EncounterTileProperty,
   MapTilesetInfo, LogEntry,
 } from './types.js';
+import { PLAYER_FACTION_ID } from '../../../shared/types.js';
 import type { EncounterContext } from '../encounterService.js';
 import { generateMap } from './MapGenerator.js';
 import { generateRoomsMap } from './RoomsMapGenerator.js';
 import {
   ZoneMap, parseStartingZones, findPlayerSpawn, populateNpcs,
 } from './SpawnHelpers.js';
+import { buildFactionRelations, projectFactionStandings } from './FactionRelations.js';
 import { stripTileFlipBits } from '../../../shared/tileGid.js';
 
 /** The shape stored in `defs.maps[i]` — pure geometry, no semantics.
@@ -199,6 +201,30 @@ export function buildSessionState(
     seedLog.push({ left: `Objective: ${req.encounterContext.objective}`, style: 'status' });
   }
 
+  // Faction relations matrix — built once from def defaults, then layered
+  // with adventure-save carry-overs (full matrix preferred, falling back to
+  // the legacy party-row), then the encounter's optional override block.
+  // After the spawn pass the matrix is also back-filled with each spawned
+  // NPC's disposition-implied standing with the party (only when the
+  // override didn't already set one), so unannotated content still produces
+  // matrix entries the new helpers can read.
+  const factionRelations = buildFactionRelations(defs.factions, {
+    seedFactionRelations: req.adventureSeed?.seedFactionRelations,
+    seedFactionStandings: req.adventureSeed?.seedFactionStandings,
+    encounterOverride: req.encounterContext.factionRelations,
+  });
+  for (const n of npcs) {
+    const cur = factionRelations[n.factionId]?.[PLAYER_FACTION_ID];
+    if (cur !== undefined) continue;
+    if (n.disposition === 'enemy') {
+      factionRelations[n.factionId] = { ...(factionRelations[n.factionId] ?? {}), [PLAYER_FACTION_ID]: -100 };
+      factionRelations[PLAYER_FACTION_ID] = { ...(factionRelations[PLAYER_FACTION_ID] ?? {}), [n.factionId]: -100 };
+    } else if (n.disposition === 'ally') {
+      factionRelations[n.factionId] = { ...(factionRelations[n.factionId] ?? {}), [PLAYER_FACTION_ID]: 100 };
+      factionRelations[PLAYER_FACTION_ID] = { ...(factionRelations[PLAYER_FACTION_ID] ?? {}), [n.factionId]: 100 };
+    }
+  }
+
   const state: GameState = {
     sessionId,
     phase: 'exploring',
@@ -232,7 +258,11 @@ export function buildSessionState(
     pendingAigmEvents: [],
     worldFlags: req.adventureSeed?.seedWorldFlags ?? {},
     narrationLastUsed: {},
-    factionStandings: req.adventureSeed?.seedFactionStandings ?? {},
+    factionRelations,
+    // Legacy projection kept in sync with the matrix at boot. Pass 2 will
+    // re-project after every mutation so existing readers stay correct.
+    factionStandings: projectFactionStandings(factionRelations),
+    discoveredFactions: req.adventureSeed?.seedDiscoveredFactions ?? [],
     rumors: req.adventureSeed?.seedRumors ?? [],
     adventureContext: req.adventureSeed ? {
       adventureId: req.adventureSeed.adventureId,

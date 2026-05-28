@@ -40,7 +40,10 @@
   "cr": "1/8",
   "color": 14924078,
   "reactions": [
-    { "kind": "parry", "acBonus": 2 }
+    {
+      "kind": "parry",
+      "acBonus": 2
+    }
   ],
   "tokenAsset": "/tokens/monster_noble.svg"
 }

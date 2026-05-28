@@ -303,6 +303,12 @@ export interface NPCDef {
   /** Optional per-NPC SVG override. When unset, the NPC falls back to the
    *  token of its `monsterClass`. */
   tokenAsset?: string;
+  /**
+   * Default faction membership for this NPC. Same role as `MonsterDef.factionId`
+   * — overrides the monster-class default and falls back to the NPC's own id
+   * when omitted (legacy NPCs preserve current implicit faction behaviour).
+   */
+  factionId?: string;
 }
 
 // ── Equipment item types ─────────────────────────────────────────────────────
@@ -661,6 +667,18 @@ export interface EncounterDef {
    * creatures whose `traits` include `sunlight_sensitivity`.
    */
   environment?: EncounterEnvironment;
+  /**
+   * Per-encounter overrides for the global faction-relation matrix. Layered on
+   * top of `defs.factions[*].defaultRelations` at session boot — only the
+   * pairs declared here are changed, everything else falls back to the
+   * global default. Use this to express scene-specific politics: e.g.
+   *
+   *     "factionRelations": { "town_guard": { "bandits": 80 } }
+   *
+   * for an encounter where the guards have been bought off and now back the
+   * bandits.
+   */
+  factionRelations?: Record<string, Record<string, number>>;
 }
 
 export interface EncounterEnvironment {
@@ -748,6 +766,18 @@ export type TriggerAction =
   /** Re-publishes a custom event on the bus, allowing one trigger to fan out into others. Only `custom` events are allowed — engine-canonical events (`npc_killed`, `damage_dealt`, …) cannot be forged from authored data. */
   | { type: 'emit_event'; name: string; payload?: Record<string, unknown> }
   | { type: 'adjust_faction_standing'; factionId: string; delta: number }
+  /**
+   * Shift the standing between any two factions by `delta`, clamped to ±100.
+   * Mirrors to both directions by default — set `mirror: false` for a
+   * one-sided shift (one faction's opinion of the other moves without
+   * reciprocation). Generalises `adjust_faction_standing` to the full
+   * pair-wise matrix.
+   */
+  | { type: 'adjust_faction_relation'; a: string; b: string; delta: number; mirror?: boolean }
+  /** Set the standing between two factions to an absolute value (clamped to ±100). Mirroring behaves like `adjust_faction_relation`. */
+  | { type: 'set_faction_relation'; a: string; b: string; value: number; mirror?: boolean }
+  /** Mark a faction as identified by the player — its name will render in the Target Panel of every member from now on (Pass 3 UI work). Idempotent. */
+  | { type: 'reveal_faction'; factionId: string }
   | { type: 'record_rumor'; id: string; text: string; salience?: number }
   /** Promotes (or demotes) every NPC currently in the encounter whose `defId` matches. Faction-mates of a newly hostile NPC are auto-aggroed via the existing `aggroFaction` path. Use together with `trigger_combat` to turn a peaceful scene hostile when the player crosses a threshold. */
   | { type: 'set_disposition_by_def_id'; defId: string; disposition: 'ally' | 'neutral' | 'enemy' }
@@ -785,12 +815,75 @@ export interface NarrationDef {
 
 // ── Factions & rumors ────────────────────────────────────────────────────────
 //
-// Factions are referenced by string id on `NpcState.factionId` and tracked
-// as numeric standings on the player. Authors can read standings via the
-// `faction_standing` guard; the AIGM adjusts them via `adjust_faction_standing`.
+// Factions are referenced by string id on `NpcState.factionId` and held as a
+// numeric **pair-wise relation matrix** on `GameState.factionRelations`. Each
+// relation is a standing in the range −100..+100; the engine derives discrete
+// states (`hostile`/`neutral`/`friendly`) via fixed thresholds (≤ −30, ≥ +30,
+// else neutral). The player is a first-class faction (`PLAYER_FACTION_ID`
+// `'party'`) — what used to be "the player's standing with faction X" is now
+// `factionRelations.party.X`. Triggers/guards still read this view via the
+// existing `adjust_faction_standing` / `faction_standing` plumbing.
+//
+// Defaults come from per-faction JSON files in `server/data/factions/`;
+// individual encounters may override specific pairs via the optional
+// `EncounterDef.factionRelations` block.
+//
+// **Discovery.** The player's identification of each faction is gated:
+// `GameState.discoveredFactions` lists faction ids the player has identified
+// (via an Insight check on combat-start, or an explicit AIGM
+// `reveal_faction` tool). The Target Panel renders `Faction: ???` until the
+// id appears in this set.
+//
 // Rumors are timestamped world events recorded into a global memory log so
 // the GM and triggers can reference them later ("the bandit captain heard
 // what you did to her brothers").
+
+/** The reserved faction id every player party is a member of. */
+export const PLAYER_FACTION_ID = 'party';
+/** Standing threshold at or below which a relation reads as `hostile`. */
+export const FACTION_HOSTILE_THRESHOLD = -30;
+/** Standing threshold at or above which a relation reads as `friendly`. */
+export const FACTION_FRIENDLY_THRESHOLD = 30;
+
+/** Discrete view of a faction-pair relation, derived from the numeric standing. */
+export type FactionStance = 'hostile' | 'neutral' | 'friendly';
+
+/**
+ * A faction the world knows about. One JSON file per faction in
+ * `server/data/factions/`. The shipped roster covers the encounter content
+ * (party, town_guard, bandits, cultists, undead, monsters, wildlife,
+ * townsfolk); adding a new faction is a JSON drop with no code change.
+ */
+export interface FactionDef {
+  /** Stable kebab/snake-case id referenced from `NpcState.factionId`. */
+  id: string;
+  /** Player-facing display name once discovered ("Town Guard", "Skein Cultists"). */
+  name: string;
+  /**
+   * One-line description shown alongside the name in the Target Panel after
+   * discovery. Helps an author keep faction identities distinct.
+   */
+  description?: string;
+  /** Hex display colour used by the UI to tint the faction tag. */
+  displayColor: string;
+  /**
+   * 1..30 renown rating. The Insight DC to identify a member of this faction
+   * is `max(1, renown)` — well-known factions are trivially identified,
+   * obscure ones require a high check. Ships at 1 across the board so the
+   * mechanic is in place but always passes.
+   */
+  renown: number;
+  /**
+   * Default standings with other factions, keyed by other-faction id. Values
+   * are the `−100..+100` matrix entries. Omitted ids default to 0.
+   *
+   * Asymmetric — a faction can dislike another without that other faction
+   * disliking them back. The engine merges both directions when computing
+   * effective relation (`getRelation(a, b)` takes the *minimum* of a→b and
+   * b→a so a one-sided hostility still bites).
+   */
+  defaultRelations?: Record<string, number>;
+}
 
 export interface Rumor {
   /** Stable id — used as the dedupe key when authoring triggers off `rumor_propagated`. */
@@ -856,8 +949,29 @@ export interface AdventureSave {
   completedChapterIds: string[];
   /** Cross-chapter world flags. Seeds `GameState.worldFlags` when each chapter session starts. */
   worldFlags: Record<string, WorldFlagValue>;
-  /** Cross-chapter faction standings. Seeds `GameState.factionStandings`. */
+  /**
+   * Cross-chapter faction standings. **Kept for backward compatibility** —
+   * stores the player's standing with each faction (`factionRelations.party.*`).
+   * On chapter boot the session seeds `factionRelations.party` from this map
+   * and persists the updated `party` row back here on chapter advance.
+   */
   factionStandings: Record<string, number>;
+  /**
+   * Full pair-wise faction-relation matrix carried between chapters. When
+   * present at chapter boot, seeds `GameState.factionRelations` (after layering
+   * the encounter override on top). When the chapter ends, persists the live
+   * matrix back so faction politics survive across chapters.
+   *
+   * Older saves without this field fall back to deriving `party`'s row from
+   * `factionStandings` plus the faction-def defaults.
+   */
+  factionRelations?: Record<string, Record<string, number>>;
+  /**
+   * Cross-chapter discovered factions. Seeds `GameState.discoveredFactions`
+   * on chapter boot; persisted back when the chapter ends so identity
+   * reveals survive.
+   */
+  discoveredFactions?: string[];
   /** Cross-chapter rumors. Seeds `GameState.rumors`. */
   rumors: Rumor[];
   /** Short GM-authored summaries of completed chapters, surfaced to the AIGM in later chapters under PRIOR CHAPTERS. */
@@ -1042,8 +1156,37 @@ export interface GameState {
   worldFlags: Record<string, WorldFlagValue>;
   /** Last variant index picked per `narrationId`. Used by NarrationSystem to avoid back-to-back repeats. */
   narrationLastUsed: Record<string, number>;
-  /** Player's standing with each faction (−100..+100). Read by `faction_standing` guards; written by `adjust_faction_standing` AIGM tool. Unknown faction → 0. */
+  /**
+   * Legacy player-relative view of standings. **Kept for backward compatibility**
+   * with existing `faction_standing` guards, `adjust_faction_standing` AIGM
+   * tool calls, and adventure-save seeding — internally this is just a
+   * projection of `factionRelations[PLAYER_FACTION_ID]` and the engine keeps
+   * it in sync.
+   *
+   * New code should read / write via `factionRelations` directly.
+   */
   factionStandings: Record<string, number>;
+  /**
+   * Full pair-wise relation matrix between every faction the session is aware
+   * of. `factionRelations[a][b]` is faction `a`'s standing with faction `b`
+   * in the range −100..+100. The matrix is **symmetric when first built**
+   * (we mirror each declared default), but runtime triggers / AIGM tool calls
+   * may break that symmetry. `getRelation(state, a, b)` resolves the
+   * effective standing by taking the worse of the two directions, so one
+   * faction can read another as hostile without the second reciprocating.
+   *
+   * Seeded at session creation from `defs.factions[*].defaultRelations` and
+   * the optional `EncounterDef.factionRelations` override block.
+   */
+  factionRelations: Record<string, Record<string, number>>;
+  /**
+   * Faction ids the player has identified through play (Insight check on
+   * combat-start, or the AIGM's `reveal_faction` tool). The Target Panel
+   * renders the faction name + colour for ids in this set, `???` otherwise.
+   * Persisted with the world save and seeded from adventure saves so identity
+   * reveals carry across chapters.
+   */
+  discoveredFactions: string[];
   /** World memory log of significant events, recorded by AIGM `create_rumor` tool or trigger `record_rumor` action. Surfaced to the GM in CURRENT STATE. */
   rumors: Rumor[];
   /** Set when the current session is a chapter of an adventure. Drives the END CHAPTER button and the chapter-advance flow. Null for single-encounter sessions. */
@@ -1178,6 +1321,10 @@ export interface CreateSessionRequest {
   adventureSeed?: AdventureSessionContext & {
     seedWorldFlags?: Record<string, WorldFlagValue>;
     seedFactionStandings?: Record<string, number>;
+    /** Cross-chapter full faction-relation matrix (Pass 1+). When absent we fall back to seeding from `seedFactionStandings` (`party` row only). */
+    seedFactionRelations?: Record<string, Record<string, number>>;
+    /** Cross-chapter discovered factions (Pass 1+). Empty when absent. */
+    seedDiscoveredFactions?: string[];
     seedRumors?: Rumor[];
   };
   resumeHp?: number;

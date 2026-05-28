@@ -16,6 +16,12 @@ export interface EncounterContext {
   startingZones?: StartingZonesLayer;
   /** Environmental flags consulted by combat resolvers (e.g. sunlit → triggers Sunlight Sensitivity). */
   environment?: EncounterEnvironment;
+  /**
+   * Per-encounter override for the global faction-relation matrix. Layered
+   * over `defs.factions[*].defaultRelations` at session boot. See
+   * `EncounterDef.factionRelations` for the JSON shape.
+   */
+  factionRelations?: Record<string, Record<string, number>>;
 }
 
 export type SecretReward =
@@ -50,6 +56,7 @@ export interface EncounterStartRequest {
   customObjective?: string;
   startingZones?: StartingZonesLayer;
   environment?: EncounterEnvironment;
+  factionRelations?: Record<string, Record<string, number>>;
 }
 
 const SECRET_POOL: SecretDef[] = [
@@ -132,5 +139,6 @@ export function buildEncounter(req: EncounterStartRequest): EncounterContext {
     enemyIds:      req.enemyIds,
     startingZones: req.startingZones,
     environment:   req.environment,
+    factionRelations: req.factionRelations,
   };
 }

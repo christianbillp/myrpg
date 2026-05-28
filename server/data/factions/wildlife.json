@@ -1,0 +1,17 @@
+{
+  "id": "wildlife",
+  "name": "Wildlife",
+  "description": "Predators, parasites, and natural beasts. Reacts to threats but rarely the aggressor.",
+  "displayColor": "#557722",
+  "renown": 1,
+  "defaultRelations": {
+    "party": 0,
+    "wildlife": 20,
+    "town_guard": 0,
+    "townsfolk": 0,
+    "bandits": -20,
+    "cultists": -20,
+    "undead": -60,
+    "monsters": -20
+  }
+}

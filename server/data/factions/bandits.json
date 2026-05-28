@@ -1,0 +1,17 @@
+{
+  "id": "bandits",
+  "name": "Bandits",
+  "description": "Outlaws living off the road. Will attack travellers and rival outfits alike.",
+  "displayColor": "#aa6633",
+  "renown": 1,
+  "defaultRelations": {
+    "party": -40,
+    "bandits": 60,
+    "town_guard": -80,
+    "townsfolk": -40,
+    "cultists": -20,
+    "undead": -60,
+    "monsters": -40,
+    "wildlife": -20
+  }
+}

@@ -93,15 +93,28 @@ export function spawnNpc(
   const npcDef = npcDefs.find((n) => n.id === defId);
   let name: string;
   let maxHp: number;
+  // Faction resolution:
+  //   • Named NPCs carry the worldbuilding — NPCDef.factionId is the source
+  //     of truth (e.g. "bridge_bandit" → "bandits").
+  //   • Raw monster spawns (no NPC wrapper, e.g. `enemyIds: ['bandit']`)
+  //     fall back to using the def id itself as a faction-of-one. That
+  //     preserves the existing implicit-faction aggro behaviour for the
+  //     generator / random-encounter content path. Authors who want raw
+  //     monster spawns to participate in the wider faction matrix should
+  //     either author a thin NPC wrapper or use a future per-spawn
+  //     faction override.
+  let factionId: string;
   if (npcDef) {
     name = npcDef.name;
     const monsterDef = monsters.find((m) => m.id === npcDef.monsterClass);
     maxHp = monsterDef?.maxHp ?? 8;
+    factionId = npcDef.factionId ?? defId;
   } else {
     const monsterDef = monsters.find((m) => m.id === defId);
     if (!monsterDef) return;
     name = monsterDef.name;
     maxHp = monsterDef.maxHp;
+    factionId = defId;
   }
 
   const occupied = new Set<string>([
@@ -141,7 +154,7 @@ export function spawnNpc(
     defId,
     name,
     tileX: nx, tileY: ny,
-    disposition, factionId: defId,
+    disposition, factionId,
     combatLabel,
     hp: maxHp, maxHp,
     isActive: false,

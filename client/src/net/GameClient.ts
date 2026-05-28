@@ -51,6 +51,7 @@ export class GameClient {
   setDisconnectHandler(fn: () => void): void { this.onDisconnect = fn; }
 
   resumeSession(sessionId: string): void { this.sessionId = sessionId; }
+  getSessionId(): string | null { return this.sessionId; }
 
   async loadWorld(): Promise<{ sessionId: string; state: GameState; gmHistory: { role: 'user' | 'assistant'; content: string }[] } | null> {
     try {
@@ -382,6 +383,32 @@ export class GameClient {
     const res = await fetch(`${API_URL}/maps`);
     if (!res.ok) throw new Error(`List maps failed: ${res.status}`);
     return res.json() as Promise<unknown[]>;
+  }
+
+  /** Fetch the live factions list from the server. Used by BootScene to seed the registry. */
+  async listFactions(): Promise<unknown[]> {
+    const res = await fetch(`${API_URL}/factions`);
+    if (!res.ok) throw new Error(`List factions failed: ${res.status}`);
+    return res.json() as Promise<unknown[]>;
+  }
+
+  /**
+   * Pause or resume the off-camera world tick. The client posts this whenever
+   * input is focused (the GM chat box, mainly) or a blocking overlay opens —
+   * the server stops advancing NPC-vs-NPC fights while the player is reading
+   * or typing. Idempotent on the server side; safe to spam.
+   */
+  async setWorldPaused(sessionId: string, paused: boolean): Promise<void> {
+    try {
+      await fetch(`${API_URL}/game/session/${sessionId}/world-paused`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ paused }),
+      });
+    } catch {
+      // Fire-and-forget — a missed message just delays the next tick by one
+      // interval, no need to surface the failure.
+    }
   }
 
   /**

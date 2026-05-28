@@ -7,6 +7,7 @@ import { ChapterCompleteOverlay } from "../ui/ChapterCompleteOverlay";
 import { NextChapterButton } from "../ui/NextChapterButton";
 import type { GameState, SpellDef, PendingReaction } from "../net/types";
 import { UIScale } from "../ui/UIScale";
+import { WorldPause } from "../net/WorldPause";
 
 export interface OverlayCallbacks {
   onEquip: (slot: "armor" | "weapon" | "shield", itemId: string) => void;
@@ -71,25 +72,27 @@ export class OverlayManager {
   showIntroIfNeeded(state: GameState): void {
     if (this.introShown || !state.introduction) return;
     this.introShown = true;
+    WorldPause.acquire('overlay:introduction');
     this.introOverlay = new IntroductionOverlay(
       this.scale,
       state.encounterTitle,
       this.playerDef,
       state.introduction,
-      () => { this.introOverlay = null; },
+      () => { this.introOverlay = null; WorldPause.release('overlay:introduction'); },
     );
   }
 
   openCharacterSheet(state: GameState): void {
     if (this.characterSheet) return;
     const inputs = this.buildInputs(state);
+    WorldPause.acquire('overlay:character-sheet');
     this.characterSheet = new CharacterSheetOverlay(this.scale, inputs, {
       onEquip:   (slot, itemId) => this.callbacks.onEquip(slot, itemId),
       onUnequip: (slot)         => this.callbacks.onUnequip(slot),
       onUse:     (_itemId)      => this.callbacks.onUsePotion(),
       onCastSpell:  (spellId)   => { this.closeCharacterSheet(); this.callbacks.onBeginSpellCast(spellId); },
       onRitualCast: (spellId)   => { this.closeCharacterSheet(); this.callbacks.onBeginRitualCast(spellId); },
-      onClose:   ()             => { this.characterSheet = null; },
+      onClose:   ()             => { this.characterSheet = null; WorldPause.release('overlay:character-sheet'); },
     });
   }
 
@@ -98,6 +101,7 @@ export class OverlayManager {
     if (!this.characterSheet) return;
     this.characterSheet.destroy();
     this.characterSheet = null;
+    WorldPause.release('overlay:character-sheet');
   }
 
   /** Rebuild the active sheet against the latest state when a server update arrives. */
@@ -156,6 +160,7 @@ export class OverlayManager {
       if (this.nextChapterButton) { this.nextChapterButton.destroy(); this.nextChapterButton = null; }
       this.callbacks.onAdvanceChapter();
     };
+    WorldPause.acquire('overlay:chapter-complete');
     this.chapterComplete = new ChapterCompleteOverlay(
       this.scale,
       state.encounterTitle,
@@ -173,6 +178,7 @@ export class OverlayManager {
     if (!this.chapterComplete) return;
     this.chapterComplete.destroy();
     this.chapterComplete = null;
+    WorldPause.release('overlay:chapter-complete');
   }
 
   private showNextChapterButton(label: string): void {

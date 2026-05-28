@@ -1,0 +1,17 @@
+{
+  "id": "cultists",
+  "name": "Cultists",
+  "description": "Sworn worshippers of an outsider power. Distrust outsiders; tolerate the dead.",
+  "displayColor": "#884488",
+  "renown": 1,
+  "defaultRelations": {
+    "party": -20,
+    "cultists": 80,
+    "town_guard": -80,
+    "townsfolk": -40,
+    "bandits": -20,
+    "undead": 40,
+    "monsters": -20,
+    "wildlife": -20
+  }
+}

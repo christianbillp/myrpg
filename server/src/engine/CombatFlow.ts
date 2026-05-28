@@ -1,7 +1,9 @@
 import { GameEvent, NpcState, LogEntry, CombatMode, MonsterDef } from './types.js';
 import type { GameContext } from './GameContext.js';
 import { rollOneInitiative, rollDeathSave, type RolledBonusDamage } from './CombatSystem.js';
-import { runEnemyTurn, runAllyTurn, chebyshev } from './EnemyAI.js';
+import { runEnemyTurn, runAllyTurn, chebyshev, type EnemyAttackTarget } from './EnemyAI.js';
+import { isHostileTo } from './FactionRelations.js';
+import { PLAYER_FACTION_ID } from '../../../shared/types.js';
 import { isIncapacitated, isVisible, hasSpeedZero, proneStandCost, TURN_CONDITIONS } from './ConditionSystem.js';
 import { mod, d20 as d20Local } from './Dice.js';
 import { doNpcOpportunityAttack } from './CombatActions.js';
@@ -116,9 +118,46 @@ export function doStartCombat(ctx: GameContext, events: GameEvent[]): void {
 
   ctx.publish({ type: 'combat_started' });
 
+  // ── Faction identification (Insight check) ─────────────────────────────
+  // Pass 3b: for every faction the player hasn't yet discovered that is
+  // represented in this fight, roll a hidden Insight check against the
+  // faction's renown-derived DC (`max(1, renown)`). On a pass, the faction
+  // is added to `discoveredFactions` and the Target Panel will render its
+  // name from now on. Factions absent from `defs.factions` (faction-of-one
+  // raw monster spawns) have nothing identifiable about them and are
+  // skipped — the player just sees the creature name.
+  runFactionIdentificationChecks(ctx, combatNpcs);
+
   // ── Start the first combatant's turn ────────────────────────────────────
   s.activeNpcIndex = -1;
   advanceTurn(ctx, events);
+}
+
+/**
+ * Roll one Insight check per unidentified faction represented in the fight.
+ * Factories: faction id → DC = `max(1, renown)`. Pass adds to
+ * `discoveredFactions`. Roll detail intentionally NOT logged so failed
+ * identifications don't leak which factions are present.
+ */
+function runFactionIdentificationChecks(ctx: GameContext, combatNpcs: NpcState[]): void {
+  const factionsInFight = new Set<string>();
+  for (const npc of combatNpcs) factionsInFight.add(npc.factionId);
+
+  const insightBonus = ctx.playerDef.skills['insight'] ?? 0;
+  for (const factionId of factionsInFight) {
+    if (ctx.state.discoveredFactions.includes(factionId)) continue;
+    const def = ctx.defs.factions.find((f) => f.id === factionId);
+    if (!def) continue; // raw-monster faction-of-one — nothing to identify
+    const dc = Math.max(1, def.renown);
+    const roll = d20Local();
+    if (roll + insightBonus >= dc) {
+      ctx.state.discoveredFactions.push(factionId);
+      ctx.addLog({
+        left: `You recognise them — ${def.name}.`,
+        style: 'status',
+      });
+    }
+  }
 }
 
 /**
@@ -325,6 +364,82 @@ function collectEnemyTraitModifiers(
   return { advantage, disadvantage };
 }
 
+/**
+ * Build the `EnemyAttackTarget` snapshot this NPC will engage on its turn.
+ * Pass 3a target picking:
+ *   • Candidates = the player (always) + every living NPC whose faction
+ *     the attacker considers hostile via `isHostileTo` (matrix-first,
+ *     disposition fallback).
+ *   • Pick the nearest by Chebyshev distance. Ties: prefer the player
+ *     (matches the pre-Pass-3 behaviour when nothing else is in range).
+ *
+ * The result is a generic snapshot — the caller routes damage by checking
+ * `result.attackedTargetId === 'player'` vs an NPC id.
+ */
+function pickEnemyAttackTarget(ctx: GameContext, attacker: NpcState): EnemyAttackTarget {
+  const s = ctx.state;
+  const attackerView = { factionId: attacker.factionId, disposition: attacker.disposition };
+  const playerView = { factionId: PLAYER_FACTION_ID };
+  const candidates: Array<{ target: EnemyAttackTarget; dist: number; isPlayer: boolean }> = [];
+
+  if (isHostileTo(s, attackerView, playerView)) {
+    candidates.push({
+      target: {
+        id: 'player',
+        displayName: ctx.playerDef.name,
+        tileX: s.player.tileX,
+        tileY: s.player.tileY,
+        ac: ctx.playerDef.ac,
+        hp: s.player.hp,
+        hidden: s.player.conditions.includes('hidden'),
+        dodging: s.player.conditions.includes('dodging'),
+        invisible: s.player.conditions.includes('invisible'),
+        passivePerception: 10 + (ctx.playerDef.skills['perception'] ?? 0),
+      },
+      dist: chebyshev(attacker.tileX, attacker.tileY, s.player.tileX, s.player.tileY),
+      isPlayer: true,
+    });
+  }
+  for (const other of s.npcs) {
+    if (other === attacker || other.hp <= 0) continue;
+    const otherView = { factionId: other.factionId, disposition: other.disposition };
+    if (!isHostileTo(s, attackerView, otherView)) continue;
+    candidates.push({
+      target: {
+        id: other.id,
+        displayName: combatantDisplayName(other, s.npcs),
+        tileX: other.tileX,
+        tileY: other.tileY,
+        ac: ctx.resolveMonsterDef(other.defId)?.ac ?? 10,
+        hp: other.hp,
+        hidden: other.conditions.includes('hidden'),
+        dodging: other.conditions.includes('dodging'),
+        invisible: other.conditions.includes('invisible'),
+        passivePerception: 10,
+      },
+      dist: chebyshev(attacker.tileX, attacker.tileY, other.tileX, other.tileY),
+      isPlayer: false,
+    });
+  }
+  // No hostile target — synthesise a player-pointed snapshot so the existing
+  // "out of reach" / log message still fires. Damage application paths
+  // already guard on `result.attacked` so this is harmless.
+  if (candidates.length === 0) {
+    return {
+      id: 'player',
+      displayName: ctx.playerDef.name,
+      tileX: s.player.tileX, tileY: s.player.tileY,
+      ac: ctx.playerDef.ac, hp: s.player.hp,
+      hidden: s.player.conditions.includes('hidden'),
+      dodging: s.player.conditions.includes('dodging'),
+      invisible: s.player.conditions.includes('invisible'),
+      passivePerception: 10 + (ctx.playerDef.skills['perception'] ?? 0),
+    };
+  }
+  candidates.sort((a, b) => (a.dist - b.dist) || (a.isPlayer ? -1 : b.isPlayer ? 1 : 0));
+  return candidates[0].target;
+}
+
 function runSingleEnemyTurn(ctx: GameContext, npc: NpcState, events: GameEvent[]): void {
   const s = ctx.state;
   const def = ctx.resolveMonsterDef(npc.defId);
@@ -397,16 +512,16 @@ function runSingleEnemyTurn(ctx: GameContext, npc: NpcState, events: GameEvent[]
 
   const { advantage: traitAdvantage, disadvantage: traitDisadvantage } = collectEnemyTraitModifiers(ctx, npc, def);
 
+  // Pick the nearest creature this enemy considers hostile. The player is
+  // always a candidate (via the synthesised PLAYER_FACTION_ID); other NPCs
+  // qualify when the matrix reports a hostile faction relation. When no
+  // hostile is in range we still target the player so the existing player-
+  // centric flow (OAs, Shield reaction) keeps firing.
+  const target = pickEnemyAttackTarget(ctx, npc);
+
   const result = runEnemyTurn(npc, def, {
     displayName: combatantDisplayName(npc, s.npcs),
-    playerTileX: s.player.tileX,
-    playerTileY: s.player.tileY,
-    playerAc: ctx.playerDef.ac,
-    playerHp: s.player.hp,
-    playerHidden: s.player.conditions.includes('hidden'),
-    playerDodging: s.player.conditions.includes('dodging'),
-    playerInvisible: s.player.conditions.includes('invisible'),
-    passivePerception: 10 + (ctx.playerDef.skills['perception'] ?? 0),
+    target,
     passable: s.map.passable,
     mapCols: s.map.cols,
     mapRows: s.map.rows,
@@ -461,7 +576,9 @@ function runSingleEnemyTurn(ctx: GameContext, npc: NpcState, events: GameEvent[]
   // Player can take an OA when an enemy moves out of their reach without
   // attacking. If the player has a reaction available AND the enemy is
   // visible to them, defer to the prompt and suspend the turn loop until
-  // they decide.
+  // they decide. Only triggers when the enemy walked AWAY from the player —
+  // an enemy moving toward a hostile NPC instead doesn't provoke the
+  // player's OA unless the player happened to be adjacent at the start.
   if (startedAdjacentToPlayer && !endedAdjacentToPlayer && !result.attacked) {
     if (playerCanReact(ctx) && isVisible(npc.conditions)) {
       ctx.addLogs(result.logs);  // Surface the move log BEFORE the prompt fires.
@@ -484,7 +601,10 @@ function runSingleEnemyTurn(ctx: GameContext, npc: NpcState, events: GameEvent[]
   // It's never strictly wasted: even if it doesn't negate this attack, it
   // still raises AC against later attacks this round from other enemies.
   // Crits ignore Shield's AC bonus per SRD (nat 20 hits regardless).
-  if (result.attacked && result.isHit && !result.isCrit && shieldAvailable(ctx)) {
+  // Only triggers when the attack targets the player — NPC-vs-NPC attacks
+  // bypass the Shield prompt.
+  const targetedPlayer = result.attackedTargetId === 'player';
+  if (targetedPlayer && result.attacked && result.isHit && !result.isCrit && shieldAvailable(ctx)) {
     s.pendingReaction = {
       kind: 'shield',
       attackerId: npc.id,
@@ -499,7 +619,11 @@ function runSingleEnemyTurn(ctx: GameContext, npc: NpcState, events: GameEvent[]
   }
 
   if (result.attacked && result.isHit) {
-    applyEnemyHitToPlayer(ctx, npc, result, events);
+    if (targetedPlayer) {
+      applyEnemyHitToPlayer(ctx, npc, result, events);
+    } else if (result.attackedTargetId) {
+      applyEnemyHitToNpc(ctx, npc, result.attackedTargetId, result, events);
+    }
   }
   finalizeNpcTurn(ctx, npc);
   ctx.publish({ type: 'turn_ended', combatantId: npc.id });
@@ -558,6 +682,61 @@ function applyEnemyHitToPlayer(
     }
     // Apply on-hit effects (attach, etc.) authored on the attack.
     applyMonsterAttachToPlayer(ctx, npc, result.attackOnHit);
+  }
+}
+
+/**
+ * Apply an enemy hit's damage to ANOTHER NPC — used for NPC-vs-NPC attacks
+ * during combat phase (Pass 3a). Mirrors `applyEnemyHitToPlayer`'s shape but:
+ *   • No death-save / unconscious-stomp path — NPCs just drop to 0 HP and
+ *     are killed by `killWithReward`.
+ *   • No Shield reaction (filtered upstream).
+ *   • Damage runs through the target's per-type resistance mod so any
+ *     resistance / vulnerability authored on the target's MonsterDef wins.
+ *
+ * `attackedId` is the NPC id from `EnemyTurnResult.attackedTargetId`. We
+ * resolve it from the live `state.npcs` array each call (the attacker's
+ * movement could in theory have shifted indices, though it doesn't today).
+ */
+function applyEnemyHitToNpc(
+  ctx: GameContext,
+  attacker: NpcState,
+  attackedId: string,
+  result: { damage: number; isCrit: boolean; bonusComponents: RolledBonusDamage[]; attackOnHit?: import('./types.js').AttackOnHitEffect[] },
+  _events: GameEvent[],
+): void {
+  const target = ctx.state.npcs.find((n) => n.id === attackedId);
+  if (!target || target.hp <= 0) return;
+  const attackerDef = ctx.resolveMonsterDef(attacker.defId);
+  const targetDef = ctx.resolveMonsterDef(target.defId);
+  if (!targetDef) return;
+
+  const meleeAttack = attackerDef?.attacks.find((a) => a.attackType === 'melee' || a.attackType === 'both');
+  const damageType = meleeAttack?.damageType ?? '';
+  const { finalDamage, log: resistLog } = ctx.resistMod(result.damage, damageType, targetDef, target.name);
+  if (resistLog) ctx.addLog(resistLog);
+  const hpBefore = target.hp;
+  target.hp = Math.max(0, target.hp - finalDamage);
+
+  // Secondary damage riders (cultist necrotic, etc.) — each rolls through
+  // resistance on its own type so a fire-resistant target halves the fire
+  // rider but takes the slashing primary in full.
+  for (const bd of result.bonusComponents) {
+    const { finalDamage: bdFinal, log: bdResistLog } = ctx.resistMod(bd.damage, bd.damageType, targetDef, target.name);
+    ctx.addLog({ left: `+ ${bdFinal} ${bd.damageType}`, right: bd.rollStr, style: 'hit' });
+    if (bdResistLog) ctx.addLog(bdResistLog);
+    target.hp = Math.max(0, target.hp - bdFinal);
+  }
+
+  publishNpcDamage(ctx, target, hpBefore, target.hp);
+  if (target.hp <= 0) {
+    // NPC-vs-NPC kills do NOT award player XP — the player wasn't involved
+    // in the fight. Log + clean up without going through `killWithReward`.
+    ctx.addLog({
+      left: `☠ ${target.name} is slain by ${combatantDisplayName(attacker, ctx.state.npcs)}!`,
+      style: 'kill',
+    });
+    ctx.killNpc(target.id);
   }
 }
 
@@ -649,8 +828,14 @@ function runSingleAllyTurn(ctx: GameContext, ally: NpcState, events: GameEvent[]
     return;
   }
 
+  // Ally targets the faction relations say it considers hostile, not just the
+  // disposition-tagged enemies. Pass 3a — opens up "town guard ally attacks
+  // a wandering monster" without the monster having to be `enemy` to the
+  // player first. Falls back to the disposition view for unannotated
+  // content via `isHostileTo`'s built-in fallback.
+  const allyView = { factionId: ally.factionId, disposition: ally.disposition };
   const enemyTargets = s.npcs
-    .filter((n) => n.disposition === 'enemy' && n.hp > 0)
+    .filter((n) => n !== ally && n.hp > 0 && isHostileTo(s, allyView, { factionId: n.factionId, disposition: n.disposition }))
     .map((n) => {
       const ndef = ctx.resolveMonsterDef(n.defId);
       return { id: n.id, tileX: n.tileX, tileY: n.tileY, ac: ndef?.ac ?? 10 };

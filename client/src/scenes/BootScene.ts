@@ -46,6 +46,7 @@ export class BootScene extends Phaser.Scene {
     this.load.json("encounters",          `${API_URL}/encounters`);
     this.load.json("adventures",          `${API_URL}/adventures`);
     this.load.json("tilesets",            `${API_URL}/tilesets`);
+    this.load.json("factions",            `${API_URL}/factions`);
   }
 
   async create(): Promise<void> {
@@ -73,6 +74,7 @@ export class BootScene extends Phaser.Scene {
       this.registry.set("maps",               this.cache.json.get("maps"));
       this.registry.set("encounters",          this.cache.json.get("encounters"));
       this.registry.set("adventures",          this.cache.json.get("adventures"));
+      this.registry.set("factions",            this.cache.json.get("factions"));
 
       // Preload every spritesheet on the server (from /tilesets) so the map
       // preview overlay can render any composed map immediately — including

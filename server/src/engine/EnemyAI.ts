@@ -2,18 +2,35 @@ import { NpcState, MonsterDef, GameEvent, LogEntry, AttackOnHitEffect } from './
 import { tryNimbleEscape, enemyAttack, type RolledBonusDamage } from './CombatSystem.js';
 import { isIncapacitated, hasAttackDisadvantage, hasAttackAdvantage, hasSpeedZero, proneStandCost } from './ConditionSystem.js';
 
+/**
+ * Snapshot of the creature an enemy NPC is about to engage. Generic over
+ * `player | npc` — the caller (`runSingleEnemyTurn`) projects the player or
+ * a target NPC into this shape so `runEnemyTurn` doesn't have to know which.
+ * The resulting `EnemyTurnResult.attackedTargetId` echoes the `id` field so
+ * the caller can route damage to the right entity.
+ */
+export interface EnemyAttackTarget {
+  /** `'player'` for the player, NPC id otherwise. */
+  id: string;
+  /** Pre-disambiguated label rendered in attack logs. */
+  displayName: string;
+  tileX: number;
+  tileY: number;
+  ac: number;
+  hp: number;
+  hidden: boolean;
+  dodging: boolean;
+  invisible: boolean;
+  passivePerception: number;
+}
+
 export interface EnemyTurnConfig {
   /** Pre-disambiguated display name (e.g. "Bridge Bandit (A)" when there are
    *  multiple Bridge Bandits in the encounter). Caller's responsibility. */
   displayName: string;
-  playerTileX: number;
-  playerTileY: number;
-  playerAc: number;
-  playerHp: number;
-  playerHidden: boolean;
-  playerDodging: boolean;
-  playerInvisible: boolean;
-  passivePerception: number;
+  /** The creature this enemy is engaging this turn — caller picks via
+   *  faction hostility + range; if absent the enemy will Hold / skip. */
+  target: EnemyAttackTarget;
   passable: boolean[][];
   mapCols: number;
   mapRows: number;
@@ -29,6 +46,8 @@ export interface EnemyTurnResult {
   isHit: boolean;
   isCrit: boolean;
   attacked: boolean;
+  /** `'player'` or the NPC id this enemy attacked. `null` when no attack was made. */
+  attackedTargetId: string | null;
   /** The attacker's d20 + bonus total — exposed so callers can decide whether a Shield reaction would convert this hit to a miss. */
   attackTotal: number;
   logs: LogEntry[];
@@ -77,19 +96,26 @@ export function runEnemyTurn(
   def: MonsterDef,
   config: EnemyTurnConfig,
 ): EnemyTurnResult {
+  const target = config.target;
   const logs: LogEntry[] = [{ left: `${config.displayName}'s turn`, style: 'header' }];
   const events: GameEvent[] = [];
   let { tileX, tileY } = enemy;
   let enemyHidden = enemy.conditions.includes('hidden');
 
+  const skip = (): EnemyTurnResult => ({
+    damage: 0, isHit: false, isCrit: false, attackTotal: 0, attacked: false,
+    attackedTargetId: null,
+    logs, events, finalTileX: tileX, finalTileY: tileY, hidden: enemyHidden, bonusComponents: [],
+  });
+
   if (isIncapacitated(enemy.conditions)) {
     logs.push({ left: `${config.displayName} is incapacitated`, style: 'status' });
-    return { damage: 0, isHit: false, isCrit: false, attackTotal: 0, attacked: false, logs, events, finalTileX: tileX, finalTileY: tileY, hidden: enemyHidden, bonusComponents: [] };
+    return skip();
   }
 
   const belowHalf = enemy.hp <= enemy.maxHp / 2;
   if (!enemyHidden && def.nimbleEscape && (belowHalf || Math.random() < 0.3)) {
-    const { hidden, logs: hideLogs } = tryNimbleEscape(def, config.passivePerception);
+    const { hidden, logs: hideLogs } = tryNimbleEscape(def, target.passivePerception);
     logs.push(...hideLogs);
     enemyHidden = hidden;
   }
@@ -100,39 +126,44 @@ export function runEnemyTurn(
     ? 0
     : Math.max(0, tileSpeed - (enemy.conditions.includes('slowed') ? 2 : 0) - standCost);
 
-  while (stepsLeft > 0 && chebyshev(tileX, tileY, config.playerTileX, config.playerTileY) > 1) {
+  while (stepsLeft > 0 && chebyshev(tileX, tileY, target.tileX, target.tileY) > 1) {
     const next = nextStepToward(
       tileX, tileY,
-      config.playerTileX, config.playerTileY,
+      target.tileX, target.tileY,
       config.passable, config.mapRows, config.mapCols,
       config.occupiedTiles,
     );
-    if (!next || (next[0] === config.playerTileX && next[1] === config.playerTileY)) break;
+    if (!next || (next[0] === target.tileX && next[1] === target.tileY)) break;
     tileX = next[0];
     tileY = next[1];
     events.push({ type: 'entity_move', entityId: enemy.id, toX: tileX, toY: tileY });
     stepsLeft--;
   }
 
-  const dist = chebyshev(tileX, tileY, config.playerTileX, config.playerTileY);
+  const dist = chebyshev(tileX, tileY, target.tileX, target.tileY);
   if (dist > 1) {
     logs.push({ left: `${config.displayName} is out of reach`, style: 'normal' });
-    return { damage: 0, isHit: false, isCrit: false, attackTotal: 0, attacked: false, logs, events, finalTileX: tileX, finalTileY: tileY, hidden: enemyHidden, bonusComponents: [] };
+    return skip();
   }
 
   const meleeAttack = def.attacks.find((a) => a.attackType === 'melee' || a.attackType === 'both');
   if (!meleeAttack) {
     logs.push({ left: `${config.displayName} has no attack`, style: 'normal' });
-    return { damage: 0, isHit: false, isCrit: false, attackTotal: 0, attacked: false, logs, events, finalTileX: tileX, finalTileY: tileY, hidden: enemyHidden, bonusComponents: [] };
+    return skip();
   }
 
-  const playerUnconscious = config.playerHp <= 0;
-  const withAdvantage = enemyHidden || playerUnconscious || hasAttackAdvantage(enemy.conditions) || !!config.traitAdvantage;
-  const withDisadvantage = config.playerHidden || config.playerInvisible || hasAttackDisadvantage(enemy.conditions) || config.playerDodging || !!config.traitDisadvantage;
-  const { damage, isHit, isCrit, attackTotal, logs: attackLogs, bonusComponents } = enemyAttack(meleeAttack, config.playerAc, withAdvantage, withDisadvantage);
+  const targetUnconscious = target.hp <= 0;
+  const withAdvantage = enemyHidden || targetUnconscious || hasAttackAdvantage(enemy.conditions) || !!config.traitAdvantage;
+  const withDisadvantage = target.hidden || target.invisible || hasAttackDisadvantage(enemy.conditions) || target.dodging || !!config.traitDisadvantage;
+  const { damage, isHit, isCrit, attackTotal, logs: attackLogs, bonusComponents } = enemyAttack(meleeAttack, target.ac, withAdvantage, withDisadvantage);
   logs.push(...attackLogs);
 
-  return { damage, isHit, isCrit, attackTotal, attacked: true, logs, events, finalTileX: tileX, finalTileY: tileY, hidden: enemyHidden, bonusComponents, attackOnHit: meleeAttack.onHit };
+  return {
+    damage, isHit, isCrit, attackTotal, attacked: true,
+    attackedTargetId: target.id,
+    logs, events, finalTileX: tileX, finalTileY: tileY, hidden: enemyHidden, bonusComponents,
+    attackOnHit: meleeAttack.onHit,
+  };
 }
 
 export function runAllyTurn(

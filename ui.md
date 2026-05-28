@@ -92,6 +92,7 @@ Selection: clicking a creature in the Game Map selects it. The creature is highl
 | **Combat Stats**   | AC, Speed                                                        |
 | **Ability Scores** | All six scores (STR DEX CON INT WIS CHA) with modifiers          |
 | **Conditions**     | Active conditions in amber (e.g. `[DODGING]`, `[POISONED]`); hidden when none |
+| **Faction**        | One-line `FACTION  <name>` row. **Hidden** when the selected NPC's `factionId` doesn't match any entry in `defs.factions` (raw-monster faction-of-one). **`FACTION  ???`** in dim text when the faction is known to the engine but the player hasn't yet identified it (the combat-start Insight check missed, or no fight has happened with this faction yet). **`FACTION  <DisplayName>`** in the faction's `displayColor` once it's been identified — either by passing the Insight check or by the AIGM calling the `reveal_faction` tool. The row re-renders on every state tick so a mid-encounter reveal flips the chip in place. |
 
 ---
 

@@ -1,0 +1,17 @@
+{
+  "id": "monsters",
+  "name": "Wandering Monsters",
+  "description": "Goblinoids, kobolds, ambush predators — opportunistic raiders without a unifying loyalty.",
+  "displayColor": "#aa3333",
+  "renown": 1,
+  "defaultRelations": {
+    "party": -60,
+    "monsters": 40,
+    "town_guard": -60,
+    "townsfolk": -60,
+    "bandits": -40,
+    "cultists": -20,
+    "undead": -40,
+    "wildlife": -20
+  }
+}

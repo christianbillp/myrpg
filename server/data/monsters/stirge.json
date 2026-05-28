@@ -37,7 +37,12 @@
       "onHit": [
         {
           "kind": "attach",
-          "dot": { "dice": 2, "sides": 4, "bonus": 0, "damageType": "necrotic" }
+          "dot": {
+            "dice": 2,
+            "sides": 4,
+            "bonus": 0,
+            "damageType": "necrotic"
+          }
         }
       ]
     }

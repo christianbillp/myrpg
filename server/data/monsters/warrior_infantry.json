@@ -41,6 +41,8 @@
   "xp": 25,
   "cr": "1/8",
   "color": 8421504,
-  "traits": ["pack_tactics"],
+  "traits": [
+    "pack_tactics"
+  ],
   "tokenAsset": "/tokens/monster_warrior_infantry.svg"
 }

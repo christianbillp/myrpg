@@ -1,0 +1,8 @@
+{
+  "id": "party",
+  "name": "Adventurers",
+  "description": "The player and their travelling companions.",
+  "displayColor": "#3388ff",
+  "renown": 1,
+  "defaultRelations": {}
+}

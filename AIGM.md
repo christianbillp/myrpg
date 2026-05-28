@@ -507,13 +507,46 @@ Searches the full, unsummarized conversation archive for past content matching a
 
 #### `adjust_faction_standing`
 
-Adjusts the player's standing with a faction by `delta`. Standings live on `GameState.factionStandings` and are clamped to [−100, +100]. Use when an action durably shifts how a faction views the player — saving a member, betraying them, completing a faction-aligned quest. Surfaced to future turns in CURRENT STATE under FACTION STANDINGS.
+Adjusts the player's standing with a faction by `delta`. Standings live on `GameState.factionStandings` and are clamped to [−100, +100]. Use when an action durably shifts how a faction views the player — saving a member, betraying them, completing a faction-aligned quest. Surfaced to future turns in CURRENT STATE under FACTION STANDINGS. **Implementation note (Pass 2):** writes are mirrored into the full `factionRelations` matrix's `party` row so the new matrix-driven readers see the same value — no behaviour change for the AIGM.
 
 | Parameter    | Type    | Required | Notes                                                          |
 | ------------ | ------- | -------- | -------------------------------------------------------------- |
 | `faction_id` | string  | yes      | Stable short id (e.g. `"bridge_bandits"`, `"town_guard"`).     |
 | `delta`      | integer | yes      | Positive improves the relationship; negative worsens it.       |
 | `reason`     | string  | yes      |                                                                |
+
+#### `adjust_faction_relation`
+
+Shifts the standing between **any two factions** by `delta` (positive → friendlier, negative → more hostile). Clamped to [−100, +100]. Use when an event durably changes how two NPC groups feel about each other — the bandits and the guards reach an understanding, the cultists declare war on the townsfolk, etc. Mirrors to both directions by default; pass `mirror: false` for a one-sided shift (one faction's opinion of the other moves without reciprocation). For player-faction shifts prefer `adjust_faction_standing`.
+
+| Parameter   | Type    | Required | Notes                                                                                                       |
+| ----------- | ------- | -------- | ----------------------------------------------------------------------------------------------------------- |
+| `faction_a` | string  | yes      | First faction id (e.g. `"bandits"`).                                                                        |
+| `faction_b` | string  | yes      | Second faction id (e.g. `"town_guard"`).                                                                    |
+| `delta`     | integer | yes      | Positive improves the relationship; negative worsens it.                                                    |
+| `mirror`    | boolean | no       | Default `true`. `false` for an asymmetric shift (only `a → b` moves, leaving `b → a` alone).               |
+| `reason`    | string  | yes      |                                                                                                             |
+
+#### `set_faction_relation`
+
+Hard-set the standing between two factions to an absolute value (clamped to ±100). Use for resets — forging an alliance at +80, declaring blood-feud at −100 — rather than incremental nudges (use `adjust_faction_relation` for those). Mirror + asymmetry behave like `adjust_faction_relation`.
+
+| Parameter   | Type    | Required | Notes                                                                                  |
+| ----------- | ------- | -------- | -------------------------------------------------------------------------------------- |
+| `faction_a` | string  | yes      | First faction id.                                                                      |
+| `faction_b` | string  | yes      | Second faction id.                                                                     |
+| `value`     | integer | yes      | Absolute standing in [−100, +100].                                                     |
+| `mirror`    | boolean | no       | Default `true`.                                                                        |
+| `reason`    | string  | yes      |                                                                                        |
+
+#### `reveal_faction`
+
+Marks a faction as identified by the player — from this point on the Target Panel will render its display name + colour instead of `"???"` for every member. Use when the player learns who a group really is through dialogue, finding a sigil, an obvious uniform, etc. Idempotent: a second call with the same id is a no-op.
+
+| Parameter    | Type   | Required | Notes                                       |
+| ------------ | ------ | -------- | ------------------------------------------- |
+| `faction_id` | string | yes      | Stable short id (e.g. `"bandits"`).         |
+| `reason`     | string | yes      |                                             |
 
 #### `create_rumor`
 

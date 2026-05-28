@@ -16,8 +16,10 @@ import {
 } from "../constants";
 import { PlayerDef } from "../data/player";
 import { MonsterDef, NPCDef } from "../data/monsters";
+import type { FactionDef } from "../../../shared/types";
 import { ItemDef } from "../data/equipment";
 import { gameClient } from "../net/GameClient";
+import { WorldPause } from "../net/WorldPause";
 import type { GameState, GameEvent, GameMap, SpellDef, FeatureDef } from "../net/types";
 import type { ChatMessage } from "../ui/AIGMOverlay";
 import { DevMode } from "../devMode";
@@ -148,6 +150,12 @@ export class GameScene extends Phaser.Scene {
 
     gameClient.setStateUpdateHandler((state, events) => this.handleStateUpdate(state, events));
     gameClient.connectWebSocket();
+
+    // Bind the world-pause manager to the active session so the off-camera
+    // tick respects input focus + open overlays. Cleared on scene teardown.
+    WorldPause.setSession(gameClient.getSessionId());
+    this.events.once('shutdown', () => WorldPause.setSession(null));
+    this.events.once('destroy',  () => WorldPause.setSession(null));
   }
 
   shutdown(): void {
@@ -304,7 +312,7 @@ export class GameScene extends Phaser.Scene {
     if (serverId === this.selectedEntityId) {
       if (this.selectedEntityId) {
         const nState = state.npcs.find(n => n.id === this.selectedEntityId);
-        if (nState) this.targetPanel.refresh(nState, nState.maxHp);
+        if (nState) this.targetPanel.refresh(nState, nState.maxHp, this.getFactions(), state.discoveredFactions ?? []);
       }
       return;
     }
@@ -321,7 +329,7 @@ export class GameScene extends Phaser.Scene {
       this.selectedEntityId = serverId;
       this.npcTokens.get(serverId)?.setSelected(true);
       const def = this.resolveMonsterDef(nState.defId);
-      this.targetPanel.show(def, nState, nState.conditions);
+      this.targetPanel.show(def, nState, this.getFactions(), state.discoveredFactions ?? [], nState.conditions);
     }
   }
 
@@ -405,7 +413,7 @@ export class GameScene extends Phaser.Scene {
     const nState = this.gameState.npcs.find(n => n.id === id);
     if (nState) {
       const def = this.resolveMonsterDef(nState.defId);
-      this.targetPanel.show(def, nState, nState.conditions);
+      this.targetPanel.show(def, nState, this.getFactions(), this.gameState.discoveredFactions ?? [], nState.conditions);
     }
     gameClient.sendAction({ type: "selectTarget", entityId: id });
     if (this.gameState) this.updateHUD(this.gameState);
@@ -740,7 +748,7 @@ export class GameScene extends Phaser.Scene {
 
     if (this.selectedEntityId) {
       const nState = state.npcs.find(n => n.id === this.selectedEntityId);
-      if (nState && nState.hp > 0) this.targetPanel.refresh(nState, nState.maxHp);
+      if (nState && nState.hp > 0) this.targetPanel.refresh(nState, nState.maxHp, this.getFactions(), state.discoveredFactions ?? []);
     }
 
     this.playerPanel.refreshActions(this.buildActionState(state));
@@ -990,6 +998,10 @@ export class GameScene extends Phaser.Scene {
   }
 
   // ── Def lookups ───────────────────────────────────────────────────────────
+
+  private getFactions(): FactionDef[] {
+    return (this.registry.get("factions") as FactionDef[] | undefined) ?? [];
+  }
 
   private resolveMonsterDef(defId: string): MonsterDef {
     const monsters = this.registry.get("monsters") as MonsterDef[];

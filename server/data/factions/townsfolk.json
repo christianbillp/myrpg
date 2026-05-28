@@ -1,0 +1,17 @@
+{
+  "id": "townsfolk",
+  "name": "Townsfolk",
+  "description": "Civilians of nearby towns and villages. Friendly to the guard; wary of strangers.",
+  "displayColor": "#ddcc88",
+  "renown": 1,
+  "defaultRelations": {
+    "party": 20,
+    "townsfolk": 60,
+    "town_guard": 60,
+    "bandits": -60,
+    "cultists": -40,
+    "undead": -100,
+    "monsters": -60,
+    "wildlife": 0
+  }
+}

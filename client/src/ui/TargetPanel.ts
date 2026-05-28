@@ -2,7 +2,7 @@ import {
   PLAYER_PANEL_WIDTH, GRID_COLS, GRID_ROWS, TILE_SIZE, TARGET_PANEL_WIDTH, HUD_HEIGHT,
 } from '../constants';
 import { MonsterDef } from '../data/monsters';
-import { NpcState } from '../net/types';
+import { NpcState, FactionDef } from '../net/types';
 import { UIScale } from './UIScale';
 import { DevMode } from '../devMode';
 
@@ -26,6 +26,10 @@ function statMod(v: number): string {
   return (m >= 0 ? '+' : '') + m;
 }
 
+function escapeHtml(s: string): string {
+  return s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]!));
+}
+
 export class TargetPanel {
   private readonly el: HTMLDivElement;
   private readonly nameEl: HTMLElement;
@@ -35,6 +39,8 @@ export class TargetPanel {
   private readonly statsEl: HTMLElement;
   private readonly abilitiesEl: HTMLElement;
   private readonly conditionsEl: HTMLElement;
+  private readonly factionEl: HTMLElement;
+  private readonly factionSepEl: HTMLElement;
   private readonly offResize: () => void;
   private readonly scale: UIScale;
   private panelHeight: number;
@@ -80,6 +86,8 @@ export class TargetPanel {
       <div class="gui-sep" style="margin-top:2px;"></div>
 
       <div style="padding:4px 12px;font-size:10px;color:#cc8844;line-height:1.8;word-wrap:break-word;" data-conditions></div>
+      <div class="gui-sep" style="margin-top:2px;" data-faction-sep></div>
+      <div style="padding:4px 12px;font-size:10px;line-height:1.6;" data-faction></div>
     `;
 
     const ref = (attr: string) => this.el.querySelector(`[data-${attr}]`) as HTMLElement;
@@ -90,6 +98,8 @@ export class TargetPanel {
     this.statsEl      = ref('stats');
     this.abilitiesEl  = ref('abilities');
     this.conditionsEl = ref('conditions');
+    this.factionEl    = ref('faction');
+    this.factionSepEl = ref('faction-sep');
 
     // Right edge fixed at canvas right; left edge moves with width.
     const rightAnchor = GRID_X + TARGET_PANEL_WIDTH;
@@ -115,7 +125,7 @@ export class TargetPanel {
     this.offResize = scale.onChange(place);
   }
 
-  show(def: MonsterDef, npcState: NpcState, _conditions: string[] = []): void {
+  show(def: MonsterDef, npcState: NpcState, factions: FactionDef[] = [], discoveredFactions: string[] = [], _conditions: string[] = []): void {
     this.currentDef = def;
     this.currentNpcState = npcState;
     const colorHex = '#' + def.color.toString(16).padStart(6, '0');
@@ -132,15 +142,42 @@ export class TargetPanel {
       .map(([n, v]) => `${n}  ${String(v).padStart(2)}  (${statMod(v)})`)
       .join('\n');
 
-    this.refresh(npcState, def.maxHp);
+    this.refresh(npcState, def.maxHp, factions, discoveredFactions);
     this.el.style.display = 'block';
+  }
+
+  /**
+   * Render the FACTION row based on the selected NPC's factionId.
+   *   • Faction-of-one (id not in the global registry — raw monster spawns):
+   *     hide the row entirely. Nothing identifiable.
+   *   • Faction known to defs.factions, NOT in discoveredFactions: show
+   *     `Faction: ???` to signal the group is mysterious until the player
+   *     identifies them.
+   *   • Faction known + discovered: show the display name in the faction's
+   *     own colour.
+   */
+  private renderFactionRow(factionId: string, factions: FactionDef[], discoveredFactions: string[]): void {
+    const def = factions.find((f) => f.id === factionId);
+    if (!def) {
+      this.factionEl.style.display = 'none';
+      this.factionSepEl.style.display = 'none';
+      return;
+    }
+    this.factionEl.style.display = 'block';
+    this.factionSepEl.style.display = 'block';
+    const known = discoveredFactions.includes(factionId);
+    if (known) {
+      this.factionEl.innerHTML = `<span style="color:#778899">FACTION</span>  <span style="color:${def.displayColor}">${escapeHtml(def.name)}</span>`;
+    } else {
+      this.factionEl.innerHTML = `<span style="color:#778899">FACTION</span>  <span style="color:#556677">???</span>`;
+    }
   }
 
   hide(): void {
     this.el.style.display = 'none';
   }
 
-  refresh(npcState: NpcState, maxHp: number): void {
+  refresh(npcState: NpcState, maxHp: number, factions: FactionDef[] = [], discoveredFactions: string[] = []): void {
     this.currentNpcState = npcState;
     const pct = maxHp > 0 ? npcState.hp / maxHp : 0;
     this.hpFill.style.width = `${Math.floor(pct * 100)}%`;
@@ -149,6 +186,10 @@ export class TargetPanel {
     this.conditionsEl.textContent = npcState.conditions.length > 0
       ? npcState.conditions.map(c => `[${c.toUpperCase()}]`).join('  ')
       : '';
+    // Re-render the FACTION row on each tick so a mid-encounter
+    // `reveal_faction` (AIGM tool or trigger) immediately flips the chip
+    // from `???` to the faction name.
+    this.renderFactionRow(npcState.factionId, factions, discoveredFactions);
   }
 
   private buildWidthHandle(reposition: () => void): HTMLDivElement {

@@ -1,0 +1,17 @@
+{
+  "id": "town_guard",
+  "name": "Town Guard",
+  "description": "Uniformed peacekeepers in service to a local lord or council.",
+  "displayColor": "#88aacc",
+  "renown": 1,
+  "defaultRelations": {
+    "party": 0,
+    "town_guard": 100,
+    "townsfolk": 60,
+    "bandits": -80,
+    "cultists": -80,
+    "undead": -100,
+    "monsters": -60,
+    "wildlife": 0
+  }
+}

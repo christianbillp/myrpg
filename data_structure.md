@@ -135,6 +135,8 @@ SRD stat blocks for all creatures — both random enemies and the underlying sta
 | `conditionImmunities` | string[] | *(optional)* Conditions that cannot be applied to this creature. |
 | `tokenAsset` | string | *(optional)* Path to the SVG token sprite. When omitted, the path is derived by convention: `/tokens/monster_<id>.svg`. See [tokens/](#tokens-1). |
 
+> **Monsters do not carry a `factionId`.** Monster JSONs are pure stat blocks (HP / AC / attacks / traits). Worldbuilding — faction membership, persona, named identity — lives on `NPCDef` (see [npcs/](#npcs)). When the deterministic encounter flow spawns a raw monster id (no NPC wrapper), `SpawnHelpers.spawnNpc` falls back to using the monster id itself as a faction-of-one. Encounter authors who want a raw monster spawn to participate in inter-faction politics should wrap the spawn in a thin `NPCDef` that declares the faction.
+
 ### Attack entry fields
 
 Each entry in `attacks` describes one attack option. The AI selects the most appropriate attack based on range.
@@ -154,6 +156,74 @@ Each entry in `attacks` describes one attack option. The AI selects the most app
 
 ---
 
+## factions/
+
+Faction definitions loaded from `server/data/factions/*.json` and surfaced via `GET /factions`. Each faction carries an id, display name + colour, renown rating, and a default-relation table. The relation table drives `GameState.factionRelations` — see "Factions & relations" below for the runtime model.
+
+### Fields
+
+| Field | Type | Notes |
+|---|---|---|
+| `id` | string | Stable id, referenced from `NpcState.factionId` and `MonsterDef.factionId` / `NPCDef.factionId`. |
+| `name` | string | Player-facing display name, shown in the Target Panel once discovered. |
+| `description` | string \| *omitted* | One-line flavour shown alongside the name. |
+| `displayColor` | string | Hex `#rrggbb` for the faction tag chip. |
+| `renown` | number | 1..30. The Insight DC to identify a member of this faction is `max(1, renown)`. Ships at 1 across the shipped roster (always passes) — tune up as content warrants. |
+| `defaultRelations` | `Record<string, number>` \| *omitted* | Default standings with other factions (−100..+100). Mirrored to both directions at session boot, so a declaration on `bandits` automatically wires up `town_guard.bandits` too. Runtime overrides may break the symmetry. |
+
+### Shipped roster
+
+`party` (the player), `town_guard`, `bandits`, `cultists`, `undead`, `monsters`, `wildlife`, `townsfolk`. Adding a new faction is a JSON drop; no code change required.
+
+### Factions & relations — runtime model
+
+`GameState.factionRelations: Record<string, Record<string, number>>` is the full pair-wise relation matrix. Built at session boot by `buildFactionRelations` (in `server/src/engine/FactionRelations.ts`) in four layers, lowest-precedence first:
+
+1. Each `FactionDef.defaultRelations` (mirrored to both directions — symmetric on cold boot).
+2. The adventure save's `seedFactionRelations` (full matrix carry-over from a previous chapter, asymmetric allowed).
+3. The adventure save's legacy `seedFactionStandings` (`party` row only, mirrored).
+4. The encounter's optional `factionRelations` override block (asymmetric — authors who want symmetry write both directions).
+
+`getRelation(state, a, b)` resolves the effective numeric standing by taking the worse (min) of `factionRelations[a][b]` and `factionRelations[b][a]`, so a one-sided grudge still bites. `getStance` discretises the number with the constants `FACTION_HOSTILE_THRESHOLD` (≤ −30 → hostile) and `FACTION_FRIENDLY_THRESHOLD` (≥ +30 → friendly).
+
+`GameState.factionStandings` (the legacy `party`-row projection) is kept in sync at session boot via `projectFactionStandings` so existing `faction_standing` guards and `adjust_faction_standing` AIGM-tool calls keep working unmodified. Pass 2 will re-project after every mutation.
+
+`GameState.discoveredFactions` is the per-session list of faction ids the player has identified. The Target Panel renders `Faction: ???` until the id appears in this list. Pass 3 wires the Insight-check-on-combat-start path and the AIGM's `reveal_faction` tool.
+
+**Pass 1 scope:** matrix is built and helpers exist; engine readers still consult `NpcState.disposition`. **Pass 2 scope:** the matrix is kept in sync with every existing disposition-writing path — `setRelation` / `adjustRelation` mutators clamp to ±100 and keep the legacy `factionStandings` projection in lockstep with the matrix's `party` row; `aggroFaction`, `set_disposition_by_def_id`, `setDisposition`, and `adjust_faction_standing` all dual-update; the spawn pass auto-fills any matrix cell the encounter override didn't author from each NPC's disposition. New trigger actions (`adjust_faction_relation`, `set_faction_relation`, `reveal_faction`) and matching AIGM tools let content + the GM mutate inter-faction politics directly. Two helpers — `isHostileTo(state, me, other)` and `isFriendlyTo(state, me, other)` — consult the matrix first and fall back to disposition for unannotated content; Pass 3 will switch the NPC AI and combat-start condition over to them. The shipped NPC defs are tagged with explicit `factionId` (bridge_bandit → `bandits`, etc.); raw monster ids continue to default to a faction-of-one of their def id since `MonsterDef` deliberately doesn't carry faction membership (monsters = stats, NPCs = worldbuilding).
+
+**Pass 3a scope (current):** **NPC AI targeting now consults `isHostileTo`** — `runEnemyTurn` accepts a generic `EnemyAttackTarget` (the player projected, or any NPC), and `runSingleEnemyTurn` picks the nearest hostile creature via `pickEnemyAttackTarget` (matrix + disposition fallback). The result carries `attackedTargetId` (`'player'` or NPC id) so damage routes to the right entity: `applyEnemyHitToPlayer` for the player (death-save accrual, Shield reaction, the existing path) and the new `applyEnemyHitToNpc` for NPC-vs-NPC hits (resistance roll, kill log, no player XP — the player wasn't in the fight). The Shield reaction prompt only fires when the target was the player; the player OA hand-off only fires when the enemy moved away from the player. Ally turn target list switches to `isHostileTo` too — allies will engage hostile-faction NPCs even when those NPCs aren't player-disposition `enemy`. **Pass 3a does NOT yet add:** real-time off-camera tick loop (NPCs only fight each other during the active combat phase for now), Insight-check discovery on combat start, Target Panel `FACTION` row.
+
+**Pass 3b scope (current):** Faction identification at combat start. Right after `doStartCombat` publishes `combat_started`, `runFactionIdentificationChecks` walks every unique `factionId` represented by the combatants. For each one not already in `discoveredFactions`: if the id resolves to a `defs.factions` entry, roll d20 + the player's `skills.insight` bonus against `max(1, faction.renown)`. On a pass, push the id into `discoveredFactions` and log `"You recognise them — <name>."` On a fail, the roll detail is intentionally NOT logged (so failed identifications don't leak which factions are present in the fight). Faction ids that don't resolve to a `defs.factions` entry (raw-monster faction-of-one spawns) are skipped — there's nothing identifiable. Renown ships at 1 across the shipped roster, so the check is currently always pass-on-die — the tuning lever is in place for future content with rarer factions.
+
+The Target Panel reads `state.discoveredFactions` + the live `factions` registry every time a creature is selected and on every state tick:
+- Faction-of-one (id missing from `defs.factions`): the FACTION row is hidden.
+- Faction in `defs.factions` but NOT in `discoveredFactions`: row shows `FACTION  ???` in dim text.
+- Faction in `defs.factions` AND discovered: row shows the display name in the faction's `displayColor`. A mid-combat `reveal_faction` AIGM tool call flips the chip in place on the next state tick.
+
+**Pass 3c scope (current):** Real-time off-camera tick. Every active session installs a `setInterval` that fires every 6 000 ms (one SRD round per real-time tick) and routes through `engine.runOffCameraTick()` → `server/src/engine/WorldTick.ts`. The tick:
+- **Pauses** when `isWorldTickEligible(sessionId)` reads false — `phase !== 'exploring'`, `pendingReaction !== null`, or the session's `worldPaused` flag is set by the client. The tick simply skips; the interval keeps running so resume is instant.
+- **Iterates** every living NPC in a per-tick deterministic shuffle (`hash(npc.id, Date.now())`) so the same NPC doesn't always get the first swing.
+- **Picks** each NPC's nearest non-player hostile via `isHostileTo` + Chebyshev distance.
+- **Runs** one full SRD turn via the existing `runEnemyTurn` (move up to speed + one attack) and applies damage through the resistance-aware path (mirrors `applyEnemyHitToNpc`).
+- **Returns** the `entity_move` / `entity_killed` events the session caller broadcasts as a single `state_update` WebSocket frame. No broadcast when the tick produced no events (no event log spam).
+
+**Client pause coordination.** The new `client/src/net/WorldPause.ts` singleton refcounts named "holders" — pause whenever any holder is active, resume when the count returns to zero. The manager auto-installs `focusin` / `focusout` listeners on every `<input>` / `<textarea>` / `contentEditable` element, so typing into the GM chat box (or any other text field) pauses the world without per-component wiring. Overlays explicitly acquire / release by id — `OverlayManager` wires `IntroductionOverlay`, `CharacterSheetOverlay`, and `ChapterCompleteOverlay`. `ReactionPromptOverlay` doesn't need to (the server-side `pendingReaction` check covers it). Setup-scene storylog overlays don't either — they only render in setup, where there's no active session.
+
+Pause / resume is posted to `POST /game/session/:id/world-paused` with `{ paused: boolean }`. The server stores it on `Session.worldPaused`. `installWorldTick(sessionId, engine)` is called by every session-creation path; `deleteSession` clears the interval.
+
+### Faction-mutation triggers (Pass 2)
+
+| Action type | Body | Effect |
+|---|---|---|
+| `adjust_faction_relation` | `{ a: string; b: string; delta: number; mirror?: boolean }` | Shift the standing between `a` and `b` by `delta` (clamped ±100). Mirrors to both directions by default; `mirror: false` for one-sided shifts. Publishes `faction_changed` when either side touches the player. |
+| `set_faction_relation` | `{ a: string; b: string; value: number; mirror?: boolean }` | Hard-set the standing to `value`. Same mirror + event semantics. |
+| `reveal_faction` | `{ factionId: string }` | Add `factionId` to `GameState.discoveredFactions`. Idempotent. Pass 3 uses this to flip the Target Panel from `???` to the faction name. |
+
+The matching AIGM tools (`adjust_faction_relation`, `set_faction_relation`, `reveal_faction`) reach through `engine.fireTriggerAction(...)` so they share the same handlers — keeping clamp + event-publishing logic in one place.
+
+---
+
 ## npcs/
 
 Named characters with identity and persona layered on top of a monster stat block. NPCs are spawned in social and exploration encounters; they do not carry full stat blocks themselves — those are resolved at runtime from `monsterClass`.
@@ -168,6 +238,7 @@ Named characters with identity and persona layered on top of a monster stat bloc
 | `color` | number | Token colour as a decimal integer. |
 | `persona` | string | *(optional)* Roleplay instructions for the AIGM. The AIGM speaks as this character when the player addresses them. |
 | `tokenAsset` | string | *(optional)* Path to the SVG token sprite, e.g. `/tokens/npc_wandering_sage.svg`. When omitted, the path is derived by convention: `/tokens/npc_<id>.svg`. If neither an explicit field nor a convention-matched file exists, the NPC falls back to its `monsterClass`'s token at render time. See [tokens/](#tokens-1). |
+| `factionId` | string | *(optional)* Faction membership for spawns of this NPC. Referenced by `SpawnHelpers.spawnNpc` to set `NpcState.factionId` and inherits the faction's relations with everyone else via `GameState.factionRelations`. When omitted, the spawn uses the NPC's own id as a faction-of-one (legacy behaviour). NPCs are the worldbuilding layer — `MonsterDef` deliberately does NOT carry a `factionId` since stats and faction loyalty are orthogonal concerns. See [factions/](#factions). |
 
 ### Example — `npcs/tavern_keeper.json`
 
@@ -786,6 +857,7 @@ A flavored combination of a map and one or more NPCs, with optional AIGM instruc
 | `tileProperties` | object[] | Per-GID semantics for the referenced map's tiles **in this encounter**. See below. Required to make any tile passable. |
 | `startingZones` | object | *(optional)* Tiled-style tile layer marking spawn regions for the player, allies, neutral NPCs, and enemies. Same dimensions as the referenced map. See below. |
 | `triggers` | object[] | *(optional)* Authored scripted events for this encounter — ambushes, reinforcements, scripted reveals. See [triggers](#triggers). |
+| `factionRelations` | `Record<factionId, Record<factionId, number>>` | *(optional)* Per-encounter override for the global faction-relation matrix. Layered over `defs.factions[*].defaultRelations` at session boot — only the pairs declared here are changed. Use to express scene-specific politics (e.g. `{ "town_guard": { "bandits": 80 } }` for an encounter where the guards have been bribed). **Asymmetric**: the engine does NOT mirror the declaration to the reverse direction, and `getRelation` takes the *worse* of the two sides — so one-sided shifts produce one-sided behaviour. Authors who want a symmetric flip declare both directions. See [factions/](#factions). |
 
 ### Combat phase on session start
 

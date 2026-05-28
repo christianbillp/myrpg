@@ -41,6 +41,9 @@
   "xp": 25,
   "cr": "1/8",
   "color": 7493969,
-  "traits": ["pack_tactics", "sunlight_sensitivity"],
+  "traits": [
+    "pack_tactics",
+    "sunlight_sensitivity"
+  ],
   "tokenAsset": "/tokens/monster_kobold_warrior.svg"
 }
