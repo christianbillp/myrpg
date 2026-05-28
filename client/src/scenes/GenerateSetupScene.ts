@@ -354,6 +354,10 @@ export class GenerateSetupScene extends Phaser.Scene {
       this.triggerEditor.destroy();
       this.triggerEditor = null;
     }
+    if (this.zonePainter) {
+      this.zonePainter.destroy();
+      this.zonePainter = null;
+    }
     this.monsterSubContainer = null;
     this.triggerSubContainer = null;
     this.monstersTabBg = null;
@@ -361,7 +365,6 @@ export class GenerateSetupScene extends Phaser.Scene {
     this.triggersTabBg = null;
     this.triggersTabLabel = null;
     this.pickerTab = "monsters";
-    this.zonePainter = null;
 
     // Hide the description textarea + story-field inputs while the right
     // panel is in its empty state — they're recreated when the map is saved.
@@ -419,6 +422,7 @@ export class GenerateSetupScene extends Phaser.Scene {
       map,
       thumbX, thumbY, thumbW, thumbH, tileSize,
       tilesetKey: pickTilesetKey(this),
+      sceneWidth: W,
       onZonesChanged: () => this.refreshButtons(),
       onClickEmpty:   () => this.openLargePreview(),
       initialPlayerCells:  this.rolledPlayerCells  ?? undefined,
@@ -504,7 +508,9 @@ export class GenerateSetupScene extends Phaser.Scene {
 
     const pickerY = tabsY + 32;
 
-    // MonsterPicker — full-width.
+    // MonsterPicker — full-width, occupies the remaining vertical space
+    // beneath the picker tabs.
+    const pickerHeight = (CONTENT_BOTTOM - 8) - pickerY;
     this.monsterSubContainer = this.add.container(0, 0);
     this.detRightContainer.add(this.monsterSubContainer);
     this.monsterPicker = new MonsterPicker({
@@ -514,6 +520,8 @@ export class GenerateSetupScene extends Phaser.Scene {
       x: RIGHT_PANEL_X,
       y: pickerY,
       width: SIDE_PANEL_WIDTH,
+      height: pickerHeight,
+      sceneWidth: W,
       initialAllyIds:    this.rolledAllyIds    ?? undefined,
       initialEnemyIds:   this.rolledEnemyIds   ?? undefined,
       initialNeutralIds: this.rolledNeutralIds ?? undefined,
@@ -528,6 +536,7 @@ export class GenerateSetupScene extends Phaser.Scene {
       x: RIGHT_PANEL_X,
       y: pickerY,
       width: SIDE_PANEL_WIDTH,
+      height: pickerHeight,
       sceneWidth: W,
       mapW: map.width,
       mapH: map.height,
@@ -572,6 +581,7 @@ export class GenerateSetupScene extends Phaser.Scene {
     const showMon = tab === "monsters";
     if (this.monsterSubContainer) this.monsterSubContainer.setVisible(showMon);
     if (this.triggerSubContainer) this.triggerSubContainer.setVisible(!showMon);
+    if (this.monsterPicker) this.monsterPicker.setVisible(showMon);
     if (this.triggerEditor) this.triggerEditor.setVisible(!showMon);
     // Tab visual state — active tab is brighter.
     const paint = (bg: Phaser.GameObjects.Rectangle | null, lbl: Phaser.GameObjects.Text | null, active: boolean) => {
@@ -1397,12 +1407,16 @@ export class GenerateSetupScene extends Phaser.Scene {
     const detInputs = [this.detTitleInput, this.detDescInput, this.detIntroInput, this.detObjectiveInput, this.detCompletionFlagInput];
     for (const el of detInputs) if (el) el.style.display = det ? "" : "none";
     if (this.genPromptInput) this.genPromptInput.style.display = !det ? "" : "none";
-    // TriggerEditor owns its own absolutely-positioned DOM inputs; the Phaser
-    // container's visibility doesn't reach them, so toggle them explicitly.
-    // When det is true, the trigger editor only shows for the active picker
-    // sub-tab, which `activatePickerTab` already handles.
-    if (this.triggerEditor && !det) this.triggerEditor.setVisible(false);
-    else if (this.triggerEditor && det) this.activatePickerTab(this.pickerTab);
+    // The sub-components (TriggerEditor, MonsterPicker) own absolutely-
+    // positioned DOM nodes; Phaser container visibility doesn't reach them,
+    // so toggle them explicitly. When det is true the picker sub-tab logic
+    // takes over via activatePickerTab.
+    if (!det) {
+      if (this.triggerEditor) this.triggerEditor.setVisible(false);
+      if (this.monsterPicker) this.monsterPicker.setVisible(false);
+    } else {
+      this.activatePickerTab(this.pickerTab);
+    }
   }
 
   private setDomChromeVisible(visible: boolean): void {
@@ -1412,6 +1426,7 @@ export class GenerateSetupScene extends Phaser.Scene {
       if (this.genPromptInput) this.genPromptInput.style.display = "none";
       if (this.statusEl)       this.statusEl.style.display       = "none";
       if (this.triggerEditor)  this.triggerEditor.setVisible(false);
+      if (this.monsterPicker)  this.monsterPicker.setVisible(false);
     } else {
       this.setDomVisibility();
       if (this.statusEl) this.statusEl.style.display = "";
@@ -1428,10 +1443,11 @@ export class GenerateSetupScene extends Phaser.Scene {
     if (this.statusEl)               { this.statusEl.remove();               this.statusEl               = null; }
     if (this.mapPreview)             { this.mapPreview.destroy();            this.mapPreview             = null; }
     if (this.mapSelector)            { this.mapSelector.destroy();           this.mapSelector            = null; }
-    // TriggerEditor + MonsterPicker own their own DOM inputs / scene listeners.
-    // Without this, the trigger editor's per-row <input>s and <textarea>s stay
-    // parented to document.body after the scene unloads (visible residue), and
-    // the monster picker's wheel listener leaks onto the scene.
+    // ZonePainter + MonsterPicker + TriggerEditor all own their own DOM
+    // elements (paint buttons, monster list, trigger rows). Without this,
+    // those DOM nodes stay parented to document.body after the scene unloads
+    // and leak visibly across navigations.
+    if (this.zonePainter)            { this.zonePainter.destroy();           this.zonePainter            = null; }
     if (this.triggerEditor)          { this.triggerEditor.destroy();         this.triggerEditor          = null; }
     if (this.monsterPicker)          { this.monsterPicker.destroy();         this.monsterPicker          = null; }
   }

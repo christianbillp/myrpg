@@ -13,8 +13,7 @@
 import Phaser from "phaser";
 import { decodeTileGid, TILE_VOID_GID } from "../../../../shared/tileGid";
 import type { MapPreviewData } from "../MapPreviewOverlay";
-
-const DPR = window.devicePixelRatio;
+import { createHtmlButton, type HtmlButtonHandle } from "../htmlButtons";
 
 /** Per-kind outline colour for trigger-region overlays. */
 const TRIGGER_COLOR: Record<TriggerRegion["kind"], number> = {
@@ -44,6 +43,8 @@ export interface ZonePainterOptions {
   initialPlayerCells?: Set<string>;
   initialEnemyCells?: Set<string>;
   initialNeutralCells?: Set<string>;
+  /** Scene's logical width — required by the HTML paint-mode buttons for scale calc. */
+  sceneWidth: number;
 }
 
 /** A trigger region drawn on the thumbnail so the author can see what tiles fire the trigger. */
@@ -60,12 +61,7 @@ export class ZonePainter {
   private readonly zoneOverlayCells = new Map<string, Phaser.GameObjects.Rectangle>();
   private readonly triggerOverlay: Phaser.GameObjects.Graphics;
   private paintMode: PaintMode = null;
-  private paintModePlayerBg: Phaser.GameObjects.Rectangle | null = null;
-  private paintModePlayerLabel: Phaser.GameObjects.Text | null = null;
-  private paintModeEnemyBg: Phaser.GameObjects.Rectangle | null = null;
-  private paintModeEnemyLabel: Phaser.GameObjects.Text | null = null;
-  private paintModeNeutralBg: Phaser.GameObjects.Rectangle | null = null;
-  private paintModeNeutralLabel: Phaser.GameObjects.Text | null = null;
+  private paintBtns: Array<{ mode: PaintMode; handle: HtmlButtonHandle }> = [];
 
   constructor(private readonly opts: ZonePainterOptions) {
     for (const k of opts.initialPlayerCells  ?? []) this.playerCells.add(k);
@@ -98,47 +94,52 @@ export class ZonePainter {
   getEnemyZones(): Set<string> { return this.enemyCells; }
   getNeutralZones(): Set<string> { return this.neutralCells; }
 
-  /** Build the 3-button paint mode toolbar below the thumbnail. Call this
-   *  after the thumbnail's footnote/label have been positioned externally. */
+  /** Tear down the HTML paint-mode buttons. The Phaser objects parented to
+   *  `opts.parent` are cleaned up by the scene when the parent container is
+   *  destroyed. */
+  destroy(): void {
+    for (const { handle } of this.paintBtns) handle.dispose();
+    this.paintBtns = [];
+  }
+
+  /**
+   * Build the four-button paint mode toolbar below the thumbnail. PLAYER /
+   * ENEMY / NEUTRAL toggle the active paint mode (clicking the active mode
+   * deactivates); CLEAR wipes every painted zone.
+   */
   buildPaintModeButtons(x: number, y: number, totalW: number): void {
-    const { scene, parent } = this.opts;
     const btnW = (totalW - 30) / 4;
-    const btnH = 26;
-    const mkBtn = (cx: number, label: string, onClick: () => void) => {
-      const bg = scene.add.rectangle(cx + btnW / 2, y, btnW, btnH, 0x1a1a2a).setStrokeStyle(1, 0x445566).setInteractive({ useHandCursor: true });
-      const lbl = scene.add.text(cx + btnW / 2, y, label, {
-        fontSize: "10px", color: "#aabbcc", fontFamily: "monospace", resolution: DPR, letterSpacing: 1,
-      }).setOrigin(0.5);
-      bg.on("pointerdown", onClick);
-      parent.add(bg);
-      parent.add(lbl);
-      return { bg, lbl };
+    const btnH = 28;
+    const mk = (mode: PaintMode | "clear", label: string, slot: number, variant: "secondary" | "danger" | "warn" | "primary"): HtmlButtonHandle => {
+      const bx = x + slot * (btnW + 10);
+      return createHtmlButton({
+        scene: this.opts.scene,
+        sceneWidth: this.opts.sceneWidth,
+        x: bx, y, w: btnW, h: btnH,
+        label, variant,
+        fontSize: 11,
+        onClick: () => {
+          if (mode === "clear") {
+            this.playerCells.clear();
+            this.enemyCells.clear();
+            this.neutralCells.clear();
+            for (const key of this.zoneOverlayCells.keys()) this.refreshZoneOverlay(key);
+            this.opts.onZonesChanged();
+          } else {
+            this.paintMode = this.paintMode === mode ? null : mode;
+            this.refreshPaintModeButtons();
+          }
+        },
+      });
     };
-    const player = mkBtn(x, "PLAYER", () => {
-      this.paintMode = this.paintMode === "player" ? null : "player";
-      this.refreshPaintModeButtons();
-    });
-    const enemy = mkBtn(x + btnW + 10, "ENEMY", () => {
-      this.paintMode = this.paintMode === "enemy" ? null : "enemy";
-      this.refreshPaintModeButtons();
-    });
-    const neutral = mkBtn(x + 2 * (btnW + 10), "NEUTRAL", () => {
-      this.paintMode = this.paintMode === "neutral" ? null : "neutral";
-      this.refreshPaintModeButtons();
-    });
-    mkBtn(x + 3 * (btnW + 10), "CLEAR", () => {
-      this.playerCells.clear();
-      this.enemyCells.clear();
-      this.neutralCells.clear();
-      for (const key of this.zoneOverlayCells.keys()) this.refreshZoneOverlay(key);
-      this.opts.onZonesChanged();
-    });
-    this.paintModePlayerBg = player.bg;
-    this.paintModePlayerLabel = player.lbl;
-    this.paintModeEnemyBg = enemy.bg;
-    this.paintModeEnemyLabel = enemy.lbl;
-    this.paintModeNeutralBg = neutral.bg;
-    this.paintModeNeutralLabel = neutral.lbl;
+    this.paintBtns = [
+      { mode: "player",  handle: mk("player",  "PLAYER",  0, "secondary") },
+      { mode: "enemy",   handle: mk("enemy",   "ENEMY",   1, "danger") },
+      { mode: "neutral", handle: mk("neutral", "NEUTRAL", 2, "warn") },
+    ];
+    // CLEAR is a non-toggleable command — store separately so refresh skips it.
+    const clear = mk("clear", "CLEAR", 3, "primary");
+    this.paintBtns.push({ mode: null, handle: clear });
     this.refreshPaintModeButtons();
   }
 
@@ -233,20 +234,9 @@ export class ZonePainter {
   }
 
   private refreshPaintModeButtons(): void {
-    if (this.paintModePlayerBg && this.paintModePlayerLabel) {
-      const on = this.paintMode === "player";
-      this.paintModePlayerBg.setFillStyle(on ? 0x3388ff : 0x1a1a2a, on ? 0.4 : 1).setStrokeStyle(2, on ? 0x3388ff : 0x445566);
-      this.paintModePlayerLabel.setColor(on ? "#dde6ff" : "#aabbcc");
-    }
-    if (this.paintModeEnemyBg && this.paintModeEnemyLabel) {
-      const on = this.paintMode === "enemy";
-      this.paintModeEnemyBg.setFillStyle(on ? 0xaa3333 : 0x1a1a2a, on ? 0.4 : 1).setStrokeStyle(2, on ? 0xaa3333 : 0x445566);
-      this.paintModeEnemyLabel.setColor(on ? "#ffd6d6" : "#aabbcc");
-    }
-    if (this.paintModeNeutralBg && this.paintModeNeutralLabel) {
-      const on = this.paintMode === "neutral";
-      this.paintModeNeutralBg.setFillStyle(on ? 0xe2b96f : 0x1a1a2a, on ? 0.4 : 1).setStrokeStyle(2, on ? 0xe2b96f : 0x445566);
-      this.paintModeNeutralLabel.setColor(on ? "#fff1c8" : "#aabbcc");
+    for (const { mode, handle } of this.paintBtns) {
+      if (mode === null) continue;  // CLEAR — not a toggle.
+      handle.setActive(this.paintMode === mode);
     }
   }
 }

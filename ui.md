@@ -241,6 +241,42 @@ When the caller passes a `zones` option (`{ playerCells: Set<string>; enemyCells
 
 ---
 
+### Encounter Editor Scene
+
+`client/src/scenes/EncounterEditorScene.ts` — top-level scene reached via `MainMenuScene → ENCOUNTER EDITOR`. Full-screen editor for an existing encounter. **No character selector** and no "generate" path; the user opens an encounter, edits its fields, and writes the changes back. **Every visible element on the scene is HTML** — buttons via `createHtmlButton`, inputs via `<input>` / `<textarea>`, titles + labels + captions + status line via `createHtmlText` — so all text stays crisp at any zoom level instead of going blurry through Phaser's canvas text rendering. The only Phaser-rendered things are the canvas backdrop, the divider rule, and the map thumbnail itself (which uses spritesheet textures).
+
+**Layout:** the page is split into two columns. The LEFT column carries the map thumbnail + zone painter + paint-mode toggle and the story-field stack (title / introduction / description / objective + completion flag). The RIGHT column carries only the MONSTERS / TRIGGERS tab toggle and the active picker, **occupying the full page height** — so long monster rosters and multiple triggers both have room to breathe without scrolling clipped lists.
+
+| Component | Description |
+| --------- | ----------- |
+| **Title row** | Centered "ENCOUNTER EDITOR" header (HTML). Subtitle directly below (HTML, centered) shows the loaded encounter's id + title, or `No encounter loaded — press OPEN ENCOUNTER` when nothing is loaded. |
+| **Status line** | HTML text pinned to the bottom of the canvas and **center-aligned** across the full width. Shows the most recent feedback — e.g. `Loaded gen_1748394920_dungeon_sweep.` after OPEN ENCOUNTER, `Saving encounter…` while a save is in flight, `Saved gen_*.` on success, or the disabled-button hint when SAVE ENCOUNTER's preconditions aren't met. |
+| **📂 OPEN ENCOUNTER** button | Top-right corner (HTML). Opens the [Encounter Picker Overlay](#encounter-picker-overlay) — a modal grid of cards listing every saved encounter. Selecting a card loads its state into the form. |
+| **Thumbnail + zone painter** *(LEFT column, top)* | Same `ZonePainter` the Generator Setup Scene uses. Player / enemy / neutral cells are decoded from the encounter's `startingZones.data` array on load. Painted triggers render as colour-coded outlined rectangles on top. Clicking with no paint mode opens the Map Preview Overlay at full size. |
+| **PAINT mode buttons** *(LEFT column)* | PLAYER / ENEMY / NEUTRAL / CLEAR — HTML buttons; the active mode renders with a brighter "active" background. |
+| **TITLE / INTRODUCTION / DESCRIPTION / OBJECTIVE / COMPLETION FLAG inputs** *(LEFT column, below paint buttons)* | HTML `<input>` + `<textarea>` stack. Loaded from the encounter's `encounterTitle`, `customIntroduction`, `customContext`, `objective`, `completionFlag` fields. Textarea heights expand to fill the remaining LEFT-column vertical space. |
+| **MONSTERS / TRIGGERS tab toggle** *(RIGHT column, top)* | Two HTML buttons spanning the right column. Active tab renders with the brighter "active" colour. |
+| **MonsterPicker** *(RIGHT column, monsters tab)* | Fully HTML scrollable list of every monster def, with `+ ALLY` / `+ NEUTRAL` / `+ ENEMY` HTML buttons per row. Pre-populated from the loaded encounter's `allyIds` / `npcIds` / `enemyIds`. A summary box + CLEAR MONSTERS button sit beneath the list. The list uses native `overflow:auto` scrolling so any number of monsters can be added. |
+| **TriggerEditor** *(RIGHT column, triggers tab)* | Fully HTML scrollable list of trigger rows. Each row has kind chips (PERCEPTION / LOG / AIDM CUE / START COMBAT), region xywh inputs, per-kind config inputs, and a REMOVE button — all HTML. Beneath the list sits the "+ ADD TRIGGER" button. There's no fixed cap on the number of triggers — the list scrolls. On load, triggers are reverse-mapped from the encounter's `triggers` array (perception / log / aigm / combat patterns); triggers that can't be represented as a single ComposedTrigger are skipped, and the status line surfaces the skipped count. |
+| **BACK** button | Bottom-left (HTML, `ghost` variant). Returns to Main Menu Scene. |
+| **✓ SAVE ENCOUNTER** button | Bottom-right (HTML, `primary` variant). POSTs `/generate/encounter/update` with the current form state. The handler merges the editable fields into the existing encounter JSON and rewrites it, **preserving every field the editor doesn't expose** (environment flags, tileProperties, generated badge, etc.). After save, the local encounters + maps registries are refreshed so a subsequent OPEN ENCOUNTER sees the latest version. The button stays clickable when its preconditions aren't met and surfaces a status-line hint ("Open an encounter first.", "Paint at least one player-start cell (PAINT: PLAYER).") instead of going silent. |
+
+---
+
+### Encounter Picker Overlay
+
+`client/src/ui/generate/EncounterPickerOverlay.ts`. Modal Phaser overlay opened by the **OPEN ENCOUNTER** button on Encounter Editor Scene. Lists every encounter in the `encounters` registry as a scrollable grid of cards.
+
+| Component | Description |
+| --------- | ----------- |
+| **Backdrop** | Semi-transparent black covering the whole canvas; swallows pointer events. |
+| **Header** | "OPEN ENCOUNTER" accent tag with a `<N> saved encounters` subtitle. |
+| **Encounter card grid** | Each card renders a thumbnail of the encounter's referenced map (looked up from the maps registry by `encounter.mapId`) at ~6 px / tile using the map's own multi-tileset routing, then shows the encounter title (accent colour), id + `✦ generated` tag (dim), and the encounter description below. Wheel-scrolls vertically when the cursor is over the grid. If the referenced map can't be found in the registry, the card surfaces "(missing map: …)" in red instead of a thumbnail. |
+| **Card click** | Resolves the full `EncounterDef` back to the parent scene, which loads it into the editor form. |
+| **CLOSE** button | Bottom-right. Dismisses the overlay without loading anything. |
+
+---
+
 | Component            | Description                                                               |
 | -------------------- | ------------------------------------------------------------------------- |
 | **Title**            | "STORY LOG" label and character name                                      |

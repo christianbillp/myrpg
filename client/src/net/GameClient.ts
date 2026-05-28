@@ -334,6 +334,47 @@ export class GameClient {
   }
 
   /**
+   * Update an existing encounter in place — used by `EncounterEditorScene`.
+   * Mirrors `composeEncounter`'s body shape but requires an `encounterId`
+   * and skips map composition (the encounter's existing `mapId` is reused
+   * unless the caller supplies a new one).
+   */
+  async updateEncounter(args: {
+    encounterId: string;
+    mapId?: string;
+    description?: string;
+    startingZonesData?: number[];
+    allyIds?: string[];
+    enemyIds?: string[];
+    neutralIds?: string[];
+    customTitle?: string;
+    customIntroduction?: string;
+    customObjective?: string;
+    completionFlag?: string;
+    triggers?: Array<{
+      id: string;
+      region: { x: number; y: number; w: number; h: number };
+      kind: "perception" | "log" | "aigm" | "combat";
+      dc: number;
+      passMessage: string;
+      message: string;
+      defId: string;
+      defIds?: string[];
+    }>;
+  }): Promise<{ encounterId: string; mapId: string }> {
+    const res = await fetch(`${API_URL}/generate/encounter/update`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(args),
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({ error: `HTTP ${res.status}` })) as { error?: string };
+      throw new Error(body.error ?? `Update encounter failed: ${res.status}`);
+    }
+    return res.json() as Promise<{ encounterId: string; mapId: string }>;
+  }
+
+  /**
    * Fetch the live maps list from the server. Used after a fresh map has been
    * generated so the client's registry can pick it up without restarting.
    */

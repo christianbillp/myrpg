@@ -32,16 +32,20 @@ export class MainMenuScene extends Phaser.Scene {
       color: "#8a8270",
     }).setOrigin(0.5);
 
-    this.makeMenuButton(w / 2, h * 0.45, "ADVENTURE", "A string of encounters with overarching narrative", () => {
+    this.makeMenuButton(w / 2, h * 0.40, "ADVENTURE", "A string of encounters with overarching narrative", () => {
       this.scene.start("AdventureSetupScene");
     });
 
-    this.makeMenuButton(w / 2, h * 0.59, "SINGLE ENCOUNTER", "Play a one-off scenario", () => {
+    this.makeMenuButton(w / 2, h * 0.52, "SINGLE ENCOUNTER", "Play a one-off scenario", () => {
       this.scene.start("EncounterSetupScene");
     });
 
-    this.makeMenuButton(w / 2, h * 0.73, "GENERATE ENCOUNTER", "Describe a scene; the GM authors a one-off encounter just for you", () => {
+    this.makeMenuButton(w / 2, h * 0.64, "GENERATE ENCOUNTER", "Describe a scene; the GM authors a one-off encounter just for you", () => {
       this.scene.start("GenerateSetupScene");
+    });
+
+    this.makeMenuButton(w / 2, h * 0.76, "ENCOUNTER EDITOR", "Open and edit an existing encounter — title, monsters, zones, triggers", () => {
+      this.scene.start("EncounterEditorScene");
     });
   }
 

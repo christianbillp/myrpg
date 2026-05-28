@@ -391,6 +391,162 @@ export function registerGenerateRoutes(server: FastifyInstance, ctx: GenerateRou
   });
 
   /**
+   * Update an existing encounter in place. Used by `EncounterEditorScene` —
+   * the user opens an encounter, edits its title / story / monsters / zones /
+   * triggers, and clicks SAVE ENCOUNTER. The endpoint rewrites the file at
+   * `server/data/encounters/<encounterId>.json` preserving any fields not
+   * exposed by the editor (e.g. `environment`, `tileProperties`, `generated`).
+   *
+   * Body mirrors `/generate/encounter/composed` minus map-composition fields
+   * (the editor doesn't compose a new map — it reuses the encounter's `mapId`
+   * by default, or accepts a new `existingMapId` if the user picked one in
+   * the editor's map selector).
+   */
+  server.post<{
+    Body: {
+      encounterId: string;
+      mapId?: string;
+      description?: string;
+      startingZonesData?: number[];
+      allyIds?: string[];
+      enemyIds?: string[];
+      neutralIds?: string[];
+      customTitle?: string;
+      customIntroduction?: string;
+      customObjective?: string;
+      completionFlag?: string;
+      triggers?: Array<{
+        id: string;
+        region: { x: number; y: number; w: number; h: number };
+        kind: "perception" | "log" | "aigm" | "combat";
+        dc: number;
+        passMessage: string;
+        message: string;
+        defId: string;
+        defIds?: string[];
+      }>;
+    };
+  }>("/generate/encounter/update", async (req, reply) => {
+    const { encounterId, mapId: requestedMapId, description, startingZonesData, allyIds, enemyIds, neutralIds, customTitle, customIntroduction, customObjective, completionFlag, triggers: composedTriggers } = req.body;
+    if (!encounterId) return reply.code(400).send({ error: "encounterId is required" });
+    const defs = getDefs();
+    try {
+      const encDir = join(dataDir, "encounters");
+      const encPath = join(encDir, `${encounterId}.json`);
+      let existing: Record<string, unknown>;
+      try {
+        existing = JSON.parse(await readFile(encPath, "utf-8")) as Record<string, unknown>;
+      } catch {
+        return reply.code(404).send({ error: `encounter "${encounterId}" not found` });
+      }
+
+      // Resolve the map — caller may swap to a different saved map via the
+      // editor's PICK MAP overlay; if omitted we keep the existing reference.
+      const mapId = requestedMapId ?? (existing.mapId as string);
+      const map = defs.maps.find((m) => m.id === mapId);
+      if (!map) return reply.code(400).send({ error: `Unknown mapId "${mapId}"` });
+      const mapWidth = map.cols;
+      const mapHeight = map.rows;
+      const cells = mapWidth * mapHeight;
+
+      // Validate creature ids against the live def registry.
+      const validIds = new Set([...defs.monsters.map((m) => m.id), ...defs.npcs.map((n) => n.id)]);
+      for (const id of [...(allyIds ?? []), ...(enemyIds ?? []), ...(neutralIds ?? [])]) {
+        if (!validIds.has(id)) return reply.code(400).send({ error: `Unknown creature id "${id}"` });
+      }
+
+      // Starting zones — if omitted, preserve the existing layer; otherwise
+      // require it to match the (possibly new) map's cell count and carry at
+      // least one player-start cell.
+      let zonesLayer: { width: number; height: number; data: number[] };
+      if (startingZonesData && startingZonesData.length > 0) {
+        if (startingZonesData.length !== cells) {
+          return reply.code(400).send({ error: `startingZonesData length ${startingZonesData.length} ≠ width*height (${cells})` });
+        }
+        if (!startingZonesData.some((z) => z === STARTING_ZONE_PLAYER)) {
+          return reply.code(400).send({ error: `startingZonesData must include at least one player-start cell` });
+        }
+        zonesLayer = { width: mapWidth, height: mapHeight, data: startingZonesData };
+      } else {
+        zonesLayer = (existing.startingZones ?? { width: mapWidth, height: mapHeight, data: new Array<number>(cells).fill(0) }) as { width: number; height: number; data: number[] };
+      }
+
+      // Expand the editor's per-trigger blobs into full EncounterTriggers
+      // using the same logic as `/generate/encounter/composed`.
+      const triggers = (composedTriggers ?? []).map((t, i) => {
+        const baseId = `${t.id || `edit_trigger_${i + 1}`}`;
+        const when = { event: 'player_moved' as const, in_area: t.region };
+        const guards = [{ type: 'phase' as const, in: ['exploring'] as const }];
+        let then: Record<string, unknown>[];
+        switch (t.kind) {
+          case 'perception':
+            then = [{
+              type: 'player_ability_check',
+              skill: 'perception',
+              dc: t.dc,
+              onPass: t.passMessage.trim() ? [{ type: 'show_log', message: t.passMessage.trim() }] : [],
+              onFail: [],
+            }];
+            break;
+          case 'log':
+            then = t.message.trim() ? [{ type: 'show_log', message: t.message.trim() }] : [];
+            break;
+          case 'aigm':
+            then = t.message.trim() ? [{ type: 'send_aigm_message', message: t.message.trim() }] : [];
+            break;
+          case 'combat': {
+            then = [];
+            const flipIds = new Set<string>();
+            if (t.defId.trim()) flipIds.add(t.defId.trim());
+            for (const id of t.defIds ?? []) if (id.trim()) flipIds.add(id.trim());
+            for (const id of flipIds) then.push({ type: 'set_disposition_by_def_id', defId: id, disposition: 'enemy' });
+            then.push({ type: 'trigger_combat' });
+            break;
+          }
+        }
+        return { id: baseId, when, if: guards, then, once: true };
+      });
+
+      const sanitiseFlag = (s: string): string => s.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 48);
+
+      // Build the updated JSON — preserve all unrecognised top-level fields
+      // (environment, tileProperties, generated, customContext from a prior
+      // session, etc.) by spreading `existing` first and overwriting just the
+      // editable slots.
+      const updated: Record<string, unknown> = {
+        ...existing,
+        id: encounterId,
+        mapId,
+        startingZones: zonesLayer,
+      };
+      if (customTitle !== undefined)        updated.encounterTitle    = customTitle.trim() || (existing.encounterTitle ?? encounterId);
+      if (customIntroduction !== undefined) updated.customIntroduction = customIntroduction.trim();
+      if (description !== undefined)        updated.customContext     = description.trim();
+      if (customObjective !== undefined)    updated.objective         = customObjective.trim() || (existing.objective ?? "Complete the encounter.");
+      if (completionFlag !== undefined) {
+        const cf = completionFlag.trim();
+        if (cf) updated.completionFlag = sanitiseFlag(cf);
+        else delete updated.completionFlag;
+      }
+      if (allyIds    !== undefined) updated.allyIds = allyIds.filter((id) => validIds.has(id));
+      if (enemyIds   !== undefined) updated.enemyIds = enemyIds.filter((id) => validIds.has(id));
+      if (neutralIds !== undefined) updated.npcIds  = neutralIds.filter((id) => validIds.has(id));
+      if (composedTriggers !== undefined) {
+        if (triggers.length > 0) updated.triggers = triggers;
+        else delete updated.triggers;
+      }
+
+      await writeFile(encPath, JSON.stringify(updated, null, 2));
+      await loadDefs();
+      return reply.send({ encounterId, mapId });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error('[generate/encounter/update] failed', msg);
+      return reply.code(400).send({ error: msg });
+    }
+  });
+
+  /**
    * Generate just a map (no encounter wrapper) via Claude. Used by the
    * GENERATE MAP ONLY iterate-and-preview flow on `GenerateSetupScene`.
    */

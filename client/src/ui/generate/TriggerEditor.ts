@@ -1,24 +1,23 @@
 /**
  * TriggerEditor — inline UI for authoring encounter triggers from the
- * Deterministic tab of `GenerateSetupScene`. Each trigger is a rectangular
- * region on the map plus one of four action templates (perception check,
- * log message, AIGM cue, start combat). The component owns its trigger
- * list; the scene reads it via `getTriggers()` when composing the encounter.
+ * Adjudicator-tab of `GenerateSetupScene` and from `EncounterEditorScene`.
  *
- * Rendering mixes Phaser primitives (labels, framing rects, chips, buttons)
- * for layout with absolutely-positioned HTML inputs for editable text and
- * numbers. The inputs reposition themselves on `scale.resize`, mirroring
- * how `GenerateSetupScene.buildTextarea` already does it.
+ * Each trigger is a rectangular region on the map plus one of four action
+ * templates (perception check, log message, AIDM cue, start combat). The
+ * component owns its trigger list; the parent scene reads it via
+ * `getTriggers()` when composing or updating the encounter.
+ *
+ * Rendering is HTML-based: the scrollable rows live inside an absolutely-
+ * positioned `<div style="overflow:auto">` so native browser scrolling +
+ * crisp font rendering replace the previous Phaser scroll container. The
+ * "+ ADD TRIGGER" button is also HTML — Phaser-rendered click targets
+ * were being occluded by sibling DOM inputs.
  */
 import Phaser from "phaser";
 
 const DPR = window.devicePixelRatio;
-// Each trigger card has four stacked sub-rows (summary, kind chips, region,
-// per-kind config) and is sized so two cards + the header + the ADD button
-// roughly match the MonsterPicker's footprint in the shared picker band.
-const ROW_H = 88;
-const ADD_BTN_H = 28;
-const MAX_VISIBLE_TRIGGERS = 2;
+const ADD_BTN_H = 32;
+const HEADER_H = 16;
 
 export type TriggerActionKind = "perception" | "log" | "aigm" | "combat";
 
@@ -26,17 +25,10 @@ export interface ComposedTrigger {
   id: string;
   region: { x: number; y: number; w: number; h: number };
   kind: TriggerActionKind;
-  // Per-kind config — only the fields for the selected kind are used.
-  dc: number;          // perception
-  passMessage: string; // perception
-  message: string;     // log + aigm
-  defId: string;       // combat — single defId for hand-authored flip
-  /**
-   * Bulk-flip list for combat triggers — used by the RANDOMIZE flow to flip
-   * every rolled monster type to enemy when the trigger fires. Coexists with
-   * `defId`; the server unions both into a deduped flip list. The editor UI
-   * doesn't expose this field — it's only set programmatically.
-   */
+  dc: number;
+  passMessage: string;
+  message: string;
+  defId: string;
   defIds?: string[];
 }
 
@@ -46,86 +38,94 @@ export interface TriggerEditorOptions {
   x: number;
   y: number;
   width: number;
-  /** Scene width in logical pixels — used to scale absolutely-positioned DOM inputs. */
+  /** Total height the editor may consume (header + scroll area + add button). */
+  height: number;
+  /** Scene width in logical pixels — used to scale absolutely-positioned DOM. */
   sceneWidth: number;
-  /** Map dimensions, used to clamp region inputs so they can't extend past the map. */
+  /** Map dimensions, used to clamp region inputs. */
   mapW: number;
   mapH: number;
-  /** Called whenever triggers change so the scene can refresh button enable-state etc. */
+  /** Called whenever triggers change. */
   onChange?: () => void;
-  /** Pre-seed the editor with triggers (used by the RANDOMIZE flow). */
+  /** Pre-seed the editor with triggers. */
   initialTriggers?: ComposedTrigger[];
-}
-
-interface TriggerRowElements {
-  card: Phaser.GameObjects.Rectangle;
-  summary: Phaser.GameObjects.Text;
-  removeBg: Phaser.GameObjects.Rectangle;
-  removeLabel: Phaser.GameObjects.Text;
-  kindChips: Map<TriggerActionKind, { bg: Phaser.GameObjects.Rectangle; label: Phaser.GameObjects.Text }>;
-  regionInputs: HTMLInputElement[];   // [x, y, w, h]
-  dcInput: HTMLInputElement;
-  passMessageInput: HTMLTextAreaElement;
-  messageInput: HTMLTextAreaElement;
-  defIdInput: HTMLInputElement;
-  // Phaser labels we toggle visibility on to show only the active kind's config.
-  kindLabels: { perception: Phaser.GameObjects.Text[]; log: Phaser.GameObjects.Text[]; aigm: Phaser.GameObjects.Text[]; combat: Phaser.GameObjects.Text[] };
 }
 
 const KIND_LABEL: Record<TriggerActionKind, string> = {
   perception: "PERCEPTION",
   log: "LOG",
-  aigm: "AIGM CUE",
+  aigm: "AIDM CUE",
   combat: "START COMBAT",
 };
 
 export class TriggerEditor {
   private readonly triggers: ComposedTrigger[] = [];
-  private readonly rows: TriggerRowElements[] = [];
-  private readonly scrollContainer: Phaser.GameObjects.Container;
-  private addBg!: Phaser.GameObjects.Rectangle;
-  private addLabel!: Phaser.GameObjects.Text;
+  private readonly rowElements: HTMLDivElement[] = [];
+  private readonly scene: Phaser.Scene;
+  private readonly opts: TriggerEditorOptions;
+  private listEl!: HTMLDivElement;
+  private addBtn!: HTMLButtonElement;
   private placeHandlers: Array<() => void> = [];
+  private visible = true;
 
-  constructor(private readonly opts: TriggerEditorOptions) {
+  constructor(opts: TriggerEditorOptions) {
+    this.scene = opts.scene;
+    this.opts = opts;
     const { scene, parent, x, y, width } = opts;
 
     parent.add(scene.add.text(x, y, "TRIGGERS — fires when the player enters the region", {
       fontSize: "10px", color: "#778899", fontFamily: "monospace", resolution: DPR, letterSpacing: 1,
     }).setOrigin(0, 0));
 
-    // Backing rect for the scroll area.
-    const scrollH = ROW_H * MAX_VISIBLE_TRIGGERS;
-    const scrollY = y + 18;
-    parent.add(scene.add.rectangle(x + width / 2, scrollY + scrollH / 2, width, scrollH, 0x0a0e16).setStrokeStyle(1, 0x334455));
-    this.scrollContainer = scene.add.container(x, scrollY);
-    parent.add(this.scrollContainer);
-    const mask = scene.make.graphics({ x: 0, y: 0 }, false);
-    mask.fillStyle(0xffffff).fillRect(x, scrollY, width, scrollH);
-    this.scrollContainer.setMask(mask.createGeometryMask());
+    // Scrollable HTML list — sized so the ADD button can sit beneath it.
+    const listY = y + HEADER_H + 4;
+    const listH = opts.height - HEADER_H - ADD_BTN_H - 14;
 
-    // ADD TRIGGER button beneath the scroll area.
-    const addY = scrollY + scrollH + 12;
-    this.addBg = scene.add.rectangle(x + width / 2, addY, width, ADD_BTN_H, 0x2a3a55).setStrokeStyle(1, 0x5588aa).setInteractive({ useHandCursor: true });
-    this.addLabel = scene.add.text(x + width / 2, addY, "+ ADD TRIGGER", {
-      fontSize: "12px", color: "#cce4ff", fontFamily: "monospace", resolution: DPR, letterSpacing: 1,
-    }).setOrigin(0.5);
-    this.addBg.on("pointerdown", () => this.addTrigger());
-    parent.add(this.addBg);
-    parent.add(this.addLabel);
+    this.listEl = document.createElement("div");
+    this.listEl.style.cssText = `
+      position: absolute;
+      background: #0a0e16;
+      border: 1px solid #334455;
+      box-sizing: border-box;
+      overflow-y: auto;
+      overflow-x: hidden;
+      z-index: 9;
+      padding: 4px;
+    `;
+    document.body.appendChild(this.listEl);
+    this.attachPlace(this.listEl, x, listY, width, listH);
 
-    // Seed from initial triggers if any were supplied (RANDOMIZE flow).
+    // ADD TRIGGER button as a real HTML button beneath the list.
+    const addY = listY + listH + 6;
+    this.addBtn = document.createElement("button");
+    this.addBtn.type = "button";
+    this.addBtn.textContent = "+ ADD TRIGGER";
+    this.addBtn.style.cssText = `
+      position: absolute;
+      background: #2a3a55;
+      color: #cce4ff;
+      border: 2px solid #5588aa;
+      padding: 0 12px;
+      font-family: monospace;
+      font-size: 12px;
+      letter-spacing: 1px;
+      cursor: pointer;
+      z-index: 10;
+      box-sizing: border-box;
+    `;
+    this.addBtn.addEventListener("mouseenter", () => { this.addBtn.style.background = "#3a4f70"; });
+    this.addBtn.addEventListener("mouseleave", () => { this.addBtn.style.background = "#2a3a55"; });
+    this.addBtn.addEventListener("click", () => this.addTrigger());
+    document.body.appendChild(this.addBtn);
+    this.attachPlace(this.addBtn, x, addY, width, ADD_BTN_H);
+
+    // Seed from initialTriggers if any were supplied.
     if (opts.initialTriggers && opts.initialTriggers.length > 0) {
-      for (const t of opts.initialTriggers.slice(0, MAX_VISIBLE_TRIGGERS)) {
+      for (const t of opts.initialTriggers) {
         this.triggers.push({ ...t, region: { ...t.region } });
       }
       this.rebuildRows();
     }
-  }
-
-  /** Total vertical pixels the editor occupies (header + scroll + add button). Useful for stacking below. */
-  totalHeight(): number {
-    return 18 + ROW_H * MAX_VISIBLE_TRIGGERS + 12 + ADD_BTN_H;
   }
 
   /** Snapshot of the current triggers. */
@@ -138,34 +138,27 @@ export class TriggerEditor {
   }
 
   destroy(): void {
-    for (const row of this.rows) this.removeRowDom(row);
-    this.rows.length = 0;
+    for (const row of this.rowElements) row.remove();
+    this.rowElements.length = 0;
+    this.listEl.remove();
+    this.addBtn.remove();
     for (const h of this.placeHandlers) this.opts.scene.scale.off("resize", h);
     this.placeHandlers = [];
   }
 
   /**
-   * Show / hide every DOM input the editor owns. Called by the tab toggle
-   * when the user flips between MONSTERS and TRIGGERS. Phaser objects are
-   * already toggled by the parent container's `setVisible`.
+   * Show / hide every DOM element the editor owns. Called by the tab toggle
+   * when the user flips between MONSTERS and TRIGGERS.
    */
   setVisible(visible: boolean): void {
-    const collect = (row: TriggerRowElements): HTMLElement[] => [...row.regionInputs, row.dcInput, row.passMessageInput, row.messageInput, row.defIdInput];
-    for (const row of this.rows) {
-      for (const el of collect(row)) {
-        // When showing, restore only the inputs that match the row's active
-        // kind — refreshKindVisibility owns the per-kind display logic, so
-        // re-running it does the right thing. When hiding, force all off.
-        el.style.display = visible ? "" : "none";
-      }
-      if (visible) this.refreshKindVisibility(row, this.triggers[this.rows.indexOf(row)].kind);
-    }
+    this.visible = visible;
+    this.listEl.style.display = visible ? "" : "none";
+    this.addBtn.style.display = visible ? "" : "none";
   }
 
   // ── Trigger lifecycle ────────────────────────────────────────────────────
 
   private addTrigger(): void {
-    if (this.triggers.length >= MAX_VISIBLE_TRIGGERS) return;
     const id = `gen_trigger_${this.triggers.length + 1}`;
     const region = { x: 0, y: 0, w: Math.min(5, this.opts.mapW), h: Math.min(5, this.opts.mapH) };
     const trig: ComposedTrigger = {
@@ -177,6 +170,8 @@ export class TriggerEditor {
     this.triggers.push(trig);
     this.rebuildRows();
     this.opts.onChange?.();
+    // Scroll new row into view.
+    this.listEl.scrollTop = this.listEl.scrollHeight;
   }
 
   private removeTrigger(index: number): void {
@@ -187,224 +182,233 @@ export class TriggerEditor {
 
   // ── Row rendering ───────────────────────────────────────────────────────
 
-  /** Tear down and rebuild all rows — simpler than diffing for a list this small. */
   private rebuildRows(): void {
-    for (const row of this.rows) this.removeRowDom(row);
-    this.rows.length = 0;
-    this.scrollContainer.removeAll(true);
+    for (const row of this.rowElements) row.remove();
+    this.rowElements.length = 0;
+    this.listEl.innerHTML = "";
     for (let i = 0; i < this.triggers.length; i++) {
       const row = this.buildRow(this.triggers[i], i);
-      this.rows.push(row);
+      this.rowElements.push(row);
+      this.listEl.appendChild(row);
     }
   }
 
-  private buildRow(trig: ComposedTrigger, i: number): TriggerRowElements {
-    const { scene, width } = this.opts;
-    const top = i * ROW_H;
-    const cardW = width - 8;
+  private buildRow(trig: ComposedTrigger, i: number): HTMLDivElement {
+    const row = document.createElement("div");
+    row.style.cssText = `
+      background: ${i % 2 === 0 ? "#111122" : "#141426"};
+      border: 1px solid #334455;
+      padding: 6px 8px;
+      margin-bottom: 4px;
+      box-sizing: border-box;
+      font-family: monospace;
+      font-size: 11px;
+      color: #aabbcc;
+    `;
 
-    const card = scene.add.rectangle(width / 2, top + ROW_H / 2, cardW, ROW_H - 4, i % 2 === 0 ? 0x111122 : 0x141426).setStrokeStyle(1, 0x334455);
-    this.scrollContainer.add(card);
+    // Summary line + REMOVE button.
+    const head = document.createElement("div");
+    head.style.cssText = "display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;";
+    const summary = document.createElement("span");
+    summary.style.color = "#e2b96f";
+    summary.textContent = this.summarise(trig);
+    head.appendChild(summary);
 
-    const summary = scene.add.text(10, top + 6, this.summarise(trig), {
-      fontSize: "10px", color: "#e2b96f", fontFamily: "monospace", resolution: DPR,
-    }).setOrigin(0, 0);
-    this.scrollContainer.add(summary);
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.textContent = "REMOVE";
+    remove.style.cssText = `
+      background: #551a1a; color: #ffcccc; border: 1px solid #aa4444;
+      padding: 1px 8px; font-family: monospace; font-size: 9px;
+      cursor: pointer; letter-spacing: 1px;
+    `;
+    remove.addEventListener("click", () => this.removeTrigger(i));
+    head.appendChild(remove);
+    row.appendChild(head);
 
-    const removeBg = scene.add.rectangle(width - 30, top + 12, 48, 14, 0x551a1a).setStrokeStyle(1, 0xaa4444).setInteractive({ useHandCursor: true });
-    const removeLabel = scene.add.text(width - 30, top + 12, "REMOVE", {
-      fontSize: "9px", color: "#ffcccc", fontFamily: "monospace", resolution: DPR, letterSpacing: 1,
-    }).setOrigin(0.5);
-    removeBg.on("pointerdown", () => this.removeTrigger(i));
-    this.scrollContainer.add(removeBg);
-    this.scrollContainer.add(removeLabel);
-
-    // Kind chips row (4 chips ~ 80px each).
-    const kindChips = new Map<TriggerActionKind, { bg: Phaser.GameObjects.Rectangle; label: Phaser.GameObjects.Text }>();
+    // Kind chips row.
+    const chipRow = document.createElement("div");
+    chipRow.style.cssText = "display: flex; gap: 4px; margin-bottom: 6px;";
     const kinds: TriggerActionKind[] = ["perception", "log", "aigm", "combat"];
-    const chipW = 90, chipH = 16;
-    kinds.forEach((k, idx) => {
-      const cx = 10 + idx * (chipW + 4) + chipW / 2;
-      const cy = top + 26;
-      const bg = scene.add.rectangle(cx, cy, chipW, chipH, 0x1a1a2a).setStrokeStyle(1, 0x445566).setInteractive({ useHandCursor: true });
-      const lbl = scene.add.text(cx, cy, KIND_LABEL[k], {
-        fontSize: "9px", color: "#aabbcc", fontFamily: "monospace", resolution: DPR, letterSpacing: 1,
-      }).setOrigin(0.5);
-      bg.on("pointerdown", () => {
+    const chipBtns = new Map<TriggerActionKind, HTMLButtonElement>();
+    for (const k of kinds) {
+      const chip = document.createElement("button");
+      chip.type = "button";
+      chip.textContent = KIND_LABEL[k];
+      chip.style.cssText = `
+        flex: 1; background: #1a1a2a; color: #aabbcc;
+        border: 1px solid #445566; padding: 2px 4px;
+        font-family: monospace; font-size: 9px; letter-spacing: 1px;
+        cursor: pointer;
+      `;
+      chip.addEventListener("click", () => {
         trig.kind = k;
-        this.refreshChips(row, trig.kind);
-        this.refreshKindVisibility(row, trig.kind);
-        summary.setText(this.summarise(trig));
+        this.refreshChips(chipBtns, trig.kind);
+        this.refreshKindVisibility(perceptionBlock, logBlock, aigmBlock, combatBlock, trig.kind);
+        summary.textContent = this.summarise(trig);
         this.opts.onChange?.();
       });
-      this.scrollContainer.add(bg);
-      this.scrollContainer.add(lbl);
-      kindChips.set(k, { bg, label: lbl });
-    });
+      chipBtns.set(k, chip);
+      chipRow.appendChild(chip);
+    }
+    row.appendChild(chipRow);
 
-    // Region inputs (4 little number boxes — x, y, w, h).
-    const regionLabel = scene.add.text(10, top + 46, "REGION  x", { fontSize: "9px", color: "#778899", fontFamily: "monospace", resolution: DPR }).setOrigin(0, 0);
-    this.scrollContainer.add(regionLabel);
+    // Region inputs.
+    const regionRow = document.createElement("div");
+    regionRow.style.cssText = "display: flex; gap: 6px; margin-bottom: 6px; align-items: center;";
+    regionRow.appendChild(this.makeLabel("REGION"));
     const regionInputs: HTMLInputElement[] = [];
-    const labelNames = ["x", "y", "w", "h"];
-    const labelXs = [80, 145, 210, 275];
-    labelNames.forEach((nm, k) => {
-      const lbl = scene.add.text(labelXs[k] - 18, top + 46, nm, { fontSize: "9px", color: "#778899", fontFamily: "monospace", resolution: DPR }).setOrigin(0, 0);
-      this.scrollContainer.add(lbl);
-      const sceneX = this.opts.x + labelXs[k] - 8;
-      const sceneY = this.opts.y + 18 + top + 42;
-      const input = this.buildNumberInput(sceneX, sceneY, 50, 18, String(k === 2 || k === 3 ? trig.region.w : 0), (val) => {
+    const labelNames: Array<keyof { x: 1; y: 1; w: 1; h: 1 }> = ["x", "y", "w", "h"];
+    for (const nm of labelNames) {
+      regionRow.appendChild(this.makeLabel(nm));
+      const input = this.makeNumberInput(String(trig.region[nm]), (val) => {
         const n = Math.max(0, Math.floor(Number(val) || 0));
-        if (k === 0) trig.region.x = Math.min(n, this.opts.mapW - 1);
-        else if (k === 1) trig.region.y = Math.min(n, this.opts.mapH - 1);
-        else if (k === 2) trig.region.w = Math.max(1, Math.min(n, this.opts.mapW - trig.region.x));
-        else            trig.region.h = Math.max(1, Math.min(n, this.opts.mapH - trig.region.y));
-        summary.setText(this.summarise(trig));
+        if (nm === "x") trig.region.x = Math.min(n, this.opts.mapW - 1);
+        else if (nm === "y") trig.region.y = Math.min(n, this.opts.mapH - 1);
+        else if (nm === "w") trig.region.w = Math.max(1, Math.min(n, this.opts.mapW - trig.region.x));
+        else trig.region.h = Math.max(1, Math.min(n, this.opts.mapH - trig.region.y));
+        summary.textContent = this.summarise(trig);
         this.opts.onChange?.();
       });
-      input.value = String(k === 0 ? trig.region.x : k === 1 ? trig.region.y : k === 2 ? trig.region.w : trig.region.h);
       regionInputs.push(input);
-    });
+      regionRow.appendChild(input);
+    }
+    row.appendChild(regionRow);
 
-    // Kind-specific config rows (one set of inputs per kind; only the active one is visible).
-    const cfgY = top + 66;
-    // Perception: DC + pass message.
-    const dcLabel = scene.add.text(10, cfgY, "DC", { fontSize: "9px", color: "#778899", fontFamily: "monospace", resolution: DPR }).setOrigin(0, 0);
-    this.scrollContainer.add(dcLabel);
-    const dcInput = this.buildNumberInput(this.opts.x + 32, this.opts.y + 18 + cfgY - 4, 50, 18, String(trig.dc), (val) => {
+    // Per-kind config blocks (only the active one is visible).
+    const perceptionBlock = document.createElement("div");
+    perceptionBlock.style.cssText = "display: flex; flex-direction: column; gap: 4px;";
+    const dcRow = document.createElement("div");
+    dcRow.style.cssText = "display: flex; gap: 6px; align-items: center;";
+    dcRow.appendChild(this.makeLabel("DC"));
+    dcRow.appendChild(this.makeNumberInput(String(trig.dc), (val) => {
       trig.dc = Math.max(1, Math.min(30, Math.floor(Number(val) || 10)));
-      summary.setText(this.summarise(trig));
+      summary.textContent = this.summarise(trig);
       this.opts.onChange?.();
-    });
-    const passLabel = scene.add.text(90, cfgY, "PASS MSG", { fontSize: "9px", color: "#778899", fontFamily: "monospace", resolution: DPR }).setOrigin(0, 0);
-    this.scrollContainer.add(passLabel);
-    const passInput = this.buildTextareaInput(this.opts.x + 152, this.opts.y + 18 + cfgY - 4, width - 162, 20, trig.passMessage, (val) => {
+    }));
+    perceptionBlock.appendChild(dcRow);
+    perceptionBlock.appendChild(this.makeLabel("PASS MESSAGE"));
+    perceptionBlock.appendChild(this.makeTextarea(trig.passMessage, (val) => {
       trig.passMessage = val;
       this.opts.onChange?.();
-    });
+    }));
+    row.appendChild(perceptionBlock);
 
-    // Log + AIGM: single message textarea (shared box per kind so they don't trample each other).
-    const msgLabel = scene.add.text(10, cfgY, "MESSAGE", { fontSize: "9px", color: "#778899", fontFamily: "monospace", resolution: DPR }).setOrigin(0, 0);
-    this.scrollContainer.add(msgLabel);
-    const messageInput = this.buildTextareaInput(this.opts.x + 72, this.opts.y + 18 + cfgY - 4, width - 82, 20, trig.message, (val) => {
+    const logBlock = document.createElement("div");
+    logBlock.appendChild(this.makeLabel("LOG MESSAGE"));
+    logBlock.appendChild(this.makeTextarea(trig.message, (val) => {
       trig.message = val;
       this.opts.onChange?.();
-    });
+    }));
+    row.appendChild(logBlock);
 
-    // Combat: defId input.
-    const defIdLabel = scene.add.text(10, cfgY, "DEF ID (optional)", { fontSize: "9px", color: "#778899", fontFamily: "monospace", resolution: DPR }).setOrigin(0, 0);
-    this.scrollContainer.add(defIdLabel);
-    const defIdInput = this.buildTextInput(this.opts.x + 130, this.opts.y + 18 + cfgY - 4, width - 140, 18, trig.defId, "e.g. cultist (flips to enemy)", (val) => {
+    const aigmBlock = document.createElement("div");
+    aigmBlock.appendChild(this.makeLabel("AIDM CUE"));
+    aigmBlock.appendChild(this.makeTextarea(trig.message, (val) => {
+      trig.message = val;
+      this.opts.onChange?.();
+    }));
+    row.appendChild(aigmBlock);
+
+    const combatBlock = document.createElement("div");
+    combatBlock.appendChild(this.makeLabel("DEF ID (optional — flips this id to enemy)"));
+    combatBlock.appendChild(this.makeTextInput(trig.defId, "e.g. cultist", (val) => {
       trig.defId = val.trim();
       this.opts.onChange?.();
-    });
+    }));
+    row.appendChild(combatBlock);
 
-    const row: TriggerRowElements = {
-      card, summary, removeBg, removeLabel, kindChips, regionInputs, dcInput, passMessageInput: passInput, messageInput, defIdInput,
-      kindLabels: { perception: [dcLabel, passLabel], log: [msgLabel], aigm: [msgLabel], combat: [defIdLabel] },
-    };
-    this.refreshChips(row, trig.kind);
-    this.refreshKindVisibility(row, trig.kind);
+    this.refreshChips(chipBtns, trig.kind);
+    this.refreshKindVisibility(perceptionBlock, logBlock, aigmBlock, combatBlock, trig.kind);
+    void regionInputs;
     return row;
   }
 
-  private refreshChips(row: TriggerRowElements, active: TriggerActionKind): void {
-    for (const [k, chip] of row.kindChips) {
+  private refreshChips(chipBtns: Map<TriggerActionKind, HTMLButtonElement>, active: TriggerActionKind): void {
+    for (const [k, btn] of chipBtns) {
       const on = k === active;
-      chip.bg.setFillStyle(on ? 0x2a3a55 : 0x1a1a2a, on ? 1 : 1).setStrokeStyle(2, on ? 0x5588aa : 0x445566);
-      chip.label.setColor(on ? "#cce4ff" : "#aabbcc");
+      btn.style.background = on ? "#2a3a55" : "#1a1a2a";
+      btn.style.borderColor = on ? "#5588aa" : "#445566";
+      btn.style.color = on ? "#cce4ff" : "#aabbcc";
     }
   }
 
-  /** Show / hide the per-kind config rows. We can't unmount the DOM inputs
-   *  cheaply, so we just toggle their CSS display.  */
-  private refreshKindVisibility(row: TriggerRowElements, active: TriggerActionKind): void {
-    const set = (el: HTMLElement, show: boolean) => { el.style.display = show ? "" : "none"; };
-    const showPerception = active === "perception";
-    const showLogOrAigm = active === "log" || active === "aigm";
-    const showCombat = active === "combat";
-    set(row.dcInput, showPerception);
-    set(row.passMessageInput, showPerception);
-    set(row.messageInput, showLogOrAigm);
-    set(row.defIdInput, showCombat);
-    // Phaser labels — must also toggle so the prompt text doesn't bleed
-    // through behind the active inputs.
-    for (const lbl of row.kindLabels.perception) lbl.setVisible(showPerception);
-    for (const lbl of row.kindLabels.log) lbl.setVisible(showLogOrAigm);
-    for (const lbl of row.kindLabels.combat) lbl.setVisible(showCombat);
+  private refreshKindVisibility(
+    perception: HTMLElement, log: HTMLElement, aigm: HTMLElement, combat: HTMLElement,
+    active: TriggerActionKind,
+  ): void {
+    perception.style.display = active === "perception" ? "" : "none";
+    log.style.display        = active === "log"        ? "" : "none";
+    aigm.style.display       = active === "aigm"       ? "" : "none";
+    combat.style.display     = active === "combat"     ? "" : "none";
   }
 
   private summarise(t: ComposedTrigger): string {
     const r = t.region;
-    const tag = KIND_LABEL[t.kind];
-    return `${tag}  @ (${r.x},${r.y}) ${r.w}×${r.h}`;
+    return `${KIND_LABEL[t.kind]}  @ (${r.x},${r.y}) ${r.w}×${r.h}`;
   }
 
-  private removeRowDom(row: TriggerRowElements): void {
-    const els: HTMLElement[] = [...row.regionInputs, row.dcInput, row.passMessageInput, row.messageInput, row.defIdInput];
-    for (const el of els) el.remove();
+  // ── DOM helpers ─────────────────────────────────────────────────────────
+
+  private makeLabel(text: string): HTMLSpanElement {
+    const el = document.createElement("span");
+    el.textContent = text;
+    el.style.cssText = "color: #778899; font-family: monospace; font-size: 9px; letter-spacing: 1px;";
+    return el;
   }
 
-  // ── DOM input helpers (mirror GenerateSetupScene.buildTextarea pattern). ──
-
-  private buildNumberInput(x: number, y: number, w: number, h: number, initial: string, onInput: (val: string) => void): HTMLInputElement {
+  private makeNumberInput(initial: string, onInput: (val: string) => void): HTMLInputElement {
     const el = document.createElement("input");
     el.type = "number";
     el.value = initial;
     el.style.cssText = `
-      position: absolute; background: #141426; color: #e0e8f0;
-      border: 1px solid #445566; padding: 0 6px;
-      font-family: monospace; font-size: 11px; z-index: 10; box-sizing: border-box;
+      background: #141426; color: #e0e8f0; border: 1px solid #445566;
+      padding: 1px 4px; font-family: monospace; font-size: 11px;
+      width: 50px; box-sizing: border-box;
     `;
-    document.body.appendChild(el);
-    this.attachPlace(el, x, y, w, h);
-    el.oninput = () => onInput(el.value);
+    el.addEventListener("input", () => onInput(el.value));
     return el;
   }
 
-  private buildTextInput(x: number, y: number, w: number, h: number, initial: string, placeholder: string, onInput: (val: string) => void): HTMLInputElement {
+  private makeTextInput(initial: string, placeholder: string, onInput: (val: string) => void): HTMLInputElement {
     const el = document.createElement("input");
     el.type = "text";
     el.value = initial;
     el.placeholder = placeholder;
     el.style.cssText = `
-      position: absolute; background: #141426; color: #e0e8f0;
-      border: 1px solid #445566; padding: 0 6px;
-      font-family: monospace; font-size: 11px; z-index: 10; box-sizing: border-box;
+      background: #141426; color: #e0e8f0; border: 1px solid #445566;
+      padding: 1px 6px; font-family: monospace; font-size: 11px;
+      width: 100%; box-sizing: border-box;
     `;
-    document.body.appendChild(el);
-    this.attachPlace(el, x, y, w, h);
-    el.oninput = () => onInput(el.value);
+    el.addEventListener("input", () => onInput(el.value));
     return el;
   }
 
-  private buildTextareaInput(x: number, y: number, w: number, h: number, initial: string, onInput: (val: string) => void): HTMLTextAreaElement {
+  private makeTextarea(initial: string, onInput: (val: string) => void): HTMLTextAreaElement {
     const el = document.createElement("textarea");
     el.value = initial;
+    el.rows = 2;
     el.style.cssText = `
-      position: absolute; background: #141426; color: #e0e8f0;
-      border: 1px solid #445566; padding: 2px 6px;
-      font-family: monospace; font-size: 11px; line-height: 1.2;
-      resize: none; z-index: 10; box-sizing: border-box;
+      background: #141426; color: #e0e8f0; border: 1px solid #445566;
+      padding: 2px 6px; font-family: monospace; font-size: 11px;
+      line-height: 1.3; resize: none; width: 100%; box-sizing: border-box;
     `;
-    document.body.appendChild(el);
-    this.attachPlace(el, x, y, w, h);
-    el.oninput = () => onInput(el.value);
+    el.addEventListener("input", () => onInput(el.value));
     return el;
   }
 
   private attachPlace(el: HTMLElement, x: number, y: number, w: number, h: number): void {
-    const place = () => {
-      const rect = this.opts.scene.sys.game.canvas.getBoundingClientRect();
+    const place = (): void => {
+      const rect = this.scene.sys.game.canvas.getBoundingClientRect();
       const s = rect.width / this.opts.sceneWidth;
       el.style.left = `${rect.left + x * s}px`;
-      el.style.top  = `${rect.top + y * s}px`;
+      el.style.top  = `${rect.top  + y * s}px`;
       el.style.width  = `${w * s}px`;
       el.style.height = `${h * s}px`;
-      el.style.fontSize = `${11 * s}px`;
+      el.style.fontSize = `${(el === this.addBtn ? 12 : 11) * s}px`;
     };
     place();
-    this.opts.scene.scale.on("resize", place);
+    this.scene.scale.on("resize", place);
     this.placeHandlers.push(place);
   }
 }

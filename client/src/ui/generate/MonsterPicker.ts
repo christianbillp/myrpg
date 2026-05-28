@@ -1,20 +1,17 @@
 /**
- * MonsterPicker — scrollable list of monster defs with `+ ALLY` / `+ ENEMY`
- * buttons on each row, plus an ally/enemy summary block and a CLEAR button.
- * Used by the Deterministic tab of `GenerateSetupScene` to populate an
- * encounter's `allyIds` and `enemyIds` from the live monsters registry.
+ * MonsterPicker — scrollable list of monster defs with `+ ALLY`, `+ NEUTRAL`,
+ * and `+ ENEMY` buttons per row. Used by the Adjudicator tab of
+ * `GenerateSetupScene` and by `EncounterEditorScene` to populate an
+ * encounter's `allyIds`, `npcIds`, and `enemyIds`.
  *
- * The component creates its own Phaser objects against the parent
- * `container` and exposes the chosen ids via `getAllyIds()` / `getEnemyIds()`.
- * `destroy()` detaches its scene-level wheel listener so successive
- * instantiations don't stack handlers.
+ * Rendering is HTML — the scrolling list is a `<div style="overflow:auto">`
+ * with native browser scrolling, and per-row buttons are HTML `<button>`s.
+ * This keeps text crisp at any zoom level and gives the in-list buttons
+ * proper click targets that scroll with the rows (previously the Phaser
+ * mask clipped rendering but not click hit-areas).
  */
 import Phaser from "phaser";
 import type { MonsterDef } from "../../data/monsters";
-
-const DPR = window.devicePixelRatio;
-const ROW_H = 22;
-const LIST_H = 130;
 
 export interface MonsterPickerOptions {
   scene: Phaser.Scene;
@@ -23,7 +20,10 @@ export interface MonsterPickerOptions {
   x: number;
   y: number;
   width: number;
-  /** Optional initial selections, used by the RANDOMIZE flow to seed rolled monsters into the picker. */
+  /** Total height the picker may consume (list + summary). */
+  height: number;
+  /** Scene width in logical pixels — used to scale absolutely-positioned DOM. */
+  sceneWidth: number;
   initialAllyIds?: string[];
   initialEnemyIds?: string[];
   initialNeutralIds?: string[];
@@ -31,140 +31,157 @@ export interface MonsterPickerOptions {
 
 export class MonsterPicker {
   private readonly scene: Phaser.Scene;
+  private readonly opts: MonsterPickerOptions;
   private readonly monsters: MonsterDef[];
   private readonly allySelections = new Map<string, number>();
   private readonly neutralSelections = new Map<string, number>();
   private readonly enemySelections = new Map<string, number>();
-  private readonly allyListText: Phaser.GameObjects.Text;
-  private readonly neutralListText: Phaser.GameObjects.Text;
-  private readonly enemyListText: Phaser.GameObjects.Text;
-  private readonly wheelHandler: (
-    pointer: Phaser.Input.Pointer,
-    objs: unknown,
-    dx: number,
-    dy: number,
-  ) => void;
-  private scrollOffset = 0;
+  private listEl!: HTMLDivElement;
+  private summaryEl!: HTMLDivElement;
+  private clearBtn!: HTMLButtonElement;
+  private placeHandlers: Array<() => void> = [];
 
   constructor(opts: MonsterPickerOptions) {
     this.scene = opts.scene;
+    this.opts = opts;
     this.monsters = opts.monsters;
 
-    // Seed selections from any rolled / preset ids before the summary lines render.
     for (const id of opts.initialAllyIds    ?? []) this.allySelections.set(id, (this.allySelections.get(id) ?? 0) + 1);
     for (const id of opts.initialEnemyIds   ?? []) this.enemySelections.set(id, (this.enemySelections.get(id) ?? 0) + 1);
     for (const id of opts.initialNeutralIds ?? []) this.neutralSelections.set(id, (this.neutralSelections.get(id) ?? 0) + 1);
 
-    const { scene, parent, monsters, x, y, width } = opts;
-    const listY = y + 20;
+    const { scene, parent, x, y, width, height } = opts;
+    const HEADER_H = 16;
+    const SUMMARY_H = 76;
 
-    parent.add(scene.add.text(x, y, "MONSTERS — click +ALLY or +ENEMY to add to the encounter", {
-      fontSize: "10px", color: "#778899", fontFamily: "monospace", resolution: DPR, letterSpacing: 1,
+    parent.add(scene.add.text(x, y, "MONSTERS — click +ALLY / +NEUTRAL / +ENEMY to add to the encounter", {
+      fontSize: "10px", color: "#778899", fontFamily: "monospace", letterSpacing: 1,
     }).setOrigin(0, 0));
 
-    // Backing rectangle.
-    parent.add(scene.add.rectangle(x + width / 2, listY + LIST_H / 2, width, LIST_H, 0x0a0e16).setStrokeStyle(1, 0x334455));
+    // Scrollable HTML list — fills the available height minus the summary.
+    const listY = y + HEADER_H + 4;
+    const listH = height - HEADER_H - SUMMARY_H - 12;
 
-    // Scroll container clipped to the list rect.
-    const scroll = scene.add.container(x, listY);
-    parent.add(scroll);
-    const mask = scene.make.graphics({ x: 0, y: 0 }, false);
-    mask.fillStyle(0xffffff);
-    mask.fillRect(x, listY, width, LIST_H);
-    scroll.setMask(mask.createGeometryMask());
+    this.listEl = document.createElement("div");
+    this.listEl.style.cssText = `
+      position: absolute;
+      background: #0a0e16;
+      border: 1px solid #334455;
+      box-sizing: border-box;
+      overflow-y: auto;
+      overflow-x: hidden;
+      z-index: 9;
+      padding: 2px;
+    `;
+    document.body.appendChild(this.listEl);
+    this.attachPlace(this.listEl, x, listY, width, listH);
+    this.renderRows();
 
-    monsters.forEach((mon, i) => {
-      const ry = i * ROW_H;
-      const rowBg = scene.add.rectangle(width / 2, ry + ROW_H / 2, width - 4, ROW_H - 2, i % 2 === 0 ? 0x111122 : 0x141426);
-      scroll.add(rowBg);
-      const label = `${mon.name}  (${mon.type ?? "—"}, ${mon.maxHp} HP)`;
-      scroll.add(scene.add.text(12, ry + ROW_H / 2, label, {
-        fontSize: "11px", color: "#aabbcc", fontFamily: "monospace", resolution: DPR,
-      }).setOrigin(0, 0.5));
+    // Summary section (ALLIES / NEUTRALS / ENEMIES + CLEAR button).
+    const summaryY = listY + listH + 6;
+    this.summaryEl = document.createElement("div");
+    this.summaryEl.style.cssText = `
+      position: absolute;
+      box-sizing: border-box;
+      font-family: monospace;
+      font-size: 11px;
+      line-height: 1.3;
+      z-index: 9;
+      padding: 4px 6px;
+      background: rgba(10, 14, 22, 0.6);
+      border: 1px solid #2a3340;
+      overflow: hidden;
+    `;
+    document.body.appendChild(this.summaryEl);
+    this.attachPlace(this.summaryEl, x, summaryY, width - 130, SUMMARY_H);
 
-      const allyBg = scene.add.rectangle(width - 195, ry + ROW_H / 2, 60, 18, 0x1a3a55).setStrokeStyle(1, 0x4477aa).setInteractive({ useHandCursor: true });
-      scroll.add(allyBg);
-      scroll.add(scene.add.text(width - 195, ry + ROW_H / 2, "+ ALLY", {
-        fontSize: "9px", color: "#cce4ff", fontFamily: "monospace", resolution: DPR, letterSpacing: 1,
-      }).setOrigin(0.5));
-      allyBg.on("pointerdown", () => this.addMonster(mon.id, "ally"));
-
-      const neutralBg = scene.add.rectangle(width - 125, ry + ROW_H / 2, 70, 18, 0x3a3a1a).setStrokeStyle(1, 0x9a8a44).setInteractive({ useHandCursor: true });
-      scroll.add(neutralBg);
-      scroll.add(scene.add.text(width - 125, ry + ROW_H / 2, "+ NEUTRAL", {
-        fontSize: "9px", color: "#ffe9a8", fontFamily: "monospace", resolution: DPR, letterSpacing: 1,
-      }).setOrigin(0.5));
-      neutralBg.on("pointerdown", () => this.addMonster(mon.id, "neutral"));
-
-      const enemyBg = scene.add.rectangle(width - 50, ry + ROW_H / 2, 60, 18, 0x551a1a).setStrokeStyle(1, 0xaa4444).setInteractive({ useHandCursor: true });
-      scroll.add(enemyBg);
-      scroll.add(scene.add.text(width - 50, ry + ROW_H / 2, "+ ENEMY", {
-        fontSize: "9px", color: "#ffcccc", fontFamily: "monospace", resolution: DPR, letterSpacing: 1,
-      }).setOrigin(0.5));
-      enemyBg.on("pointerdown", () => this.addMonster(mon.id, "enemy"));
-    });
-
-    // Scene-level wheel listener, scoped to the list's screen bounds. No hit
-    // rect is layered on top of the buttons (an earlier version of this code
-    // did that and the rect stole every click).
-    const totalContentH = monsters.length * ROW_H;
-    const maxScroll = Math.max(0, totalContentH - LIST_H);
-    this.wheelHandler = (pointer, _objs, _dx, dy) => {
-      if (pointer.x < x || pointer.x > x + width || pointer.y < listY || pointer.y > listY + LIST_H) return;
-      this.scrollOffset = Phaser.Math.Clamp(this.scrollOffset + dy * 0.5, 0, maxScroll);
-      scroll.setY(listY - this.scrollOffset);
-    };
-    scene.input.on("wheel", this.wheelHandler);
-
-    // Selected lists.
-    const summaryY = listY + LIST_H + 12;
-    this.allyListText = scene.add.text(x, summaryY, this.formatSelected(this.allySelections, "ALLIES"), {
-      fontSize: "11px", color: "#cce4ff", fontFamily: "monospace", resolution: DPR,
-      wordWrap: { width },
-    }).setOrigin(0, 0);
-    parent.add(this.allyListText);
-    this.neutralListText = scene.add.text(x, summaryY + 16, this.formatSelected(this.neutralSelections, "NEUTRALS"), {
-      fontSize: "11px", color: "#ffe9a8", fontFamily: "monospace", resolution: DPR,
-      wordWrap: { width },
-    }).setOrigin(0, 0);
-    parent.add(this.neutralListText);
-    this.enemyListText = scene.add.text(x, summaryY + 32, this.formatSelected(this.enemySelections, "ENEMIES"), {
-      fontSize: "11px", color: "#ffcccc", fontFamily: "monospace", resolution: DPR,
-      wordWrap: { width },
-    }).setOrigin(0, 0);
-    parent.add(this.enemyListText);
-
-    // Clear-selections button.
-    const clearBg = scene.add.rectangle(x + width - 80, summaryY + 16, 140, 22, 0x222233).setStrokeStyle(1, 0x556677).setInteractive({ useHandCursor: true });
-    parent.add(clearBg);
-    parent.add(scene.add.text(x + width - 80, summaryY + 16, "CLEAR MONSTERS", {
-      fontSize: "9px", color: "#aabbcc", fontFamily: "monospace", resolution: DPR, letterSpacing: 1,
-    }).setOrigin(0.5));
-    clearBg.on("pointerdown", () => {
+    this.clearBtn = document.createElement("button");
+    this.clearBtn.type = "button";
+    this.clearBtn.textContent = "CLEAR MONSTERS";
+    this.clearBtn.style.cssText = `
+      position: absolute;
+      background: #222233; color: #aabbcc;
+      border: 1px solid #556677;
+      padding: 0 8px;
+      font-family: monospace; font-size: 10px; letter-spacing: 1px;
+      cursor: pointer; z-index: 10; box-sizing: border-box;
+    `;
+    this.clearBtn.addEventListener("mouseenter", () => { this.clearBtn.style.background = "#2c2f44"; });
+    this.clearBtn.addEventListener("mouseleave", () => { this.clearBtn.style.background = "#222233"; });
+    this.clearBtn.addEventListener("click", () => {
       this.allySelections.clear();
       this.neutralSelections.clear();
       this.enemySelections.clear();
-      this.refreshSelectedLists();
+      this.refreshSummary();
     });
+    document.body.appendChild(this.clearBtn);
+    this.attachPlace(this.clearBtn, x + width - 126, summaryY + SUMMARY_H / 2 - 12, 120, 24);
+
+    this.refreshSummary();
   }
 
   /** Flat id list — `["bandit","bandit"]` for two bandits as allies. */
-  getAllyIds(): string[] {
-    return this.expand(this.allySelections);
-  }
-
-  /** Flat id list — `["wolf","wolf","wolf"]` for three wolves as enemies. */
-  getEnemyIds(): string[] {
-    return this.expand(this.enemySelections);
-  }
-
-  /** Flat id list — creatures placed as neutral NPCs (don't fight unless flipped). */
-  getNeutralIds(): string[] {
-    return this.expand(this.neutralSelections);
-  }
+  getAllyIds(): string[] { return this.expand(this.allySelections); }
+  getEnemyIds(): string[] { return this.expand(this.enemySelections); }
+  getNeutralIds(): string[] { return this.expand(this.neutralSelections); }
 
   destroy(): void {
-    this.scene.input.off("wheel", this.wheelHandler);
+    this.listEl.remove();
+    this.summaryEl.remove();
+    this.clearBtn.remove();
+    for (const h of this.placeHandlers) this.scene.scale.off("resize", h);
+    this.placeHandlers = [];
+  }
+
+  /** Show / hide every owned DOM element (used by the tab toggle). */
+  setVisible(visible: boolean): void {
+    this.listEl.style.display = visible ? "" : "none";
+    this.summaryEl.style.display = visible ? "" : "none";
+    this.clearBtn.style.display = visible ? "" : "none";
+  }
+
+  // ── Internal ────────────────────────────────────────────────────────────
+
+  private renderRows(): void {
+    this.listEl.innerHTML = "";
+    this.monsters.forEach((mon, i) => {
+      const row = document.createElement("div");
+      row.style.cssText = `
+        display: flex; align-items: center;
+        background: ${i % 2 === 0 ? "#111122" : "#141426"};
+        padding: 3px 6px; box-sizing: border-box;
+        font-family: monospace; font-size: 11px; color: #aabbcc;
+      `;
+      const label = document.createElement("span");
+      label.style.cssText = "flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-right: 8px;";
+      label.textContent = `${mon.name}  (${mon.type ?? "—"}, ${mon.maxHp} HP)`;
+      row.appendChild(label);
+
+      const allyBtn = this.makeAddButton("+ ALLY",    "#1a3a55", "#4477aa", "#cce4ff");
+      const neutBtn = this.makeAddButton("+ NEUTRAL", "#3a3a1a", "#9a8a44", "#ffe9a8");
+      const enemBtn = this.makeAddButton("+ ENEMY",   "#551a1a", "#aa4444", "#ffcccc");
+      allyBtn.addEventListener("click", () => this.addMonster(mon.id, "ally"));
+      neutBtn.addEventListener("click", () => this.addMonster(mon.id, "neutral"));
+      enemBtn.addEventListener("click", () => this.addMonster(mon.id, "enemy"));
+      row.appendChild(allyBtn);
+      row.appendChild(neutBtn);
+      row.appendChild(enemBtn);
+
+      this.listEl.appendChild(row);
+    });
+  }
+
+  private makeAddButton(text: string, bg: string, border: string, color: string): HTMLButtonElement {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.textContent = text;
+    btn.style.cssText = `
+      background: ${bg}; color: ${color}; border: 1px solid ${border};
+      padding: 1px 6px; margin-left: 4px;
+      font-family: monospace; font-size: 9px; letter-spacing: 1px;
+      cursor: pointer; flex-shrink: 0;
+    `;
+    return btn;
   }
 
   private addMonster(id: string, side: "ally" | "neutral" | "enemy"): void {
@@ -172,27 +189,43 @@ export class MonsterPicker {
                  : side === "enemy" ? this.enemySelections
                  : this.neutralSelections;
     target.set(id, (target.get(id) ?? 0) + 1);
-    this.refreshSelectedLists();
+    this.refreshSummary();
   }
 
-  private refreshSelectedLists(): void {
-    this.allyListText.setText(this.formatSelected(this.allySelections, "ALLIES"));
-    this.neutralListText.setText(this.formatSelected(this.neutralSelections, "NEUTRALS"));
-    this.enemyListText.setText(this.formatSelected(this.enemySelections, "ENEMIES"));
+  private refreshSummary(): void {
+    const allyLine = this.formatSelected(this.allySelections, "ALLIES",   "#cce4ff");
+    const neutLine = this.formatSelected(this.neutralSelections, "NEUTRALS", "#ffe9a8");
+    const enemLine = this.formatSelected(this.enemySelections, "ENEMIES",  "#ffcccc");
+    this.summaryEl.innerHTML = `${allyLine}<br>${neutLine}<br>${enemLine}`;
   }
 
-  private formatSelected(sel: Map<string, number>, label: string): string {
-    if (sel.size === 0) return `${label}: (none)`;
+  private formatSelected(sel: Map<string, number>, label: string, color: string): string {
+    if (sel.size === 0) return `<span style="color: ${color}">${label}: (none)</span>`;
     const parts = Array.from(sel.entries()).map(([id, n]) => {
       const mon = this.monsters.find((m) => m.id === id);
-      return `${mon?.name ?? id}${n > 1 ? ` ×${n}` : ""}`;
+      const safe = (mon?.name ?? id).replace(/</g, "&lt;");
+      return `${safe}${n > 1 ? ` ×${n}` : ""}`;
     });
-    return `${label}: ${parts.join(", ")}`;
+    return `<span style="color: ${color}">${label}: ${parts.join(", ")}</span>`;
   }
 
   private expand(sel: Map<string, number>): string[] {
     const out: string[] = [];
     for (const [id, n] of sel) for (let i = 0; i < n; i++) out.push(id);
     return out;
+  }
+
+  private attachPlace(el: HTMLElement, x: number, y: number, w: number, h: number): void {
+    const place = (): void => {
+      const rect = this.scene.sys.game.canvas.getBoundingClientRect();
+      const s = rect.width / this.opts.sceneWidth;
+      el.style.left = `${rect.left + x * s}px`;
+      el.style.top  = `${rect.top  + y * s}px`;
+      el.style.width  = `${w * s}px`;
+      el.style.height = `${h * s}px`;
+    };
+    place();
+    this.scene.scale.on("resize", place);
+    this.placeHandlers.push(place);
   }
 }
