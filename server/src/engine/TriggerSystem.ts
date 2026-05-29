@@ -344,12 +344,24 @@ export function fireAction(ctx: GameContext, action: TriggerAction): void {
       const text = action.text.trim();
       if (!text) return;
       let entityId: string | null = null;
-      if (action.entity === 'player') entityId = 'player';
-      else {
+      let speakerName: string | null = null;
+      if (action.entity === 'player') {
+        entityId = 'player';
+        speakerName = ctx.playerDef.name;
+      } else {
         const npc = ctx.resolveNpcByEntity(action.entity);
-        if (npc) entityId = npc.id;
+        if (npc) {
+          entityId = npc.id;
+          speakerName = npc.revealedName ?? npc.name;
+        }
       }
-      if (!entityId) return;
+      if (!entityId || !speakerName) return;
+      // Mirror the spoken line into the Event Log — same surfacing as the
+      // AIGM `npc_speaks` tool. Logged even when there's no eventSink so
+      // a startup-event trigger (encounter_started) still leaves a record.
+      // 💬 prefix matches the AIGM-tool path so dialogue lines line up
+      // visually in the log.
+      ctx.addLog({ left: `💬 ${speakerName}: "${text}"`, style: 'status' });
       const sink = ctx.eventSink;
       if (!sink) return;
       sink.push({ type: 'npc_speech', entityId, text });

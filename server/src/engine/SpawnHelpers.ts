@@ -108,13 +108,15 @@ export function spawnNpc(
     name = npcDef.name;
     const monsterDef = monsters.find((m) => m.id === npcDef.monsterClass);
     maxHp = monsterDef?.maxHp ?? 8;
-    factionId = npcDef.factionId ?? defId;
+    // NPC's factionId wins; if absent, fall through to the monster def's
+    // factionId; finally fall back to the def id as a faction-of-one.
+    factionId = npcDef.factionId ?? monsterDef?.factionId ?? defId;
   } else {
     const monsterDef = monsters.find((m) => m.id === defId);
     if (!monsterDef) return;
     name = monsterDef.name;
     maxHp = monsterDef.maxHp;
-    factionId = defId;
+    factionId = monsterDef.factionId ?? defId;
   }
 
   const occupied = new Set<string>([

@@ -1,6 +1,7 @@
 {
   "id": "cultist",
   "name": "Cultist",
+  "factionId": "cultists",
   "type": "Medium or Small Humanoid, Neutral",
   "maxHp": 9,
   "hpFormula": "2d8",

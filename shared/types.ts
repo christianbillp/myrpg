@@ -256,6 +256,13 @@ export interface MonsterDef {
   xp: number;
   cr: string;
   color: number;
+  /** Default faction membership for raw-monster spawns (i.e. when the spawn
+   *  has no NPC wrapper to declare a faction). `SpawnHelpers` reads this
+   *  first; if absent it falls back to the def id as a faction-of-one. Use
+   *  this when the bare monster def already belongs to one of the world's
+   *  factions in `defs.factions/` — e.g. `cultist` → `cultists` so the
+   *  Target Panel renders the faction row instead of hiding it. */
+  factionId?: string;
   resistances?: string[];
   vulnerabilities?: string[];
   immunities?: string[];

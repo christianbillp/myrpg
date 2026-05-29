@@ -1345,7 +1345,7 @@ server.post("/game/session/:id/aigm", async (req, reply) => {
     const saytoMatch = body.playerMessage.match(/^\[(.+?) says to (.+?)\]:\s*(.+)$/s);
     if (saytoMatch) {
       const [, sayer, target, line] = saytoMatch;
-      engine.addLog({ left: `${sayer} → ${target}: "${line.trim()}"`, style: 'status' });
+      engine.addLog({ left: `💬 ${sayer} → ${target}: "${line.trim()}"`, style: 'status' });
       pushStateUpdate(id, [], engine.getState());
     }
 

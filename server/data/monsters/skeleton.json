@@ -1,6 +1,7 @@
 {
   "id": "skeleton",
   "name": "Skeleton",
+  "factionId": "undead",
   "type": "Medium Undead, Lawful Evil",
   "maxHp": 13,
   "hpFormula": "2d8+4",

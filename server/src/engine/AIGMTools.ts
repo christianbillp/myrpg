@@ -158,7 +158,7 @@ function buildToolList() { return [
   },
   {
     name: 'npc_speaks',
-    description: 'Show a brief speech bubble above an NPC (or the player) on the map for the line you pass. Call this **alongside** any in-fiction quote in your reply so the player can see at a glance who is speaking and where the sound is coming from — the bubble shows the same text you put between quotes in the narrative. Entity: the full ref from CURRENT STATE ("enemy_A", "ally_A", "npc_<id>", or "player"). Text: only the spoken line itself (no "she says" wrapping). Use a separate call per speaker if multiple characters speak in one reply.',
+    description: '**REQUIRED for every quoted line of dialogue you write.** Renders a speech bubble above the speaker AND appends `<speaker>: "<line>"` to the Event Log — without this call, the spoken text never reaches the Event Log and the speech bubble never appears. Call this **alongside** any in-fiction quote in your reply; the player must be able to see who is speaking and where the sound is coming from. Use a separate call per speaker if multiple characters speak in one reply. Entity: the full ref from CURRENT STATE ("enemy_A", "ally_A", "npc_<id>", or "player"). Text: only the spoken line itself, exactly as it appears between quotes in the prose (no "she says" wrapping, no leading/trailing punctuation that isn\'t part of the speech). A reply containing `"…"` quoted dialogue without a matching `npc_speaks` call is a bug.',
     input_schema: { type: 'object' as const, properties: { entity: { type: 'string' }, text: { type: 'string' } }, required: ['entity', 'text'] },
   },
   {
@@ -537,16 +537,26 @@ export function applyAIGMTool(
       // Resolve "player" → "player"; otherwise look up the NPC. Unknown
       // entity refs are a no-op (with a hint so the model corrects itself).
       let entityId: string | null = null;
+      let speakerName: string | null = null;
       if (entity === 'player') {
         entityId = 'player';
+        speakerName = engine.getPlayerDef().name;
       } else {
         const npc = engine.resolveNpcEntity(entity);
-        if (npc) entityId = npc.id;
+        if (npc) {
+          entityId = npc.id;
+          speakerName = npc.revealedName ?? npc.name;
+        }
       }
-      if (!entityId) {
+      if (!entityId || !speakerName) {
         toolResultContent = `npc_speaks: unknown entity ref "${entity}". Use one from CURRENT STATE.`;
         break;
       }
+      // Mirror the spoken line into the Event Log so the player has a
+      // scrollable record of what each NPC said — same surfacing the
+      // player-sayto path does on the server side. Prefixed with the speech
+      // bubble emoji so dialogue stands out at a glance.
+      engine.addLog({ left: `💬 ${speakerName}: "${text}"`, style: 'status' });
       events = [{ type: 'npc_speech', entityId, text }];
       toolResultContent = `Speech bubble queued above ${entity}: "${text}".`;
       break;

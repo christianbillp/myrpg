@@ -1,6 +1,7 @@
 {
   "id": "bandit",
   "name": "Bandit",
+  "factionId": "bandits",
   "type": "Medium or Small Humanoid, Neutral",
   "maxHp": 11,
   "hpFormula": "2d8+2",

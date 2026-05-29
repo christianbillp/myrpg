@@ -1,6 +1,7 @@
 {
   "id": "stirge",
   "name": "Stirge",
+  "factionId": "wildlife",
   "type": "Tiny Monstrosity, Unaligned",
   "maxHp": 5,
   "hpFormula": "2d4",
