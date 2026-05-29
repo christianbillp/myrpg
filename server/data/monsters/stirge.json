@@ -24,6 +24,7 @@
   "initiativeBonus": 3,
   "stealthBonus": 3,
   "passivePerception": 9,
+  "senses": { "darkvision": 60 },
   "speed": 40,
   "attacks": [
     {

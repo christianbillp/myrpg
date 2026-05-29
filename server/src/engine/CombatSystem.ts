@@ -68,6 +68,8 @@ function resolvePlayerAttack(
   profBonus = player.proficiencyBonus,
   autoCrit = false,
   playerHidden = false,
+  /** SRD Cover AC bonus: half +2, three-quarters +5, total = auto-miss. */
+  coverAcBonus = 0,
 ): { damage: number; isHit: boolean; isCrit: boolean; attackTotal: number; naturalRoll: number; logs: LogEntry[]; vexApplied: boolean; slowApplied: boolean; bonusComponents: RolledBonusDamage[] } {
   const statMod = attack.statKey === 'str' ? mod(player.str) : mod(player.dex);
   const attackBonus = statMod + profBonus;
@@ -94,10 +96,12 @@ function resolvePlayerAttack(
   const total = naturalRoll + attackBonus;
   const natural20 = naturalRoll === 20;
   const natural1 = naturalRoll === 1;
-  const wouldHit = natural20 || total >= enemy.ac;
+  const effectiveAc = enemy.ac + coverAcBonus;
+  const wouldHit = natural20 || total >= effectiveAc;
   const isHit = wouldHit && !natural1;
   const isCrit = natural20 || (autoCrit && isHit);
-  const atkPart = `${rollPart}+${attackBonus}=${total} vs AC ${enemy.ac}`;
+  const coverNote = coverAcBonus > 0 ? ` (+${coverAcBonus} cover)` : '';
+  const atkPart = `${rollPart}+${attackBonus}=${total} vs AC ${effectiveAc}${coverNote}`;
 
   let damage = 0, vexApplied = false, slowApplied = false;
 
@@ -169,8 +173,9 @@ export function playerMeleeAttack(
   withDisadvantage = false,
   autoCrit = false,
   playerHidden = false,
+  coverAcBonus = 0,
 ): { damage: number; isHit: boolean; isCrit: boolean; attackTotal: number; naturalRoll: number; logs: LogEntry[]; vexApplied: boolean; slowApplied: boolean; bonusComponents: RolledBonusDamage[] } {
-  return resolvePlayerAttack(player, player.mainAttack, enemy, withAdvantage, withDisadvantage, player.proficiencyBonus, autoCrit, playerHidden);
+  return resolvePlayerAttack(player, player.mainAttack, enemy, withAdvantage, withDisadvantage, player.proficiencyBonus, autoCrit, playerHidden, coverAcBonus);
 }
 
 export function playerThrowAttack(
@@ -182,22 +187,27 @@ export function playerThrowAttack(
   profBonus?: number,
   autoCrit = false,
   playerHidden = false,
+  coverAcBonus = 0,
 ): { damage: number; isHit: boolean; isCrit: boolean; attackTotal: number; naturalRoll: number; logs: LogEntry[]; vexApplied: boolean; slowApplied: boolean; bonusComponents: RolledBonusDamage[] } {
-  return resolvePlayerAttack(player, attack, enemy, withAdvantage, withDisadvantage, profBonus ?? player.proficiencyBonus, autoCrit, playerHidden);
+  return resolvePlayerAttack(player, attack, enemy, withAdvantage, withDisadvantage, profBonus ?? player.proficiencyBonus, autoCrit, playerHidden, coverAcBonus);
 }
 
-export function playerHide(
-  player: PlayerDef,
-  enemyPassivePerception: number,
-): { hidden: boolean; logs: LogEntry[] } {
+/**
+ * SRD 5.2.1 Hide [Action]. Rolls a Dexterity (Stealth) check; success is a
+ * total of at least DC 15. On success the total becomes the per-creature DC
+ * for Wisdom (Perception) checks to find the hider — Vision.runPerceptionSweep
+ * opposes that DC. The gate (Heavily Obscured / Cover / LOS) is enforced by
+ * the caller (CombatActions.doHide) before this is invoked.
+ */
+export function playerHide(player: PlayerDef): { hidden: boolean; dc: number; logs: LogEntry[] } {
   const stealthBonus = player.skills['stealth'] ?? 0;
   const stealthRoll = d20() + stealthBonus;
-  const success = stealthRoll > enemyPassivePerception;
-  const right = `Stealth d20+${stealthBonus}=${stealthRoll} vs PP ${enemyPassivePerception}`;
-  if (success) {
-    return { hidden: true, logs: [{ left: `${player.name} slips into the shadows`, right: `${right} ✓`, style: 'status' }] };
+  const hidden = stealthRoll >= 15;
+  const right = `Stealth d20+${stealthBonus}=${stealthRoll} vs DC 15`;
+  if (hidden) {
+    return { hidden: true, dc: stealthRoll, logs: [{ left: `${player.name} slips into the shadows`, right: `${right} ✓`, style: 'status' }] };
   }
-  return { hidden: false, logs: [{ left: `${player.name} fails to hide`, right: `${right} ✗`, style: 'miss' }] };
+  return { hidden: false, dc: 0, logs: [{ left: `${player.name} fails to hide`, right: `${right} ✗`, style: 'miss' }] };
 }
 
 export function enemyAttack(
@@ -205,6 +215,8 @@ export function enemyAttack(
   playerAc: number,
   withAdvantage: boolean,
   withDisadvantage = false,
+  /** SRD Cover the player benefits from against this NPC's attack. */
+  coverAcBonus = 0,
 ): { damage: number; isHit: boolean; isCrit: boolean; attackTotal: number; naturalRoll: number; logs: LogEntry[]; bonusComponents: RolledBonusDamage[] } {
   const logs: LogEntry[] = [];
   const effAdv = withAdvantage && !withDisadvantage;
@@ -222,9 +234,11 @@ export function enemyAttack(
   }
 
   const attackTotal = naturalRoll + attack.bonus;
+  const effectiveAc = playerAc + coverAcBonus;
   const isCrit = naturalRoll === 20;
-  const isHit = (isCrit || attackTotal >= playerAc) && naturalRoll !== 1;
-  const atkPart = `${rollPart}+${attack.bonus}=${attackTotal} vs AC ${playerAc}`;
+  const isHit = (isCrit || attackTotal >= effectiveAc) && naturalRoll !== 1;
+  const coverNote = coverAcBonus > 0 ? ` (+${coverAcBonus} cover)` : '';
+  const atkPart = `${rollPart}+${attack.bonus}=${attackTotal} vs AC ${effectiveAc}${coverNote}`;
 
   let damage = 0;
   if (isHit) {

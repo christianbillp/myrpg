@@ -752,5 +752,8 @@
       0,
       0
     ]
+  },
+  "environment": {
+    "lightLevel": "dark"
   }
 }

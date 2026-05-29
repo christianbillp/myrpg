@@ -86,3 +86,21 @@ export function isAutoCrit(conditions: string[], dist: number): boolean {
 export function proneStandCost(conditions: string[], speedTiles: number): number {
   return conditions.includes('prone') ? Math.floor(speedTiles / 2) : 0;
 }
+
+/**
+ * Clear a Hide-granted invisibility on a creature. SRD: the Hide action's
+ * Invisible condition ends when the creature attacks, makes noise above a
+ * whisper, or is spotted. We track that the invisibility came from Hide via
+ * the matching `hideDC` field — magical Invisibility (Greater Invisibility,
+ * etc.) does NOT set `hideDC` and therefore persists through these triggers.
+ */
+export function clearHide<T extends { conditions: string[]; hideDC?: number }>(target: T): void {
+  if (typeof target.hideDC === 'number') {
+    target.conditions = target.conditions.filter((c) => c !== 'hidden' && c !== 'invisible');
+    target.hideDC = undefined;
+  } else {
+    // Defensive — if a caller flagged a creature as hidden without setting
+    // hideDC (shouldn't happen post-Layer-D), just strip the 'hidden' marker.
+    target.conditions = target.conditions.filter((c) => c !== 'hidden');
+  }
+}

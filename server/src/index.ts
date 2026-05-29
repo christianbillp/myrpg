@@ -233,6 +233,7 @@ function extractTilePassability(tiles: TiledTileDef[] | undefined): Record<numbe
 
 const TILESETS_DIR = join(DATA_DIR, "tilesets");
 const TOKENS_DIR = join(DATA_DIR, "tokens");
+const SOUNDS_DIR = join(DATA_DIR, "sounds");
 
 /**
  * Resolve an inline-or-external tileset entry to the merged inline form,
@@ -474,6 +475,30 @@ server.get<{ Params: { filename: string } }>(
       return reply.type("image/png").send(data);
     } catch {
       return reply.code(404).send({ error: "tileset not found" });
+    }
+  },
+);
+
+// Static sound assets — referenced by `client/src/ui/ScreenEffects` for the
+// supertitle stinger and any future cinematic SFX. Drop `.mp3`, `.ogg`, or
+// `.wav` files into `server/data/sounds/`; the client requests them by name
+// (e.g. `/sounds/supertitle.mp3`). Filenames are validated against the same
+// character class as tokens to stop arbitrary path access.
+server.get<{ Params: { filename: string } }>(
+  "/sounds/:filename",
+  async (req, reply) => {
+    const { filename } = req.params;
+    const match = filename.match(/^([A-Za-z0-9_-]+)\.(mp3|ogg|wav)$/);
+    if (!match) {
+      return reply.code(400).send({ error: "invalid sound filename" });
+    }
+    const ext = match[2];
+    const mimeType = ext === "mp3" ? "audio/mpeg" : ext === "ogg" ? "audio/ogg" : "audio/wav";
+    try {
+      const data = await readFile(join(SOUNDS_DIR, filename));
+      return reply.type(mimeType).send(data);
+    } catch {
+      return reply.code(404).send({ error: "sound not found" });
     }
   },
 );

@@ -28,7 +28,7 @@ export interface MapPreviewZones {
   triggerRegions?: Array<{
     kind:
       | 'perception' | 'log' | 'aigm' | 'combat' | 'xp'
-      | 'supertitle' | 'announcement' | 'speech' | 'fade';
+      | 'announcement' | 'speech' | 'fade';
     region: { x: number; y: number; w: number; h: number };
   }>;
 }
@@ -55,7 +55,7 @@ export interface MapPreviewOptions {
 /** Per-kind outline colour for trigger-region overlays. Matches `ZonePainter.TRIGGER_COLOR`. */
 const TRIGGER_COLOR: Record<
   'perception' | 'log' | 'aigm' | 'combat' | 'xp'
-  | 'supertitle' | 'announcement' | 'speech' | 'fade',
+  | 'announcement' | 'speech' | 'fade',
   number
 > = {
   perception:   0x88ccaa,
@@ -63,7 +63,6 @@ const TRIGGER_COLOR: Record<
   aigm:         0xe2b96f,
   combat:       0xff6644,
   xp:           0x88ccff,
-  supertitle:   0xffffff,
   announcement: 0xf4e6c1,
   speech:       0x5588aa,
   fade:         0x222222,

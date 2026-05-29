@@ -14,8 +14,10 @@ import { SpellTargetSelector, type SpellTargetCandidate } from "../ui/SpellTarge
 import { SpeechBubbles } from "../ui/SpeechBubbles";
 import { SpeechInputBubble } from "../ui/SpeechInputBubble";
 import { ScreenEffects } from "../ui/ScreenEffects";
+import { playSound } from "../ui/SoundLibrary";
 import { UIScale } from "../ui/UIScale";
 import { GridView } from "../systems/GridView";
+import { VisionMask } from "../systems/VisionMask";
 import { OverlayManager } from "../systems/OverlayManager";
 import {
   TILE_SIZE, GRID_COLS, GRID_ROWS, HUD_HEIGHT,
@@ -74,6 +76,8 @@ export class GameScene extends Phaser.Scene {
   private overlays!: OverlayManager;
   private highlightLayer!: Phaser.GameObjects.Graphics;
   private movePathLayer!: Phaser.GameObjects.Graphics;
+  /** Fog-of-war + sound-rings overlay (Vision/Sound system). */
+  private visionMask!: VisionMask;
   /** Persistent overlays driven by player state: Detect Magic ring, etc. Redrawn each state tick. */
   private spellAuraLayer!: Phaser.GameObjects.Graphics;
   /** Cursor-following AOE preview during spell-targeting mode. Cleared on exit. */
@@ -154,6 +158,16 @@ export class GameScene extends Phaser.Scene {
     this.itemTokens = new Map();
     this.selectedEntityId = null;
     this.uiDestroyed = false;
+    // Phaser reuses the same scene instance across encounters, so class-member
+    // initializers only fire once per page load. These flags MUST be reset
+    // here or the second-and-onward encounter inherits stale values — most
+    // visibly `awaitingFirstStateUpdate`, which gates the boot fade-in and
+    // would leave the screen stuck at the pre-blacked overlay.
+    this.awaitingFirstStateUpdate = true;
+    this.focusedAnnouncementActive = false;
+    this.animatingEntityId = null;
+    this.speechInputBubble = null;
+    this.gmTypingIndicatorClear = null;
     this.moveMode = false;
     this.moveDist = [];
     this.movePrev = [];
@@ -168,10 +182,14 @@ export class GameScene extends Phaser.Scene {
     this.movePathLayer  = this.add.graphics();
     this.spellAuraLayer = this.add.graphics();
     this.spellAoeLayer  = this.add.graphics();
+    // VisionMask: fog-of-war veil + sound-ring overlay.
+    this.visionMask = new VisionMask(this);
     this.gridView.container.add(this.highlightLayer);
     this.gridView.container.add(this.movePathLayer);
     this.gridView.container.add(this.spellAuraLayer);
     this.gridView.container.add(this.spellAoeLayer);
+    this.gridView.container.add(this.visionMask.fogLayer);
+    this.gridView.container.add(this.visionMask.soundLayer);
 
     this.overlays = new OverlayManager(this.uiScale, this.playerDef, {
       onEquip:     (slot, itemId) => gameClient.sendAction({ type: "equip", slot, itemId }),
@@ -247,6 +265,8 @@ export class GameScene extends Phaser.Scene {
     for (const ev of events) {
       if (ev.type === "entity_move") this.eventQueue.push(ev);
       else if (ev.type === "npc_speech") this.speechBubbles.spawn(ev.entityId, ev.text);
+      else if (ev.type === "sound_ring") this.visionMask?.pushSoundRing(ev.x, ev.y, ev.intensity);
+      else if (ev.type === "play_sound") playSound(ev.sound);
       else if (ev.type === "screen_fade" || ev.type === "supertitle" || ev.type === "announcement") {
         this.eventQueue.push(ev);
       }
@@ -546,6 +566,8 @@ export class GameScene extends Phaser.Scene {
 
   update(): void {
     this.speechBubbles?.refresh();
+    if (this.gameState) this.visionMask?.refresh(this.gameState, this.playerDef);
+    this.visionMask?.refreshSoundRings();
     if (this.overlays.isAnyOpen) return;
     if (this.focusedAnnouncementActive) return;
     if (!this.gameState || !this.player) return;

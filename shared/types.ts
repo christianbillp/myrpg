@@ -165,6 +165,10 @@ export interface PlayerDef {
   hitDieType: number;
   sneakAttackDice: number;
   speed: number;
+  /** Special senses (SRD): darkvision / blindsight / tremorsense / truesight.
+   *  Seeded from species traits when the character is built. Absent means
+   *  "normal sight only". Read by `Vision.canSee` and the Hide gate. */
+  senses?: Senses;
   color: number;
   xp: number;
   savageAttacker: boolean;
@@ -238,6 +242,27 @@ export interface OngoingEffect {
   dot: PeriodicDamage;
 }
 
+/**
+ * Special senses block — SRD 5.2.1 "Vision and Light". Ranges in feet. All
+ * fields are optional; absence means "normal sight only". Used by the
+ * Vision module to decide whether an observer can see through Darkness /
+ * Heavily Obscured tiles / Invisible targets / Total Cover.
+ *   - darkvision: see in Dim Light as Bright; in Darkness as Dim (gray).
+ *   - blindsight: see within range without sight (pierces Darkness +
+ *     Invisible; blocked only by Total Cover).
+ *   - tremorsense: pinpoint creatures on the same surface (ground / wall /
+ *     liquid) within range; not a form of sight, so does not pierce cover
+ *     or perceive airborne creatures.
+ *   - truesight: pierces Darkness + Invisible + magical concealment +
+ *     transmutation disguises within range.
+ */
+export interface Senses {
+  darkvision?: number;
+  blindsight?: number;
+  tremorsense?: number;
+  truesight?: number;
+}
+
 export interface MonsterDef {
   id: string;
   name: string;
@@ -251,6 +276,9 @@ export interface MonsterDef {
   initiativeBonus: number;
   stealthBonus: number;
   passivePerception: number;
+  /** Special senses (SRD): darkvision / blindsight / tremorsense / truesight.
+   *  Absent means "normal sight only". Read by `Vision.canSee`. */
+  senses?: Senses;
   speed: number;
   attacks: MonsterAttack[];
   xp: number;
@@ -603,9 +631,26 @@ export interface SavedMapDef {
 export interface EncounterTileProperty {
   gid: number;
   passable?: boolean;
+  /** SRD 5.2.1 Cover — tiles between an attacker and a target contribute to
+   *  the target's effective cover. The `Vision.canSee` LOS walker collects
+   *  the worst cover along the line and the combat resolver translates it
+   *  to an AC bonus: half (+2), three-quarters (+5), total (untargetable
+   *  AND blocks sight). */
+  cover?: 'half' | 'three-quarters' | 'total';
+  /** When the tile is **impassable** but `transparent: true` is set, the LOS
+   *  walker does NOT auto-promote it to Total Cover. Use for chasms, deep
+   *  water, low walls — terrain you can see across but cannot walk onto.
+   *  Default: false. When false, every impassable tile that has no explicit
+   *  `cover` declaration is treated as Total Cover by the Vision module so
+   *  walls block sight without authors having to tag every wall GID. */
+  transparent?: boolean;
+  /** SRD 5.2.1 Obscurance — `lightly` imposes Disadvantage on Wisdom
+   *  (Perception) checks to see into the tile; `heavily` Blinds the
+   *  observer while looking into it AND counts as a valid Hide cover for
+   *  the SRD Hide action. */
+  obscurance?: 'lightly' | 'heavily';
   // Future, currently parsed-but-unused:
   // difficult?: boolean;     // costs 2 ft of movement per ft (US-044)
-  // cover?: 'half' | 'three-quarters' | 'total';  // US-045
   // trapped?: { dc: number; damageDice: number; damageSides: number; damageType: string };
 }
 
@@ -626,6 +671,15 @@ export interface TileLegendEntry {
   layer: 'ground' | 'object';
   description: string;
   tags: string[];
+  /** SRD Cover the tile provides by default (Vision/combat). Encounter
+   *  `tileProperties` overrides this per-encounter. */
+  cover?: 'half' | 'three-quarters' | 'total';
+  /** SRD Obscurance the tile imposes by default. */
+  obscurance?: 'lightly' | 'heavily';
+  /** Whether an impassable tile is see-through (chasms, water, windows).
+   *  Opts the tile out of SessionBuilder's "impassable → Total Cover"
+   *  auto-promotion. */
+  transparent?: boolean;
 }
 export interface TileLegend {
   notes: string;
@@ -740,6 +794,12 @@ export interface EncounterDef {
 export interface EncounterEnvironment {
   /** True if the encounter takes place in direct sunlight. */
   sunlit?: boolean;
+  /** SRD 5.2.1 ambient light level for tiles that don't declare their own.
+   *  `bright` (default) — normal sight. `dim` — tiles are Lightly Obscured
+   *  by default (Disadv on Perception sight checks). `dark` — tiles are
+   *  Heavily Obscured by default (Blinded into them) unless the observer
+   *  has Darkvision (which steps darkness → dim within range). */
+  lightLevel?: 'bright' | 'dim' | 'dark';
 }
 
 // ── Engine event bus ─────────────────────────────────────────────────────────
@@ -778,7 +838,13 @@ export type EngineEvent =
   /** A rumor was recorded into world memory. */
   | { type: 'rumor_propagated'; rumorId: string }
   /** Trigger-authored custom event. Lets authors chain triggers via `emit_event` without touching engine code. */
-  | { type: 'custom'; name: string; payload?: Record<string, unknown> };
+  | { type: 'custom'; name: string; payload?: Record<string, unknown> }
+  /** A noise was emitted at a tile (footstep, attack, spell with V component,
+   *  shout). `intensity` is the audible radius in tiles; SRD-rough
+   *  conversion: whisper=1, footstep=2, normal speech=3, attack/cast=5.
+   *  Sound subscribers use this to break Hide on the source and alert
+   *  hostile NPCs within the radius. */
+  | { type: 'noise'; x: number; y: number; intensity: number; sourceId?: string };
 
 export type WorldFlagValue = number | string | boolean;
 
@@ -858,8 +924,6 @@ export type TriggerAction =
   | { type: 'award_xp'; amount: number }
   /** Roll a player ability check server-side (d20 + the player's `skills[<skill>]` bonus) against `dc`. Fires `onPass` actions if the total ≥ DC, otherwise `onFail`. Either branch may be empty — an empty `onFail` is the standard way to write "perception check that silently does nothing on a miss". The roll itself is NOT logged so failed perception/stealth checks don't leak information about hidden content. */
   | { type: 'player_ability_check'; skill: string; dc: number; onPass: TriggerAction[]; onFail: TriggerAction[] }
-  /** Movie-style centred location title. Mirrors the `show_supertitle` AIGM tool — same `durationMs` semantics (default 3000, max 15000). */
-  | { type: 'show_supertitle'; text: string; durationMs?: number }
   /** Centre-screen announcement card; also appended to the Event Log so the message persists. Mirrors the `show_announcement` AIGM tool.
    *  `mode` defaults to `'focused'` (orange-bordered card; hides Player/Target/HUD panels; locks input; pauses world). Use `'unfocused'` for borderless atmospheric announcements that leave the UI and game running. */
   | { type: 'show_announcement'; text: string; durationMs?: number; mode?: 'focused' | 'unfocused' }
@@ -1106,6 +1170,11 @@ export interface PlayerState {
   heroicInspiration: boolean;
   exhaustionLevel: number;
   conditions: string[];
+  /** SRD Hide outcome — the total of the Stealth check that became the
+   *  player's `hidden` condition. Every subsequent Perception attempt
+   *  (passive sweep on turn boundary / movement, or active Search) opposes
+   *  this DC. Cleared together with the `hidden` condition. */
+  hideDC?: number;
   equippedSlotLabels: { armor: string | null; weapon: string | null; shield: string | null };
   /** Current effective AC after armor / shield / Mage Armor / Defense fighting style. Synced from `playerDef.ac` after every `applyEquipment` call so the client doesn't have to recompute. */
   ac: number;
@@ -1269,6 +1338,15 @@ export interface NpcState {
   isActive: boolean;
   reactionUsed: boolean;
   conditions: string[];
+  /** SRD Hide outcome for this NPC — Stealth roll total recorded when the
+   *  creature took the Hide action. Opposed by player / other NPC Perception. */
+  hideDC?: number;
+  /** Last tile the player observed this NPC on. Set whenever `Vision.canSee`
+   *  reports the player saw this creature. Used by the client to render the
+   *  NPC's last-known position as a faded ghost when the player loses sight
+   *  (SRD "out of sight, not out of mind"). Cleared when the player sees
+   *  the creature again at its current tile. */
+  lastSeenTile?: { x: number; y: number };
   inventoryIds: string[];
   // Initiative roll total for the current combat (d20 + initiativeBonus, with
   // optional Disadvantage if Surprised). Cleared when combat ends.
@@ -1305,6 +1383,18 @@ export interface GameMap {
   passable: boolean[][];
   cols: number;
   rows: number;
+  /** Per-tile cover (SRD 5.2.1). `null` = no cover. Authored via
+   *  `EncounterTileProperty.cover` and baked at session-build time so the
+   *  Vision LOS walker and combat resolver can read it in O(1). */
+  cover?: (null | 'half' | 'three-quarters' | 'total')[][];
+  /** Per-tile obscurance (SRD 5.2.1). `null` = clear; `lightly` imposes
+   *  Disadv on Perception (sight); `heavily` Blinds the observer into the
+   *  tile and counts as Hide-eligible cover. Baked from
+   *  `EncounterTileProperty.obscurance`. Encounter-wide light defaults
+   *  (`EncounterEnvironment.lightLevel`) are NOT baked in here — they are
+   *  layered on top at read time so darkvision can override them per
+   *  observer. */
+  obscurance?: (null | 'lightly' | 'heavily')[][];
   /** Ground-layer tile GIDs for rendering. Optional: procedural maps may omit. */
   gidGrid?: number[][];
   /** Object-layer tile GIDs (drawn over the ground layer). 0 = empty cell. */
@@ -1452,6 +1542,19 @@ export type GameEvent =
    *  resolves the entity ref (`player` / `enemy_A` / `npc_<id>`) to a token
    *  position and renders an absolutely-positioned bubble. */
   | { type: 'npc_speech'; entityId: string; text: string }
+  /** A noise was emitted at the given tile. The client renders a brief
+   *  expanding circle (a "sound ring") at the source so the player gets
+   *  visual feedback of audible events — useful when the noise came from
+   *  outside the player's line of sight. `intensity` is in tiles (matches
+   *  the server-side EngineEvent radius). */
+  | { type: 'sound_ring'; x: number; y: number; intensity: number }
+  /** Play a one-off sound effect. The `sound` field is a logical id the
+   *  client maps to an audio file (see `SoundLibrary` in
+   *  `client/src/ui/SoundLibrary.ts`). Reserved for cinematic SFX cues
+   *  (physical-attack hit, spell impact, …) — NOT for the per-tile noise
+   *  events fed into the Hide/Perception model, which use `sound_ring`
+   *  plus the engine-side `noise` event. */
+  | { type: 'play_sound'; sound: string }
   /** Black-out fade overlay covering the entire canvas + every UI panel.
    *  `mode: 'out'` runs opacity → 1 (full black); `mode: 'in'` runs → 0
    *  (fully clear); `mode: 'dim'` runs → 0.5 (50% black — atmospheric dim

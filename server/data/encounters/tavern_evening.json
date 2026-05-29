@@ -538,5 +538,8 @@
       0,
       0
     ]
+  },
+  "environment": {
+    "lightLevel": "dim"
   }
 }

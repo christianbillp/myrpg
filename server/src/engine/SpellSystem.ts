@@ -20,6 +20,18 @@ import { startConcentration } from './ConcentrationSystem.js';
 import { applyEquipment } from './EquipmentSystem.js';
 import { publishNpcDamage } from './ThresholdPublisher.js';
 import { combatantDisplayName } from './CombatFlow.js';
+import { emitNoise, NOISE_SPELL_VERBAL } from './Sound.js';
+import { canSee as visCanSee } from './Vision.js';
+
+/** Cover the target benefits from against the player's spell attack. */
+function visCanSeeTargetCover(ctx: GameContext, target: NpcState): 'none' | 'half' | 'three-quarters' | 'total' {
+  const v = visCanSee(
+    ctx.state,
+    { tileX: ctx.state.player.tileX, tileY: ctx.state.player.tileY, senses: ctx.playerDef.senses },
+    { tileX: target.tileX, tileY: target.tileY, conditions: target.conditions, id: target.id },
+  );
+  return v.cover;
+}
 
 /** Ability mod for the player's spellcasting ability (defaults to 0 if unset). */
 function spellMod(ctx: GameContext): number {
@@ -122,16 +134,32 @@ function resolveAttackRollSpell(
   if (!def) return false;
   if (!spell.damage) return false;
 
+  // SRD cover for spell attack rolls. Total cover blocks the cast entirely
+  // before any roll happens — refunds nothing (the slot was already
+  // consumed by consumeCastingResources, which mirrors the player's choice
+  // to commit). The defender's cover bonus stacks onto effective AC.
+  const visionCover = visCanSeeTargetCover(ctx, target);
+  if (visionCover === 'total') {
+    ctx.addLog({
+      left: `${ctx.playerDef.name} casts ${spell.name} — ${combatantDisplayName(target, ctx.state.npcs)} is behind total cover`,
+      style: 'miss',
+    });
+    return false;
+  }
+  const coverAcBonus = visionCover === 'three-quarters' ? 5 : visionCover === 'half' ? 2 : 0;
+  const effectiveAc = def.ac + coverAcBonus;
+
   const bonus = spellAttackBonus(ctx);
   const roll = d20();
   const isCrit = roll === 20;
   const total = roll + bonus;
-  const hit = isCrit || (roll !== 1 && total >= def.ac);
+  const hit = isCrit || (roll !== 1 && total >= effectiveAc);
+  const coverNote = coverAcBonus > 0 ? ` (+${coverAcBonus} cover)` : '';
 
   if (!hit) {
     ctx.addLog({
       left: `${ctx.playerDef.name} casts ${spell.name} at ${combatantDisplayName(target, ctx.state.npcs)} — miss`,
-      right: `d20(${roll})+${bonus}=${total} vs AC ${def.ac}`,
+      right: `d20(${roll})+${bonus}=${total} vs AC ${effectiveAc}${coverNote}`,
       style: 'miss',
     });
     return false;
@@ -149,7 +177,7 @@ function resolveAttackRollSpell(
 
   ctx.addLog({
     left: `${ctx.playerDef.name} casts ${spell.name} — ${isCrit ? 'CRIT' : 'hit'}, ${dmg} ${spell.damage.type}`,
-    right: `d20(${roll})+${bonus}=${total} vs AC ${def.ac} · ${dice}d${spell.damage.sides}[${rolls.join(',')}]`,
+    right: `d20(${roll})+${bonus}=${total} vs AC ${effectiveAc}${coverNote} · ${dice}d${spell.damage.sides}[${rolls.join(',')}]`,
     style: isCrit ? 'crit' : 'hit',
   });
   applyDamageToNpc(ctx, target, dmg, spell.damage.type);
@@ -666,6 +694,14 @@ export function doCastSpell(
   maybeAggroOnCast(ctx, spell, targetIds, tile, events);
 
   consumeCastingResources(ctx, spell, slotLevel, asRitual);
+
+  // SRD: a spell with a Verbal component spoken aloud breaks Hide on the
+  // caster. We emit a `noise` event at the caster's tile; the Sound bus
+  // subscriber will clear the hide. Subtle Spell / silent-cast metamagic
+  // would later set `components.verbal = false` to suppress this.
+  if (spell.components.verbal) {
+    emitNoise(ctx, ctx.state.player.tileX, ctx.state.player.tileY, NOISE_SPELL_VERBAL, 'player');
+  }
 
   // Summon spells (Mage Hand, Unseen Servant) take the AOE-click tile and
   // conjure the spell's `summon.monsterId` there. Handled before the

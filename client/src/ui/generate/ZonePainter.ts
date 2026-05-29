@@ -22,7 +22,6 @@ const TRIGGER_COLOR: Record<TriggerRegion["kind"], number> = {
   aigm:         0xe2b96f,  // amber — narrative cue
   combat:       0xff6644,  // hot red — fight starts here
   xp:           0x88ccff,  // sky blue — reward
-  supertitle:   0xffffff,  // white — movie title card
   announcement: 0xf4e6c1,  // parchment — attention-grabbing card
   speech:       0x5588aa,  // bubble-blue
   fade:         0x222222,  // deep grey — blackout
@@ -57,7 +56,7 @@ export interface TriggerRegion {
   id: string;
   kind:
     | "perception" | "log" | "aigm" | "combat" | "xp"
-    | "supertitle" | "announcement" | "speech" | "fade";
+    | "announcement" | "speech" | "fade";
   region: { x: number; y: number; w: number; h: number };
 }
 

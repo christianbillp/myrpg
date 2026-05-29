@@ -314,17 +314,6 @@ export function fireAction(ctx: GameContext, action: TriggerAction): void {
       for (const a of branch) fireAction(ctx, a);
       return;
     }
-    case 'show_supertitle': {
-      const text = action.text.trim();
-      if (!text) return;
-      const sink = ctx.eventSink;
-      if (!sink) return;
-      const ev: GameEvent = action.durationMs !== undefined
-        ? { type: 'supertitle', text, durationMs: clampDuration(action.durationMs, 15000) }
-        : { type: 'supertitle', text };
-      sink.push(ev);
-      return;
-    }
     case 'show_announcement': {
       const text = action.text.trim();
       if (!text) return;

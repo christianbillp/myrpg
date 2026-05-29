@@ -21,10 +21,15 @@ const HEADER_H = 16;
 
 export type TriggerActionKind =
   | "perception" | "log" | "aigm" | "combat" | "xp"
-  | "supertitle" | "announcement" | "speech" | "fade";
+  | "announcement" | "speech" | "fade";
+
+export type TriggerWhenEvent = "player_moved" | "encounter_started" | "encounter_completed";
 
 export interface ComposedTrigger {
   id: string;
+  /** WHEN event the trigger fires on. `player_moved` uses the `region`;
+   *  `encounter_started` and `encounter_completed` ignore it. */
+  whenEvent?: TriggerWhenEvent;
   region: { x: number; y: number; w: number; h: number };
   kind: TriggerActionKind;
   dc: number;
@@ -34,7 +39,7 @@ export interface ComposedTrigger {
   defIds?: string[];
   /** Amount granted by an `xp` trigger. Optional; defaults to 0 (no-op). */
   xpAmount?: number;
-  /** Hold time (ms) for `supertitle` / `announcement`; fade time for `fade`. */
+  /** Hold time (ms) for `announcement`; fade time for `fade`. */
   durationMs?: number;
   /** Entity ref for `speech` (e.g. `player`, `npc_<id>`, `enemy_A`). */
   entityRef?: string;
@@ -69,10 +74,23 @@ const KIND_LABEL: Record<TriggerActionKind, string> = {
   aigm: "AIGM CUE",
   combat: "START COMBAT",
   xp: "AWARD XP",
-  supertitle: "SUPERTITLE",
   announcement: "ANNOUNCE",
   speech: "SPEECH",
   fade: "FADE",
+};
+
+/** Per-kind swatch colour shown next to each trigger's summary so authors
+ *  can match a trigger row to its outline on the map preview. Matches
+ *  `ZonePainter.TRIGGER_COLOR` / `MapPreviewOverlay.TRIGGER_COLOR`. */
+export const KIND_SWATCH: Record<TriggerActionKind, string> = {
+  perception:   "#88ccaa",
+  log:          "#c8d8e8",
+  aigm:         "#e2b96f",
+  combat:       "#ff6644",
+  xp:           "#88ccff",
+  announcement: "#f4e6c1",
+  speech:       "#5588aa",
+  fade:         "#222222",
 };
 
 const KIND_TOOLTIP: Record<TriggerActionKind, string> = {
@@ -81,7 +99,6 @@ const KIND_TOOLTIP: Record<TriggerActionKind, string> = {
   aigm: "Queue a cue for the AIGM's next reply.",
   combat: "Flip the named def to enemy and start combat.",
   xp: "Award the player XP.",
-  supertitle: "Show a movie-style centered title (huge white text).",
   announcement: "Show a centered announcement card; mirrored to the Event Log.",
   speech: "Show a speech bubble above the named entity's token.",
   fade: "Fade the screen to or from black. Pair an OUT with an IN.",
@@ -210,6 +227,7 @@ export class TriggerEditor {
     const region = { x: 0, y: 0, w: Math.min(5, this.opts.mapW), h: Math.min(5, this.opts.mapH) };
     const trig: ComposedTrigger = {
       id, region, kind: "perception",
+      whenEvent: "player_moved",
       dc: 10, passMessage: "You sense something nearby.",
       message: "",
       defId: "",
@@ -255,11 +273,35 @@ export class TriggerEditor {
 
     // Summary line + REMOVE button.
     const head = document.createElement("div");
-    head.style.cssText = "display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;";
+    head.style.cssText = "display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; gap: 6px;";
+    const summaryLine = document.createElement("div");
+    summaryLine.style.cssText = "display: flex; align-items: center; gap: 6px; flex: 1; min-width: 0;";
+
+    // Region swatch — small square matching the trigger's outline colour on
+    // the map preview. Empty (hollow) for lifecycle triggers that have no
+    // region, so authors can tell at a glance which triggers paint outlines.
+    const swatch = document.createElement("span");
+    const hasRegion = (trig.whenEvent ?? "player_moved") === "player_moved";
+    swatch.style.cssText = `
+      width: 12px; height: 12px; flex-shrink: 0;
+      border: 1px solid ${hasRegion ? KIND_SWATCH[trig.kind] : "#445566"};
+      background: ${hasRegion ? KIND_SWATCH[trig.kind] : "transparent"};
+      box-sizing: border-box;
+    `;
+    summaryLine.appendChild(swatch);
+
     const summary = document.createElement("span");
-    summary.style.color = "#e2b96f";
+    summary.style.cssText = "color: #e2b96f; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;";
     summary.textContent = this.summarise(trig);
-    head.appendChild(summary);
+    summaryLine.appendChild(summary);
+    head.appendChild(summaryLine);
+    // Helper for child handlers to keep the swatch in sync after kind /
+    // whenEvent changes.
+    const refreshSwatch = (): void => {
+      const region = (trig.whenEvent ?? "player_moved") === "player_moved";
+      swatch.style.background = region ? KIND_SWATCH[trig.kind] : "transparent";
+      swatch.style.borderColor = region ? KIND_SWATCH[trig.kind] : "#445566";
+    };
 
     const remove = document.createElement("button");
     remove.type = "button";
@@ -273,13 +315,57 @@ export class TriggerEditor {
     head.appendChild(remove);
     row.appendChild(head);
 
-    // Kind chips row. With 9 chip kinds we wrap onto two rows so each chip
-    // stays readable rather than getting squeezed to a few pixels.
+    // WHEN selector — picks the engine event the trigger listens on. The
+    // region inputs below are only shown for `player_moved`. We declare
+    // `regionRow` as a forward-reference so the WHEN-button handlers can
+    // flip its display; it's populated further down once chip-row logic is
+    // in scope.
+    let regionRow: HTMLDivElement;
+    const whenRow = document.createElement("div");
+    whenRow.style.cssText = "display: flex; gap: 4px; margin-bottom: 6px; align-items: center;";
+    whenRow.appendChild(this.makeLabel("WHEN"));
+    const whenButtons = new Map<TriggerWhenEvent, HTMLButtonElement>();
+    const refreshWhenButtons = (active: TriggerWhenEvent): void => {
+      for (const [m, b] of whenButtons) {
+        const on = m === active;
+        b.style.background = on ? "#2a3a55" : "#1a1a2a";
+        b.style.color = on ? "#cce4ff" : "#aabbcc";
+      }
+    };
+    const makeWhenBtn = (we: TriggerWhenEvent, label: string, tooltip: string): HTMLButtonElement => {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.textContent = label;
+      btn.title = tooltip;
+      btn.style.cssText = `
+        flex: 1; background: #1a1a2a; color: #aabbcc;
+        border: 1px solid #445566; padding: 2px 4px;
+        font-family: monospace; font-size: 9px; letter-spacing: 1px;
+        cursor: pointer; white-space: nowrap;
+      `;
+      btn.addEventListener("click", () => {
+        trig.whenEvent = we;
+        refreshWhenButtons(we);
+        regionRow.style.display = we === "player_moved" ? "" : "none";
+        summary.textContent = this.summarise(trig);
+        refreshSwatch();
+        this.opts.onChange?.();
+      });
+      whenButtons.set(we, btn);
+      return btn;
+    };
+    whenRow.appendChild(makeWhenBtn("player_moved", "REGION", "Fires when the player walks into the region defined below."));
+    whenRow.appendChild(makeWhenBtn("encounter_started", "ON START", "Fires once when the encounter begins."));
+    whenRow.appendChild(makeWhenBtn("encounter_completed", "ON COMPLETE", "Fires once when the encounter resolves (combat-victory or completionFlag set)."));
+    refreshWhenButtons(trig.whenEvent ?? "player_moved");
+    row.appendChild(whenRow);
+
+    // Kind chips row. Each chip selects the THEN action template.
     const chipRow = document.createElement("div");
     chipRow.style.cssText = "display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 6px;";
     const kinds: TriggerActionKind[] = [
       "perception", "log", "aigm", "combat", "xp",
-      "supertitle", "announcement", "speech", "fade",
+      "announcement", "speech", "fade",
     ];
     const chipBtns = new Map<TriggerActionKind, HTMLButtonElement>();
     for (const k of kinds) {
@@ -298,6 +384,7 @@ export class TriggerEditor {
         this.refreshChips(chipBtns, trig.kind);
         this.refreshKindVisibility(blocks, trig.kind);
         summary.textContent = this.summarise(trig);
+        refreshSwatch();
         this.opts.onChange?.();
       });
       chipBtns.set(k, chip);
@@ -305,9 +392,10 @@ export class TriggerEditor {
     }
     row.appendChild(chipRow);
 
-    // Region inputs.
-    const regionRow = document.createElement("div");
+    // Region inputs. Hidden when `whenEvent` is a lifecycle event.
+    regionRow = document.createElement("div");
     regionRow.style.cssText = "display: flex; gap: 6px; margin-bottom: 6px; align-items: center;";
+    if ((trig.whenEvent ?? "player_moved") !== "player_moved") regionRow.style.display = "none";
     regionRow.appendChild(this.makeLabel("REGION"));
     const regionInputs: HTMLInputElement[] = [];
     const labelNames: Array<keyof { x: 1; y: 1; w: 1; h: 1 }> = ["x", "y", "w", "h"];
@@ -385,13 +473,6 @@ export class TriggerEditor {
     }));
     xpBlock.appendChild(xpRow);
     blocks.set("xp", xpBlock);
-
-    const supertitleBlock = this.buildTextDurationBlock(
-      "TITLE TEXT", trig.message, "DURATION (ms, default 3000)", trig.durationMs,
-      (text) => { trig.message = text; this.opts.onChange?.(); },
-      (ms)   => { trig.durationMs = ms; this.opts.onChange?.(); },
-    );
-    blocks.set("supertitle", supertitleBlock);
 
     const announcementBlock = this.buildTextDurationBlock(
       "ANNOUNCEMENT TEXT", trig.message, "DURATION (ms, default 3500)", trig.durationMs,
@@ -542,7 +623,11 @@ export class TriggerEditor {
     if (t.kind === "xp")    tail = ` (+${t.xpAmount ?? 0})`;
     else if (t.kind === "fade") tail = ` ${(t.fadeMode ?? "out").toUpperCase()}`;
     else if (t.kind === "speech" && t.entityRef) tail = ` ${t.entityRef}`;
-    return `${KIND_LABEL[t.kind]}${tail}  @ (${r.x},${r.y}) ${r.w}×${r.h}`;
+    const when = t.whenEvent ?? "player_moved";
+    const whenSuffix = when === "player_moved"
+      ? `@ (${r.x},${r.y}) ${r.w}×${r.h}`
+      : when === "encounter_started" ? "ON START" : "ON COMPLETE";
+    return `${KIND_LABEL[t.kind]}${tail}  ${whenSuffix}`;
   }
 
   // ── DOM helpers ─────────────────────────────────────────────────────────

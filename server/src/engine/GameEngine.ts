@@ -18,6 +18,7 @@ import { setRelation, getRelation } from './FactionRelations.js';
 import { runOffCameraTick as runOffCameraTickImpl } from './WorldTick.js';
 import { PLAYER_FACTION_ID } from '../../../shared/types.js';
 import * as Guard from './ActionGuards.js';
+import { clearHide } from './ConditionSystem.js';
 import type { GameContext } from './GameContext.js';
 import {
   endCombat as cfEndCombat, autoEndCombatIfNoEnemies as cfAutoEndCombat,
@@ -38,6 +39,7 @@ import {
 import { doEquip as ivDoEquip, doUnequip as ivDoUnequip } from './InventoryActions.js';
 import { doCastSpell as spDoCastSpell } from './SpellSystem.js';
 import { doCommandSummon, checkSummonTether, registerSummonHooks } from './SummonSystem.js';
+import { registerSoundHooks } from './Sound.js';
 import { maybeBreakConcentration } from './ConcentrationSystem.js';
 import { doUseFeature } from './FeatureRegistry.js';
 import { buildSessionState, SavedMapRecord } from './SessionBuilder.js';
@@ -111,6 +113,7 @@ export class GameEngine {
     registerEncounterLifecycle(this.ctx);
     registerTriggers(this.ctx);
     registerSummonHooks(this.ctx);
+    registerSoundHooks(this.ctx);
 
     // Fire encounter_started AFTER every subscriber is registered. Triggers
     // listening on this event push their GameEvents into the startup buffer
@@ -120,6 +123,18 @@ export class GameEngine {
     this.ctx.eventSink = this.startupEvents;
     try {
       publishEncounterStarted(this.ctx);
+      // Auto-prepend the encounter title supertitle so every scene opens with
+      // the same cinematic location card regardless of authored triggers.
+      // The pre-blacked screen (see GameScene.create) sits behind it so the
+      // title reads against full black. We also explicitly append a
+      // fade_screen 'in' so the world reveals after the title — and so the
+      // client's "no fade in startup events → unshift fade-in" guard sees a
+      // fade event and doesn't add its own.
+      const title = this.state.encounterTitle?.trim();
+      if (title) {
+        this.startupEvents.unshift({ type: 'supertitle', text: title, durationMs: 2500 });
+        this.startupEvents.push({ type: 'screen_fade', mode: 'in', durationMs: 800 });
+      }
     } finally {
       this.ctx.eventSink = null;
     }
@@ -704,7 +719,7 @@ export class GameEngine {
     // Concentration save: any damage while concentrating triggers a CON save.
     if (s.player.concentratingOn) maybeBreakConcentration(this.ctx, damage);
     if (s.player.hp > 0) return;
-    s.player.conditions = s.player.conditions.filter((c) => c !== 'hidden');
+    clearHide(s.player);
     const leftover = damage - hpBefore;
     if (leftover >= this.playerDef.maxHp) {
       this.addLog({ left: `Massive damage — ${this.playerDef.name} dies instantly`, style: 'kill' });
@@ -724,7 +739,7 @@ export class GameEngine {
     }
     dying.inventoryIds = [];
     dying.isActive = false;
-    dying.conditions = dying.conditions.filter((c) => c !== 'hidden');
+    clearHide(dying);
     // A dead source can't sustain its periodic effects — drop any attach
     // effects it had on the player or other NPCs.
     s.player.ongoingEffects = s.player.ongoingEffects.filter((oe) => oe.sourceNpcId !== id);

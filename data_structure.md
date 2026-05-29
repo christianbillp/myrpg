@@ -124,6 +124,7 @@ SRD stat blocks for all creatures — both random enemies and the underlying sta
 | `initiativeBonus` | number | Added to the initiative roll. Typically equals the DEX modifier. |
 | `stealthBonus` | number | Used when the creature attempts to hide. |
 | `passivePerception` | number | Used to detect hiding players. |
+| `senses` | object | *(optional)* SRD special senses (`{ darkvision?: number, blindsight?: number, tremorsense?: number, truesight?: number }`, all in feet). Read by `Vision.canSee` to step ambient darkness → dim within Darkvision range, see through Invisible with Truesight, etc. Absent means "normal sight only." |
 | `speed` | number | Movement speed in **feet**. |
 | `attacks` | Attack[] | One or more attack entries (see below). |
 | `xp` | number | XP awarded on kill. |
@@ -945,12 +946,15 @@ Encounters that want a delayed reveal (stealth / ambush) should leave the map fr
 
 ### tileProperties
 
-Each entry maps one of the map's GIDs to the semantic properties that GID should carry during this encounter. The engine's only currently-honoured property is `passable`; future SRD features (difficult terrain US-044, cover US-045, traps) will add more fields without changing the file shape.
+Each entry maps one of the map's GIDs to the semantic properties that GID should carry during this encounter. The engine honours `passable`, `cover`, `obscurance`, and `transparent`; SessionBuilder bakes them into per-tile arrays on `GameMap` so the Vision module + combat resolver can read them in O(1).
 
 | Field | Type | Notes |
 |---|---|---|
 | `gid` | integer | GID from the referenced map's terrain layer (= the map's `firstgid + tile.id`). |
 | `passable` | boolean | *(default: `false`)* Whether creatures can walk onto a tile of this GID. |
+| `cover` | string | *(optional)* SRD Cover: `"half"` (+2 AC/Dex), `"three-quarters"` (+5 AC/Dex), `"total"` (untargetable, blocks line of sight). Walls without an explicit cover declaration are auto-promoted to `"total"` if the tile is also impassable (so authors don't have to tag every wall GID). |
+| `obscurance` | string | *(optional)* SRD Obscurance: `"lightly"` (Disadv on Perception sight checks, counts as Hide-eligible terrain only when combined with cover); `"heavily"` (Blinded into the tile; counts as Hide-eligible on its own). Underbrush, smoke, fog. |
+| `transparent` | boolean | *(optional, default `false`)* Opts an impassable tile **out of** the auto-Total-Cover promotion. Use for chasms, deep water, low walls — terrain you can see across but cannot walk onto. Has no effect on passable tiles. |
 
 **Lookup order for a GID's `passable`:**
 
@@ -958,9 +962,43 @@ Each entry maps one of the map's GIDs to the semantic properties that GID should
 2. The tileset's legend file (see [tilesets/](#tilesets-1)) — sensible default for tiles the encounter didn't customise.
 3. `false` (impassable) — final fallback when neither source declares a value.
 
-So encounters only need to list GIDs whose meaning differs from the legend (e.g. an "underground passage" scenario marks GID 287 / chasm as `passable: true`); a GID that matches the legend default can be omitted.
+**Cover + obscurance baking** (`SessionBuilder.buildGameMapFromSaved`):
+  - For every cell the walker checks the ground GID and the object GID. The **worst** declared `cover` and the **worst** declared `obscurance` across the two layers win — so a tree (object) on grass (ground) → three-quarters cover and lightly obscured if both are declared that way.
+  - Impassable cells without an explicit `cover` declaration → auto-`"total"` UNLESS either layer has `transparent: true`. This means walls block LOS out of the box.
+  - Results are stored on `GameMap.cover: (null|'half'|'three-quarters'|'total')[][]` and `GameMap.obscurance: (null|'lightly'|'heavily')[][]`.
+
+So encounters only need to list GIDs whose meaning differs from the legend (e.g. an "underground passage" scenario marks GID 287 / chasm as `passable: true, transparent: true`); a GID that matches the legend default can be omitted.
 
 Because semantics live here and not in the map, the same `bridge.json` can be reused across encounters with different tile meanings — a broken-wall scenario could mark GID 2 (normally a wall) as `passable: true`, while a flooded scenario could leave it solid.
+
+### environment
+
+Optional. Encounter-level environmental flags consulted by combat / vision resolvers.
+
+| Field | Type | Notes |
+|---|---|---|
+| `sunlit` | boolean | *(optional)* True if the encounter is in direct sunlight. Triggers Sunlight Sensitivity (Disadv on attacks) for creatures whose `traits` include `sunlight_sensitivity`. |
+| `lightLevel` | string | *(optional, default `"bright"`)* SRD baseline ambient: `"bright"` — normal sight; `"dim"` — every tile is **lightly obscured** by default (Disadv on Perception sight checks); `"dark"` — every tile is **heavily obscured** (Blinded into) by default. Darkvision steps `"dark"` → `"dim"` within the observer's range. Per-tile `obscurance` stacks (worst-of) with this baseline. Used for night, underground, fog-bound scenes. |
+
+### Vision / Sound runtime modules
+
+Two engine modules combine the schemas above into the SRD-faithful vision + audible-noise model:
+
+**`server/src/engine/Vision.ts`** — line-of-sight + senses + perception resolver.
+  - `canSee(state, observer, target)` walks Bresenham, accumulates the worst cover + obscurance along the line, applies the observer's senses (Darkvision steps dark→dim within range; Blindsight pierces sight requirements within its range bar Total Cover; Tremorsense pinpoints on a shared surface; Truesight pierces invisibility + concealment). Returns `{ sees, cover, obscurance, via }`.
+  - `effectivePerception(basePP, vision)` applies +5 (Truesight / Blindsight / Tremorsense in range), −5 (Lightly Obscured / Darkness without Darkvision).
+  - `runPerceptionSweep(ctx, hider)` rolls an opposed Perception against the hider's stored `hideDC` for every potential observer; on success clears `hidden` + `invisible` via `ConditionSystem.clearHide`.
+
+**`server/src/engine/Sound.ts`** — noise model.
+  - `emitNoise(ctx, x, y, intensity, sourceId?)` publishes a `noise` EngineEvent **and** queues a client-facing `sound_ring` GameEvent so the player sees an expanding circle on the map.
+  - `registerSoundHooks(ctx)` registers a bus subscriber that breaks Hide on the source whenever intensity > whisper, then runs a Perception sweep against every hidden creature inside the audible radius.
+  - Intensity tiles: `NOISE_WHISPER = 1`, `NOISE_FOOTSTEP = 2`, `NOISE_STEALTH_MOVE = 0`, `NOISE_SPEECH = 3`, `NOISE_COMBAT = 5`, `NOISE_SPELL_VERBAL = 5`. SpellSystem fires a `NOISE_SPELL_VERBAL` event on every cast whose `components.verbal` is true.
+
+**Hide gate enforcement** ([CombatActions.doHide](../server/src/engine/CombatActions.ts)) requires Heavily Obscured tile OR every observer has ≥ three-quarters cover from the hider OR no observer present. On success, `playerHide` rolls Stealth, requires ≥ DC 15, and stores the total as `player.hideDC`. The same DC is then opposed by every subsequent Perception attempt (passive sweep or active SEARCH).
+
+**Hide → Invisible bundling** ([ConditionSystem.clearHide](../server/src/engine/ConditionSystem.ts)) — SRD: a successful Hide grants the Invisible condition. We push both `'hidden'` and `'invisible'` together when Hide lands; both are cleared as a unit when `hideDC` is set and any of the four break-triggers fires (attack, noise > whisper, spotted, V-component spell cast). Magical invisibility (Greater Invisibility) sets only `'invisible'` without `hideDC`, so it survives those triggers.
+
+**SEARCH action** ([ExplorationActions.doSearch](../server/src/engine/ExplorationActions.ts)) — in addition to the existing secrets sweep, the SEARCH Action now runs `Vision.runPerceptionSweep` against every hidden NPC within 6 tiles (30 ft). Spotted hiders lose their hidden + invisible flags and surface on the map.
 
 ### startingZones
 

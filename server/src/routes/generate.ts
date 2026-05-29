@@ -210,9 +210,10 @@ export function registerGenerateRoutes(server: FastifyInstance, ctx: GenerateRou
       triggers?: Array<{
         id: string;
         region: { x: number; y: number; w: number; h: number };
+        whenEvent?: "player_moved" | "encounter_started" | "encounter_completed";
         kind:
           | "perception" | "log" | "aigm" | "combat" | "xp"
-          | "supertitle" | "announcement" | "speech" | "fade";
+          | "announcement" | "speech" | "fade";
         dc: number;
         passMessage: string;
         message: string;
@@ -328,8 +329,15 @@ export function registerGenerateRoutes(server: FastifyInstance, ctx: GenerateRou
       // entry. The body depends on the chosen action template.
       const triggers = (composedTriggers ?? []).map((t, i) => {
         const baseId = `${t.id || `gen_trigger_${i + 1}`}`;
-        const when = { event: 'player_moved' as const, in_area: t.region };
-        const guards = [{ type: 'phase' as const, in: ['exploring'] as const }];
+        const whenEvent = t.whenEvent ?? 'player_moved';
+        const when: Record<string, unknown> = whenEvent === 'player_moved'
+          ? { event: 'player_moved', in_area: t.region }
+          : { event: whenEvent };
+        // `phase: exploring` guard only applies to region-walk triggers —
+        // lifecycle triggers fire on engine events, not phase transitions.
+        const guards = whenEvent === 'player_moved'
+          ? [{ type: 'phase' as const, in: ['exploring'] as const }]
+          : [];
         let then: Record<string, unknown>[];
         switch (t.kind) {
           case 'perception':
@@ -363,15 +371,6 @@ export function registerGenerateRoutes(server: FastifyInstance, ctx: GenerateRou
           case 'xp': {
             const amount = Math.max(0, Math.floor(t.xpAmount ?? 0));
             then = amount > 0 ? [{ type: 'award_xp', amount }] : [];
-            break;
-          }
-          case 'supertitle': {
-            const text = t.message.trim();
-            then = text ? [{
-              type: 'show_supertitle',
-              text,
-              ...(t.durationMs && t.durationMs > 0 ? { durationMs: t.durationMs } : {}),
-            }] : [];
             break;
           }
           case 'announcement': {
@@ -468,9 +467,10 @@ export function registerGenerateRoutes(server: FastifyInstance, ctx: GenerateRou
       triggers?: Array<{
         id: string;
         region: { x: number; y: number; w: number; h: number };
+        whenEvent?: "player_moved" | "encounter_started" | "encounter_completed";
         kind:
           | "perception" | "log" | "aigm" | "combat" | "xp"
-          | "supertitle" | "announcement" | "speech" | "fade";
+          | "announcement" | "speech" | "fade";
         dc: number;
         passMessage: string;
         message: string;
@@ -532,8 +532,13 @@ export function registerGenerateRoutes(server: FastifyInstance, ctx: GenerateRou
       // using the same logic as `/generate/encounter/composed`.
       const triggers = (composedTriggers ?? []).map((t, i) => {
         const baseId = `${t.id || `edit_trigger_${i + 1}`}`;
-        const when = { event: 'player_moved' as const, in_area: t.region };
-        const guards = [{ type: 'phase' as const, in: ['exploring'] as const }];
+        const whenEvent = t.whenEvent ?? 'player_moved';
+        const when: Record<string, unknown> = whenEvent === 'player_moved'
+          ? { event: 'player_moved', in_area: t.region }
+          : { event: whenEvent };
+        const guards = whenEvent === 'player_moved'
+          ? [{ type: 'phase' as const, in: ['exploring'] as const }]
+          : [];
         let then: Record<string, unknown>[];
         switch (t.kind) {
           case 'perception':
@@ -563,15 +568,6 @@ export function registerGenerateRoutes(server: FastifyInstance, ctx: GenerateRou
           case 'xp': {
             const amount = Math.max(0, Math.floor(t.xpAmount ?? 0));
             then = amount > 0 ? [{ type: 'award_xp', amount }] : [];
-            break;
-          }
-          case 'supertitle': {
-            const text = t.message.trim();
-            then = text ? [{
-              type: 'show_supertitle',
-              text,
-              ...(t.durationMs && t.durationMs > 0 ? { durationMs: t.durationMs } : {}),
-            }] : [];
             break;
           }
           case 'announcement': {

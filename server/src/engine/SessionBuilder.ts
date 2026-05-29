@@ -55,9 +55,18 @@ function resolveGidPassable(
 function buildGameMapFromSaved(
   saved: SavedMapRecord,
   tileProperties: EncounterTileProperty[] | undefined,
+  tileLegend: Record<string, { cover?: 'half' | 'three-quarters' | 'total'; obscurance?: 'lightly' | 'heavily'; transparent?: boolean }>,
 ): GameMap {
   const byGid = new Map<number, EncounterTileProperty>();
   for (const tp of tileProperties ?? []) byGid.set(tp.gid, tp);
+  /** Read cover/obscurance/transparent for a GID. Encounter override wins;
+   *  otherwise fall through to the tileset legend defaults. */
+  const tileCoverFor = (gid: number): 'half' | 'three-quarters' | 'total' | null =>
+    byGid.get(gid)?.cover ?? tileLegend[String(gid)]?.cover ?? null;
+  const tileObsFor = (gid: number): 'lightly' | 'heavily' | null =>
+    byGid.get(gid)?.obscurance ?? tileLegend[String(gid)]?.obscurance ?? null;
+  const tileTransparent = (gid: number): boolean =>
+    byGid.get(gid)?.transparent ?? tileLegend[String(gid)]?.transparent ?? false;
   const passable: boolean[][] = saved.gidGrid.map((row, y) =>
     row.map((groundGid, x) => {
       if (!resolveGidPassable(groundGid, byGid, saved.tilesets)) return false;
@@ -65,15 +74,63 @@ function buildGameMapFromSaved(
       return resolveGidPassable(objectGid, byGid, saved.tilesets);
     }),
   );
+  // Bake per-tile cover and obscurance from the encounter's tileProperties.
+  // The walker takes the worst of the ground + object GID for each cell so a
+  // patch of underbrush sitting on grass becomes "lightly obscured", and a
+  // dense tree on dirt becomes "three-quarters cover". Tileset-level
+  // defaults are not (yet) consulted — authors mark these explicitly via
+  // `EncounterTileProperty`.
+  //
+  // Impassable tiles without an explicit cover declaration are auto-promoted
+  // to Total Cover so walls block vision out of the box. Authors opt out of
+  // this by setting `transparent: true` on the tile property (chasms, deep
+  // water, low walls — terrain you can see across but cannot enter).
+  const coverGrid: (null | 'half' | 'three-quarters' | 'total')[][] = saved.gidGrid.map((row, y) =>
+    row.map((groundGid, x) => {
+      const objectGid = saved.objectGidGrid?.[y]?.[x] ?? 0;
+      let cover = worstCover(tileCoverFor(groundGid), tileCoverFor(objectGid));
+      // Auto-promote: if this cell is impassable AND neither layer declared
+      // `transparent: true` (legend or encounter override), treat as Total
+      // Cover. Authors mark chasms / water / windows transparent to opt out.
+      if (!passable[y][x] && !tileTransparent(groundGid) && !tileTransparent(objectGid) && cover === null) {
+        cover = 'total';
+      }
+      return cover;
+    }),
+  );
+  const obscuranceGrid: (null | 'lightly' | 'heavily')[][] = saved.gidGrid.map((row, y) =>
+    row.map((groundGid, x) => {
+      const objectGid = saved.objectGidGrid?.[y]?.[x] ?? 0;
+      return worstObscurance(tileObsFor(groundGid), tileObsFor(objectGid));
+    }),
+  );
   return {
     cols: saved.cols,
     rows: saved.rows,
     passable,
+    cover: coverGrid,
+    obscurance: obscuranceGrid,
     // Carry rendering info through to the client.
     gidGrid: saved.gidGrid,
     objectGidGrid: saved.objectGidGrid,
     tilesets: saved.tilesets,
   };
+}
+
+type CoverCell = null | 'half' | 'three-quarters' | 'total';
+const COVER_RANK: Record<Exclude<CoverCell, null>, number> = { 'half': 1, 'three-quarters': 2, 'total': 3 };
+function worstCover(a: CoverCell, b: CoverCell): CoverCell {
+  if (!a) return b;
+  if (!b) return a;
+  return COVER_RANK[a] >= COVER_RANK[b] ? a : b;
+}
+
+type ObsCell = null | 'lightly' | 'heavily';
+const OBS_RANK: Record<Exclude<ObsCell, null>, number> = { 'lightly': 1, 'heavily': 2 };
+function worstObscurance(a: ObsCell, b: ObsCell): ObsCell {
+  if (!a) return b;
+  if (!b) return a;
+  return OBS_RANK[a] >= OBS_RANK[b] ? a : b;
 }
 
 /**
@@ -90,7 +147,7 @@ export function buildSessionState(
   if (!playerDef) throw new Error(`Unknown playerDefId: ${req.playerDefId}`);
 
   const map: GameMap = savedMap
-    ? buildGameMapFromSaved(savedMap, req.tileProperties)
+    ? buildGameMapFromSaved(savedMap, req.tileProperties, defs.tileLegend.tiles)
     : (req.mapType === 'rooms' ? generateRoomsMap() : generateMap());
 
   const equippedSlots: EquipmentSlots = req.resumeEquippedSlots ?? { ...playerDef.defaultEquipment };

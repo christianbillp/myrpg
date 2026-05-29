@@ -6,35 +6,65 @@
       "passable": true,
       "layer": "ground",
       "description": "Featureless light tile with no surface detail. Passable. Use sparingly — for default walkable floors prefer stone_floor (GID 15) or its variants.",
-      "tags": ["blank", "fill", "placeholder"]
+      "tags": [
+        "blank",
+        "fill",
+        "placeholder"
+      ]
     },
     "2": {
       "name": "path_corner_se",
       "passable": true,
       "layer": "ground",
       "description": "Dirt path corner; the path enters from the bottom edge and turns to exit on the right.",
-      "tags": ["path", "road", "outdoor", "corner", "connect_s", "connect_e"]
+      "tags": [
+        "path",
+        "road",
+        "outdoor",
+        "corner",
+        "connect_s",
+        "connect_e"
+      ]
     },
     "3": {
       "name": "stone_wall_corner_tl",
       "passable": false,
       "layer": "ground",
       "description": "Solid stone wall corner piece (top-left). Blocks movement and sight.",
-      "tags": ["stone", "wall", "dungeon", "indoor", "barrier", "corner"]
+      "tags": [
+        "stone",
+        "wall",
+        "dungeon",
+        "indoor",
+        "barrier",
+        "corner"
+      ]
     },
     "4": {
       "name": "stone_wall_top",
       "passable": false,
       "layer": "ground",
       "description": "Solid stone wall segment placed along the top of the tile. Blocks movement and sight.",
-      "tags": ["stone", "wall", "dungeon", "indoor", "barrier"]
+      "tags": [
+        "stone",
+        "wall",
+        "dungeon",
+        "indoor",
+        "barrier"
+      ]
     },
     "5": {
       "name": "doorway_top",
       "passable": true,
       "layer": "object",
       "description": "An open doorway (no door) set in the top part of the tile. Passable opening; place over a wall tile.",
-      "tags": ["door", "entrance", "dungeon", "indoor", "passage"]
+      "tags": [
+        "door",
+        "entrance",
+        "dungeon",
+        "indoor",
+        "passage"
+      ]
     },
     "6": {
       "name": "crate",
@@ -48,21 +78,33 @@
         "loot",
         "searchable",
         "indoor"
-      ]
+      ],
+      "cover": "half",
+      "transparent": true
     },
     "7": {
       "name": "wood_wall_top",
       "passable": false,
       "layer": "ground",
       "description": "Light wooden plank wall segment along the top of the tile. Blocks movement and sight.",
-      "tags": ["wood", "wall", "tavern", "indoor", "barrier"]
+      "tags": [
+        "wood",
+        "wall",
+        "tavern",
+        "indoor",
+        "barrier"
+      ]
     },
     "8": {
       "name": "grass",
       "passable": true,
       "layer": "ground",
       "description": "Solid medium-green grass. Default outdoor ground fill.",
-      "tags": ["nature", "outdoor", "fill"]
+      "tags": [
+        "nature",
+        "outdoor",
+        "fill"
+      ]
     },
     "9": {
       "name": "path_corner_se_transparent",
@@ -145,7 +187,9 @@
         "transparent",
         "overlay",
         "no_background"
-      ]
+      ],
+      "cover": "half",
+      "transparent": true
     },
     "14": {
       "name": "wood_wall_top_transparent",
@@ -168,49 +212,96 @@
       "passable": true,
       "layer": "ground",
       "description": "Pale grey flagstone floor with faint grid lines. **Default walkable dungeon / interior floor** — pair with stone_floor_cracked (71) for variation in worn or ruined areas.",
-      "tags": ["stone", "floor", "dungeon", "indoor", "fill", "default"]
+      "tags": [
+        "stone",
+        "floor",
+        "dungeon",
+        "indoor",
+        "fill",
+        "default"
+      ]
     },
     "16": {
       "name": "path_straight_v",
       "passable": true,
       "layer": "ground",
       "description": "Straight vertical dirt path running from the bottom edge to the top edge.",
-      "tags": ["path", "road", "outdoor", "straight", "connect_n", "connect_s"]
+      "tags": [
+        "path",
+        "road",
+        "outdoor",
+        "straight",
+        "connect_n",
+        "connect_s"
+      ]
     },
     "17": {
       "name": "stone_wall_corner_curved",
       "passable": false,
       "layer": "ground",
       "description": "Curved stone wall corner piece. Blocks movement and sight.",
-      "tags": ["stone", "wall", "dungeon", "indoor", "barrier", "corner"]
+      "tags": [
+        "stone",
+        "wall",
+        "dungeon",
+        "indoor",
+        "barrier",
+        "corner"
+      ]
     },
     "18": {
       "name": "half_wall_ul",
       "passable": true,
       "layer": "object",
       "description": "A low half-wall in the upper-left of the tile. Passable; provides cover but does not block line of sight.",
-      "tags": ["wall", "half_wall", "cover", "passable", "indoor"]
+      "tags": [
+        "wall",
+        "half_wall",
+        "cover",
+        "passable",
+        "indoor"
+      ],
+      "cover": "half"
     },
     "19": {
       "name": "doorway_open_top",
       "passable": true,
       "layer": "object",
       "description": "An open doorway with no door, set in the upper part of the tile. Passable opening.",
-      "tags": ["door", "entrance", "passage", "indoor"]
+      "tags": [
+        "door",
+        "entrance",
+        "passage",
+        "indoor"
+      ]
     },
     "20": {
       "name": "brazier",
       "passable": false,
       "layer": "object",
       "description": "A standing lit brazier. Blocks movement; emits light.",
-      "tags": ["brazier", "light", "fixture", "furniture", "indoor"]
+      "tags": [
+        "brazier",
+        "light",
+        "fixture",
+        "furniture",
+        "indoor"
+      ],
+      "cover": "half",
+      "transparent": true
     },
     "21": {
       "name": "chair_n",
       "passable": true,
       "layer": "object",
       "description": "A wooden chair, centered, facing north. Passable seat a character can occupy.",
-      "tags": ["chair", "seat", "furniture", "indoor", "facing_n"]
+      "tags": [
+        "chair",
+        "seat",
+        "furniture",
+        "indoor",
+        "facing_n"
+      ]
     },
     "22": {
       "name": "crate_closed",
@@ -224,7 +315,9 @@
         "loot",
         "searchable",
         "indoor"
-      ]
+      ],
+      "cover": "half",
+      "transparent": true
     },
     "23": {
       "name": "path_straight_v_transparent",
@@ -274,7 +367,8 @@
         "transparent",
         "overlay",
         "no_background"
-      ]
+      ],
+      "cover": "half"
     },
     "26": {
       "name": "doorway_open_top_transparent",
@@ -305,7 +399,9 @@
         "transparent",
         "overlay",
         "no_background"
-      ]
+      ],
+      "cover": "half",
+      "transparent": true
     },
     "28": {
       "name": "chair_n_transparent",
@@ -328,7 +424,14 @@
       "passable": false,
       "layer": "ground",
       "description": "Floor meeting a void/chasm at the top-left corner. Blocks movement at the void.",
-      "tags": ["void", "chasm", "pit", "hazard", "corner"]
+      "tags": [
+        "void",
+        "chasm",
+        "pit",
+        "hazard",
+        "corner"
+      ],
+      "transparent": true
     },
     "30": {
       "name": "path_intersection",
@@ -351,21 +454,42 @@
       "passable": false,
       "layer": "ground",
       "description": "Stone wall corner beside a void. Blocks movement and sight.",
-      "tags": ["stone", "wall", "dungeon", "indoor", "barrier", "corner"]
+      "tags": [
+        "stone",
+        "wall",
+        "dungeon",
+        "indoor",
+        "barrier",
+        "corner"
+      ]
     },
     "32": {
       "name": "half_wall_cracked_ul",
       "passable": true,
       "layer": "object",
       "description": "A cracked low half-wall in the upper part of the tile. Passable; provides cover but does not block line of sight.",
-      "tags": ["wall", "half_wall", "cracked", "cover", "passable", "indoor"]
+      "tags": [
+        "wall",
+        "half_wall",
+        "cracked",
+        "cover",
+        "passable",
+        "indoor"
+      ],
+      "cover": "half"
     },
     "33": {
       "name": "door_open_top",
       "passable": true,
       "layer": "object",
       "description": "An open door; frame in the upper part of the tile, door swung open toward the lower right. Passable.",
-      "tags": ["door", "entrance", "passage", "indoor", "open"]
+      "tags": [
+        "door",
+        "entrance",
+        "passage",
+        "indoor",
+        "open"
+      ]
     },
     "34": {
       "name": "barrels_two",
@@ -379,21 +503,37 @@
         "loot",
         "searchable",
         "indoor"
-      ]
+      ],
+      "cover": "half",
+      "transparent": true
     },
     "35": {
       "name": "firewood",
       "passable": false,
       "layer": "object",
       "description": "A pile of planks or firewood. Blocks movement; searchable.",
-      "tags": ["firewood", "planks", "wood", "searchable", "decoration"]
+      "tags": [
+        "firewood",
+        "planks",
+        "wood",
+        "searchable",
+        "decoration"
+      ],
+      "cover": "half",
+      "transparent": true
     },
     "36": {
       "name": "trapdoor",
       "passable": true,
       "layer": "object",
       "description": "A trapdoor set into the floor that opens toward the right. Passable; acts as a level transition.",
-      "tags": ["trapdoor", "transition", "passage", "floor", "indoor"]
+      "tags": [
+        "trapdoor",
+        "transition",
+        "passage",
+        "floor",
+        "indoor"
+      ]
     },
     "37": {
       "name": "path_intersection_transparent",
@@ -446,7 +586,8 @@
         "transparent",
         "overlay",
         "no_background"
-      ]
+      ],
+      "cover": "half"
     },
     "40": {
       "name": "door_open_top_transparent",
@@ -479,7 +620,9 @@
         "transparent",
         "overlay",
         "no_background"
-      ]
+      ],
+      "cover": "half",
+      "transparent": true
     },
     "42": {
       "name": "firewood_transparent",
@@ -495,42 +638,81 @@
         "transparent",
         "overlay",
         "no_background"
-      ]
+      ],
+      "cover": "half",
+      "transparent": true
     },
     "43": {
       "name": "stone_floor_diamond",
       "passable": true,
       "layer": "ground",
       "description": "Stone floor with a diamond tile pattern. Walkable dungeon floor.",
-      "tags": ["stone", "floor", "dungeon", "indoor", "fill", "decorated"]
+      "tags": [
+        "stone",
+        "floor",
+        "dungeon",
+        "indoor",
+        "fill",
+        "decorated"
+      ]
     },
     "44": {
       "name": "rail_corner_se",
       "passable": true,
       "layer": "ground",
       "description": "Railway track curving from the bottom edge to the right edge.",
-      "tags": ["rail", "track", "corner", "connect_s", "connect_e", "outdoor"]
+      "tags": [
+        "rail",
+        "track",
+        "corner",
+        "connect_s",
+        "connect_e",
+        "outdoor"
+      ]
     },
     "45": {
       "name": "stone_wall_conduit_corner",
       "passable": false,
       "layer": "ground",
       "description": "Curved stone wall corner with a conduit/pipe. Blocks movement and sight.",
-      "tags": ["stone", "wall", "dungeon", "indoor", "barrier", "corner"]
+      "tags": [
+        "stone",
+        "wall",
+        "dungeon",
+        "indoor",
+        "barrier",
+        "corner"
+      ]
     },
     "46": {
       "name": "window_top",
       "passable": false,
       "layer": "ground",
       "description": "A horizontal window set into the top part of a wall. Blocks movement.",
-      "tags": ["window", "wall", "dungeon", "indoor", "barrier"]
+      "tags": [
+        "window",
+        "wall",
+        "dungeon",
+        "indoor",
+        "barrier"
+      ],
+      "cover": "half",
+      "transparent": true
     },
     "47": {
       "name": "brazier_b",
       "passable": false,
       "layer": "object",
       "description": "A standing lit brazier. Blocks movement; emits light.",
-      "tags": ["brazier", "light", "fixture", "furniture", "indoor"]
+      "tags": [
+        "brazier",
+        "light",
+        "fixture",
+        "furniture",
+        "indoor"
+      ],
+      "cover": "half",
+      "transparent": true
     },
     "48": {
       "name": "barrels_three",
@@ -544,21 +726,37 @@
         "loot",
         "searchable",
         "indoor"
-      ]
+      ],
+      "cover": "half",
+      "transparent": true
     },
     "49": {
       "name": "bed_n",
       "passable": false,
       "layer": "object",
       "description": "A bed, centered, vertical, facing north. Blocks movement.",
-      "tags": ["bed", "furniture", "indoor", "facing_n"]
+      "tags": [
+        "bed",
+        "furniture",
+        "indoor",
+        "facing_n"
+      ],
+      "cover": "half",
+      "transparent": true
     },
     "50": {
       "name": "stairs_up",
       "passable": true,
       "layer": "object",
       "description": "A staircase leading up. Passable; acts as a level transition.",
-      "tags": ["stairs", "up", "transition", "passage", "dungeon", "indoor"]
+      "tags": [
+        "stairs",
+        "up",
+        "transition",
+        "passage",
+        "dungeon",
+        "indoor"
+      ]
     },
     "51": {
       "name": "rail_corner_se_transparent",
@@ -608,7 +806,9 @@
         "transparent",
         "overlay",
         "no_background"
-      ]
+      ],
+      "cover": "half",
+      "transparent": true
     },
     "54": {
       "name": "brazier_b_transparent",
@@ -624,7 +824,9 @@
         "transparent",
         "overlay",
         "no_background"
-      ]
+      ],
+      "cover": "half",
+      "transparent": true
     },
     "55": {
       "name": "barrels_three_transparent",
@@ -641,7 +843,9 @@
         "transparent",
         "overlay",
         "no_background"
-      ]
+      ],
+      "cover": "half",
+      "transparent": true
     },
     "56": {
       "name": "bed_n_transparent",
@@ -656,28 +860,51 @@
         "transparent",
         "overlay",
         "no_background"
-      ]
+      ],
+      "cover": "half",
+      "transparent": true
     },
     "57": {
       "name": "stone_floor_inlay",
       "passable": true,
       "layer": "ground",
       "description": "Stone floor with a central diamond inlay. Walkable dungeon floor.",
-      "tags": ["stone", "floor", "dungeon", "indoor", "fill", "decorated"]
+      "tags": [
+        "stone",
+        "floor",
+        "dungeon",
+        "indoor",
+        "fill",
+        "decorated"
+      ]
     },
     "58": {
       "name": "rail_straight_v",
       "passable": true,
       "layer": "ground",
       "description": "Straight railway track running from the bottom edge to the top edge.",
-      "tags": ["rail", "track", "straight", "connect_n", "connect_s", "outdoor"]
+      "tags": [
+        "rail",
+        "track",
+        "straight",
+        "connect_n",
+        "connect_s",
+        "outdoor"
+      ]
     },
     "59": {
       "name": "stone_wall_corner_ul",
       "passable": false,
       "layer": "ground",
       "description": "Stone wall placed in the upper-left part of the tile. Blocks movement and sight.",
-      "tags": ["stone", "wall", "dungeon", "indoor", "barrier", "corner"]
+      "tags": [
+        "stone",
+        "wall",
+        "dungeon",
+        "indoor",
+        "barrier",
+        "corner"
+      ]
     },
     "60": {
       "name": "wall_spikes_top",
@@ -706,28 +933,51 @@
         "loot",
         "searchable",
         "indoor"
-      ]
+      ],
+      "cover": "half",
+      "transparent": true
     },
     "62": {
       "name": "arrow_body_se",
       "passable": true,
       "layer": "object",
       "description": "Marker: arrow body curving from the center-bottom toward the center-right. Part of a multi-tile directional arrow overlay.",
-      "tags": ["marker", "arrow", "ui", "overlay", "connect_s", "connect_e"]
+      "tags": [
+        "marker",
+        "arrow",
+        "ui",
+        "overlay",
+        "connect_s",
+        "connect_e"
+      ]
     },
     "63": {
       "name": "bed_unmade",
       "passable": false,
       "layer": "object",
       "description": "An unmade bed. Blocks movement.",
-      "tags": ["bed", "furniture", "indoor", "unmade"]
+      "tags": [
+        "bed",
+        "furniture",
+        "indoor",
+        "unmade"
+      ],
+      "cover": "half",
+      "transparent": true
     },
     "64": {
       "name": "stairs_down",
       "passable": true,
       "layer": "object",
       "description": "A staircase leading down. Passable; acts as a level transition.",
-      "tags": ["stairs", "down", "transition", "passage", "dungeon", "indoor"]
+      "tags": [
+        "stairs",
+        "down",
+        "transition",
+        "passage",
+        "dungeon",
+        "indoor"
+      ]
     },
     "65": {
       "name": "rail_straight_v_transparent",
@@ -796,7 +1046,9 @@
         "transparent",
         "overlay",
         "no_background"
-      ]
+      ],
+      "cover": "half",
+      "transparent": true
     },
     "69": {
       "name": "arrow_body_se_transparent",
@@ -827,14 +1079,23 @@
         "transparent",
         "overlay",
         "no_background"
-      ]
+      ],
+      "cover": "half",
+      "transparent": true
     },
     "71": {
       "name": "stone_floor_cracked",
       "passable": true,
       "layer": "ground",
       "description": "Cracked grey stone floor. Walkable dungeon floor.",
-      "tags": ["stone", "floor", "dungeon", "indoor", "fill", "cracked"]
+      "tags": [
+        "stone",
+        "floor",
+        "dungeon",
+        "indoor",
+        "fill",
+        "cracked"
+      ]
     },
     "72": {
       "name": "rail_intersection",
@@ -857,42 +1118,86 @@
       "passable": false,
       "layer": "ground",
       "description": "Stone wall placed in the upper-left part of the tile. Blocks movement and sight.",
-      "tags": ["stone", "wall", "dungeon", "indoor", "barrier", "corner"]
+      "tags": [
+        "stone",
+        "wall",
+        "dungeon",
+        "indoor",
+        "barrier",
+        "corner"
+      ]
     },
     "74": {
       "name": "wall_broken_top",
       "passable": true,
       "layer": "object",
       "description": "A broken-down wall along the top of the tile, rubble spilling toward the center. Passable over the rubble.",
-      "tags": ["wall", "broken", "rubble", "passable", "indoor"]
+      "tags": [
+        "wall",
+        "broken",
+        "rubble",
+        "passable",
+        "indoor"
+      ],
+      "cover": "half"
     },
     "75": {
       "name": "campfire",
       "passable": false,
       "layer": "object",
       "description": "A lit campfire. Blocks movement; emits light.",
-      "tags": ["campfire", "fire", "light", "camp", "fixture", "outdoor"]
+      "tags": [
+        "campfire",
+        "fire",
+        "light",
+        "camp",
+        "fixture",
+        "outdoor"
+      ],
+      "cover": "half",
+      "transparent": true
     },
     "76": {
       "name": "arrow_body_v",
       "passable": true,
       "layer": "object",
       "description": "Marker: vertical arrow body, centered, running from top to bottom. Part of a multi-tile directional arrow overlay.",
-      "tags": ["marker", "arrow", "ui", "overlay", "connect_n", "connect_s"]
+      "tags": [
+        "marker",
+        "arrow",
+        "ui",
+        "overlay",
+        "connect_n",
+        "connect_s"
+      ]
     },
     "77": {
       "name": "coffin",
       "passable": false,
       "layer": "object",
       "description": "A coffin or tomb marked with a cross. Blocks movement; searchable.",
-      "tags": ["coffin", "tomb", "furniture", "searchable", "indoor"]
+      "tags": [
+        "coffin",
+        "tomb",
+        "furniture",
+        "searchable",
+        "indoor"
+      ],
+      "cover": "half",
+      "transparent": true
     },
     "78": {
       "name": "bridge_v",
       "passable": true,
       "layer": "ground",
       "description": "A straight bridge segment running from top to bottom. Passable; lay across water or chasm to cross.",
-      "tags": ["bridge", "wood", "crossing", "connect_n", "connect_s"]
+      "tags": [
+        "bridge",
+        "wood",
+        "crossing",
+        "connect_n",
+        "connect_s"
+      ]
     },
     "79": {
       "name": "rail_intersection_transparent",
@@ -944,7 +1249,8 @@
         "transparent",
         "overlay",
         "no_background"
-      ]
+      ],
+      "cover": "half"
     },
     "82": {
       "name": "campfire_transparent",
@@ -961,7 +1267,9 @@
         "transparent",
         "overlay",
         "no_background"
-      ]
+      ],
+      "cover": "half",
+      "transparent": true
     },
     "83": {
       "name": "arrow_body_v_transparent",
@@ -993,63 +1301,114 @@
         "transparent",
         "overlay",
         "no_background"
-      ]
+      ],
+      "cover": "half",
+      "transparent": true
     },
     "85": {
       "name": "wood_floor",
       "passable": true,
       "layer": "ground",
       "description": "Warm wooden plank floor. Default walkable floor for taverns and wooden interiors.",
-      "tags": ["wood", "floor", "tavern", "indoor", "fill"]
+      "tags": [
+        "wood",
+        "floor",
+        "tavern",
+        "indoor",
+        "fill"
+      ]
     },
     "86": {
       "name": "minecart_n",
       "passable": false,
       "layer": "object",
       "description": "A minecart on a railway track, facing north. Blocks movement.",
-      "tags": ["minecart", "rail", "cart", "furniture", "facing_n"]
+      "tags": [
+        "minecart",
+        "rail",
+        "cart",
+        "furniture",
+        "facing_n"
+      ],
+      "cover": "half",
+      "transparent": true
     },
     "87": {
       "name": "stone_wall_curve_top",
       "passable": false,
       "layer": "ground",
       "description": "A horizontal stone wall in the upper part of the tile, curved on the right side. Blocks movement and sight.",
-      "tags": ["stone", "wall", "dungeon", "indoor", "barrier", "curve"]
+      "tags": [
+        "stone",
+        "wall",
+        "dungeon",
+        "indoor",
+        "barrier",
+        "curve"
+      ]
     },
     "88": {
       "name": "grate_square",
       "passable": true,
       "layer": "object",
       "description": "A square floor grate. Passable.",
-      "tags": ["grate", "floor", "decoration", "indoor"]
+      "tags": [
+        "grate",
+        "floor",
+        "decoration",
+        "indoor"
+      ]
     },
     "89": {
       "name": "flowers",
       "passable": true,
       "layer": "object",
       "description": "A patch of flowers. Low decoration; does not block movement.",
-      "tags": ["flowers", "nature", "outdoor", "decoration"]
+      "tags": [
+        "flowers",
+        "nature",
+        "outdoor",
+        "decoration"
+      ]
     },
     "90": {
       "name": "arrow_head_n",
       "passable": true,
       "layer": "object",
       "description": "Marker: arrowhead pointing up (north). Endpoint of a multi-tile directional arrow overlay.",
-      "tags": ["marker", "arrow", "arrowhead", "ui", "overlay", "connect_s"]
+      "tags": [
+        "marker",
+        "arrow",
+        "arrowhead",
+        "ui",
+        "overlay",
+        "connect_s"
+      ]
     },
     "91": {
       "name": "liquid_floor",
       "passable": true,
       "layer": "ground",
       "description": "A pool of liquid on the ground. Passable.",
-      "tags": ["liquid", "water", "floor", "outdoor"]
+      "tags": [
+        "liquid",
+        "water",
+        "floor",
+        "outdoor"
+      ]
     },
     "92": {
       "name": "bridge_broken_bottom",
       "passable": true,
       "layer": "ground",
       "description": "A bridge segment with a missing board at the bottom. Passable but broken at the south edge.",
-      "tags": ["bridge", "wood", "crossing", "broken", "connect_n"]
+      "tags": [
+        "bridge",
+        "wood",
+        "crossing",
+        "broken",
+        "connect_n"
+      ]
     },
     "93": {
       "name": "minecart_n_transparent",
@@ -1065,7 +1424,9 @@
         "transparent",
         "overlay",
         "no_background"
-      ]
+      ],
+      "cover": "half",
+      "transparent": true
     },
     "94": {
       "name": "stone_wall_curve_top_transparent",
@@ -1150,49 +1511,96 @@
       "passable": true,
       "layer": "ground",
       "description": "Bumpy, uneven terrain. Walkable but counts as difficult terrain.",
-      "tags": ["terrain", "rough", "difficult", "outdoor", "fill"]
+      "tags": [
+        "terrain",
+        "rough",
+        "difficult",
+        "outdoor",
+        "fill"
+      ],
+      "obscurance": "lightly"
     },
     "100": {
       "name": "minecart_offrail_n",
       "passable": false,
       "layer": "object",
       "description": "A minecart off the tracks, centered, facing north. Blocks movement.",
-      "tags": ["minecart", "cart", "furniture", "facing_n"]
+      "tags": [
+        "minecart",
+        "cart",
+        "furniture",
+        "facing_n"
+      ],
+      "cover": "half",
+      "transparent": true
     },
     "101": {
       "name": "stone_wall_corner_ul_top",
       "passable": false,
       "layer": "ground",
       "description": "A horizontal stone wall in the upper-left part of the tile. Blocks movement and sight.",
-      "tags": ["stone", "wall", "dungeon", "indoor", "barrier", "corner"]
+      "tags": [
+        "stone",
+        "wall",
+        "dungeon",
+        "indoor",
+        "barrier",
+        "corner"
+      ]
     },
     "102": {
       "name": "grate_round",
       "passable": true,
       "layer": "object",
       "description": "A round floor grate. Passable.",
-      "tags": ["grate", "floor", "decoration", "indoor"]
+      "tags": [
+        "grate",
+        "floor",
+        "decoration",
+        "indoor"
+      ]
     },
     "103": {
       "name": "tree",
       "passable": false,
       "layer": "object",
       "description": "A tree placed on top of a ground tile. Blocks movement.",
-      "tags": ["tree", "nature", "forest", "outdoor"]
+      "tags": [
+        "tree",
+        "nature",
+        "forest",
+        "outdoor"
+      ],
+      "cover": "three-quarters"
     },
     "104": {
       "name": "arrow_start_n",
       "passable": true,
       "layer": "object",
       "description": "Marker: start of a multi-tile arrow, beginning at center and continuing north. Part of a directional arrow overlay.",
-      "tags": ["marker", "arrow", "start", "ui", "overlay", "connect_n"]
+      "tags": [
+        "marker",
+        "arrow",
+        "start",
+        "ui",
+        "overlay",
+        "connect_n"
+      ]
     },
     "105": {
       "name": "dragon_skull",
       "passable": false,
       "layer": "object",
       "description": "The skull of a dragon. Blocks movement; searchable.",
-      "tags": ["skull", "dragon", "bones", "decoration", "searchable"]
+      "tags": [
+        "skull",
+        "dragon",
+        "bones",
+        "decoration",
+        "searchable"
+      ],
+      "cover": "half",
+      "transparent": true
     },
     "106": {
       "name": "walkway_v",
@@ -1221,7 +1629,9 @@
         "transparent",
         "overlay",
         "no_background"
-      ]
+      ],
+      "cover": "half",
+      "transparent": true
     },
     "108": {
       "name": "stone_wall_corner_ul_top_transparent",
@@ -1268,7 +1678,8 @@
         "transparent",
         "overlay",
         "no_background"
-      ]
+      ],
+      "cover": "three-quarters"
     },
     "111": {
       "name": "arrow_start_n_transparent",
@@ -1300,14 +1711,24 @@
         "transparent",
         "overlay",
         "no_background"
-      ]
+      ],
+      "cover": "half",
+      "transparent": true
     },
     "65534": {
       "name": "void",
       "passable": false,
       "layer": "ground",
       "description": "Pure black void / abyss. The renderer draws a solid black rectangle here (no sprite is sampled from the tileset) and the cell is impassable. Use this as the chasm fill — fill the impassable region with GID 65534 and lay bridge tiles (78 or 106) across it for crossings.",
-      "tags": ["void", "chasm", "pit", "abyss", "hazard", "fill"]
+      "tags": [
+        "void",
+        "chasm",
+        "pit",
+        "abyss",
+        "hazard",
+        "fill"
+      ],
+      "transparent": true
     }
   }
 }

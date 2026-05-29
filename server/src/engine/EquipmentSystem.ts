@@ -96,6 +96,20 @@ export function applySpecies(playerDef: PlayerDef, allSpecies: SpeciesDef[]): vo
     }
   }
   playerDef.speed = speed;
+
+  // Seed SRD special senses from species traits — Dwarf/Elf darkvision,
+  // future blindsight/tremorsense from feats/items, etc. `Vision.canSee`
+  // reads `playerDef.senses` for the sight-mode resolution.
+  const senses: { darkvision?: number; blindsight?: number; tremorsense?: number; truesight?: number } = {};
+  for (const trait of species.traits) {
+    const dv = (trait.effects as { darkvision?: { feet?: number } }).darkvision?.feet;
+    if (typeof dv === 'number') senses.darkvision = Math.max(senses.darkvision ?? 0, dv);
+    // Stonecunning grants Tremorsense as an activated ability with a duration
+    // — the static species record always-on representation only marks the
+    // creature as POTENTIALLY having it. We leave the activated form out of
+    // the static `playerDef.senses` block for now.
+  }
+  if (Object.keys(senses).length > 0) playerDef.senses = senses;
 }
 
 export function applyFeats(playerDef: PlayerDef, allFeats: FeatDef[]): void {

@@ -2,7 +2,8 @@ import { GameEvent, NpcState, LogEntry, CombatMode } from './types.js';
 import type { GameContext } from './GameContext.js';
 import { rollOneInitiative, rollDeathSave, type RolledBonusDamage } from './CombatSystem.js';
 import { chebyshev } from './EnemyAI.js';
-import { isIncapacitated, hasSpeedZero, proneStandCost, TURN_CONDITIONS } from './ConditionSystem.js';
+import { isIncapacitated, hasSpeedZero, proneStandCost, TURN_CONDITIONS, clearHide } from './ConditionSystem.js';
+import { runPerceptionSweep } from './Vision.js';
 import { mod, d20 as d20Local } from './Dice.js';
 import { runSingleEnemyTurn, runSingleAllyTurn } from './NpcTurnRunners.js';
 import { applyMonsterAttachToPlayer } from './OngoingEffectsSystem.js';
@@ -18,7 +19,7 @@ export function endCombat(ctx: GameContext): GameEvent[] {
   s.player.initiativeRoll = 0;
   s.activeNpcIndex = 0;
   s.turnOrderIds = [];
-  s.player.conditions = s.player.conditions.filter((c) => c !== 'hidden');
+  clearHide(s.player);
   ctx.publish({ type: 'combat_ended' });
   return [];
 }
@@ -389,7 +390,15 @@ export function applyEnemyHitToPlayer(
 
 export function finalizeNpcTurn(ctx: GameContext, npc: NpcState): void {
   const s = ctx.state;
-  s.player.conditions = s.player.conditions.filter((c) => c !== 'hidden');
+  // SRD: Hide / Invisible only ends when an enemy FINDS the hider — i.e. an
+  // active Perception roll opposes their hideDC and wins. Run a sweep here
+  // so the finishing NPC (and every other observer) gets one chance to spot
+  // the player using their actual senses + vision rules. Blanket-clearing
+  // hidden on every NPC turn-end was the pre-Vision-module hack and broke
+  // the Hide-then-attack-with-Advantage opener.
+  if (s.player.conditions.includes('hidden')) {
+    runPerceptionSweep(ctx, 'player');
+  }
 
   // Sleep re-save: per SRD, the Incapacitated condition from Sleep ends at
   // the end of the target's next turn, at which point they re-save vs the

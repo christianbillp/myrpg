@@ -10,6 +10,7 @@ import { ZonePainter } from "../ui/generate/ZonePainter";
 import { TriggerEditor, type ComposedTrigger } from "../ui/generate/TriggerEditor";
 import { EncounterPickerOverlay } from "../ui/generate/EncounterPickerOverlay";
 import { createHtmlButton, createHtmlText, type HtmlButtonHandle, type HtmlTextHandle } from "../ui/htmlButtons";
+import { ScreenEffects } from "../ui/ScreenEffects";
 import {
   TILE_SIZE,
   GRID_COLS,
@@ -63,6 +64,9 @@ export class EncounterEditorScene extends Phaser.Scene {
   private detObjective = "";
   private detCompletionFlag = "";
   private detTitleInput: HTMLInputElement | null = null;
+  /** HTML button rendered next to the title input that previews the title
+   *  as the in-game supertitle (hides the editor for the duration). */
+  private titlePreviewBtn: HtmlButtonHandle | null = null;
   private detIntroInput: HTMLTextAreaElement | null = null;
   private detDescInput: HTMLTextAreaElement | null = null;
   private detObjectiveInput: HTMLInputElement | null = null;
@@ -258,6 +262,7 @@ export class EncounterEditorScene extends Phaser.Scene {
     this.pickerTab = "monsters";
 
     if (this.detTitleInput)          { this.detTitleInput.remove();          this.detTitleInput          = null; }
+    if (this.titlePreviewBtn)        { this.titlePreviewBtn.dispose();       this.titlePreviewBtn        = null; }
     if (this.detIntroInput)          { this.detIntroInput.remove();          this.detIntroInput          = null; }
     if (this.detDescInput)           { this.detDescInput.remove();           this.detDescInput           = null; }
     if (this.detObjectiveInput)      { this.detObjectiveInput.remove();      this.detObjectiveInput      = null; }
@@ -341,12 +346,23 @@ export class EncounterEditorScene extends Phaser.Scene {
 
     const titleY = storyTop;
     this.formLabels.push(this.makeSubLabel(LEFT_X, titleY, inputW, "TITLE"));
+    // Reserve room for a PREVIEW button to the right of the title input so
+    // authors can see the supertitle full-size before saving.
+    const previewBtnW = 110;
+    const titleInputW = inputW - previewBtnW - 8;
     this.detTitleInput = this.buildLineInput(
-      LEFT_X, titleY + 22, inputW, oneLineH,
+      LEFT_X, titleY + 22, titleInputW, oneLineH,
       "Encounter title",
       (val) => { this.detTitle = val; },
       this.detTitle,
     );
+    this.titlePreviewBtn = createHtmlButton({
+      scene: this, sceneWidth: W,
+      x: LEFT_X + titleInputW + 8, y: titleY + 22,
+      w: previewBtnW, h: oneLineH,
+      label: "PREVIEW", variant: "secondary", fontSize: 11,
+      onClick: () => this.previewTitleSupertitle(),
+    });
 
     const introY = titleY + 22 + oneLineH + 14;
     this.formLabels.push(this.makeSubLabel(LEFT_X, introY, inputW, "INTRODUCTION"));
@@ -655,6 +671,37 @@ export class EncounterEditorScene extends Phaser.Scene {
     this.scale.on("resize", place);
   }
 
+  /**
+   * Play the encounter title as a full-screen supertitle so the author can
+   * see exactly how it'll appear in-game (and whether it wraps unflatteringly,
+   * runs into the edges, or fits cleanly on a single line). Hides every UI
+   * element the editor owns for the duration, fades to black, plays the
+   * supertitle, then fades back in and restores the chrome. Re-entry guarded
+   * so a hammered button can't stack multiple previews.
+   */
+  private async previewTitleSupertitle(): Promise<void> {
+    if (this.titlePreviewActive) return;
+    const text = (this.detTitleInput?.value ?? this.detTitle).trim();
+    if (!text) return;
+    this.titlePreviewActive = true;
+    this.setDomChromeVisible(false);
+    if (this.mapPreview)      this.mapPreview.destroy();  // its own DOM lives above the canvas
+    // The MapPreview is destroyed for visual purity; will be re-created on the
+    // next state-driven refresh if applicable. The editor's other chrome is
+    // hidden via setDomChromeVisible above.
+    const screenEffects = new ScreenEffects();
+    try {
+      await screenEffects.fadeOut(0);
+      await screenEffects.showSupertitle(text, 2500);
+      await screenEffects.fadeIn(600);
+    } finally {
+      screenEffects.destroy();
+      this.setDomChromeVisible(true);
+      this.titlePreviewActive = false;
+    }
+  }
+  private titlePreviewActive = false;
+
   private setDomChromeVisible(visible: boolean): void {
     const inputs = [this.detTitleInput, this.detIntroInput, this.detDescInput, this.detObjectiveInput, this.detCompletionFlagInput];
     for (const el of inputs) if (el) el.style.display = visible ? "" : "none";
@@ -669,6 +716,12 @@ export class EncounterEditorScene extends Phaser.Scene {
     if (this.saveBtn) this.saveBtn.setVisible(visible);
     if (this.monstersTabBtn) this.monstersTabBtn.setVisible(visible);
     if (this.triggersTabBtn) this.triggersTabBtn.setVisible(visible);
+    if (this.titlePreviewBtn) this.titlePreviewBtn.setVisible(visible);
+    // ZonePainter's paint-mode buttons are HTML; the rest of its visuals are
+    // Phaser at low depth and get covered by the MapPreview's z=1000
+    // container automatically. Without this call the PLAYER / ENEMY /
+    // NEUTRAL / CLEAR buttons leak through on top of the preview.
+    if (this.zonePainter) this.zonePainter.setVisible(visible);
     if (this.monsterPicker)  this.monsterPicker.setVisible(visible && this.pickerTab === "monsters");
     if (this.triggerEditor) {
       if (!visible) this.triggerEditor.setVisible(false);
@@ -678,6 +731,7 @@ export class EncounterEditorScene extends Phaser.Scene {
 
   private teardownDom(): void {
     if (this.detTitleInput)          { this.detTitleInput.remove();          this.detTitleInput          = null; }
+    if (this.titlePreviewBtn)        { this.titlePreviewBtn.dispose();       this.titlePreviewBtn        = null; }
     if (this.detIntroInput)          { this.detIntroInput.remove();          this.detIntroInput          = null; }
     if (this.detDescInput)           { this.detDescInput.remove();           this.detDescInput           = null; }
     if (this.detObjectiveInput)      { this.detObjectiveInput.remove();      this.detObjectiveInput      = null; }
@@ -707,43 +761,49 @@ export class EncounterEditorScene extends Phaser.Scene {
 function reverseMapTriggers(triggers: EncounterTrigger[]): ComposedTrigger[] {
   const out: ComposedTrigger[] = [];
   for (const t of triggers) {
-    if (t.when.event !== "player_moved" || !t.when.in_area) continue;
-    const region = t.when.in_area;
+    const isRegion = t.when.event === "player_moved" && "in_area" in t.when && !!t.when.in_area;
+    const whenEvent = isRegion ? "player_moved"
+      : t.when.event === "encounter_started" ? "encounter_started"
+      : t.when.event === "encounter_completed" ? "encounter_completed"
+      : null;
+    if (!whenEvent) continue;
+    // Region triggers carry their own bounds; lifecycle triggers have none —
+    // use a sentinel 1×1 at origin so the editor's region inputs still have
+    // a value (the row hides them anyway).
+    const region = (isRegion && "in_area" in t.when && t.when.in_area)
+      ? t.when.in_area
+      : { x: 0, y: 0, w: 1, h: 1 };
     const first = t.then[0];
     if (!first) continue;
 
     if (first.type === "player_ability_check" && first.skill === "perception") {
       const pass = first.onPass[0];
       const passMessage = pass && pass.type === "show_log" ? pass.message : "";
-      out.push({ id: t.id, region, kind: "perception", dc: first.dc, passMessage, message: "", defId: "" });
+      out.push({ id: t.id, whenEvent, region, kind: "perception", dc: first.dc, passMessage, message: "", defId: "" });
       continue;
     }
     if (first.type === "show_log") {
-      out.push({ id: t.id, region, kind: "log", dc: 10, passMessage: "", message: first.message, defId: "" });
+      out.push({ id: t.id, whenEvent, region, kind: "log", dc: 10, passMessage: "", message: first.message, defId: "" });
       continue;
     }
     if (first.type === "send_aigm_message") {
-      out.push({ id: t.id, region, kind: "aigm", dc: 10, passMessage: "", message: first.message, defId: "" });
+      out.push({ id: t.id, whenEvent, region, kind: "aigm", dc: 10, passMessage: "", message: first.message, defId: "" });
       continue;
     }
     if (first.type === "award_xp") {
-      out.push({ id: t.id, region, kind: "xp", dc: 10, passMessage: "", message: "", defId: "", xpAmount: first.amount });
-      continue;
-    }
-    if (first.type === "show_supertitle") {
-      out.push({ id: t.id, region, kind: "supertitle", dc: 10, passMessage: "", message: first.text, defId: "", durationMs: first.durationMs });
+      out.push({ id: t.id, whenEvent, region, kind: "xp", dc: 10, passMessage: "", message: "", defId: "", xpAmount: first.amount });
       continue;
     }
     if (first.type === "show_announcement") {
-      out.push({ id: t.id, region, kind: "announcement", dc: 10, passMessage: "", message: first.text, defId: "", durationMs: first.durationMs, announcementMode: first.mode });
+      out.push({ id: t.id, whenEvent, region, kind: "announcement", dc: 10, passMessage: "", message: first.text, defId: "", durationMs: first.durationMs, announcementMode: first.mode });
       continue;
     }
     if (first.type === "npc_speaks") {
-      out.push({ id: t.id, region, kind: "speech", dc: 10, passMessage: "", message: first.text, defId: "", entityRef: first.entity });
+      out.push({ id: t.id, whenEvent, region, kind: "speech", dc: 10, passMessage: "", message: first.text, defId: "", entityRef: first.entity });
       continue;
     }
     if (first.type === "fade_screen") {
-      out.push({ id: t.id, region, kind: "fade", dc: 10, passMessage: "", message: "", defId: "", fadeMode: first.mode, durationMs: first.durationMs });
+      out.push({ id: t.id, whenEvent, region, kind: "fade", dc: 10, passMessage: "", message: "", defId: "", fadeMode: first.mode, durationMs: first.durationMs });
       continue;
     }
     if (t.then.some((a) => a.type === "trigger_combat")) {
@@ -752,7 +812,7 @@ function reverseMapTriggers(triggers: EncounterTrigger[]): ComposedTrigger[] {
         if (a.type === "set_disposition_by_def_id" && a.disposition === "enemy") flipIds.push(a.defId);
       }
       out.push({
-        id: t.id, region, kind: "combat", dc: 10, passMessage: "", message: "",
+        id: t.id, whenEvent, region, kind: "combat", dc: 10, passMessage: "", message: "",
         defId: flipIds[0] ?? "",
         defIds: flipIds.length > 1 ? flipIds : undefined,
       });

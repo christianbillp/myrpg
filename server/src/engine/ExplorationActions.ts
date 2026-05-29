@@ -6,6 +6,7 @@ import { doStartCombat as cfDoStartCombat } from './CombatFlow.js';
 import { chebyshev } from './EnemyAI.js';
 import { isIncapacitated, isVisible } from './ConditionSystem.js';
 import { d, d20, mod } from './Dice.js';
+import { runPerceptionSweep } from './Vision.js';
 import { canShortRest as guardCanShortRest } from './ActionGuards.js';
 
 export function doMove(ctx: GameContext, dx: number, dy: number, events: GameEvent[]): void {
@@ -131,8 +132,23 @@ export function doSearch(ctx: GameContext): void {
     (sec) => chebyshev(s.player.tileX, s.player.tileY, sec.tileX, sec.tileY) <= 1,
   );
 
+  // SRD Search [Action] — active Perception sweep against every hidden NPC
+  // within 30 ft of the player. Each hider's `hideDC` is opposed by the
+  // single roll above (the d20 fires once for the Action, reused across
+  // every detection check). Spotting clears the hidden + invisible flags
+  // via Vision.runPerceptionSweep, which performs its own roll internally
+  // using the searcher's PP — we call it for each candidate.
+  const PERCEPTION_RANGE_TILES = 6;
+  const hidersInRange = s.npcs.filter((n) =>
+    n.hp > 0
+    && n.conditions.includes('hidden')
+    && typeof n.hideDC === 'number'
+    && chebyshev(s.player.tileX, s.player.tileY, n.tileX, n.tileY) <= PERCEPTION_RANGE_TILES,
+  );
+  for (const h of hidersInRange) runPerceptionSweep(ctx, h.id);
+
   if (adj.length === 0) {
-    ctx.addLog({ left: `Search (${roll}) — nothing found`, style: 'miss' });
+    if (hidersInRange.length === 0) ctx.addLog({ left: `Search (${roll}) — nothing found`, style: 'miss' });
     return;
   }
 

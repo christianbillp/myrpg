@@ -355,9 +355,10 @@ export class GameClient {
     triggers?: Array<{
       id: string;
       region: { x: number; y: number; w: number; h: number };
+      whenEvent?: "player_moved" | "encounter_started" | "encounter_completed";
       kind:
         | "perception" | "log" | "aigm" | "combat" | "xp"
-        | "supertitle" | "announcement" | "speech" | "fade";
+        | "announcement" | "speech" | "fade";
       dc: number;
       passMessage: string;
       message: string;
@@ -428,9 +429,10 @@ export class GameClient {
     triggers?: Array<{
       id: string;
       region: { x: number; y: number; w: number; h: number };
+      whenEvent?: "player_moved" | "encounter_started" | "encounter_completed";
       kind:
         | "perception" | "log" | "aigm" | "combat" | "xp"
-        | "supertitle" | "announcement" | "speech" | "fade";
+        | "announcement" | "speech" | "fade";
       dc: number;
       passMessage: string;
       message: string;

@@ -88,25 +88,32 @@ export class ScreenEffects {
   /**
    * Movie-style supertitle: huge bold centred white text. Total elapsed time
    * is `fadeIn + holdMs + fadeOut`. Resolves once the element is removed.
+   * Also plays a cinematic boom-swell stinger synchronised with the visual.
    */
   showSupertitle(text: string, holdMs = SUPERTITLE_DEFAULT_HOLD_MS): Promise<void> {
+    playSupertitleSound();
     const el = document.createElement('div');
     el.style.cssText = `
       position: fixed;
       left: 50%; top: 50%;
       transform: translate(-50%, -50%);
-      width: 95vw;
+      width: 90vw;
       max-height: 90vh;
       text-align: center;
       font-family: 'Georgia', 'Times New Roman', serif;
-      font-weight: 700;
-      font-size: clamp(72px, 18vw, 280px);
+      font-weight: 900;
       line-height: 1.05;
       color: #ffffff;
-      letter-spacing: 0.05em;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
       text-shadow: 0 4px 24px rgba(0, 0, 0, 0.85);
-      word-wrap: break-word;
-      overflow-wrap: break-word;
+      /* No character-level breaks — words wrap to a new line as a unit but
+       * never split mid-word. The auto-fit loop below shrinks the font
+       * until the text fits 90vw wide without overflow. */
+      word-wrap: normal;
+      overflow-wrap: normal;
+      word-break: keep-all;
+      white-space: normal;
       opacity: 0;
       pointer-events: none;
       z-index: ${TEXT_Z};
@@ -114,6 +121,7 @@ export class ScreenEffects {
     `;
     el.textContent = text;
     document.body.appendChild(el);
+    autoFitSupertitle(el);
     return this.fadeTextElement(el, holdMs, SUPERTITLE_FADE_MS);
   }
 
@@ -211,5 +219,88 @@ export class ScreenEffects {
         setTimeout(() => { el.remove(); resolve(); }, fadeMs);
       }, fadeMs + Math.max(0, holdMs));
     });
+  }
+}
+
+/** Backend origin where static sound files are served from. Mirrors the
+ *  hard-coded API_URL used by the WS / token routes elsewhere in the client. */
+const SOUND_BASE_URL = 'http://localhost:3000';
+
+/** File served by `GET /sounds/:filename`. Stored at
+ *  `server/data/sounds/`. Change this constant if you swap the asset for a
+ *  different file — the server route accepts `.mp3`, `.ogg`, and `.wav`. */
+const SUPERTITLE_SOUND_URL = `${SOUND_BASE_URL}/sounds/563935__fester993__guitar-trombone-reverb.wav`;
+
+/** Playback volume (0.0–1.0) for the supertitle stinger. */
+const SUPERTITLE_SOUND_VOLUME = 0.85;
+
+/**
+ * Pre-allocated HTMLAudioElement reused across every supertitle so we don't
+ * have to re-fetch / re-decode the file each call. Created lazily on the
+ * first invocation so the page doesn't issue a 404 at boot when the asset
+ * is missing.
+ */
+let supertitleAudioEl: HTMLAudioElement | null = null;
+
+/**
+ * Cinematic supertitle stinger. Plays `server/data/sounds/supertitle.mp3`
+ * via an HTMLAudioElement at the moment a supertitle appears (encounter
+ * title card, AIGM `show_supertitle` tool call, or the encounter editor's
+ * PREVIEW button).
+ *
+ * Silent fallback: if the file is missing or fails to load, the visual
+ * still plays and the next supertitle will simply try again — no error
+ * surfaces to the player.
+ */
+function playSupertitleSound(): void {
+  try {
+    if (!supertitleAudioEl) {
+      supertitleAudioEl = new Audio(SUPERTITLE_SOUND_URL);
+      supertitleAudioEl.preload = 'auto';
+      supertitleAudioEl.volume = SUPERTITLE_SOUND_VOLUME;
+    }
+    // Restart from the beginning every call so back-to-back supertitles
+    // (rare, but possible via chained triggers) each get a fresh hit.
+    supertitleAudioEl.currentTime = 0;
+    void supertitleAudioEl.play().catch(() => { /* autoplay blocked / file missing — visual still plays */ });
+  } catch {
+    // Audio construction can throw in non-browser environments / tests.
+  }
+}
+
+/**
+ * Shrink the supertitle's font-size until the rendered text fits its 90vw
+ * container without overflowing horizontally or running past 90vh tall.
+ *
+ *   - Start from a generous max (22vw, capped at 340 px — same upper bound
+ *     the old `clamp()` had).
+ *   - Each step multiplies by 0.92 (~half-stop down) and forces a reflow.
+ *   - Stops when the element fits or hits a 32 px floor (anything smaller
+ *     would be too small to read at supertitle scale anyway).
+ *
+ * Words are never split mid-character because the CSS above sets
+ * `word-break: keep-all` and `overflow-wrap: normal`. Long words overflow
+ * horizontally instead, which the loop detects and corrects by shrinking.
+ */
+function autoFitSupertitle(el: HTMLDivElement): void {
+  const vw = window.innerWidth;
+  const vh = window.innerHeight;
+  const maxFont = Math.min(vw * 0.22, 340);
+  const minFont = 32;
+  const maxHeight = vh * 0.9;
+  let fontPx = maxFont;
+  el.style.fontSize = `${fontPx}px`;
+  // Trigger an initial layout so scrollWidth / scrollHeight reflect content.
+  void el.offsetWidth;
+  // Safety bound on iteration count — `fontPx *= 0.92` from 340 → 32 takes
+  // ~30 steps. 80 is a generous cap.
+  for (let i = 0; i < 80; i++) {
+    const overflowsWide = el.scrollWidth > el.clientWidth + 1;
+    const overflowsTall = el.scrollHeight > maxHeight;
+    if (!overflowsWide && !overflowsTall) return;
+    if (fontPx <= minFont) return;
+    fontPx = Math.max(minFont, fontPx * 0.92);
+    el.style.fontSize = `${fontPx}px`;
+    void el.offsetWidth;
   }
 }

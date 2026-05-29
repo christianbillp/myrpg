@@ -317,6 +317,12 @@ export function runSingleEnemyTurn(ctx: GameContext, npc: NpcState, events: Game
     return;
   }
 
+  if (result.attacked && targetedPlayer) {
+    // Player-facing physical-attack sound (hit thump or swing whoosh). NPC vs
+    // NPC attacks would also be physical but we leave them silent for now —
+    // the player's audio attention belongs on attacks involving them.
+    events.push({ type: 'play_sound', sound: result.isHit ? 'physical_hit' : 'physical_miss' });
+  }
   if (result.attacked && result.isHit) {
     if (targetedPlayer) {
       applyEnemyHitToPlayer(ctx, npc, result, events);

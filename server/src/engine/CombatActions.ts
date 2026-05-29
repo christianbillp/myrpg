@@ -6,7 +6,7 @@ import {
 } from './CombatSystem.js';
 import {
   isIncapacitated, grantsAdvantageAgainst, grantsDisadvantageAgainst,
-  hasAttackDisadvantage, hasAttackAdvantage, isAutoCrit,
+  hasAttackDisadvantage, hasAttackAdvantage, isAutoCrit, clearHide,
 } from './ConditionSystem.js';
 import { chebyshev } from './EnemyAI.js';
 import { makePlayerAttack } from './EquipmentSystem.js';
@@ -17,6 +17,59 @@ import {
   canDetach as guardCanDetach,
 } from './ActionGuards.js';
 import { publishNpcDamage } from './ThresholdPublisher.js';
+import { canSee as visCanSee } from './Vision.js';
+
+/**
+ * Push a `play_sound` GameEvent for a resolved physical attack. The client's
+ * SoundLibrary plays a hit thump or a swing-whoosh accordingly. Called from
+ * every physical-attack resolver — main attack, throw, OAs (player + NPC),
+ * and the NPC-vs-player path in NpcTurnRunners. Silent no-op when there's
+ * no outer eventSink in scope (e.g. AIGM-driven combat resolves).
+ */
+export function emitPhysicalAttackSound(ctx: GameContext, isHit: boolean): void {
+  ctx.eventSink?.push({ type: 'play_sound', sound: isHit ? 'physical_hit' : 'physical_miss' });
+}
+
+/**
+ * SRD Cover applied to a player attack against `target`. Returns the AC
+ * bonus the target benefits from (0/2/5) or the sentinel `untargetable: true`
+ * when Total Cover blocks the line — callers short-circuit on that to avoid
+ * wasting Actions / spell slots.
+ */
+function coverBonusVsTarget(ctx: GameContext, target: NpcState): { bonus: number; untargetable: boolean } {
+  const vision = visCanSee(
+    ctx.state,
+    { tileX: ctx.state.player.tileX, tileY: ctx.state.player.tileY, senses: ctx.playerDef.senses },
+    { tileX: target.tileX, tileY: target.tileY, conditions: target.conditions, id: target.id },
+  );
+  switch (vision.cover) {
+    case 'half':           return { bonus: 2, untargetable: false };
+    case 'three-quarters': return { bonus: 5, untargetable: false };
+    case 'total':          return { bonus: 0, untargetable: true };
+    default:               return { bonus: 0, untargetable: false };
+  }
+}
+
+/**
+ * Cover bonus the player benefits from against `npc`'s attack — vision is
+ * walked from the NPC's tile to the player's tile, and the worst cover the
+ * line traverses is translated to an AC bonus (half +2, three-quarters +5,
+ * total +∞ but the NPC AI wouldn't be attacking through total cover).
+ */
+function playerCoverAcVsNpc(ctx: GameContext, npc: NpcState): number {
+  const def = ctx.resolveMonsterDef(npc.defId);
+  const vision = visCanSee(
+    ctx.state,
+    { tileX: npc.tileX, tileY: npc.tileY, senses: def?.senses },
+    { tileX: ctx.state.player.tileX, tileY: ctx.state.player.tileY, conditions: ctx.state.player.conditions, id: 'player' },
+  );
+  switch (vision.cover) {
+    case 'half': return 2;
+    case 'three-quarters': return 5;
+    case 'total': return 99;
+    default: return 0;
+  }
+}
 
 export function doAttack(ctx: GameContext, targetId: string | undefined, events: GameEvent[]): void {
   const s = ctx.state;
@@ -80,10 +133,15 @@ export function doAttack(ctx: GameContext, targetId: string | undefined, events:
   const withAdvantage = playerHidden || hasAttackAdvantage(s.player.conditions) || grantsAdvantageAgainst(target.conditions, dist);
   const withDisadvantage = hasAttackDisadvantage(s.player.conditions) || grantsDisadvantageAgainst(target.conditions, dist) || rangedDisadvantage;
   const autoCrit = isAutoCrit(target.conditions, dist);
+  const { bonus: coverBonus, untargetable } = coverBonusVsTarget(ctx, target);
+  if (untargetable) {
+    ctx.addLog({ left: `${ctx.playerDef.name} has no line of sight — ${target.name} is behind total cover`, style: 'miss' });
+    return;
+  }
   const resolved = playerThrowAttack(
-    ctx.playerDef, atk, targetDef, withAdvantage, withDisadvantage, ctx.playerDef.proficiencyBonus, autoCrit, playerHidden,
+    ctx.playerDef, atk, targetDef, withAdvantage, withDisadvantage, ctx.playerDef.proficiencyBonus, autoCrit, playerHidden, coverBonus,
   );
-  s.player.conditions = s.player.conditions.filter((c) => c !== 'hidden');
+  clearHide(s.player);
 
   // Defensive reactions (e.g. Noble's Parry): trigger when the NPC was hit by
   // a melee attack roll. If the +AC bump turns the hit into a miss, suppress
@@ -94,6 +152,7 @@ export function doAttack(ctx: GameContext, targetId: string | undefined, events:
     ? parry.replaced
     : resolved;
   ctx.addLogs(logs);
+  emitPhysicalAttackSound(ctx, isHit);
 
   if (!isHit) {
     void bonusComponents; void vexApplied; void slowApplied; void damage;
@@ -213,11 +272,17 @@ function executeThrowOnTarget(
     || hasAttackDisadvantage(s.player.conditions) || adjacentEnemy;
   const autoCrit = isAutoCrit(target.conditions, dist);
   ctx.addLog({ left: `${ctx.playerDef.name} throws ${itemDef.name}`, style: 'normal' });
+  const { bonus: coverBonus, untargetable } = coverBonusVsTarget(ctx, target);
+  if (untargetable) {
+    ctx.addLog({ left: `${target.name} is behind total cover — the ${itemDef.name} can't reach`, style: 'miss' });
+    return;
+  }
   const { damage, isHit, logs, vexApplied, slowApplied, bonusComponents } = playerThrowAttack(
-    ctx.playerDef, attack, targetDef, withAdvantage, withDisadvantage, profBonus, autoCrit, playerHidden,
+    ctx.playerDef, attack, targetDef, withAdvantage, withDisadvantage, profBonus, autoCrit, playerHidden, coverBonus,
   );
-  s.player.conditions = s.player.conditions.filter((c) => c !== 'hidden');
+  clearHide(s.player);
   ctx.addLogs(logs);
+  emitPhysicalAttackSound(ctx, isHit);
 
   if (isHit) {
     target.inventoryIds.push(itemDef.id);
@@ -243,28 +308,64 @@ function executeThrowOnTarget(
 export function doHide(ctx: GameContext): void {
   const s = ctx.state;
   if (!guardCanHide(ctx)) return;
-  // Stealth check is opposed by the highest Passive Perception that could spot
-  // the player: any non-ally, non-dead, non-incapacitated NPC. Neutral NPCs
-  // count (you can hide from a bandit who hasn't decided to fight yet).
-  // Empty-list fallback uses the SRD default Passive Perception of 10.
+  // SRD Hide gate: the player must be Heavily Obscured OR behind
+  // Three-Quarters / Total Cover against at least one observer, AND must be
+  // outside every enemy's line of sight. Vision module checks both at once.
+  if (!canTakeHideAction(ctx)) {
+    ctx.addLog({ left: `${ctx.playerDef.name} has no cover or obscurance — cannot hide here`, style: 'miss' });
+    return;
+  }
+  const { hidden, dc, logs } = playerHide(ctx.playerDef);
+  if (hidden) {
+    // SRD: on a successful Hide the creature gains the Invisible condition
+    // (Adv on Initiative, Adv on attacks, attacks vs you have Disadv,
+    // concealed from "must be seen" effects). The Stealth total becomes
+    // the per-observer Perception DC. Both flags are tracked together so
+    // `clearHide` can strip them as a unit on a break trigger.
+    if (!s.player.conditions.includes('hidden')) s.player.conditions.push('hidden');
+    if (!s.player.conditions.includes('invisible')) s.player.conditions.push('invisible');
+    s.player.hideDC = dc;
+  } else {
+    clearHide(s.player);
+  }
+  ctx.addLogs(logs);
+  // Action economy only applies in combat. During exploring, hiding is free —
+  // it's the Sneak Attack opener that triggers combat with Advantage.
+  if (s.phase === 'player_turn') spendCunningOrAction(ctx);
+}
+
+/**
+ * Decide whether the player has somewhere to hide. SRD: Heavily Obscured tile
+ * counts; Three-Quarters / Total cover relative to every potential observer
+ * counts; out-of-sight for every observer counts. We accept the action when
+ * NO observer currently sees the player AND (the player's tile is Heavily
+ * Obscured OR every observer has ≥ Three-Quarters cover from them).
+ */
+function canTakeHideAction(ctx: GameContext): boolean {
+  const s = ctx.state;
+  const onTileObs = s.map.obscurance?.[s.player.tileY]?.[s.player.tileX] ?? null;
+  if (onTileObs === 'heavily') return true;
   const observers = s.npcs.filter((n) =>
     n.disposition !== 'ally'
     && n.hp > 0
     && !n.conditions.includes('incapacitated')
     && !n.conditions.includes('unconscious'),
   );
-  const passivePerceptions = observers.map((n) => ctx.resolveMonsterDef(n.defId)?.passivePerception ?? 10);
-  const maxPP = passivePerceptions.length > 0 ? Math.max(...passivePerceptions) : 10;
-  const { hidden, logs } = playerHide(ctx.playerDef, maxPP);
-  if (hidden) {
-    if (!s.player.conditions.includes('hidden')) s.player.conditions.push('hidden');
-  } else {
-    s.player.conditions = s.player.conditions.filter((c) => c !== 'hidden');
+  if (observers.length === 0) return true;  // no one to hide from
+  for (const npc of observers) {
+    const def = ctx.resolveMonsterDef(npc.defId);
+    const vision = visCanSee(
+      s,
+      { tileX: npc.tileX, tileY: npc.tileY, senses: def?.senses },
+      { tileX: s.player.tileX, tileY: s.player.tileY, conditions: s.player.conditions, id: 'player' },
+    );
+    if (vision.sees) {
+      // The observer sees us — gating SRD: we need ≥ 3/4 cover to take Hide
+      // even with LOS. `none` and `half` are insufficient.
+      if (vision.cover !== 'three-quarters' && vision.cover !== 'total') return false;
+    }
   }
-  ctx.addLogs(logs);
-  // Action economy only applies in combat. During exploring, hiding is free —
-  // it's the Sneak Attack opener that triggers combat with Advantage.
-  if (s.phase === 'player_turn') spendCunningOrAction(ctx);
+  return true;
 }
 
 export function doDash(ctx: GameContext): void {
@@ -334,8 +435,10 @@ export function doEnemyOpportunityAttack(ctx: GameContext, npc: NpcState, events
   if (!meleeAtk) return;
   npc.reactionUsed = true;
   const withDisadvantage = s.player.conditions.includes('dodging');
-  const { damage, isHit, isCrit, logs, bonusComponents } = enemyAttack(meleeAtk, ctx.playerDef.ac, false, withDisadvantage);
+  const playerCoverAc = playerCoverAcVsNpc(ctx, npc);
+  const { damage, isHit, isCrit, logs, bonusComponents } = enemyAttack(meleeAtk, ctx.playerDef.ac, false, withDisadvantage, playerCoverAc);
   ctx.addLogs([{ left: `⚡ ${npc.name} makes an Opportunity Attack!`, style: 'header' }, ...logs]);
+  emitPhysicalAttackSound(ctx, isHit);
   if (isHit) {
     ctx.applyDamageToPlayer(damage, events);
     for (const bd of bonusComponents) {
@@ -355,8 +458,10 @@ export function doPlayerOpportunityAttack(ctx: GameContext, npc: NpcState): void
   s.player.reactionUsed = true;
   const dist = chebyshev(s.player.tileX, s.player.tileY, npc.tileX, npc.tileY);
   const oaAutoCrit = isAutoCrit(npc.conditions, dist);
-  const { damage, logs, vexApplied, slowApplied, bonusComponents } = playerMeleeAttack(ctx.playerDef, targetDef, false, false, oaAutoCrit);
+  const { bonus: oaCoverBonus } = coverBonusVsTarget(ctx, npc);
+  const { damage, isHit: oaIsHit, logs, vexApplied, slowApplied, bonusComponents } = playerMeleeAttack(ctx.playerDef, targetDef, false, false, oaAutoCrit, false, oaCoverBonus);
   ctx.addLogs([{ left: `⚡ ${ctx.playerDef.name} makes an Opportunity Attack!`, style: 'header' }, ...logs]);
+  emitPhysicalAttackSound(ctx, oaIsHit);
   const { finalDamage, log: oaResistLog } = ctx.resistMod(damage, ctx.playerDef.mainAttack.damageType, targetDef, npc.name);
   if (oaResistLog) ctx.addLog(oaResistLog);
   const hpBeforeOa = npc.hp;
