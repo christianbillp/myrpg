@@ -1517,8 +1517,7 @@
         "difficult",
         "outdoor",
         "fill"
-      ],
-      "obscurance": "lightly"
+      ]
     },
     "100": {
       "name": "minecart_offrail_n",
@@ -1564,14 +1563,14 @@
       "name": "tree",
       "passable": false,
       "layer": "object",
-      "description": "A tree placed on top of a ground tile. Blocks movement.",
+      "description": "A tree placed on top of a ground tile. Blocks movement and sight.",
       "tags": [
         "tree",
         "nature",
         "forest",
         "outdoor"
       ],
-      "cover": "three-quarters"
+      "cover": "total"
     },
     "104": {
       "name": "arrow_start_n",
@@ -1669,7 +1668,7 @@
       "name": "tree_transparent",
       "passable": false,
       "layer": "object",
-      "description": "A tree placed on top of a ground tile. Blocks movement. Transparent background (no floor); overlay on top of a ground tile. Twin of tree.",
+      "description": "A tree placed on top of a ground tile. Blocks movement and sight. Transparent background (no floor); overlay on top of a ground tile. Twin of tree.",
       "tags": [
         "tree",
         "nature",
@@ -1679,7 +1678,7 @@
         "overlay",
         "no_background"
       ],
-      "cover": "three-quarters"
+      "cover": "total"
     },
     "111": {
       "name": "arrow_start_n_transparent",

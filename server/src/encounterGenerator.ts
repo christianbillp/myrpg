@@ -57,6 +57,8 @@ export async function generateEncounter(
   const validMonsterIds = new Set(defs.monsters.map((m) => m.id));
   const validNpcIds = new Set(defs.npcs.map((n) => n.id));
   const validTileGids = new Set(Object.keys(defs.tileLegend.tiles).map((k) => parseInt(k, 10)));
+  const groundLayerGids = layerGidSet(defs, 'ground');
+  const objectLayerGids = layerGidSet(defs, 'object');
 
   const system = buildSystemPrompt(defs);
   const user = buildUserPrompt(req);
@@ -76,7 +78,7 @@ export async function generateEncounter(
     throw new Error("Model did not return a tool_use block.");
   }
   const payload = block.input as unknown as GeneratedPayload;
-  validate(payload, validMonsterIds, validNpcIds, validTileGids);
+  validate(payload, validMonsterIds, validNpcIds, validTileGids, groundLayerGids, objectLayerGids);
 
   const stamp = Date.now();
   const slug = slugify(payload.encounterTitle).slice(0, 32) || "scene";
@@ -106,6 +108,8 @@ export async function generateMap(
   req: GenerateRequest,
 ): Promise<GeneratedMap> {
   const validTileGids = new Set(Object.keys(defs.tileLegend.tiles).map((k) => parseInt(k, 10)));
+  const groundLayerGids = layerGidSet(defs, 'ground');
+  const objectLayerGids = layerGidSet(defs, 'object');
 
   const system = buildMapSystemPrompt(defs);
   const user = buildUserPrompt(req);
@@ -123,7 +127,7 @@ export async function generateMap(
   const block = resp.content.find((b) => b.type === "tool_use");
   if (!block || block.type !== "tool_use") throw new Error("Model did not return a tool_use block.");
   const payload = block.input as unknown as GeneratedMapPayload;
-  validateMapPayload(payload, validTileGids);
+  validateMapPayload(payload, validTileGids, groundLayerGids, objectLayerGids);
 
   const stamp = Date.now();
   const slug = slugify(payload.name).slice(0, 32) || "map";
@@ -177,11 +181,20 @@ function buildMapSystemPrompt(defs: GameDefs): string {
 TILE PALETTE (use only these GIDs, exact integers):
 ${legendLines}
 
+LAYER MODEL — the map has TWO stacked layers and you must keep them strictly separate:
+- \`terrainData\` is the ground layer. Every entry MUST reference a \`layer: "ground"\` GID. No 0s; every cell has a floor.
+- \`objectData\` is the object overlay. Entries MUST be 0 (empty) OR a \`layer: "object"\` GID. Never put a ground-layer GID here, and never put an object-layer GID in \`terrainData\`.
+- Object-layer GIDs whose name ends in \`_transparent\` have NO floor of their own — place them on top of a varied ground tile (grass, stone_floor, …) to let the floor texture show through. Prefer these for decoration (trees, flowers, crates, …) so the ground variation underneath stays visible.
+- A cell is passable iff BOTH its ground tile AND its object tile (if non-zero) are passable.
+
+VARIATION — instead of authoring one floor texture per zone, sprinkle ground variants from the palette so the floor reads as natural surface:
+- Outdoor (grass biome): mostly \`grass\` (GID 8) with occasional \`terrain_bumpy\` (99) or \`stone_floor_cracked\` (71).
+- Dungeon/indoor: mostly \`stone_floor\` (15) with occasional \`stone_floor_cracked\` (71), \`stone_floor_diamond\` (43), or \`stone_floor_inlay\` (57).
+- Then layer transparent-twin objects (flowers 96, tree 110, …) on top.
+
 MAP RULES:
 - Width × height between 12×8 and 30×22 inclusive.
 - Both arrays must have length exactly width*height, row-major (top row first, left to right).
-- The terrain array must have a non-zero passable GID at every walkable cell — and every cell must have SOME terrain GID (no 0s in terrain).
-- Index 0 in the object array means "empty"; non-zero entries must reference an "object" layer GID from the palette above.
 - The map perimeter (outer ring of cells) should be impassable unless you specifically want creatures to be able to exit off the edge.
 - At least one connected region of 24+ passable cells should exist for play to happen in.
 
@@ -209,16 +222,26 @@ function buildMapResponseTool() {
   };
 }
 
-function validateMapPayload(p: GeneratedMapPayload, validTileGids: Set<number>): void {
+function validateMapPayload(
+  p: GeneratedMapPayload,
+  validTileGids: Set<number>,
+  groundLayerGids: Set<number>,
+  objectLayerGids: Set<number>,
+): void {
   const cells = p.width * p.height;
   if (p.terrainData.length !== cells) throw new Error(`terrainData length ${p.terrainData.length} ≠ width*height (${cells})`);
   if (p.objectData.length !== cells)  throw new Error(`objectData length ${p.objectData.length} ≠ width*height (${cells})`);
   for (const [i, gid] of p.terrainData.entries()) {
     if (gid === 0) throw new Error(`terrainData[${i}] is 0 (empty) — every terrain cell must reference a valid GID`);
-    if (!validTileGids.has(gid)) throw new Error(`terrainData[${i}] references unknown GID ${gid}`);
+    const base = gid & 0x1fffffff;
+    if (!validTileGids.has(base)) throw new Error(`terrainData[${i}] references unknown GID ${base}`);
+    if (!groundLayerGids.has(base)) throw new Error(`terrainData[${i}] (GID ${base}) is an object-layer tile — terrainData must contain only ground-layer GIDs`);
   }
   for (const [i, gid] of p.objectData.entries()) {
-    if (gid !== 0 && !validTileGids.has(gid)) throw new Error(`objectData[${i}] references unknown GID ${gid}`);
+    if (gid === 0) continue;
+    const base = gid & 0x1fffffff;
+    if (!validTileGids.has(base)) throw new Error(`objectData[${i}] references unknown GID ${base}`);
+    if (!objectLayerGids.has(base)) throw new Error(`objectData[${i}] (GID ${base}) is a ground-layer tile — objectData must contain only object-layer GIDs`);
   }
 }
 
@@ -243,10 +266,16 @@ ${monsterLines}
 NPC ROSTER (use these exact ids in encounter.npcIds for neutral / social NPCs and in encounter.allyIds for friendly companions):
 ${npcLines}
 
+LAYER MODEL — the map has TWO stacked layers and you must keep them strictly separate:
+- \`terrainData\` is the ground layer. Every entry MUST reference a \`layer: "ground"\` GID. No 0s; every cell has a floor.
+- \`objectData\` is the object overlay. Entries MUST be 0 (empty) OR a \`layer: "object"\` GID. Never put a ground-layer GID here, and never put an object-layer GID in \`terrainData\`.
+- Object-layer GIDs whose name ends in \`_transparent\` have NO floor of their own — place them on top of a varied ground tile (grass, stone_floor, …) so the floor texture shows through underneath. Prefer these for decoration.
+
+VARIATION — sprinkle ground variants from the palette so the floor reads as natural surface (mostly \`grass\` (8) outdoor with occasional \`terrain_bumpy\` (99); mostly \`stone_floor\` (15) indoor with occasional cracked / diamond / inlay variants). Then layer transparent-twin objects (flowers 96, tree 110, crate_transparent 13, …) on top.
+
 MAP RULES:
 - Width × height must be between 12×8 and 30×22 inclusive.
 - Both arrays must have length exactly width*height, row-major (top row first, left to right).
-- Index 0 means "empty" for the objects layer; the terrain layer must always have a non-zero passable GID at every walkable cell.
 - A cell is passable iff BOTH its terrain tile and its object tile (if non-zero) are passable.
 - Map perimeter should be impassable unless you specifically want the player to be able to exit (used by the flee mechanic).
 - At least one connected region of 12+ passable cells must exist for the player and NPCs to occupy.
@@ -342,6 +371,8 @@ function validate(
   validMonsterIds: Set<string>,
   validNpcIds: Set<string>,
   validTileGids: Set<number>,
+  groundLayerGids: Set<number>,
+  objectLayerGids: Set<number>,
 ): void {
   const cells = p.width * p.height;
   if (p.terrainData.length !== cells) throw new Error(`terrainData length ${p.terrainData.length} ≠ width*height (${cells})`);
@@ -350,10 +381,15 @@ function validate(
 
   for (const [i, gid] of p.terrainData.entries()) {
     if (gid === 0) throw new Error(`terrainData[${i}] is 0 (empty) — every terrain cell must reference a valid GID`);
-    if (!validTileGids.has(gid)) throw new Error(`terrainData[${i}] references unknown GID ${gid}`);
+    const base = gid & 0x1fffffff;
+    if (!validTileGids.has(base)) throw new Error(`terrainData[${i}] references unknown GID ${base}`);
+    if (!groundLayerGids.has(base)) throw new Error(`terrainData[${i}] (GID ${base}) is an object-layer tile — terrainData must contain only ground-layer GIDs`);
   }
   for (const [i, gid] of p.objectData.entries()) {
-    if (gid !== 0 && !validTileGids.has(gid)) throw new Error(`objectData[${i}] references unknown GID ${gid}`);
+    if (gid === 0) continue;
+    const base = gid & 0x1fffffff;
+    if (!validTileGids.has(base)) throw new Error(`objectData[${i}] references unknown GID ${base}`);
+    if (!objectLayerGids.has(base)) throw new Error(`objectData[${i}] (GID ${base}) is a ground-layer tile — objectData must contain only object-layer GIDs`);
   }
 
   const playerZoneCount = p.startingZonesData.filter((z) => z === 1).length;
@@ -415,4 +451,12 @@ function buildEncounterJson(id: string, p: GeneratedPayload): unknown {
 
 function slugify(s: string): string {
   return s.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
+}
+
+function layerGidSet(defs: GameDefs, layer: 'ground' | 'object'): Set<number> {
+  const out = new Set<number>();
+  for (const [gid, t] of Object.entries(defs.tileLegend.tiles)) {
+    if (t.layer === layer) out.add(parseInt(gid, 10));
+  }
+  return out;
 }

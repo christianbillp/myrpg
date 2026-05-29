@@ -18,6 +18,14 @@
 // Scribble lives at firstgid=1 (155 tiles, ids 0-154). Water lives at
 // firstgid=WATER_FIRSTGID below that; the saved map JSON declares both
 // tilesets so the renderer + passability resolver pick the right one.
+//
+// Multilayer composition: ground variation comes from `BIOME_PALETTES`
+// (weighted-random pool per biome) and object decoration uses the
+// transparent-twin GIDs of the scribble tileset so the ground texture is
+// visible underneath. Feature-placer object GIDs below are likewise
+// transparent twins (e.g. `TREE` → 110 not 103, `FLOWERS` → 96 not 89).
+
+import { BIOME_PALETTES, pickGroundGid, rollObjectGid, type BiomePalette } from '../../../shared/biomePalettes.js';
 
 export const WATER_FIRSTGID = 200;
 const WL = WATER_FIRSTGID; // local shorthand for the water tileset offset
@@ -46,12 +54,15 @@ const G = {
   PARTIAL_CORNER_UR: 59 + 0xA0000000,               // wall in UR → room at LL (SW)
   PARTIAL_CORNER_LR: 59 + 0xC0000000,               // wall in LR → room at UL (NW)
   PARTIAL_CORNER_LL: 59 + 0x60000000,               // wall in LL → room at UR (NE)
-  TREE: 103,
-  CAMPFIRE: 75,
-  FLOWERS: 89,
-  CRATE_CLOSED: 22,
-  BARRELS_TWO: 34,
-  FIREWOOD: 35,
+  // Object overlays. All use transparent-twin GIDs (cols 8–13 of the scribble
+  // sheet) so the underlying ground tile shows through and the multilayer
+  // ground palette stays visible.
+  TREE: 110,            // tree_transparent
+  CAMPFIRE: 82,         // campfire_transparent
+  FLOWERS: 96,          // flowers_transparent
+  CRATE_CLOSED: 22,     // crate_closed has no transparent twin — keep as-is
+  BARRELS_TWO: 41,      // barrels_two_transparent
+  FIREWOOD: 42,         // firewood_transparent
   // Path tiles — GID 2 is `path_corner_se` (connects S + E in base
   // orientation); the four rotations cover all corner orientations. GID 16
   // (`path_straight_v`) handles straight runs; its 90° rotation handles
@@ -273,24 +284,18 @@ export function composeMap(opts: ComposeOptions): ComposedMap {
     return composeDungeon(width, height, features, rng);
   }
 
-  // Outdoor terrains share a grass base, optionally with trees scattered on
-  // top, plus the standard feature stack.
+  // Outdoor terrains pull their ground GIDs from the biome's weighted ground
+  // pool (grass-dominant with cracked-stone / bumpy variants for texture).
+  // Object decoration is added by `applyObjectPool` after feature placement
+  // so we don't overwrite features that need clean ground underneath.
+  const palette = BIOME_PALETTES[terrain];
   const terrainGrid: number[][] = [];
   const objectGrid: number[][] = [];
   for (let r = 0; r < height; r++) {
-    terrainGrid.push(new Array<number>(width).fill(G.GRASS));
+    const row: number[] = new Array<number>(width);
+    for (let c = 0; c < width; c++) row[c] = pickGroundGid(palette, rng);
+    terrainGrid.push(row);
     objectGrid.push(new Array<number>(width).fill(0));
-  }
-
-  if (terrain === 'forest') {
-    // Scatter trees densely with clumping — Poisson-ish with a thinner belt
-    // along the south edge so the player has open ground to spawn on.
-    for (let r = 0; r < height; r++) {
-      const density = r < height - 3 ? 0.22 : 0.05;
-      for (let c = 0; c < width; c++) {
-        if (rng() < density) objectGrid[r][c] = G.TREE;
-      }
-    }
   }
 
   // Features layer. The coastline carves its footprint first so subsequent
@@ -305,6 +310,13 @@ export function composeMap(opts: ComposeOptions): ComposedMap {
   if (features.includes('buildings')) placeBuildings(terrainGrid, objectGrid, rng, width, height, anchors);
   if (features.includes('campsites')) placeCampsites(terrainGrid, objectGrid, rng, width, height, anchors);
 
+  // Decoration pass — sprinkle palette objects (trees, flowers, …) on the
+  // remaining natural ground. Skips cells whose ground GID isn't in the
+  // palette's pool (so paths, building floors, water all stay clean), cells
+  // already carrying an object, and a 3-row belt along the south edge so
+  // the player has clear ground to spawn on.
+  applyObjectPool(palette, terrainGrid, objectGrid, rng, width, height);
+
   const tilesets: ComposedTilesetRef[] = usesWater
     ? [SCRIBBLE_TILESET, WATER_TILESET]
     : [SCRIBBLE_TILESET];
@@ -318,6 +330,51 @@ export function composeMap(opts: ComposeOptions): ComposedMap {
     tilesets,
     anchors,
   };
+}
+
+/**
+ * Run the biome's `objectPool` density rules over the map's natural-ground
+ * cells. Skipped:
+ *   • cells whose ground GID isn't in the palette's `groundPool` (paths,
+ *     stamped building floors, water — anything a feature placer authored);
+ *   • cells already carrying an object (campfires, furniture, etc.);
+ *   • a 3-row belt along the south edge so the spawn band stays clear.
+ *
+ * Walls/impassable cells are reported via `isWall` so `wall_adjacent`
+ * entries can find them. Trees and the rest of the pool are placed by the
+ * shared `rollObjectGid` helper using its clustering rules.
+ */
+function applyObjectPool(
+  palette: BiomePalette,
+  terrain: number[][],
+  objects: number[][],
+  rng: () => number,
+  W: number, H: number,
+): void {
+  if (palette.objectPool.length === 0) return;
+  const naturalGround = new Set(palette.groundPool.map((e) => e.gid));
+  const isWall = (x: number, y: number): boolean => {
+    if (x < 0 || x >= W || y < 0 || y >= H) return false;
+    const g = terrain[y][x] & 0x1fffffff;
+    return !naturalGround.has(g);
+  };
+  // Flat row-major view of `objects` for the shared roll helper.
+  const flat = new Array<number>(W * H).fill(0);
+  for (let r = 0; r < H; r++) for (let c = 0; c < W; c++) flat[r * W + c] = objects[r][c];
+
+  const SOUTH_BUFFER = 3;
+  for (let r = 0; r < H - SOUTH_BUFFER; r++) {
+    for (let c = 0; c < W; c++) {
+      if (objects[r][c] !== 0) continue;
+      const ground = terrain[r][c] & 0x1fffffff;
+      if (!naturalGround.has(ground)) continue;
+      const gid = rollObjectGid(palette, rng, c, r, W, H, flat, isWall);
+      if (gid !== 0) {
+        objects[r][c] = gid;
+        flat[r * W + c] = gid;
+      }
+    }
+  }
 }
 
 // ── Feature placers ─────────────────────────────────────────────────────────
@@ -341,6 +398,26 @@ function rectTouchesWater(terrain: number[][], x: number, y: number, w: number, 
   return false;
 }
 
+/** True iff the cell's terrain GID is one of the dirt-path tiles laid by
+ *  `placePath` (straight runs, corners, intersection — base GIDs 2/16/30
+ *  after stripping flip flags). Used by feature placers to reject footprints
+ *  that would block the path. */
+function isPathCell(terrain: number[][], r: number, c: number, W: number, H: number): boolean {
+  if (r < 0 || r >= H || c < 0 || c >= W) return false;
+  const base = terrain[r][c] & 0x1fffffff;
+  return base === 2 || base === 16 || base === 30;
+}
+
+/** True iff any cell in the rectangle [x, x+w) × [y, y+h) is a path tile. */
+function rectTouchesPath(terrain: number[][], x: number, y: number, w: number, h: number, W: number, H: number): boolean {
+  for (let r = y; r < y + h; r++) {
+    for (let c = x; c < x + w; c++) {
+      if (isPathCell(terrain, r, c, W, H)) return true;
+    }
+  }
+  return false;
+}
+
 function placeRuins(terrain: number[][], objects: number[][], rng: () => number, W: number, H: number, anchors: MapAnchors): void {
   const count = 2 + Math.floor(rng() * 2);  // 2-3 ruined buildings
   for (let i = 0; i < count; i++) {
@@ -350,8 +427,10 @@ function placeRuins(terrain: number[][], objects: number[][], rng: () => number,
       const h = 5 + Math.floor(rng() * 3);   // 5-7 tall
       const x = 1 + Math.floor(rng() * Math.max(1, W - w - 2));
       const y = 1 + Math.floor(rng() * Math.max(1, H - h - 2));
-      // Skip footprints that overlap any coastline water.
+      // Skip footprints that overlap coastline water or the path — buildings
+      // mustn't cap the road or land in the surf.
       if (rectTouchesWater(terrain, x, y, w, h, W, H)) continue;
+      if (rectTouchesPath(terrain, x, y, w, h, W, H)) continue;
       const sides: Doorway['side'][] = ['N', 'S', 'E', 'W'];
       const dwSide = sides[Math.floor(rng() * 4)];
       const wallLen = (dwSide === 'N' || dwSide === 'S') ? w : h;
@@ -390,6 +469,7 @@ function placeBuildings(terrain: number[][], objects: number[][], rng: () => num
       const x = 1 + Math.floor(rng() * Math.max(1, W - w - 2));
       const y = 1 + Math.floor(rng() * Math.max(1, H - h - 2));
       if (rectTouchesWater(terrain, x, y, w, h, W, H)) continue;
+      if (rectTouchesPath(terrain, x, y, w, h, W, H)) continue;
       const sides: Doorway['side'][] = ['N', 'S', 'E', 'W'];
       const dwSide = sides[Math.floor(rng() * 4)];
       const wallLen = (dwSide === 'N' || dwSide === 'S') ? w : h;
@@ -541,93 +621,43 @@ function placeCampsites(terrain: number[][], objects: number[][], rng: () => num
 
 // ── Water features (coastline) ──────────────────────────────────────────────
 //
-// Both call the same shoreline-aware fill routine. A boolean `water` grid
-// describes the desired water footprint; the routine assigns the correct
-// water tile id at every cell of the grid based on its neighbours (open
-// water, edges along the four cardinal sides, outer corners where two water
-// edges meet, and inner corners where the water rounds into a grass pocket).
-// Trees are cleared on water cells; the player is responsible for finding an
-// edge tile to spawn at.
-
-function paintWater(terrain: number[][], objects: number[][], water: boolean[][], W: number, H: number): void {
-  const isWater = (x: number, y: number): boolean => x >= 0 && x < W && y >= 0 && y < H && water[y][x];
-  // Pass 1 — water cells at the edges or convex corners of the water body.
-  //
-  // NOTE on corner naming: the water tileset's `<dir>` label points at the
-  // direction the *water bulges* (the rounded face of the water body), not
-  // at the direction of the grass pocket. So a water cell with grass to its
-  // N and W (sitting at the NW corner of the body) needs the tile whose
-  // water rounds out toward the SE — `WATER_OUTER_SE`. This is the inverse
-  // of a naïve "named corner = grass corner" reading.
-  for (let r = 0; r < H; r++) {
-    for (let c = 0; c < W; c++) {
-      if (!water[r][c]) continue;
-      objects[r][c] = 0; // trees / props drown.
-      const n = isWater(c, r - 1);
-      const s = isWater(c, r + 1);
-      const e = isWater(c + 1, r);
-      const w = isWater(c - 1, r);
-      // Outer corner: water cell, two adjacent grass neighbours. The named
-      // corner points toward the water (away from the grass).
-      if (!n && !w && s && e) { terrain[r][c] = G.WATER_OUTER_SE; continue; }
-      if (!n && !e && s && w) { terrain[r][c] = G.WATER_OUTER_SW; continue; }
-      if (!s && !e && n && w) { terrain[r][c] = G.WATER_OUTER_NW; continue; }
-      if (!s && !w && n && e) { terrain[r][c] = G.WATER_OUTER_NE; continue; }
-      // Edge: a single grass side.
-      if (!n && s && e && w) { terrain[r][c] = G.WATER_EDGE_N; continue; }
-      if (!s && n && e && w) { terrain[r][c] = G.WATER_EDGE_S; continue; }
-      if (!e && n && s && w) { terrain[r][c] = G.WATER_EDGE_E; continue; }
-      if (!w && n && s && e) { terrain[r][c] = G.WATER_EDGE_W; continue; }
-      // Open water — fully surrounded.
-      terrain[r][c] = G.WATER;
-    }
-  }
-  // Pass 2 — grass cells sitting in a concave corner of the water body.
-  // Same inverted-direction convention as the outer corners: the named
-  // corner of `WATER_INNER_<dir>` points at the *water* side of the curve,
-  // not the grass side. A grass cell with water to N and W therefore uses
-  // `WATER_INNER_NW` only if the convention is grass-pocket; per the actual
-  // artwork it needs `WATER_INNER_SE` (water rounds out toward SE).
-  for (let r = 0; r < H; r++) {
-    for (let c = 0; c < W; c++) {
-      if (water[r][c]) continue;
-      const n = isWater(c, r - 1);
-      const s = isWater(c, r + 1);
-      const e = isWater(c + 1, r);
-      const w = isWater(c - 1, r);
-      if (n && w && !s && !e) terrain[r][c] = G.WATER_INNER_SE;
-      else if (n && e && !s && !w) terrain[r][c] = G.WATER_INNER_SW;
-      else if (s && e && !n && !w) terrain[r][c] = G.WATER_INNER_NW;
-      else if (s && w && !n && !e) terrain[r][c] = G.WATER_INNER_NE;
-    }
-  }
-}
+// The coastline cuts a uniform-depth strip of water along one randomly chosen
+// edge of the map. The water side is filled with the open-water tile; the
+// single row of water cells nearest the dry land uses the matching
+// `WATER_EDGE_<grass side>` tile so the shoreline reads as a continuous wave
+// line. There are no outer/inner corner tiles — the coastline is straight.
 
 function placeCoastline(terrain: number[][], objects: number[][], rng: () => number, W: number, H: number, anchors: MapAnchors): void {
-  // Flood one of the four edges inward by a uniform depth — a perfectly
-  // straight coastline with no wave variation.
   const sides = ['N', 'E', 'S', 'W'] as const;
   const side = sides[Math.floor(rng() * 4)];
-  const water = Array.from({ length: H }, () => new Array<boolean>(W).fill(false));
   const depth = side === 'N' || side === 'S' ? Math.max(3, Math.floor(H * 0.4)) : Math.max(3, Math.floor(W * 0.4));
 
-  if (side === 'N' || side === 'S') {
+  // Paint the rectangle of water cells; for cells in the row/col farthest
+  // from the map edge (the shoreline row) use the matching WATER_EDGE_<dir>
+  // tile, where <dir> is the grass side — i.e. for a north coastline the
+  // shoreline cells have grass to their south, so they get WATER_EDGE_S.
+  const fillCol = (r: number, edgeTile: number, fillTile: number, isShoreline: boolean) => {
     for (let c = 0; c < W; c++) {
-      for (let i = 0; i < depth; i++) {
-        const r = side === 'N' ? i : H - 1 - i;
-        water[r][c] = true;
-      }
+      objects[r][c] = 0;
+      terrain[r][c] = isShoreline ? edgeTile : fillTile;
     }
-  } else {
+  };
+  const fillRow = (c: number, edgeTile: number, fillTile: number, isShoreline: boolean) => {
     for (let r = 0; r < H; r++) {
-      for (let i = 0; i < depth; i++) {
-        const c = side === 'W' ? i : W - 1 - i;
-        water[r][c] = true;
-      }
+      objects[r][c] = 0;
+      terrain[r][c] = isShoreline ? edgeTile : fillTile;
     }
-  }
+  };
 
-  paintWater(terrain, objects, water, W, H);
+  if (side === 'N') {
+    for (let r = 0; r < depth; r++) fillCol(r, G.WATER_EDGE_S, G.WATER, r === depth - 1);
+  } else if (side === 'S') {
+    for (let r = H - depth; r < H; r++) fillCol(r, G.WATER_EDGE_N, G.WATER, r === H - depth);
+  } else if (side === 'W') {
+    for (let c = 0; c < depth; c++) fillRow(c, G.WATER_EDGE_E, G.WATER, c === depth - 1);
+  } else {
+    for (let c = W - depth; c < W; c++) fillRow(c, G.WATER_EDGE_W, G.WATER, c === W - depth);
+  }
 
   // Record a thin inland band on the opposite (dry) edge — that's where a
   // traveller approaches the coast from. The randomizer uses this so the
@@ -728,10 +758,15 @@ function composeDungeon(W: number, H: number, features: Feature[], rng: () => nu
   //   • one orthogonal floor neighbour → straight wall along the room's edge
   //   • two perpendicular orthogonal floor neighbours → inner room corner
   //   • diagonal-only floor neighbour → outer room corner
+  //
+  // Floor tiles are sampled from the dungeon biome's ground pool so the
+  // stone-floor texture varies cell-to-cell (cracked / diamond / inlay
+  // sprinkled into the base stone).
+  const dungeonPalette = BIOME_PALETTES.dungeon;
   for (let r = 0; r < H; r++) {
     for (let c = 0; c < W; c++) {
       if (floor[r][c]) {
-        terrainGrid[r][c] = G.STONE_FLOOR;
+        terrainGrid[r][c] = pickGroundGid(dungeonPalette, rng);
         continue;
       }
       const fN  = !!floor[r - 1]?.[c];

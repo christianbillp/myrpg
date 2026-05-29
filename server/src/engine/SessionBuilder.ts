@@ -20,13 +20,15 @@ export type SavedMapRecord = import('./types.js').SavedMapDef;
 /**
  * Resolve the passability of a single GID against (1) the encounter's explicit
  * tileProperties, (2) the source tileset's `tiles[].properties[].passable`
- * carried on `MapTilesetInfo.tilePassability`, and (3) a default of `true`
- * (Tiled's convention: unmarked tiles are passable). Encounter overrides win.
+ * carried on `MapTilesetInfo.tilePassability`, (3) the global tile legend,
+ * and (4) a default of `true` (Tiled's convention: unmarked tiles are
+ * passable). Encounter overrides win, then tileset, then legend.
  */
 function resolveGidPassable(
   rawGid: number,
   byGid: Map<number, EncounterTileProperty>,
   tilesets: MapTilesetInfo[],
+  tileLegend: Record<string, { passable?: boolean }>,
 ): boolean {
   if (rawGid === 0) return true; // empty object-layer cell — no obstacle here.
   // Strip Tiled's flip/rotation bits before looking up — orientation never
@@ -40,22 +42,31 @@ function resolveGidPassable(
   for (const ts of tilesets) {
     if (ts.firstgid <= gid && (!owner || ts.firstgid > owner.firstgid)) owner = ts;
   }
-  if (!owner) return true;
-  const local = gid - owner.firstgid;
-  const declared = owner.tilePassability[local];
-  return declared ?? true;
+  if (owner) {
+    const local = gid - owner.firstgid;
+    const declared = owner.tilePassability[local];
+    if (declared !== undefined) return declared;
+  }
+  // Fall through to the legend — transparent-twin tiles and others added in
+  // the legend JSON but missing from the source .tsj end up here.
+  const legendPassable = tileLegend[String(gid)]?.passable;
+  if (legendPassable !== undefined) return legendPassable;
+  return true;
 }
 
 /**
  * Combine a saved map's GID grid(s) with the encounter's per-GID tile
  * properties to produce the engine's `GameMap` (with passability resolved).
- * A cell is passable iff the ground GID is passable AND any object GID at
- * that cell is also passable.
+ *
+ * Object overrides terrain: when a cell carries a non-zero object GID, that
+ * GID alone determines passability / cover / obscurance — a passable doorway
+ * laid over an impassable wall opens the cell; a tree on grass blocks it.
+ * The ground tile only matters when the object slot is empty.
  */
 function buildGameMapFromSaved(
   saved: SavedMapRecord,
   tileProperties: EncounterTileProperty[] | undefined,
-  tileLegend: Record<string, { cover?: 'half' | 'three-quarters' | 'total'; obscurance?: 'lightly' | 'heavily'; transparent?: boolean }>,
+  tileLegend: Record<string, { passable?: boolean; cover?: 'half' | 'three-quarters' | 'total'; obscurance?: 'lightly' | 'heavily'; transparent?: boolean }>,
 ): GameMap {
   const byGid = new Map<number, EncounterTileProperty>();
   for (const tp of tileProperties ?? []) byGid.set(tp.gid, tp);
@@ -67,32 +78,30 @@ function buildGameMapFromSaved(
     byGid.get(gid)?.obscurance ?? tileLegend[String(gid)]?.obscurance ?? null;
   const tileTransparent = (gid: number): boolean =>
     byGid.get(gid)?.transparent ?? tileLegend[String(gid)]?.transparent ?? false;
+  /** GID whose tile properties win for this cell — the object when present,
+   *  otherwise the ground GID. Implements the object-overrides-terrain rule. */
+  const effectiveGid = (groundGid: number, objectGid: number): number =>
+    objectGid !== 0 ? objectGid : groundGid;
   const passable: boolean[][] = saved.gidGrid.map((row, y) =>
     row.map((groundGid, x) => {
-      if (!resolveGidPassable(groundGid, byGid, saved.tilesets)) return false;
       const objectGid = saved.objectGidGrid?.[y]?.[x] ?? 0;
-      return resolveGidPassable(objectGid, byGid, saved.tilesets);
+      return resolveGidPassable(effectiveGid(groundGid, objectGid), byGid, saved.tilesets, tileLegend);
     }),
   );
-  // Bake per-tile cover and obscurance from the encounter's tileProperties.
-  // The walker takes the worst of the ground + object GID for each cell so a
-  // patch of underbrush sitting on grass becomes "lightly obscured", and a
-  // dense tree on dirt becomes "three-quarters cover". Tileset-level
-  // defaults are not (yet) consulted — authors mark these explicitly via
-  // `EncounterTileProperty`.
+  // Bake per-tile cover and obscurance from the effective tile (object
+  // overrides ground per the rule above) plus any encounter override. A
+  // tree-on-grass cell reads as "tree" (impassable, total cover); an empty
+  // patch of underbrush stays at ground-tile defaults.
   //
   // Impassable tiles without an explicit cover declaration are auto-promoted
   // to Total Cover so walls block vision out of the box. Authors opt out of
-  // this by setting `transparent: true` on the tile property (chasms, deep
-  // water, low walls — terrain you can see across but cannot enter).
+  // this by setting `transparent: true` on the tile (chasms, water, windows).
   const coverGrid: (null | 'half' | 'three-quarters' | 'total')[][] = saved.gidGrid.map((row, y) =>
     row.map((groundGid, x) => {
       const objectGid = saved.objectGidGrid?.[y]?.[x] ?? 0;
-      let cover = worstCover(tileCoverFor(groundGid), tileCoverFor(objectGid));
-      // Auto-promote: if this cell is impassable AND neither layer declared
-      // `transparent: true` (legend or encounter override), treat as Total
-      // Cover. Authors mark chasms / water / windows transparent to opt out.
-      if (!passable[y][x] && !tileTransparent(groundGid) && !tileTransparent(objectGid) && cover === null) {
+      const gid = effectiveGid(groundGid, objectGid);
+      let cover = tileCoverFor(gid);
+      if (!passable[y][x] && !tileTransparent(gid) && cover === null) {
         cover = 'total';
       }
       return cover;
@@ -101,7 +110,7 @@ function buildGameMapFromSaved(
   const obscuranceGrid: (null | 'lightly' | 'heavily')[][] = saved.gidGrid.map((row, y) =>
     row.map((groundGid, x) => {
       const objectGid = saved.objectGidGrid?.[y]?.[x] ?? 0;
-      return worstObscurance(tileObsFor(groundGid), tileObsFor(objectGid));
+      return tileObsFor(effectiveGid(groundGid, objectGid));
     }),
   );
   return {
@@ -115,22 +124,6 @@ function buildGameMapFromSaved(
     objectGidGrid: saved.objectGidGrid,
     tilesets: saved.tilesets,
   };
-}
-
-type CoverCell = null | 'half' | 'three-quarters' | 'total';
-const COVER_RANK: Record<Exclude<CoverCell, null>, number> = { 'half': 1, 'three-quarters': 2, 'total': 3 };
-function worstCover(a: CoverCell, b: CoverCell): CoverCell {
-  if (!a) return b;
-  if (!b) return a;
-  return COVER_RANK[a] >= COVER_RANK[b] ? a : b;
-}
-
-type ObsCell = null | 'lightly' | 'heavily';
-const OBS_RANK: Record<Exclude<ObsCell, null>, number> = { 'lightly': 1, 'heavily': 2 };
-function worstObscurance(a: ObsCell, b: ObsCell): ObsCell {
-  if (!a) return b;
-  if (!b) return a;
-  return OBS_RANK[a] >= OBS_RANK[b] ? a : b;
 }
 
 /**

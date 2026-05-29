@@ -36,7 +36,6 @@ import { decodeTileGid, TILE_VOID_GID } from "../../../shared/tileGid";
 
 const GAME_W = PLAYER_PANEL_WIDTH + GRID_COLS * TILE_SIZE + TARGET_PANEL_WIDTH;
 const GAME_H = GRID_ROWS * TILE_SIZE + HUD_HEIGHT;
-const MAP_TILE_ALPHA = 0.7;
 const API_URL = "http://localhost:3000";
 
 export class GameScene extends Phaser.Scene {
@@ -1207,7 +1206,6 @@ export class GameScene extends Phaser.Scene {
               frame,
             );
             sprite.setDisplaySize(TILE_SIZE, TILE_SIZE);
-            sprite.setAlpha(MAP_TILE_ALPHA);
             if (decoded.angle !== 0) sprite.setAngle(decoded.angle);
             if (decoded.flipX) sprite.setFlipX(true);
             if (decoded.flipY) sprite.setFlipY(true);
