@@ -37,15 +37,21 @@ import {
 } from './ExplorationActions.js';
 import { doEquip as ivDoEquip, doUnequip as ivDoUnequip } from './InventoryActions.js';
 import { doCastSpell as spDoCastSpell } from './SpellSystem.js';
+import { doCommandSummon, checkSummonTether, registerSummonHooks } from './SummonSystem.js';
 import { maybeBreakConcentration } from './ConcentrationSystem.js';
 import { doUseFeature } from './FeatureRegistry.js';
 import { buildSessionState, SavedMapRecord } from './SessionBuilder.js';
 import { registerTriggers, adjustFactionStanding, recordRumor, fireAction as triggerFireAction } from './TriggerSystem.js';
 import { registerDirector } from './Director.js';
 import { registerAdventureProgress } from './AdventureProgress.js';
+import { registerEncounterLifecycle, publishEncounterStarted } from './EncounterLifecycle.js';
 import { EventBus } from './EventBus.js';
 import { publishHpThresholdCrossings } from './ThresholdPublisher.js';
 import { WeaponDef } from './types.js';
+import { buildLevelUpPreview, applyLevelUp, applyLevelUpHistory } from './Leveling.js';
+import { canLevelUp } from '../../../shared/xpTable.js';
+import type { LevelUpPreview, LevelUpChoices, LongRestPreview, LongRestChoices } from '../../../shared/types.js';
+import { buildLongRestPreview, applyLongRest } from './Resting.js';
 
 export interface ActionResult {
   events: GameEvent[];
@@ -60,14 +66,24 @@ export class GameEngine {
   private playerDef: PlayerDef;
   private ctx: GameContext;
   private bus: EventBus;
+  /** GameEvents emitted during session construction (notably by triggers fired
+   *  from `encounter_started`). The WS handler flushes these onto the first
+   *  state_update so intro cinematics land the moment the client connects.
+   *  See `consumeStartupEvents()`. */
+  private startupEvents: GameEvent[] = [];
 
-  constructor(state: GameState, defs: GameDefs) {
+  constructor(state: GameState, defs: GameDefs, levelUpHistory: LevelUpChoices[] = []) {
     this.state = state;
     this.bus = new EventBus();
     // Clone the player def so per-session equipment mutations never leak into the
     // shared GameDefs (which is reused across every session in the process).
     const sharedDef = defs.playerDefs.find((p) => p.id === state.player.defId)!;
     this.playerDef = JSON.parse(JSON.stringify(sharedDef));
+    // Replay recorded level-ups onto the clone BEFORE applyEquipment so AC /
+    // proficiency-bonus-derived skills land at the character's current level.
+    if (levelUpHistory.length > 0) {
+      applyLevelUpHistory(this.playerDef, levelUpHistory, defs.features, defs.spells);
+    }
     this.defs = {
       ...defs,
       playerDefs: defs.playerDefs.map((p) => p.id === this.playerDef.id ? this.playerDef : p),
@@ -92,7 +108,30 @@ export class GameEngine {
     // before authored reactions to the same event.
     registerDirector(this.ctx);
     registerAdventureProgress(this.ctx);
+    registerEncounterLifecycle(this.ctx);
     registerTriggers(this.ctx);
+    registerSummonHooks(this.ctx);
+
+    // Fire encounter_started AFTER every subscriber is registered. Triggers
+    // listening on this event push their GameEvents into the startup buffer
+    // (point ctx.eventSink at it for the duration of the publish call), and
+    // the WS handler flushes that buffer onto the first state_update so any
+    // intro cinematic plays the moment the client connects.
+    this.ctx.eventSink = this.startupEvents;
+    try {
+      publishEncounterStarted(this.ctx);
+    } finally {
+      this.ctx.eventSink = null;
+    }
+  }
+
+  /** Drains and returns the buffer of GameEvents emitted during session
+   *  construction (by `encounter_started` triggers). Called once by the WS
+   *  handler on initial connection; subsequent calls return an empty array. */
+  consumeStartupEvents(): GameEvent[] {
+    const out = this.startupEvents;
+    this.startupEvents = [];
+    return out;
   }
 
   private buildCtx(): GameContext {
@@ -118,6 +157,7 @@ export class GameEngine {
       doPlayerOpportunityAttack: (npc) => caDoPlayerOA(this.ctx, npc),
       spawnEnemyNearPlayer: (id, mn, mx) => this.spawnEnemyNearPlayer(id, mn, mx),
       spawnEnemyAt: (id, tx, ty) => this.spawnEnemyAt(id, tx, ty),
+      spawnSummon: (id, spellId, tx, ty) => this.spawnSummon(id, spellId, tx, ty),
       bus: this.bus,
       publish: (event) => this.bus.publish(event),
       removeNpc: (id) => this.removeNpcFromEncounter(id),
@@ -180,7 +220,7 @@ export class GameEngine {
           events.push(...caThrowItem(this.ctx, action.itemId, action.targetId));
         break;
       case 'castSpell':
-        spDoCastSpell(this.ctx, action.spellId, action.slotLevel, action.targetIds, action.tile, !!action.asRitual, events);
+        spDoCastSpell(this.ctx, action.spellId, action.slotLevel, action.targetIds, action.tile, !!action.asRitual, events, action.damageTypeChoice);
         break;
       case 'hide':         caDoHide(this.ctx); break;
       case 'useFeature':   doUseFeature(this.ctx, action.featureId, { targetId: action.targetId, tile: action.tile }, events); break;
@@ -189,8 +229,13 @@ export class GameEngine {
       case 'dodge':        caDoDodge(this.ctx); break;
       case 'disengage':    caDoDisengage(this.ctx); break;
       case 'detach':       caDoDetach(this.ctx); break;
+      case 'commandSummon': doCommandSummon(this.ctx, action.summonNpcId, action.tile, events); break;
       case 'endTurn':
-        if (s.phase === 'player_turn') cfEnterEnemyPhase(this.ctx, events);
+        if (s.phase === 'player_turn') {
+          // SRD Mage Hand: vanishes if the caster ends a turn > 30 ft away.
+          checkSummonTether(this.ctx);
+          cfEnterEnemyPhase(this.ctx, events);
+        }
         break;
       case 'rollDeathSave': cfDoRollDeathSave(this.ctx, events); break;
       case 'shortRest':    exDoShortRest(this.ctx); break;
@@ -357,6 +402,58 @@ export class GameEngine {
     const [tx, ty] = this.findFreeTileNear(s.player.tileX, s.player.tileY, minDist, maxDist);
     if (tx === -1) return null;
     return this.materializeEnemy(monsterId, tx, ty);
+  }
+
+  /**
+   * Conjure a player-owned summon (Mage Hand, Unseen Servant) at the chosen
+   * tile. Despawns any existing summon of the same `spellId` first — Mage
+   * Hand's SRD "vanishes if you cast this spell again" rule.
+   *
+   * Summons spawn with `disposition: 'ally'`, no combat label, and skip the
+   * combat turn loop — they only act when the caster commands them via
+   * `commandSummon`. They live in their own faction (the spell id) so they
+   * don't interact with the faction-relation matrix.
+   */
+  spawnSummon(monsterId: string, spellId: string, tx: number, ty: number): NpcState | null {
+    const def = this.defs.monsters.find((m) => m.id === monsterId);
+    if (!def) return null;
+    const s = this.state;
+
+    // Existing summon of this spell → vanish first.
+    for (const existing of s.npcs.filter((n) => n.summonSpellId === spellId && n.summonOwnerId === 'player')) {
+      this.removeNpcFromEncounter(existing.id);
+      this.addLog({ left: `${existing.name} fades away.`, style: 'status' });
+    }
+
+    const { cols, rows, passable } = s.map;
+    const occupied = (x: number, y: number): boolean =>
+      (s.player.tileX === x && s.player.tileY === y)
+      || s.npcs.some((n) => n.hp > 0 && n.tileX === x && n.tileY === y);
+    let fx = tx, fy = ty;
+    const inBounds = tx >= 0 && tx < cols && ty >= 0 && ty < rows;
+    if (!inBounds || !passable[ty][tx] || occupied(tx, ty)) {
+      const [nfx, nfy] = this.findFreeTileNear(tx, ty, 0, 6);
+      if (nfx === -1) return null;
+      fx = nfx; fy = nfy;
+    }
+
+    const npc: NpcState = {
+      id: `sm${++uidCounter}`,
+      defId: def.id,
+      name: def.name,
+      combatLabel: '',  // summons don't carry a combat label
+      tileX: fx, tileY: fy,
+      disposition: 'ally',
+      factionId: `summon:${spellId}`,
+      summonSpellId: spellId,
+      summonOwnerId: 'player',
+      combatPassive: true,
+      hp: def.maxHp, maxHp: def.maxHp,
+      isActive: false,
+      reactionUsed: false, conditions: [], inventoryIds: [], ongoingEffects: [],
+    };
+    s.npcs.push(npc);
+    return npc;
   }
 
   spawnEnemyAt(monsterId: string, tx: number, ty: number): NpcState | null {
@@ -533,6 +630,15 @@ export class GameEngine {
     return rollNpcAttackVsAc(monsterDef, targetAc);
   }
 
+  /**
+   * Public lookup for AIGM tools: resolve an entity ref (`enemy_A`,
+   * `ally_A`, `npc_<id>`) to the matching NpcState, or undefined when the
+   * ref doesn't resolve. Wraps the existing private resolver.
+   */
+  resolveNpcEntity(entity: string): NpcState | undefined {
+    return this.resolveNpcByEntity(entity);
+  }
+
   // ── Private helpers shared with the GameContext ─────────────────────────────
 
   private resolveNpcByEntity(entity: string): NpcState | undefined {
@@ -688,7 +794,147 @@ export class GameEngine {
       canShortRest: Guard.canShortRest(this.ctx),
       castableSpellIds: Guard.castableSpellIds(this.ctx),
       canDetach: Guard.canDetach(this.ctx),
+      // LEVEL UP is offered in exploration only — the overlay opens a modal
+      // dialogue and applies HP / feature changes that shouldn't land mid-turn.
+      canLevelUp: phase === 'exploring' && canLevelUp(this.playerDef.level, p.xp),
+      // LONG REST is gated by the encounter — only safehouses / taverns set
+      // `allowsLongRest`. Combat phases block it outright.
+      canLongRest: phase === 'exploring' && s.allowsLongRest === true,
     };
+  }
+
+  // ── Level-up ───────────────────────────────────────────────────────────────
+
+  /**
+   * Build the SRD preview the LevelUpOverlay renders. Returns `null` when the
+   * character isn't eligible right now (insufficient XP, already at L20, or
+   * outside the exploration phase). The preview is recomputed by
+   * `commitLevelUp` so the client can't smuggle stale values back.
+   */
+  buildLevelUpPreview(): LevelUpPreview | null {
+    return buildLevelUpPreview({
+      playerDef: this.playerDef,
+      xp: this.state.player.xp,
+      features: this.defs.features,
+      spells: this.defs.spells,
+    });
+  }
+
+  /**
+   * Apply a player-confirmed level-up. Mutates `playerDef` + projects the new
+   * `maxHp` / spell-slot caps onto `state.player`. The caller is responsible
+   * for persisting the updated character save to disk and broadcasting a
+   * `state_update`.
+   */
+  commitLevelUp(choices: LevelUpChoices): LevelUpPreview {
+    if (this.state.phase !== 'exploring') {
+      throw new Error('Level up is only available in the exploration phase.');
+    }
+    const preview = this.buildLevelUpPreview();
+    if (!preview) throw new Error('Not enough XP to level up.');
+
+    const slotsBefore = (this.playerDef.defaultSpellSlots ?? []).slice();
+    applyLevelUp({
+      playerDef: this.playerDef,
+      choices,
+      features: this.defs.features,
+      spells: this.defs.spells,
+      preview,
+    });
+
+    // Heal the newly-gained HP so the player sees their fresh max HP
+    // immediately. `maxHp` itself lives on `playerDef` (no separate runtime
+    // copy in PlayerState); the response carries the updated playerDef so the
+    // client refreshes its cached copy.
+    this.state.player.hp = Math.min(this.playerDef.maxHp, this.state.player.hp + preview.hpGain);
+
+    // For each slot level that gained a slot, also refill the current pool by
+    // the same delta so the player can immediately cast at the new ceiling.
+    const slotsAfter = this.playerDef.defaultSpellSlots ?? [];
+    for (let i = 0; i < slotsAfter.length; i++) {
+      const before = slotsBefore[i] ?? 0;
+      const after = slotsAfter[i] ?? 0;
+      const delta = after - before;
+      if (delta <= 0) continue;
+      this.state.player.spellSlots[i] = (this.state.player.spellSlots[i] ?? 0) + delta;
+    }
+
+    // Initialise feature resource pools for newly-granted features with a
+    // resource (e.g. Action Surge gets 1 use per short rest).
+    for (const f of preview.newFeatures) {
+      const def = this.defs.features.find((d) => d.id === f.id);
+      if (def?.resource?.kind && def.resource.kind !== 'unlimited') {
+        this.state.player.resources[def.id] = def.resource.max;
+      }
+    }
+
+    this.addLog({ left: `── Level up: ${this.playerDef.name} reaches level ${preview.toLevel} ──`, style: 'header' });
+    this.addLog({ left: `+${preview.hpGain} HP (${preview.toLevel === 2 ? 'fixed value + Con' : 'class roll'})`, style: 'heal' });
+    for (const f of preview.newFeatures) {
+      this.addLog({ left: `New feature: ${f.name}`, style: 'status' });
+    }
+
+    this.computeAvailableActions();
+    return preview;
+  }
+
+  /** Read-only access to the per-session mutable PlayerDef. The session
+   *  manager uses this to write the updated character back to disk after a
+   *  level-up. */
+  getPlayerDef(): PlayerDef { return this.playerDef; }
+
+  // ── Long Rest ──────────────────────────────────────────────────────────────
+
+  /**
+   * Build the SRD Long Rest preview the LongRestOverlay renders. Returns
+   * `null` when the current encounter doesn't permit Long Rest or the
+   * player is mid-combat. The preview is recomputed inside `commitLongRest`
+   * so the client can't smuggle stale values.
+   */
+  buildLongRestPreview(): LongRestPreview | null {
+    if (this.state.phase !== 'exploring' || this.state.allowsLongRest !== true) return null;
+    return buildLongRestPreview({
+      playerDef: this.playerDef,
+      player: this.state.player,
+      features: this.defs.features,
+      spells: this.defs.spells,
+    });
+  }
+
+  /**
+   * Apply a confirmed Long Rest. Restores HP, hit dice, spell slots, feature
+   * pools, exhaustion, and (for Wizards) rebuilds prepared spells. Returns
+   * the preview that was applied so the caller can persist it.
+   */
+  commitLongRest(choices: LongRestChoices): LongRestPreview {
+    const preview = this.buildLongRestPreview();
+    if (!preview) throw new Error('Long Rest is not available here.');
+
+    applyLongRest(
+      { playerDef: this.playerDef, player: this.state.player, features: this.defs.features, spells: this.defs.spells },
+      choices,
+      preview,
+    );
+
+    this.addLog({ left: `── Long Rest — ${this.playerDef.name} is fully rested ──`, style: 'header' });
+    if (preview.hpRestored > 0) {
+      this.addLog({ left: `HP restored: ${this.state.player.hp}/${this.playerDef.maxHp}`, style: 'heal' });
+    }
+    if (preview.hitDiceRestored > 0) {
+      this.addLog({ left: `Hit Dice restored: ${preview.hitDiceRestored}`, style: 'status' });
+    }
+    if (preview.spellSlotsRestored.some((d) => d > 0)) {
+      const parts = preview.spellSlotsRestored
+        .map((d, i) => d > 0 ? `L${i + 1}+${d}` : null)
+        .filter((s): s is string => !!s);
+      this.addLog({ left: `Spell slots restored: ${parts.join(', ')}`, style: 'status' });
+    }
+    if (preview.exhaustionReduced) {
+      this.addLog({ left: `Exhaustion level: ${this.state.player.exhaustionLevel}`, style: 'status' });
+    }
+
+    this.computeAvailableActions();
+    return preview;
   }
 
   private findFreeTileNear(cx: number, cy: number, minDist: number, maxDist: number): [number, number] {
@@ -720,8 +966,25 @@ export class GameEngine {
     defs: GameDefs,
     savedMap?: SavedMapRecord,
   ): GameEngine {
-    const state = buildSessionState(sessionId, req, defs, savedMap);
-    // The constructor clones playerDef internally to avoid mutating shared defs.
-    return new GameEngine(state, defs);
+    // Build a leveled clone of the playerDef BEFORE buildSessionState so the
+    // initial state (maxHp, spell slots, features) reflects the character's
+    // current level rather than the L1 starting state.
+    const history = req.resumeLevelUps ?? [];
+    let defsForBuild = defs;
+    if (history.length > 0) {
+      const base = defs.playerDefs.find((p) => p.id === req.playerDefId);
+      if (base) {
+        const leveled = JSON.parse(JSON.stringify(base)) as PlayerDef;
+        applyLevelUpHistory(leveled, history, defs.features, defs.spells);
+        defsForBuild = {
+          ...defs,
+          playerDefs: defs.playerDefs.map((p) => p.id === base.id ? leveled : p),
+        };
+      }
+    }
+    const state = buildSessionState(sessionId, req, defsForBuild, savedMap);
+    // Replay again inside the constructor so the engine's own clone is also
+    // updated (defsForBuild is local to this method).
+    return new GameEngine(state, defs, history);
   }
 }

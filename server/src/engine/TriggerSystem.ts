@@ -41,6 +41,7 @@ function validateTrigger(trigger: EncounterTrigger, ctx: GameContext): void {
   const validEvents: WhenClause['event'][] = [
     'player_moved', 'npc_killed', 'item_picked_up',
     'turn_started', 'turn_ended', 'combat_started', 'combat_ended',
+    'encounter_started', 'encounter_completed',
     'damage_dealt', 'hp_threshold_crossed', 'faction_changed', 'custom',
   ];
   if (!validEvents.includes(trigger.when.event)) {
@@ -106,6 +107,8 @@ function whenMatches(when: WhenClause, event: EngineEvent): boolean {
     }
     case 'combat_started':
     case 'combat_ended':
+    case 'encounter_started':
+    case 'encounter_completed':
       return true;
     case 'damage_dealt': {
       const e = event as Extract<EngineEvent, { type: 'damage_dealt' }>;
@@ -288,6 +291,17 @@ export function fireAction(ctx: GameContext, action: TriggerAction): void {
       ctx.doStartCombat(sink);
       return;
     }
+    case 'award_xp': {
+      // Authored story XP — perception finds, riddles solved, parley
+      // resolved, etc. Kill XP is awarded automatically by the kill resolver;
+      // this is the "no kill happened" path. No-op when the amount is non-
+      // positive so authoring "+0" doesn't add spurious log entries.
+      const amount = Math.max(0, Math.floor(action.amount));
+      if (amount <= 0) return;
+      ctx.state.player.xp += amount;
+      ctx.addLog({ left: `+${amount} XP`, style: 'status' });
+      return;
+    }
     case 'player_ability_check': {
       // d20 + player's skill bonus (defaults to 0 for unknown skills). The
       // roll itself is intentionally NOT logged so a failed check leaks no
@@ -300,7 +314,60 @@ export function fireAction(ctx: GameContext, action: TriggerAction): void {
       for (const a of branch) fireAction(ctx, a);
       return;
     }
+    case 'show_supertitle': {
+      const text = action.text.trim();
+      if (!text) return;
+      const sink = ctx.eventSink;
+      if (!sink) return;
+      const ev: GameEvent = action.durationMs !== undefined
+        ? { type: 'supertitle', text, durationMs: clampDuration(action.durationMs, 15000) }
+        : { type: 'supertitle', text };
+      sink.push(ev);
+      return;
+    }
+    case 'show_announcement': {
+      const text = action.text.trim();
+      if (!text) return;
+      // Mirror the announcement to the Event Log so it persists after the
+      // visual fades — same behaviour as the AIGM tool.
+      ctx.addLog(text);
+      const sink = ctx.eventSink;
+      if (!sink) return;
+      const mode: 'focused' | 'unfocused' = action.mode === 'unfocused' ? 'unfocused' : 'focused';
+      const ev: GameEvent = action.durationMs !== undefined
+        ? { type: 'announcement', text, durationMs: clampDuration(action.durationMs, 15000), mode }
+        : { type: 'announcement', text, mode };
+      sink.push(ev);
+      return;
+    }
+    case 'npc_speaks': {
+      const text = action.text.trim();
+      if (!text) return;
+      let entityId: string | null = null;
+      if (action.entity === 'player') entityId = 'player';
+      else {
+        const npc = ctx.resolveNpcByEntity(action.entity);
+        if (npc) entityId = npc.id;
+      }
+      if (!entityId) return;
+      const sink = ctx.eventSink;
+      if (!sink) return;
+      sink.push({ type: 'npc_speech', entityId, text });
+      return;
+    }
+    case 'fade_screen': {
+      const sink = ctx.eventSink;
+      if (!sink) return;
+      const durationMs = clampDuration(action.durationMs ?? 1200, 10000);
+      sink.push({ type: 'screen_fade', mode: action.mode, durationMs });
+      return;
+    }
   }
+}
+
+function clampDuration(raw: number, max: number): number {
+  if (!Number.isFinite(raw) || raw < 0) return 0;
+  return Math.min(max, Math.floor(raw));
 }
 
 // ── Faction & rumor helpers (also called from AIGMTools) ─────────────────────

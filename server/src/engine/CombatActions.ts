@@ -264,10 +264,7 @@ export function doHide(ctx: GameContext): void {
   ctx.addLogs(logs);
   // Action economy only applies in combat. During exploring, hiding is free —
   // it's the Sneak Attack opener that triggers combat with Advantage.
-  if (s.phase === 'player_turn') {
-    if (hasCunningAction(ctx)) s.player.bonusActionUsed = true;
-    else s.player.actionUsed = true;
-  }
+  if (s.phase === 'player_turn') spendCunningOrAction(ctx);
 }
 
 export function doDash(ctx: GameContext): void {
@@ -275,7 +272,7 @@ export function doDash(ctx: GameContext): void {
   if (!guardCanDash(ctx)) return;
   s.player.movesLeft += ctx.playerDef.speed / 5;
   s.player.conditions.push('dashing');
-  s.player.actionUsed = true;
+  spendCunningOrAction(ctx);
   ctx.addLog({ left: `${ctx.playerDef.name} Dashes — +${ctx.playerDef.speed / 5} tiles movement`, style: 'status' });
 }
 
@@ -291,8 +288,22 @@ export function doDisengage(ctx: GameContext): void {
   const s = ctx.state;
   if (!guardCanDisengage(ctx)) return;
   s.player.conditions.push('disengaged');
-  s.player.actionUsed = true;
+  spendCunningOrAction(ctx);
   ctx.addLog({ left: `${ctx.playerDef.name} Disengages — no Opportunity Attacks this turn`, style: 'status' });
+}
+
+/**
+ * Helper for SRD Cunning Action: prefer spending the Bonus Action when the
+ * character has Cunning Action (L2+ Rogue) and a Bonus Action is still free
+ * — that's the strictly better economy. Otherwise fall back to the Action.
+ */
+function spendCunningOrAction(ctx: GameContext): void {
+  const s = ctx.state;
+  if (hasCunningAction(ctx) && !s.player.bonusActionUsed) {
+    s.player.bonusActionUsed = true;
+  } else {
+    s.player.actionUsed = true;
+  }
 }
 
 /**

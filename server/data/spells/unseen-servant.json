@@ -1,0 +1,18 @@
+{
+  "id": "unseen-servant",
+  "name": "Unseen Servant",
+  "summon": { "monsterId": "unseen_servant", "moveRangeFeet": 15 },
+  "area": { "shape": "sphere", "sizeFeet": 0 },
+  "level": 1,
+  "school": "conjuration",
+  "classes": ["bard", "warlock", "wizard"],
+  "castingTime": "action",
+  "range": "60 feet",
+  "rangeFeet": 60,
+  "components": { "verbal": true, "somatic": true, "material": "a bit of string and of wood" },
+  "duration": "1 hour",
+  "durationRounds": 600,
+  "concentration": false,
+  "ritual": true,
+  "description": "This spell creates an invisible, mindless, shapeless Medium force that performs simple tasks at your command until the spell ends. The servant springs into existence in an unoccupied space within range. It has AC 10, 1 HP, and Strength 2. If the servant takes any damage, the spell ends. As an action you can mentally command the servant to move up to 15 feet and interact with an object. The servant can perform simple tasks that a human servant could do, such as fetching things, cleaning, mending, folding clothes, lighting fires, serving food, and pouring wine."
+}

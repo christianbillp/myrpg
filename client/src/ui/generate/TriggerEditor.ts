@@ -19,7 +19,9 @@ const DPR = window.devicePixelRatio;
 const ADD_BTN_H = 32;
 const HEADER_H = 16;
 
-export type TriggerActionKind = "perception" | "log" | "aigm" | "combat";
+export type TriggerActionKind =
+  | "perception" | "log" | "aigm" | "combat" | "xp"
+  | "supertitle" | "announcement" | "speech" | "fade";
 
 export interface ComposedTrigger {
   id: string;
@@ -30,6 +32,16 @@ export interface ComposedTrigger {
   message: string;
   defId: string;
   defIds?: string[];
+  /** Amount granted by an `xp` trigger. Optional; defaults to 0 (no-op). */
+  xpAmount?: number;
+  /** Hold time (ms) for `supertitle` / `announcement`; fade time for `fade`. */
+  durationMs?: number;
+  /** Entity ref for `speech` (e.g. `player`, `npc_<id>`, `enemy_A`). */
+  entityRef?: string;
+  /** Direction for `fade`. `dim` holds the overlay at 50% black (world still visible). */
+  fadeMode?: "in" | "out" | "dim";
+  /** Style for `announcement`. `focused` hides side panels + locks input + pauses world; `unfocused` keeps the UI live. */
+  announcementMode?: "focused" | "unfocused";
 }
 
 export interface TriggerEditorOptions {
@@ -56,6 +68,23 @@ const KIND_LABEL: Record<TriggerActionKind, string> = {
   log: "LOG",
   aigm: "AIGM CUE",
   combat: "START COMBAT",
+  xp: "AWARD XP",
+  supertitle: "SUPERTITLE",
+  announcement: "ANNOUNCE",
+  speech: "SPEECH",
+  fade: "FADE",
+};
+
+const KIND_TOOLTIP: Record<TriggerActionKind, string> = {
+  perception: "Roll a Perception check vs DC. On pass, show the log line.",
+  log: "Write a line to the Event Log.",
+  aigm: "Queue a cue for the AIGM's next reply.",
+  combat: "Flip the named def to enemy and start combat.",
+  xp: "Award the player XP.",
+  supertitle: "Show a movie-style centered title (huge white text).",
+  announcement: "Show a centered announcement card; mirrored to the Event Log.",
+  speech: "Show a speech bubble above the named entity's token.",
+  fade: "Fade the screen to or from black. Pair an OUT with an IN.",
 };
 
 export class TriggerEditor {
@@ -63,6 +92,7 @@ export class TriggerEditor {
   private readonly rowElements: HTMLDivElement[] = [];
   private readonly scene: Phaser.Scene;
   private readonly opts: TriggerEditorOptions;
+  private titleEl!: HTMLDivElement;
   private listEl!: HTMLDivElement;
   private addBtn!: HTMLButtonElement;
   private placeHandlers: Array<() => void> = [];
@@ -71,11 +101,26 @@ export class TriggerEditor {
   constructor(opts: TriggerEditorOptions) {
     this.scene = opts.scene;
     this.opts = opts;
-    const { scene, parent, x, y, width } = opts;
+    const { x, y, width } = opts;
 
-    parent.add(scene.add.text(x, y, "TRIGGERS — fires when the player enters the region", {
-      fontSize: "10px", color: "#778899", fontFamily: "monospace", resolution: DPR, letterSpacing: 1,
-    }).setOrigin(0, 0));
+    // HTML title — matches the rest of the editor's crisp HTML rendering
+    // instead of a blurry Phaser text. Sized to the same logical-pixel
+    // footprint and rescaled with the canvas via attachPlace().
+    this.titleEl = document.createElement("div");
+    this.titleEl.textContent = "TRIGGERS — fires when the player enters the region";
+    this.titleEl.style.cssText = `
+      position: absolute;
+      color: #778899;
+      font-family: monospace;
+      letter-spacing: 1px;
+      z-index: 9;
+      pointer-events: none;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    `;
+    document.body.appendChild(this.titleEl);
+    this.attachPlace(this.titleEl, x, y, width, HEADER_H);
 
     // Scrollable HTML list — sized so the ADD button can sit beneath it.
     const listY = y + HEADER_H + 4;
@@ -140,6 +185,7 @@ export class TriggerEditor {
   destroy(): void {
     for (const row of this.rowElements) row.remove();
     this.rowElements.length = 0;
+    this.titleEl.remove();
     this.listEl.remove();
     this.addBtn.remove();
     for (const h of this.placeHandlers) this.opts.scene.scale.off("resize", h);
@@ -152,6 +198,7 @@ export class TriggerEditor {
    */
   setVisible(visible: boolean): void {
     this.visible = visible;
+    this.titleEl.style.display = visible ? "" : "none";
     this.listEl.style.display = visible ? "" : "none";
     this.addBtn.style.display = visible ? "" : "none";
   }
@@ -226,25 +273,30 @@ export class TriggerEditor {
     head.appendChild(remove);
     row.appendChild(head);
 
-    // Kind chips row.
+    // Kind chips row. With 9 chip kinds we wrap onto two rows so each chip
+    // stays readable rather than getting squeezed to a few pixels.
     const chipRow = document.createElement("div");
-    chipRow.style.cssText = "display: flex; gap: 4px; margin-bottom: 6px;";
-    const kinds: TriggerActionKind[] = ["perception", "log", "aigm", "combat"];
+    chipRow.style.cssText = "display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 6px;";
+    const kinds: TriggerActionKind[] = [
+      "perception", "log", "aigm", "combat", "xp",
+      "supertitle", "announcement", "speech", "fade",
+    ];
     const chipBtns = new Map<TriggerActionKind, HTMLButtonElement>();
     for (const k of kinds) {
       const chip = document.createElement("button");
       chip.type = "button";
       chip.textContent = KIND_LABEL[k];
+      chip.title = KIND_TOOLTIP[k];
       chip.style.cssText = `
-        flex: 1; background: #1a1a2a; color: #aabbcc;
+        flex: 1 0 18%; background: #1a1a2a; color: #aabbcc;
         border: 1px solid #445566; padding: 2px 4px;
         font-family: monospace; font-size: 9px; letter-spacing: 1px;
-        cursor: pointer;
+        cursor: pointer; white-space: nowrap;
       `;
       chip.addEventListener("click", () => {
         trig.kind = k;
         this.refreshChips(chipBtns, trig.kind);
-        this.refreshKindVisibility(perceptionBlock, logBlock, aigmBlock, combatBlock, trig.kind);
+        this.refreshKindVisibility(blocks, trig.kind);
         summary.textContent = this.summarise(trig);
         this.opts.onChange?.();
       });
@@ -275,7 +327,11 @@ export class TriggerEditor {
     }
     row.appendChild(regionRow);
 
-    // Per-kind config blocks (only the active one is visible).
+    // Per-kind config blocks (only the active one is visible). One block per
+    // TriggerActionKind, keyed in a Map so adding a new kind only requires
+    // appending one entry plus a chip — no extra branches in the toggle.
+    const blocks = new Map<TriggerActionKind, HTMLElement>();
+
     const perceptionBlock = document.createElement("div");
     perceptionBlock.style.cssText = "display: flex; flex-direction: column; gap: 4px;";
     const dcRow = document.createElement("div");
@@ -292,7 +348,7 @@ export class TriggerEditor {
       trig.passMessage = val;
       this.opts.onChange?.();
     }));
-    row.appendChild(perceptionBlock);
+    blocks.set("perception", perceptionBlock);
 
     const logBlock = document.createElement("div");
     logBlock.appendChild(this.makeLabel("LOG MESSAGE"));
@@ -300,7 +356,7 @@ export class TriggerEditor {
       trig.message = val;
       this.opts.onChange?.();
     }));
-    row.appendChild(logBlock);
+    blocks.set("log", logBlock);
 
     const aigmBlock = document.createElement("div");
     aigmBlock.appendChild(this.makeLabel("AIGM CUE"));
@@ -308,7 +364,7 @@ export class TriggerEditor {
       trig.message = val;
       this.opts.onChange?.();
     }));
-    row.appendChild(aigmBlock);
+    blocks.set("aigm", aigmBlock);
 
     const combatBlock = document.createElement("div");
     combatBlock.appendChild(this.makeLabel("DEF ID (optional — flips this id to enemy)"));
@@ -316,12 +372,155 @@ export class TriggerEditor {
       trig.defId = val.trim();
       this.opts.onChange?.();
     }));
-    row.appendChild(combatBlock);
+    blocks.set("combat", combatBlock);
+
+    const xpBlock = document.createElement("div");
+    const xpRow = document.createElement("div");
+    xpRow.style.cssText = "display: flex; gap: 6px; align-items: center;";
+    xpRow.appendChild(this.makeLabel("AMOUNT"));
+    xpRow.appendChild(this.makeNumberInput(String(trig.xpAmount ?? 0), (val) => {
+      trig.xpAmount = Math.max(0, Math.floor(Number(val) || 0));
+      summary.textContent = this.summarise(trig);
+      this.opts.onChange?.();
+    }));
+    xpBlock.appendChild(xpRow);
+    blocks.set("xp", xpBlock);
+
+    const supertitleBlock = this.buildTextDurationBlock(
+      "TITLE TEXT", trig.message, "DURATION (ms, default 3000)", trig.durationMs,
+      (text) => { trig.message = text; this.opts.onChange?.(); },
+      (ms)   => { trig.durationMs = ms; this.opts.onChange?.(); },
+    );
+    blocks.set("supertitle", supertitleBlock);
+
+    const announcementBlock = this.buildTextDurationBlock(
+      "ANNOUNCEMENT TEXT", trig.message, "DURATION (ms, default 3500)", trig.durationMs,
+      (text) => { trig.message = text; this.opts.onChange?.(); },
+      (ms)   => { trig.durationMs = ms; this.opts.onChange?.(); },
+    );
+    // Mode toggle: FOCUSED (orange-bordered, hides UI, pauses world, locks
+    // input) vs UNFOCUSED (borderless edge-fade card, UI stays live).
+    const announceModeRow = document.createElement("div");
+    announceModeRow.style.cssText = "display: flex; gap: 6px; align-items: center; margin-top: 2px;";
+    announceModeRow.appendChild(this.makeLabel("MODE"));
+    const announceButtons = new Map<"focused" | "unfocused", HTMLButtonElement>();
+    const refreshAnnounceButtons = (active: "focused" | "unfocused"): void => {
+      for (const [m, b] of announceButtons) {
+        const on = m === active;
+        b.style.background = on ? "#2a3a55" : "#1a1a2a";
+        b.style.color = on ? "#cce4ff" : "#aabbcc";
+      }
+    };
+    const makeAnnounceBtn = (mode: "focused" | "unfocused", label: string): HTMLButtonElement => {
+      const btn = this.makeToggleButton(label, () => {
+        trig.announcementMode = mode;
+        refreshAnnounceButtons(mode);
+        this.opts.onChange?.();
+      });
+      announceButtons.set(mode, btn);
+      return btn;
+    };
+    announceModeRow.appendChild(makeAnnounceBtn("focused", "FOCUSED"));
+    announceModeRow.appendChild(makeAnnounceBtn("unfocused", "UNFOCUSED"));
+    refreshAnnounceButtons(trig.announcementMode ?? "focused");
+    announcementBlock.appendChild(announceModeRow);
+    blocks.set("announcement", announcementBlock);
+
+    const speechBlock = document.createElement("div");
+    speechBlock.style.cssText = "display: flex; flex-direction: column; gap: 4px;";
+    speechBlock.appendChild(this.makeLabel("ENTITY (player, npc_<id>, enemy_A, ally_A)"));
+    speechBlock.appendChild(this.makeTextInput(trig.entityRef ?? "", "e.g. npc_wanderer_0", (val) => {
+      trig.entityRef = val.trim();
+      summary.textContent = this.summarise(trig);
+      this.opts.onChange?.();
+    }));
+    speechBlock.appendChild(this.makeLabel("SPOKEN LINE"));
+    speechBlock.appendChild(this.makeTextarea(trig.message, (val) => {
+      trig.message = val;
+      this.opts.onChange?.();
+    }));
+    blocks.set("speech", speechBlock);
+
+    const fadeBlock = document.createElement("div");
+    fadeBlock.style.cssText = "display: flex; flex-direction: column; gap: 4px;";
+    const fadeModeRow = document.createElement("div");
+    fadeModeRow.style.cssText = "display: flex; gap: 6px; align-items: center;";
+    fadeModeRow.appendChild(this.makeLabel("MODE"));
+    const fadeButtons = new Map<"in" | "out" | "dim", HTMLButtonElement>();
+    const refreshFadeButtons = (active: "in" | "out" | "dim"): void => {
+      for (const [m, b] of fadeButtons) {
+        const on = m === active;
+        b.style.background = on ? "#2a3a55" : "#1a1a2a";
+        b.style.color = on ? "#cce4ff" : "#aabbcc";
+      }
+    };
+    const makeFadeBtn = (mode: "in" | "out" | "dim", label: string): HTMLButtonElement => {
+      const btn = this.makeToggleButton(label, () => {
+        trig.fadeMode = mode;
+        refreshFadeButtons(mode);
+        summary.textContent = this.summarise(trig);
+        this.opts.onChange?.();
+      });
+      fadeButtons.set(mode, btn);
+      return btn;
+    };
+    fadeModeRow.appendChild(makeFadeBtn("out", "FADE OUT"));
+    fadeModeRow.appendChild(makeFadeBtn("dim", "FADE DIM (50%)"));
+    fadeModeRow.appendChild(makeFadeBtn("in", "FADE IN"));
+    refreshFadeButtons(trig.fadeMode ?? "out");
+    fadeBlock.appendChild(fadeModeRow);
+    const fadeDurRow = document.createElement("div");
+    fadeDurRow.style.cssText = "display: flex; gap: 6px; align-items: center;";
+    fadeDurRow.appendChild(this.makeLabel("DURATION (ms, default 1200)"));
+    fadeDurRow.appendChild(this.makeNumberInput(String(trig.durationMs ?? 1200), (val) => {
+      trig.durationMs = Math.max(0, Math.floor(Number(val) || 0));
+      this.opts.onChange?.();
+    }));
+    fadeBlock.appendChild(fadeDurRow);
+    blocks.set("fade", fadeBlock);
+
+    for (const block of blocks.values()) row.appendChild(block);
 
     this.refreshChips(chipBtns, trig.kind);
-    this.refreshKindVisibility(perceptionBlock, logBlock, aigmBlock, combatBlock, trig.kind);
+    this.refreshKindVisibility(blocks, trig.kind);
     void regionInputs;
     return row;
+  }
+
+  private buildTextDurationBlock(
+    textLabel: string, initialText: string,
+    durationLabel: string, initialDuration: number | undefined,
+    onTextChange: (val: string) => void,
+    onDurationChange: (ms: number) => void,
+  ): HTMLDivElement {
+    const block = document.createElement("div");
+    block.style.cssText = "display: flex; flex-direction: column; gap: 4px;";
+    block.appendChild(this.makeLabel(textLabel));
+    block.appendChild(this.makeTextarea(initialText, onTextChange));
+    const durRow = document.createElement("div");
+    durRow.style.cssText = "display: flex; gap: 6px; align-items: center;";
+    durRow.appendChild(this.makeLabel(durationLabel));
+    durRow.appendChild(this.makeNumberInput(String(initialDuration ?? ""), (val) => {
+      const trimmed = val.trim();
+      if (trimmed === "") onDurationChange(0);
+      else onDurationChange(Math.max(0, Math.floor(Number(trimmed) || 0)));
+    }));
+    block.appendChild(durRow);
+    return block;
+  }
+
+  private makeToggleButton(label: string, onClick: () => void): HTMLButtonElement {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.textContent = label;
+    btn.style.cssText = `
+      flex: 1; background: #1a1a2a; color: #aabbcc;
+      border: 1px solid #445566; padding: 2px 6px;
+      font-family: monospace; font-size: 10px; letter-spacing: 1px;
+      cursor: pointer; white-space: nowrap;
+    `;
+    btn.addEventListener("click", onClick);
+    return btn;
   }
 
   private refreshChips(chipBtns: Map<TriggerActionKind, HTMLButtonElement>, active: TriggerActionKind): void {
@@ -333,19 +532,17 @@ export class TriggerEditor {
     }
   }
 
-  private refreshKindVisibility(
-    perception: HTMLElement, log: HTMLElement, aigm: HTMLElement, combat: HTMLElement,
-    active: TriggerActionKind,
-  ): void {
-    perception.style.display = active === "perception" ? "" : "none";
-    log.style.display        = active === "log"        ? "" : "none";
-    aigm.style.display       = active === "aigm"       ? "" : "none";
-    combat.style.display     = active === "combat"     ? "" : "none";
+  private refreshKindVisibility(blocks: Map<TriggerActionKind, HTMLElement>, active: TriggerActionKind): void {
+    for (const [kind, el] of blocks) el.style.display = kind === active ? "" : "none";
   }
 
   private summarise(t: ComposedTrigger): string {
     const r = t.region;
-    return `${KIND_LABEL[t.kind]}  @ (${r.x},${r.y}) ${r.w}×${r.h}`;
+    let tail = "";
+    if (t.kind === "xp")    tail = ` (+${t.xpAmount ?? 0})`;
+    else if (t.kind === "fade") tail = ` ${(t.fadeMode ?? "out").toUpperCase()}`;
+    else if (t.kind === "speech" && t.entityRef) tail = ` ${t.entityRef}`;
+    return `${KIND_LABEL[t.kind]}${tail}  @ (${r.x},${r.y}) ${r.w}×${r.h}`;
   }
 
   // ── DOM helpers ─────────────────────────────────────────────────────────
@@ -405,7 +602,8 @@ export class TriggerEditor {
       el.style.top  = `${rect.top  + y * s}px`;
       el.style.width  = `${w * s}px`;
       el.style.height = `${h * s}px`;
-      el.style.fontSize = `${(el === this.addBtn ? 12 : 11) * s}px`;
+      const basePx = el === this.addBtn ? 12 : el === this.titleEl ? 10 : 11;
+      el.style.fontSize = `${basePx * s}px`;
     };
     place();
     this.scene.scale.on("resize", place);

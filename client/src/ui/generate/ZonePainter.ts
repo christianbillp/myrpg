@@ -17,10 +17,15 @@ import { createHtmlButton, type HtmlButtonHandle } from "../htmlButtons";
 
 /** Per-kind outline colour for trigger-region overlays. */
 const TRIGGER_COLOR: Record<TriggerRegion["kind"], number> = {
-  perception: 0x88ccaa,  // muted teal — non-violent senses
-  log:        0xc8d8e8,  // pale blue — neutral log message
-  aigm:       0xe2b96f,  // amber — narrative cue
-  combat:     0xff6644,  // hot red — fight starts here
+  perception:   0x88ccaa,  // muted teal — non-violent senses
+  log:          0xc8d8e8,  // pale blue — neutral log message
+  aigm:         0xe2b96f,  // amber — narrative cue
+  combat:       0xff6644,  // hot red — fight starts here
+  xp:           0x88ccff,  // sky blue — reward
+  supertitle:   0xffffff,  // white — movie title card
+  announcement: 0xf4e6c1,  // parchment — attention-grabbing card
+  speech:       0x5588aa,  // bubble-blue
+  fade:         0x222222,  // deep grey — blackout
 };
 
 export type PaintMode = "player" | "enemy" | "neutral" | null;
@@ -50,7 +55,9 @@ export interface ZonePainterOptions {
 /** A trigger region drawn on the thumbnail so the author can see what tiles fire the trigger. */
 export interface TriggerRegion {
   id: string;
-  kind: "perception" | "log" | "aigm" | "combat";
+  kind:
+    | "perception" | "log" | "aigm" | "combat" | "xp"
+    | "supertitle" | "announcement" | "speech" | "fade";
   region: { x: number; y: number; w: number; h: number };
 }
 

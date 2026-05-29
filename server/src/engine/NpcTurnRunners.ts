@@ -37,6 +37,23 @@ import { applyTurnStartPeriodicDamage, isAttacker } from './OngoingEffectsSystem
  * withAdvantage/withDisadvantage logic, where the standard SRD cancellation
  * rule still applies.
  */
+/**
+ * Flavour line for an incapacitated NPC's "hold" turn, so the log says
+ * something more evocative than the bare generic "holds its ground". Picks
+ * the most specific match in priority order (unconscious > stunned >
+ * paralyzed > prone + incapacitated → Hideous Laughter flavor > plain
+ * incapacitated).
+ */
+function incapacitatedFlavor(conditions: string[]): string {
+  if (conditions.includes('unconscious'))  return 'lies unconscious';
+  if (conditions.includes('stunned'))      return 'is stunned — cannot act';
+  if (conditions.includes('paralyzed'))    return 'is paralyzed — cannot move or act';
+  if (conditions.includes('prone') && conditions.includes('incapacitated')) {
+    return 'rolls on the ground, helpless with laughter';
+  }
+  return 'is incapacitated — takes no action';
+}
+
 function collectEnemyTraitModifiers(
   ctx: GameContext,
   attacker: NpcState,
@@ -181,7 +198,7 @@ export function runSingleEnemyTurn(ctx: GameContext, npc: NpcState, events: Game
       npc.conditions.push('dodging');
       ctx.addLog({ left: `${combatantDisplayName(npc, s.npcs)} Dodges — attackers have Disadvantage`, style: 'status' });
     } else {
-      ctx.addLog({ left: `${combatantDisplayName(npc, s.npcs)} holds its ground`, style: 'status' });
+      ctx.addLog({ left: `${combatantDisplayName(npc, s.npcs)} ${incapacitatedFlavor(npc.conditions)}`, style: 'status' });
     }
     finalizeNpcTurn(ctx, npc);
     ctx.publish({ type: 'turn_ended', combatantId: npc.id });

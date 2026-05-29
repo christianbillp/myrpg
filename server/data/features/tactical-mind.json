@@ -1,0 +1,8 @@
+{
+  "id": "tactical-mind",
+  "name": "Tactical Mind",
+  "classId": "fighter",
+  "minLevel": 2,
+  "description": "When you fail an ability check, you can expend a use of your Second Wind to roll 1d10 and add it to the check. If the check still fails, the use isn't expended.",
+  "cost": { "kind": "free" }
+}

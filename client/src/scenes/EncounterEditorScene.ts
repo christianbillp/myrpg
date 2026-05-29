@@ -726,6 +726,26 @@ function reverseMapTriggers(triggers: EncounterTrigger[]): ComposedTrigger[] {
       out.push({ id: t.id, region, kind: "aigm", dc: 10, passMessage: "", message: first.message, defId: "" });
       continue;
     }
+    if (first.type === "award_xp") {
+      out.push({ id: t.id, region, kind: "xp", dc: 10, passMessage: "", message: "", defId: "", xpAmount: first.amount });
+      continue;
+    }
+    if (first.type === "show_supertitle") {
+      out.push({ id: t.id, region, kind: "supertitle", dc: 10, passMessage: "", message: first.text, defId: "", durationMs: first.durationMs });
+      continue;
+    }
+    if (first.type === "show_announcement") {
+      out.push({ id: t.id, region, kind: "announcement", dc: 10, passMessage: "", message: first.text, defId: "", durationMs: first.durationMs, announcementMode: first.mode });
+      continue;
+    }
+    if (first.type === "npc_speaks") {
+      out.push({ id: t.id, region, kind: "speech", dc: 10, passMessage: "", message: first.text, defId: "", entityRef: first.entity });
+      continue;
+    }
+    if (first.type === "fade_screen") {
+      out.push({ id: t.id, region, kind: "fade", dc: 10, passMessage: "", message: "", defId: "", fadeMode: first.mode, durationMs: first.durationMs });
+      continue;
+    }
     if (t.then.some((a) => a.type === "trigger_combat")) {
       const flipIds: string[] = [];
       for (const a of t.then) {

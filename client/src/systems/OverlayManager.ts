@@ -29,7 +29,7 @@ export interface OverlayCallbacks {
 
 export class OverlayManager {
   private readonly scale: UIScale;
-  private readonly playerDef: PlayerDef;
+  private playerDef: PlayerDef;
   private readonly callbacks: OverlayCallbacks;
 
   private introOverlay: IntroductionOverlay | null = null;
@@ -67,6 +67,12 @@ export class OverlayManager {
 
   markResumed(): void {
     this.introShown = true;
+  }
+
+  /** Replace the cached `PlayerDef` (used after a level-up). The
+   *  character-sheet overlay refreshes lazily on next open. */
+  setPlayerDef(def: PlayerDef): void {
+    this.playerDef = def;
   }
 
   showIntroIfNeeded(state: GameState): void {

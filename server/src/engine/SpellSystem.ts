@@ -117,10 +117,10 @@ function resolveAttackRollSpell(
   spell: SpellDef,
   target: NpcState,
   slotLevel: number,
-): void {
+): boolean {
   const def = ctx.resolveMonsterDef(target.defId);
-  if (!def) return;
-  if (!spell.damage) return;
+  if (!def) return false;
+  if (!spell.damage) return false;
 
   const bonus = spellAttackBonus(ctx);
   const roll = d20();
@@ -134,7 +134,7 @@ function resolveAttackRollSpell(
       right: `d20(${roll})+${bonus}=${total} vs AC ${def.ac}`,
       style: 'miss',
     });
-    return;
+    return false;
   }
 
   // Cantrip scaling: extra dice at character L5/11/17. Leveled spells get
@@ -160,6 +160,7 @@ function resolveAttackRollSpell(
     if (!target.conditions.includes('slowed')) target.conditions.push('slowed');
     ctx.addLog({ left: `${combatantDisplayName(target, ctx.state.npcs)} is slowed (Speed −10 ft until end of next turn)`, style: 'status' });
   }
+  return true;
 }
 
 function resolveAutoHitSpell(
@@ -167,8 +168,8 @@ function resolveAutoHitSpell(
   spell: SpellDef,
   targetIds: string[],
   slotLevel: number,
-): void {
-  if (!spell.damage || !spell.darts) return;
+): boolean {
+  if (!spell.damage || !spell.darts) return false;
   const s = ctx.state;
   const darts = spell.darts + Math.max(0, slotLevel - spell.level);
 
@@ -177,7 +178,7 @@ function resolveAutoHitSpell(
   const assignments: NpcState[] = [];
   if (targetIds.length === 0) {
     const t = s.npcs.find((n) => n.id === s.selectedTargetId && n.hp > 0 && n.disposition !== 'ally');
-    if (!t) return;
+    if (!t) return false;
     for (let i = 0; i < darts; i++) assignments.push(t);
   } else {
     // Round-robin then pile on last.
@@ -188,7 +189,7 @@ function resolveAutoHitSpell(
     }
   }
 
-  if (assignments.length === 0) return;
+  if (assignments.length === 0) return false;
 
   // SRD: all darts strike simultaneously. Pool damage per target so a single
   // application resolves the entire spell — prevents duplicate kill rewards
@@ -213,6 +214,7 @@ function resolveAutoHitSpell(
     right: `${darts} darts × 1d${spell.damage.sides}+${spell.damage.bonus ?? 0}`,
     style: 'hit',
   });
+  return true;
 }
 
 /**
@@ -246,11 +248,52 @@ function coneTileSet(
 }
 
 /**
+ * Tile-side count for a sphere or cube area.
+ *
+ *   Sphere: `area.sizeFeet` is the **radius**, so the grid footprint is
+ *           `2 * sizeFeet / 5` tiles on a side (5 ft Sleep → 2 × 2 = 4 cells,
+ *           20 ft Fog Cloud → 8 × 8).
+ *   Cube:   `area.sizeFeet` is the **side length**, so the footprint is
+ *           `sizeFeet / 5` tiles on a side (15 ft Thunderwave → 3 × 3,
+ *           10 ft Grease → 2 × 2).
+ */
+function spellSideTiles(spell: SpellDef): number {
+  const sizeFeet = spell.area?.sizeFeet ?? 5;
+  if (spell.area?.shape === 'sphere') return Math.max(1, Math.ceil(2 * sizeFeet / 5));
+  return Math.max(1, Math.ceil(sizeFeet / 5));
+}
+
+/**
+ * Tiles covered by a sphere/cube area when the clicked tile is `(cx, cy)`.
+ *
+ *   • Odd side count: the clicked tile is the centre, area is a chebyshev
+ *     disc of radius `(sideTiles − 1) / 2`.
+ *   • Even side count: the clicked tile is the **top-left** of the area;
+ *     the rest extends right + down by `sideTiles − 1`. Fixed orientation
+ *     keeps cursor movement smooth — moving the cursor one tile shifts the
+ *     area one tile, with no mirroring across the caster's axis. The
+ *     "extend away from caster" rule we used earlier caused the area to
+ *     jump by 2 tiles whenever the cursor crossed the caster's row / column.
+ */
+function rectAreaCells(
+  _ctx: GameContext,
+  sideTiles: number,
+  cx: number,
+  cy: number,
+): { xMin: number; xMax: number; yMin: number; yMax: number } {
+  if (sideTiles % 2 === 1) {
+    const r = (sideTiles - 1) / 2;
+    return { xMin: cx - r, xMax: cx + r, yMin: cy - r, yMax: cy + r };
+  }
+  const offset = sideTiles - 1;
+  return { xMin: cx, xMax: cx + offset, yMin: cy, yMax: cy + offset };
+}
+
+/**
  * Living non-player creatures in a spell's area, computed from the spell's
  * `area.shape`. Cones key off (player tile → target tile) direction; spheres
- * and cubes use a chebyshev disc centered on the spell's anchor (player tile
- * for `range: "self"`, otherwise the targeted tile). Includes allies — AOE
- * spells like Burning Hands are indiscriminate per SRD.
+ * and cubes use the tile-side helpers above. Includes allies — AOE spells
+ * like Burning Hands are indiscriminate per SRD.
  */
 function creaturesInArea(
   ctx: GameContext,
@@ -258,10 +301,9 @@ function creaturesInArea(
   tile: { x: number; y: number } | undefined,
 ): NpcState[] {
   const s = ctx.state;
-  const sizeFeet = spell.area?.sizeFeet ?? 5;
-  const radiusTiles = Math.max(1, Math.ceil(sizeFeet / 5));
 
   if (spell.area?.shape === 'cone') {
+    const radiusTiles = Math.max(1, Math.ceil((spell.area?.sizeFeet ?? 5) / 5));
     // Cone origins at the caster's tile (self-range — the only shape we ship
     // today); direction comes from the `tile` payload.
     const tx = tile?.x ?? s.player.tileX + 1;
@@ -270,12 +312,36 @@ function creaturesInArea(
     return s.npcs.filter((n) => n.hp > 0 && inCone.has(`${n.tileX},${n.tileY}`));
   }
 
-  // Sphere / cube → chebyshev disc.
+  // Sphere / cube.
   const cx = spell.range === 'self' ? s.player.tileX : (tile?.x ?? s.player.tileX);
   const cy = spell.range === 'self' ? s.player.tileY : (tile?.y ?? s.player.tileY);
+  const sideTiles = spellSideTiles(spell);
+  const { xMin, xMax, yMin, yMax } = rectAreaCells(ctx, sideTiles, cx, cy);
   return s.npcs.filter((n) =>
-    n.hp > 0 && chebyshev(cx, cy, n.tileX, n.tileY) <= radiusTiles,
+    n.hp > 0 && n.tileX >= xMin && n.tileX <= xMax && n.tileY >= yMin && n.tileY <= yMax,
   );
+}
+
+/**
+ * Normalise `SpellEffect.onFail` (which the schema allows as either a single
+ * string or an array of strings) to a plain list of condition names.
+ */
+function normaliseConditionList(value: string | string[] | undefined): string[] {
+  if (!value) return [];
+  return Array.isArray(value) ? value.slice() : [value];
+}
+
+/**
+ * Flavour line for a failed save. Recognises a handful of spells with
+ * iconic narration; falls back to a generic "is &lt;condition&gt;" / "is affected"
+ * for everything else.
+ */
+function conditionLogText(spell: SpellDef, conds: string[]): string {
+  if (conds.length === 0) return 'is affected';
+  if (spell.id === 'hideous-laughter') return 'collapses, helpless with laughter';
+  if (spell.id === 'sleep')            return 'falls into a magical slumber';
+  if (spell.id === 'charm-person')     return 'is charmed';
+  return 'is ' + conds.join(' and ');
 }
 
 function resolveSaveSpell(
@@ -283,15 +349,25 @@ function resolveSaveSpell(
   spell: SpellDef,
   tile: { x: number; y: number } | undefined,
   slotLevel: number,
-): void {
-  if (!spell.save) return;
+  selectedIds?: string[],
+): boolean {
+  if (!spell.save) return false;
   const dc = spellSaveDC(ctx);
 
-  const targets = creaturesInArea(ctx, spell, tile);
+  let targets = creaturesInArea(ctx, spell, tile);
+
+  // SRD "creature of your choice" spells (Sleep) pair the AOE click with a
+  // second-step picker — the client sends the chosen ids in `selectedIds`,
+  // and only those are saved against. When the picker isn't used (default
+  // path or non-selective AOEs), every creature in the area is targeted.
+  if (spell.area?.creaturesOfYourChoice && selectedIds) {
+    const allowed = new Set(selectedIds);
+    targets = targets.filter((n) => allowed.has(n.id));
+  }
 
   if (targets.length === 0) {
     ctx.addLog({ left: `${ctx.playerDef.name} casts ${spell.name} — no creatures in area`, style: 'miss' });
-    return;
+    return false;
   }
 
   // Damage roll — scale dice for cantrip level or upcast slot. SRD says save-
@@ -310,6 +386,7 @@ function resolveSaveSpell(
     style: 'header',
   });
 
+  let anyAffected = false;
   for (const target of targets) {
     const def = ctx.resolveMonsterDef(target.defId);
     if (!def) continue;
@@ -326,16 +403,90 @@ function resolveSaveSpell(
         style: success ? 'normal' : 'hit',
       });
       applyDamageToNpc(ctx, target, dmg, spell.damage.type);
+      if (dmg > 0) anyAffected = true;
     } else if (spell.effect) {
-      // Pure condition save (Sleep).
-      const cond = !success ? spell.effect.onFail : null;
-      if (cond && !target.conditions.includes(cond)) target.conditions.push(cond);
+      // Pure condition save (Sleep). `onFail` may be a single condition or an
+      // array — Hideous Laughter applies both Prone and Incapacitated.
+      const conds = !success ? normaliseConditionList(spell.effect.onFail) : [];
+      for (const c of conds) {
+        if (!target.conditions.includes(c)) target.conditions.push(c);
+      }
       ctx.addLog({
-        left: `${combatantDisplayName(target, ctx.state.npcs)} ${success ? 'resists' : 'is ' + (cond ?? 'affected')}`,
+        left: `${combatantDisplayName(target, ctx.state.npcs)} ${success ? 'resists' : conditionLogText(spell, conds)}`,
         right: `d20(${roll})+${saveBonus}=${total} vs DC ${dc}`,
         style: success ? 'normal' : 'status',
       });
+      if (!success && conds.length > 0) anyAffected = true;
     }
+  }
+  return anyAffected;
+}
+
+/**
+ * Single-target save spell (Hideous Laughter, Charm Person, …). The caller
+ * has already validated target + range; we just roll the save and apply the
+ * effect / damage to the one creature.
+ */
+function resolveSingleTargetSaveSpell(
+  ctx: GameContext,
+  spell: SpellDef,
+  target: NpcState,
+  slotLevel: number,
+): boolean {
+  if (!spell.save) return false;
+  const dc = spellSaveDC(ctx);
+
+  const def = ctx.resolveMonsterDef(target.defId);
+  if (!def) return false;
+  const saveBonus = npcSaveMod(target, def, spell.save.ability);
+  const roll = d20();
+  const total = roll + saveBonus;
+  const success = total >= dc;
+
+  const upcastBonus = Math.max(0, slotLevel - spell.level);
+  const dieMult = spell.level === 0 ? cantripDiceMultiplier(ctx.playerDef.level) : 1;
+  let dmgRoll: { total: number; rolls: number[] } | null = null;
+  if (spell.damage) {
+    const dice = spell.damage.dice * dieMult + upcastBonus;
+    dmgRoll = rollDamage(dice, spell.damage.sides, spell.damage.bonus ?? 0);
+  }
+
+  ctx.addLog({
+    left: `${ctx.playerDef.name} casts ${spell.name} on ${combatantDisplayName(target, ctx.state.npcs)} (${spell.save.ability.toUpperCase()} save DC ${dc})`,
+    right: dmgRoll && spell.damage ? `${spell.damage.dice * dieMult + upcastBonus}d${spell.damage.sides}[${dmgRoll.rolls.join(',')}]=${dmgRoll.total}` : '',
+    style: 'header',
+  });
+
+  if (dmgRoll && spell.damage) {
+    const dmg = success && spell.save.halfOnSuccess ? Math.floor(dmgRoll.total / 2) : success ? 0 : dmgRoll.total;
+    ctx.addLog({
+      left: `${combatantDisplayName(target, ctx.state.npcs)} ${success ? 'saves' : 'fails'} — ${dmg} ${spell.damage.type}`,
+      right: `d20(${roll})+${saveBonus}=${total} vs DC ${dc}`,
+      style: success ? 'normal' : 'hit',
+    });
+    applyDamageToNpc(ctx, target, dmg, spell.damage.type);
+    return dmg > 0;
+  } else if (spell.effect) {
+    const conds = !success ? normaliseConditionList(spell.effect.onFail) : [];
+    for (const c of conds) {
+      if (!target.conditions.includes(c)) target.conditions.push(c);
+    }
+    ctx.addLog({
+      left: `${combatantDisplayName(target, ctx.state.npcs)} ${success ? 'resists' : conditionLogText(spell, conds)}`,
+      right: `d20(${roll})+${saveBonus}=${total} vs DC ${dc}`,
+      style: success ? 'normal' : 'status',
+    });
+    return !success && conds.length > 0;
+  } else {
+    // Pure narrative single-target save (Charm Person, Hideous Laughter). The
+    // outcome is logged but no engine-tracked condition is set yet — content
+    // can wire one via spell.effect.onFail when needed.
+    ctx.addLog({
+      left: `${combatantDisplayName(target, ctx.state.npcs)} ${success ? 'resists' : 'is affected'}`,
+      right: `d20(${roll})+${saveBonus}=${total} vs DC ${dc}`,
+      style: success ? 'normal' : 'status',
+    });
+    return !success;
   }
 }
 
@@ -396,9 +547,12 @@ function maybeAggroOnCast(
   if (s.phase !== 'exploring') return [];
   if (!isAggressiveSpell(spell)) return [];
 
-  // Identify the non-ally NPCs affected by the cast.
+  // Identify the non-ally NPCs affected by the cast. Attack-roll and
+  // single-target save spells (Hideous Laughter, Charm Person) key off the
+  // selected creature; AOE save spells use the area sweep.
   let affected: NpcState[] = [];
-  if (spell.attack === 'ranged-spell' || spell.attack === 'melee-spell' || spell.attack === 'auto-hit') {
+  if (spell.attack === 'ranged-spell' || spell.attack === 'melee-spell' || spell.attack === 'auto-hit'
+    || (spell.save && !spell.area)) {
     const ids = targetIds && targetIds.length > 0 ? targetIds : (s.selectedTargetId ? [s.selectedTargetId] : []);
     affected = ids
       .map((id) => s.npcs.find((n) => n.id === id))
@@ -436,9 +590,23 @@ export function doCastSpell(
   tile: { x: number; y: number } | undefined,
   asRitual: boolean,
   events: GameEvent[],
+  damageTypeChoice?: string,
 ): void {
-  const spell = ctx.defs.spells.find((sp) => sp.id === spellId);
-  if (!spell) return;
+  const baseSpell = ctx.defs.spells.find((sp) => sp.id === spellId);
+  if (!baseSpell) return;
+
+  // Spells that let the caster pick a damage type at cast time (Chromatic
+  // Orb, …) carry a `damageTypeChoices` list. Apply the player's choice by
+  // swapping `damage.type` on a shallow clone so the rest of the resolver
+  // doesn't need a per-call override path.
+  let spell = baseSpell;
+  if (baseSpell.damageTypeChoices && baseSpell.damageTypeChoices.length > 0 && baseSpell.damage) {
+    const fallback = baseSpell.damage.type;
+    const picked = damageTypeChoice && baseSpell.damageTypeChoices.includes(damageTypeChoice)
+      ? damageTypeChoice
+      : fallback;
+    spell = { ...baseSpell, damage: { ...baseSpell.damage, type: picked } };
+  }
 
   // Ritual casting has its own eligibility rules: spell must have the Ritual
   // tag, must be known (spellbook OR cantrip — cantrips can't really be cast
@@ -477,6 +645,19 @@ export function doCastSpell(
     const target = tid ? ctx.state.npcs.find((n) => n.id === tid && n.hp > 0 && n.disposition !== 'ally') : null;
     if (!target) { ctx.addLog({ left: `${spell.name}: no target`, style: 'miss' }); return; }
     preResolvedTarget = target;
+  } else if (spell.save && !spell.area) {
+    // Single-target save spell (Hideous Laughter, Charm Person, …).
+    // Validate target + range up front so we don't consume a slot / action on
+    // a no-target cast or an out-of-range pick.
+    const tid = targetIds?.[0] ?? ctx.state.selectedTargetId;
+    const target = tid ? ctx.state.npcs.find((n) => n.id === tid && n.hp > 0 && n.disposition !== 'ally') : null;
+    if (!target) { ctx.addLog({ left: `${spell.name}: no target`, style: 'miss' }); return; }
+    const dist = chebyshev(ctx.state.player.tileX, ctx.state.player.tileY, target.tileX, target.tileY);
+    if (dist > Math.max(1, Math.ceil(spell.rangeFeet / 5))) {
+      ctx.addLog({ left: `${spell.name}: target out of range`, style: 'miss' });
+      return;
+    }
+    preResolvedTarget = target;
   }
 
   // Aggressive casts in exploring phase trigger combat first — same as the
@@ -486,19 +667,55 @@ export function doCastSpell(
 
   consumeCastingResources(ctx, spell, slotLevel, asRitual);
 
-  // Concentration: a new concentration spell drops any previous one first.
-  if (spell.concentration) startConcentration(ctx, spell.id);
-
-  // Branch by mechanical shape.
-  if (spell.attack === 'ranged-spell' || spell.attack === 'melee-spell') {
-    if (preResolvedTarget) resolveAttackRollSpell(ctx, spell, preResolvedTarget, slotLevel);
-  } else if (spell.attack === 'auto-hit') {
-    resolveAutoHitSpell(ctx, spell, targetIds ?? [], slotLevel);
-  } else if (spell.save) {
-    resolveSaveSpell(ctx, spell, tile, slotLevel);
-  } else {
-    resolveUtilitySpell(ctx, spell);
+  // Summon spells (Mage Hand, Unseen Servant) take the AOE-click tile and
+  // conjure the spell's `summon.monsterId` there. Handled before the
+  // mechanical-shape branch since these are neither attack rolls nor saves.
+  if (spell.summon) {
+    if (!tile) {
+      ctx.addLog({ left: `${spell.name}: no target tile`, style: 'miss' });
+      return;
+    }
+    const dist = chebyshev(ctx.state.player.tileX, ctx.state.player.tileY, tile.x, tile.y);
+    if (dist > Math.max(1, Math.ceil(spell.rangeFeet / 5))) {
+      ctx.addLog({ left: `${spell.name}: target tile out of range`, style: 'miss' });
+      return;
+    }
+    const summoned = ctx.spawnSummon(spell.summon.monsterId, spell.id, tile.x, tile.y);
+    if (!summoned) {
+      ctx.addLog({ left: `${spell.name}: no space to summon`, style: 'miss' });
+      return;
+    }
+    ctx.addLog({ left: `${ctx.playerDef.name} casts ${spell.name} — ${summoned.name} appears`, style: 'status' });
+    return;
   }
+
+  // Branch by mechanical shape; each resolver returns whether the spell
+  // actually produced a lasting effect (any target affected, damage dealt,
+  // etc.) so we can suppress concentration on a "spell fizzled" outcome.
+  let anyEffect = false;
+  if (spell.attack === 'ranged-spell' || spell.attack === 'melee-spell') {
+    anyEffect = preResolvedTarget
+      ? resolveAttackRollSpell(ctx, spell, preResolvedTarget, slotLevel)
+      : false;
+  } else if (spell.attack === 'auto-hit') {
+    anyEffect = resolveAutoHitSpell(ctx, spell, targetIds ?? [], slotLevel);
+  } else if (spell.save) {
+    if (preResolvedTarget) {
+      anyEffect = resolveSingleTargetSaveSpell(ctx, spell, preResolvedTarget, slotLevel);
+    } else {
+      anyEffect = resolveSaveSpell(ctx, spell, tile, slotLevel, targetIds);
+    }
+  } else {
+    // Utility / self spells (Mage Armor, Detect Magic, …) always produce
+    // their effect by definition — they don't roll for it.
+    resolveUtilitySpell(ctx, spell);
+    anyEffect = true;
+  }
+
+  // Concentration only kicks in after a real effect lands — every target
+  // saved or the spell missed → no ongoing effect → no concentration cost.
+  // A new concentration spell drops any previous one first.
+  if (spell.concentration && anyEffect) startConcentration(ctx, spell.id);
 }
 
 // Export labels useful for the UI.

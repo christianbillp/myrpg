@@ -206,11 +206,13 @@ export function registerGenerateRoutes(server: FastifyInstance, ctx: GenerateRou
       customObjective?: string;
       /** Optional author-supplied completion-flag slug. Overrides the default `<slug>_resolved`. */
       completionFlag?: string;
-      /** Author-painted triggers: rectangular region + one of four action templates. Each is expanded to a full `EncounterTrigger`. */
+      /** Author-painted triggers: rectangular region + one of the action templates. Each is expanded to a full `EncounterTrigger`. */
       triggers?: Array<{
         id: string;
         region: { x: number; y: number; w: number; h: number };
-        kind: "perception" | "log" | "aigm" | "combat";
+        kind:
+          | "perception" | "log" | "aigm" | "combat" | "xp"
+          | "supertitle" | "announcement" | "speech" | "fade";
         dc: number;
         passMessage: string;
         message: string;
@@ -223,6 +225,15 @@ export function registerGenerateRoutes(server: FastifyInstance, ctx: GenerateRou
          * is flipped (existing single-defId behavior).
          */
         defIds?: string[];
+        /** Amount granted by an `xp` trigger. Defaults to 0 (no-op). */
+        xpAmount?: number;
+        /** Hold time (ms) for `supertitle` / `announcement`; fade time for `fade`. */
+        durationMs?: number;
+        /** Entity ref for `speech` (e.g. `player`, `npc_<id>`, `enemy_A`). */
+        entityRef?: string;
+        /** Direction for `fade`. */
+        fadeMode?: "in" | "out" | "dim";
+        announcementMode?: "focused" | "unfocused";
       }>;
     };
   }>("/generate/encounter/composed", async (req, reply) => {
@@ -349,6 +360,45 @@ export function registerGenerateRoutes(server: FastifyInstance, ctx: GenerateRou
             then.push({ type: 'trigger_combat' });
             break;
           }
+          case 'xp': {
+            const amount = Math.max(0, Math.floor(t.xpAmount ?? 0));
+            then = amount > 0 ? [{ type: 'award_xp', amount }] : [];
+            break;
+          }
+          case 'supertitle': {
+            const text = t.message.trim();
+            then = text ? [{
+              type: 'show_supertitle',
+              text,
+              ...(t.durationMs && t.durationMs > 0 ? { durationMs: t.durationMs } : {}),
+            }] : [];
+            break;
+          }
+          case 'announcement': {
+            const text = t.message.trim();
+            then = text ? [{
+              type: 'show_announcement',
+              text,
+              ...(t.durationMs && t.durationMs > 0 ? { durationMs: t.durationMs } : {}),
+              ...(t.announcementMode ? { mode: t.announcementMode } : {}),
+            }] : [];
+            break;
+          }
+          case 'speech': {
+            const text = t.message.trim();
+            const entity = (t.entityRef ?? '').trim();
+            then = (text && entity) ? [{ type: 'npc_speaks', entity, text }] : [];
+            break;
+          }
+          case 'fade': {
+            const mode = t.fadeMode ?? 'out';
+            then = [{
+              type: 'fade_screen',
+              mode,
+              ...(t.durationMs && t.durationMs > 0 ? { durationMs: t.durationMs } : {}),
+            }];
+            break;
+          }
         }
         return { id: baseId, when, if: guards, then, once: true };
       });
@@ -418,12 +468,19 @@ export function registerGenerateRoutes(server: FastifyInstance, ctx: GenerateRou
       triggers?: Array<{
         id: string;
         region: { x: number; y: number; w: number; h: number };
-        kind: "perception" | "log" | "aigm" | "combat";
+        kind:
+          | "perception" | "log" | "aigm" | "combat" | "xp"
+          | "supertitle" | "announcement" | "speech" | "fade";
         dc: number;
         passMessage: string;
         message: string;
         defId: string;
         defIds?: string[];
+        xpAmount?: number;
+        durationMs?: number;
+        entityRef?: string;
+        fadeMode?: "in" | "out" | "dim";
+        announcementMode?: "focused" | "unfocused";
       }>;
     };
   }>("/generate/encounter/update", async (req, reply) => {
@@ -501,6 +558,45 @@ export function registerGenerateRoutes(server: FastifyInstance, ctx: GenerateRou
             for (const id of t.defIds ?? []) if (id.trim()) flipIds.add(id.trim());
             for (const id of flipIds) then.push({ type: 'set_disposition_by_def_id', defId: id, disposition: 'enemy' });
             then.push({ type: 'trigger_combat' });
+            break;
+          }
+          case 'xp': {
+            const amount = Math.max(0, Math.floor(t.xpAmount ?? 0));
+            then = amount > 0 ? [{ type: 'award_xp', amount }] : [];
+            break;
+          }
+          case 'supertitle': {
+            const text = t.message.trim();
+            then = text ? [{
+              type: 'show_supertitle',
+              text,
+              ...(t.durationMs && t.durationMs > 0 ? { durationMs: t.durationMs } : {}),
+            }] : [];
+            break;
+          }
+          case 'announcement': {
+            const text = t.message.trim();
+            then = text ? [{
+              type: 'show_announcement',
+              text,
+              ...(t.durationMs && t.durationMs > 0 ? { durationMs: t.durationMs } : {}),
+              ...(t.announcementMode ? { mode: t.announcementMode } : {}),
+            }] : [];
+            break;
+          }
+          case 'speech': {
+            const text = t.message.trim();
+            const entity = (t.entityRef ?? '').trim();
+            then = (text && entity) ? [{ type: 'npc_speaks', entity, text }] : [];
+            break;
+          }
+          case 'fade': {
+            const mode = t.fadeMode ?? 'out';
+            then = [{
+              type: 'fade_screen',
+              mode,
+              ...(t.durationMs && t.durationMs > 0 ? { durationMs: t.durationMs } : {}),
+            }];
             break;
           }
         }

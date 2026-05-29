@@ -1,0 +1,16 @@
+{
+  "id": "disguise-self",
+  "name": "Disguise Self",
+  "level": 1,
+  "school": "illusion",
+  "classes": ["bard", "sorcerer", "wizard"],
+  "castingTime": "action",
+  "range": "self",
+  "rangeFeet": 0,
+  "components": { "verbal": true, "somatic": true, "material": null },
+  "duration": "1 hour",
+  "durationRounds": 600,
+  "concentration": false,
+  "ritual": false,
+  "description": "You make yourself — including your clothing, armor, weapons, and other belongings — look different until the spell ends. You can seem 1 foot shorter or taller and can appear thin, fat, or in between. The changes aren't physical: a creature can use its action to inspect you and discern the disguise with a successful Intelligence (Investigation) check against your spell save DC."
+}

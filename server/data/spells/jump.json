@@ -1,0 +1,16 @@
+{
+  "id": "jump",
+  "name": "Jump",
+  "level": 1,
+  "school": "transmutation",
+  "classes": ["druid", "ranger", "sorcerer", "wizard"],
+  "castingTime": "bonus-action",
+  "range": "touch",
+  "rangeFeet": 0,
+  "components": { "verbal": true, "somatic": true, "material": "a grasshopper's hind leg" },
+  "duration": "1 minute",
+  "durationRounds": 10,
+  "concentration": false,
+  "ritual": false,
+  "description": "You touch a willing creature. Until the spell ends, the target's jump distance is tripled."
+}

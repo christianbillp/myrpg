@@ -1,0 +1,20 @@
+{
+  "id": "ice-knife",
+  "name": "Ice Knife",
+  "level": 1,
+  "school": "conjuration",
+  "classes": ["druid", "sorcerer", "wizard"],
+  "castingTime": "action",
+  "range": "60 feet",
+  "rangeFeet": 60,
+  "components": { "verbal": false, "somatic": true, "material": "a drop of water or a piece of ice" },
+  "duration": "instantaneous",
+  "concentration": false,
+  "ritual": false,
+  "attack": "ranged-spell",
+  "damage": { "dice": 1, "sides": 10, "type": "piercing" },
+  "save": { "ability": "dex", "halfOnSuccess": false },
+  "area": { "shape": "sphere", "sizeFeet": 5 },
+  "description": "You create a shard of ice and fling it at a creature within range. Make a ranged spell attack against the target. On a hit, the target takes 1d10 Piercing damage. Hit or miss, the shard then explodes — each creature within 5 feet of the target must succeed on a Dexterity save or take 2d6 Cold damage.",
+  "scaling": "Both damage rolls increase by 1d6 for each spell slot level above 1."
+}

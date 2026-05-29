@@ -1,0 +1,19 @@
+{
+  "id": "chromatic-orb",
+  "name": "Chromatic Orb",
+  "level": 1,
+  "school": "evocation",
+  "classes": ["sorcerer", "wizard"],
+  "castingTime": "action",
+  "range": "90 feet",
+  "rangeFeet": 90,
+  "components": { "verbal": true, "somatic": true, "material": "a diamond worth 50+ GP" },
+  "duration": "instantaneous",
+  "concentration": false,
+  "ritual": false,
+  "attack": "ranged-spell",
+  "damage": { "dice": 3, "sides": 8, "type": "acid" },
+  "damageTypeChoices": ["acid", "cold", "fire", "lightning", "poison", "thunder"],
+  "description": "You hurl a 4-inch-diameter sphere of energy at a creature within range. Choose Acid, Cold, Fire, Lightning, Poison, or Thunder for the damage type, then make a ranged spell attack. On a hit, the target takes 3d8 damage of the chosen type. If you roll the same number on two of the dice, the orb leaps to a creature of your choice within 30 feet that you can see (you make a new attack roll against the new target).",
+  "scaling": "The damage increases by 1d8 for each spell slot level above 1."
+}

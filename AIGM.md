@@ -136,6 +136,12 @@ Text retention: text accompanying a [roll-requesting tool](#d20-tests) (`request
 
 When the player's message starts with `[PlayerName says to TargetName]:`, that NPC is the addressee and must respond in the AIGM's reply — voice their reaction, dialogue, or refusal. Pivoting to a different NPC or to the environment in place of the addressee's response is forbidden.
 
+The wrapper is produced in two places client-side:
+  - HUD chat — when the GM-mode dropup is set to `sayto` and a target is selected, the chat send routes the raw text through `HUD.sendSayto`.
+  - Player Panel — the **TALK** button opens an inline speech-bubble input pinned to the player token; submitting routes through the same `HUD.sendSayto` path.
+
+At entry to `POST /game/session/:id/aigm` the server matches the wrapper with `/^\[(.+?) says to (.+?)\]:\s*(.+)$/s`. When it matches, the server immediately writes a `<player> → <target>: "<line>"` row into the Event Log and pushes a fresh `state_update` **before** `processAIGMChat` runs — so the player sees their dialogue land in the log on submit, not when the GM reply finally streams. The client also spawns a player speech bubble (with overlap-avoidance against the target token) and a persistent typing indicator over the target NPC; the indicator clears on `aigm_done`.
+
 ## Narrative-mirror rule
 
 The player only sees the narrative reply — never the tool calls. Every player-visible tool effect must therefore also appear in the narrative, in-fiction:
@@ -487,6 +493,61 @@ Appends a line to the Event Log without changing any game state. Use this to rec
 | Parameter | Type   | Required |
 | --------- | ------ | -------- |
 | `text`    | string | yes      |
+
+#### `npc_speaks`
+
+Renders a short speech bubble above the named entity's token for ~6 seconds and fades out. Use whenever an NPC speaks aloud, shouts, or makes an audible sound the player should be able to source visually — call alongside the narrative quote (the bubble is supplemental, the prose stays the same). Also valid for environmental sounds anchored to a creature (e.g. growls, sobbing). The `entity` field accepts the same refs as the rest of the tool surface (`player`, `enemy_A`, `npc_<id>`).
+
+| Parameter | Type   | Required |
+| --------- | ------ | -------- |
+| `entity`  | string | yes      |
+| `text`    | string | yes      |
+
+#### `fade_screen`
+
+Fade the entire game screen (map + every UI panel) to or from black. Three modes:
+
+  - **`"out"`** — opacity → 1 (full black). Blocks input.
+  - **`"in"`** — opacity → 0 (fully clear). Restores input.
+  - **`"dim"`** — opacity → 0.5 (50% black overlay). The world stays visible underneath and pointer input still passes through — use for atmospheric beats, not full cinematic cuts.
+
+Use for cinematic scene transitions — time-jumps, travel montages, dramatic reveals — and combine with `show_supertitle` / `show_announcement` so the message lands against the black (or the dim) between fades.
+
+The fade is **sticky**: an `"out"` or `"dim"` call leaves the overlay in place until a matching `"in"` call (or the next chapter advance / long rest, which manage their own fades). Events from a single tool-loop iteration play sequentially through the client's event queue, so a typical cinematic transition queues `fade_screen out → show_supertitle → show_announcement → fade_screen in` and the supertitle / announcement all render against the darkened background.
+
+| Parameter     | Type    | Required |
+| ------------- | ------- | -------- |
+| `mode`        | string  | yes (`"in"`, `"out"`, or `"dim"`) |
+| `duration_ms` | integer | no (default 1200, max 10000) |
+| `reason`      | string  | yes      |
+
+#### `show_supertitle`
+
+Display a movie-style location title — huge bold white text centred on screen for a few seconds, wrapping onto two lines for longer titles. Use sparingly for significant location or time changes ("THE TANGLED WOOD", "THREE DAYS LATER", chapter-style cards). Pair with `fade_screen` for dramatic reveals.
+
+`duration_ms` controls the hold time; the client adds its own fade-in and fade-out on top. The event blocks the client's event queue for the full duration so subsequent events queue after it cleanly.
+
+| Parameter     | Type    | Required |
+| ------------- | ------- | -------- |
+| `text`        | string  | yes      |
+| `duration_ms` | integer | no (default 3000, max 15000) |
+| `reason`      | string  | yes      |
+
+#### `show_announcement`
+
+Display a large centred announcement card. The text is **also** appended to the Event Log so the message persists after the visual fades. Use `add_log_entry` for routine log lines that do not need an attention-grabbing card.
+
+`mode` controls how the announcement integrates with play:
+
+  - **`"focused"`** (default) — orange-bordered card; the Player Panel, Target Panel, and HUD **fade out before** the card appears and **fade back in after** it leaves; player movement / actions are locked; the world tick is paused via `WorldPause`. Use for important beats the player MUST stop and read (quest reveal, major discovery, end-of-encounter close).
+  - **`"unfocused"`** — borderless card with a soft radial edge-fade; the UI stays live, the world keeps ticking, the player keeps moving. Use for atmospheric flavour the player can read in stride (weather shift, distant sound, time-of-day cue).
+
+| Parameter     | Type    | Required |
+| ------------- | ------- | -------- |
+| `text`        | string  | yes      |
+| `duration_ms` | integer | no (default 3500, max 15000) |
+| `mode`        | string  | no (`"focused"` (default) or `"unfocused"`) |
+| `reason`      | string  | yes      |
 
 ---
 

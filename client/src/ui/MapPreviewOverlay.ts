@@ -2,6 +2,7 @@ import Phaser from "phaser";
 import { tilesetTextureKey } from "../scenes/BootScene";
 import type { SavedMapDef } from "../net/types";
 import { decodeTileGid, TILE_VOID_GID } from "../../../shared/tileGid";
+import { createHtmlButton, createHtmlText, type HtmlButtonHandle, type HtmlTextHandle } from "./htmlButtons";
 
 export interface MapPreviewData {
   /** Set only when the map has been persisted (by `/generate/map/save`). Null/undefined for unsaved previews. */
@@ -25,7 +26,9 @@ export interface MapPreviewZones {
   neutralCells?: Set<string>;
   /** Trigger regions rendered as colour-coded outlined rectangles on top of the grid. */
   triggerRegions?: Array<{
-    kind: 'perception' | 'log' | 'aigm' | 'combat';
+    kind:
+      | 'perception' | 'log' | 'aigm' | 'combat' | 'xp'
+      | 'supertitle' | 'announcement' | 'speech' | 'fade';
     region: { x: number; y: number; w: number; h: number };
   }>;
 }
@@ -50,11 +53,20 @@ export interface MapPreviewOptions {
  *   • `destroy()` — tears down all Phaser objects in the container.
  */
 /** Per-kind outline colour for trigger-region overlays. Matches `ZonePainter.TRIGGER_COLOR`. */
-const TRIGGER_COLOR: Record<'perception' | 'log' | 'aigm' | 'combat', number> = {
-  perception: 0x88ccaa,
-  log:        0xc8d8e8,
-  aigm:       0xe2b96f,
-  combat:     0xff6644,
+const TRIGGER_COLOR: Record<
+  'perception' | 'log' | 'aigm' | 'combat' | 'xp'
+  | 'supertitle' | 'announcement' | 'speech' | 'fade',
+  number
+> = {
+  perception:   0x88ccaa,
+  log:          0xc8d8e8,
+  aigm:         0xe2b96f,
+  combat:       0xff6644,
+  xp:           0x88ccff,
+  supertitle:   0xffffff,
+  announcement: 0xf4e6c1,
+  speech:       0x5588aa,
+  fade:         0x222222,
 };
 
 const PANEL_W = 1100;
@@ -70,14 +82,14 @@ export class MapPreviewOverlay {
   private readonly scene: Phaser.Scene;
   private readonly container: Phaser.GameObjects.Container;
   private readonly gridContainer: Phaser.GameObjects.Container;
-  private readonly nameText: Phaser.GameObjects.Text;
-  private readonly descText: Phaser.GameObjects.Text;
-  private readonly busyText: Phaser.GameObjects.Text;
-  private readonly regenBg: Phaser.GameObjects.Rectangle | null;
-  private readonly regenLabel: Phaser.GameObjects.Text | null;
-  private readonly saveBg: Phaser.GameObjects.Rectangle | null;
-  private readonly saveLabel: Phaser.GameObjects.Text | null;
-  private readonly savedAsText: Phaser.GameObjects.Text;
+  private readonly nameText: HtmlTextHandle;
+  private readonly descText: HtmlTextHandle;
+  private readonly busyText: HtmlTextHandle;
+  private readonly regenBtn: HtmlButtonHandle | null;
+  private readonly saveBtn: HtmlButtonHandle | null;
+  private readonly savedAsText: HtmlTextHandle;
+  private readonly headerTag: HtmlTextHandle;
+  private readonly closeBtn: HtmlButtonHandle;
   private saved = false;
   /** The fallback single-tileset key, used when a map carries no `tilesets[]` (legacy AI previews). */
   private readonly fallbackTilesetKey: string;
@@ -120,13 +132,14 @@ export class MapPreviewOverlay {
 
     this.container = scene.add.container(0, 0).setDepth(1000);
 
-    // Backdrop
+    // Backdrop — kept Phaser so it swallows clicks behind the panel.
     const backdrop = scene.add.rectangle(w / 2, h / 2, w, h, 0x000000, 0.75)
       .setInteractive();
     backdrop.on("pointerdown", () => { /* swallow clicks behind the panel */ });
     this.container.add(backdrop);
 
-    // Panel
+    // Panel — kept Phaser so its border / background sit below the HTML
+    // chrome layered on top.
     const panel = scene.add.rectangle(w / 2, h / 2, PANEL_W, PANEL_H, 0x141426)
       .setStrokeStyle(2, 0x88ccaa);
     this.container.add(panel);
@@ -134,22 +147,29 @@ export class MapPreviewOverlay {
     const top = h / 2 - PANEL_H / 2;
     const left = w / 2 - PANEL_W / 2;
 
-    // Header
-    const headerTag = scene.add.text(w / 2, top + 22, "MAP PREVIEW", {
-      fontSize: "11px", color: "#88ccaa", fontFamily: "monospace", letterSpacing: 2,
-    }).setOrigin(0.5, 0);
-    this.container.add(headerTag);
+    // Header / name / description are HTML so they stay crisp at any canvas
+    // scale and so the rest of the GenerateSetupScene chrome can hide them
+    // uniformly when needed.
+    this.headerTag = createHtmlText({
+      scene, sceneWidth: w,
+      x: left, y: top + 18, w: PANEL_W, h: 14,
+      text: "MAP PREVIEW",
+      fontSize: 11, color: "#88ccaa", align: "center", letterSpacing: 2,
+    });
 
-    this.nameText = scene.add.text(w / 2, top + 42, initial.name, {
-      fontSize: "20px", color: "#e8e8f8", fontFamily: "monospace",
-    }).setOrigin(0.5, 0);
-    this.container.add(this.nameText);
+    this.nameText = createHtmlText({
+      scene, sceneWidth: w,
+      x: left, y: top + 38, w: PANEL_W, h: 26,
+      text: initial.name,
+      fontSize: 20, color: "#e8e8f8", align: "center",
+    });
 
-    this.descText = scene.add.text(w / 2, top + 72, initial.description, {
-      fontSize: "12px", color: "#aabbcc", fontFamily: "monospace",
-      align: "center", wordWrap: { width: PANEL_W - 80 },
-    }).setOrigin(0.5, 0);
-    this.container.add(this.descText);
+    this.descText = createHtmlText({
+      scene, sceneWidth: w,
+      x: left + 40, y: top + 68, w: PANEL_W - 80, h: 36,
+      text: initial.description,
+      fontSize: 12, color: "#aabbcc", align: "center",
+    });
 
     // Preview area (centered group of tile images)
     this.viewportCenterX = w / 2;
@@ -184,84 +204,92 @@ export class MapPreviewOverlay {
 
     this.renderGrid(initial);
 
-    this.busyText = scene.add.text(w / 2, top + 110 + PREVIEW_AREA_H / 2, "Regenerating…", {
-      fontSize: "14px", color: "#88ccaa", fontFamily: "monospace",
-      backgroundColor: "rgba(0,0,0,0.7)", padding: { x: 14, y: 8 },
-    }).setOrigin(0.5).setVisible(false);
-    this.container.add(this.busyText);
+    this.busyText = createHtmlText({
+      scene, sceneWidth: w,
+      x: this.viewportCenterX - 100, y: this.viewportCenterY - 12, w: 200, h: 24,
+      text: "Regenerating…",
+      fontSize: 14, color: "#88ccaa", align: "center",
+    });
+    this.busyText.el.style.background = "rgba(0,0,0,0.7)";
+    this.busyText.el.style.padding = "4px 10px";
+    this.busyText.setVisible(false);
 
     // Buttons row. Layout adapts to which callbacks were supplied —
     // view-only mode (no onRegenerate, no onSave) shows only a single
     // centred CLOSE button; the full editor (regenerate + save + close)
     // spreads three buttons across the bottom.
-    const buttonY = top + PANEL_H - 50;
+    const buttonY = top + PANEL_H - 70;
+    const buttonW = 220;
+    const buttonH = 40;
     const showSave  = !!callbacks.onSave;
     const showRegen = !!callbacks.onRegenerate;
     const buttonsCenter = left + PANEL_W / 2;
 
     if (showRegen) {
-      const regenX = showSave ? buttonsCenter - 240 : buttonsCenter - 130;
-      this.regenBg = scene.add.rectangle(regenX, buttonY, 220, 40, 0x1a3a2a)
-        .setStrokeStyle(2, 0x2a6655).setInteractive({ useHandCursor: true });
-      this.regenLabel = scene.add.text(regenX, buttonY, "↻ REGENERATE", {
-        fontSize: "13px", color: "#ffe9a8", fontFamily: "monospace",
-      }).setOrigin(0.5);
-      this.regenBg.on("pointerdown", () => callbacks.onRegenerate!());
-      this.container.add(this.regenBg);
-      this.container.add(this.regenLabel);
+      const regenCx = showSave ? buttonsCenter - 240 : buttonsCenter - 130;
+      this.regenBtn = createHtmlButton({
+        scene, sceneWidth: w,
+        x: regenCx - buttonW / 2, y: buttonY, w: buttonW, h: buttonH,
+        label: "↻ REGENERATE", variant: "primary", fontSize: 13,
+        onClick: () => callbacks.onRegenerate!(),
+      });
     } else {
-      this.regenBg = null;
-      this.regenLabel = null;
+      this.regenBtn = null;
     }
 
     if (showSave) {
-      const saveX = showRegen ? buttonsCenter : buttonsCenter - 130;
-      this.saveBg = scene.add.rectangle(saveX, buttonY, 220, 40, 0x2a3a55)
-        .setStrokeStyle(2, 0x5588aa).setInteractive({ useHandCursor: true });
-      this.saveLabel = scene.add.text(saveX, buttonY, "✓ SAVE", {
-        fontSize: "13px", color: "#cce4ff", fontFamily: "monospace",
-      }).setOrigin(0.5);
-      this.saveBg.on("pointerdown", () => {
-        if (this.saved) return;
-        callbacks.onSave!();
+      const saveCx = showRegen ? buttonsCenter : buttonsCenter - 130;
+      this.saveBtn = createHtmlButton({
+        scene, sceneWidth: w,
+        x: saveCx - buttonW / 2, y: buttonY, w: buttonW, h: buttonH,
+        label: "✓ SAVE", variant: "secondary", fontSize: 13,
+        onClick: () => {
+          if (this.saved) return;
+          callbacks.onSave!();
+        },
       });
-      this.container.add(this.saveBg);
-      this.container.add(this.saveLabel);
+      // Use the cooler blue from the original Phaser styling rather than the
+      // greyer secondary default.
+      this.saveBtn.el.style.background = "#2a3a55";
+      this.saveBtn.el.style.borderColor = "#5588aa";
+      this.saveBtn.el.style.color = "#cce4ff";
     } else {
-      this.saveBg = null;
-      this.saveLabel = null;
+      this.saveBtn = null;
     }
 
     // CLOSE always exists. Position depends on what's beside it.
-    const closeX = (showRegen && showSave) ? buttonsCenter + 240
-                 : (showRegen || showSave) ? buttonsCenter + 130
-                 : buttonsCenter;
-    const closeBg = scene.add.rectangle(closeX, buttonY, 220, 40, 0x222233)
-      .setStrokeStyle(2, 0x556677).setInteractive({ useHandCursor: true });
-    const closeLabel = scene.add.text(closeX, buttonY, "CLOSE", {
-      fontSize: "13px", color: "#aabbcc", fontFamily: "monospace",
-    }).setOrigin(0.5);
-    closeBg.on("pointerdown", () => callbacks.onClose());
-    this.container.add(closeBg);
-    this.container.add(closeLabel);
+    const closeCx = (showRegen && showSave) ? buttonsCenter + 240
+                  : (showRegen || showSave) ? buttonsCenter + 130
+                  : buttonsCenter;
+    this.closeBtn = createHtmlButton({
+      scene, sceneWidth: w,
+      x: closeCx - buttonW / 2, y: buttonY, w: buttonW, h: buttonH,
+      label: "CLOSE", variant: "ghost", fontSize: 13,
+      onClick: () => callbacks.onClose(),
+    });
 
     // "Saved as gen_..." footnote — hidden until the user clicks SAVE.
-    this.savedAsText = scene.add.text(w / 2, buttonY - 30, "", {
-      fontSize: "10px", color: "#556677", fontFamily: "monospace",
-    }).setOrigin(0.5).setVisible(false);
-    this.container.add(this.savedAsText);
+    this.savedAsText = createHtmlText({
+      scene, sceneWidth: w,
+      x: left, y: buttonY - 24, w: PANEL_W, h: 14,
+      text: "",
+      fontSize: 10, color: "#556677", align: "center",
+    });
+    this.savedAsText.setVisible(false);
   }
 
   /** Lock the SAVE button into a "✓ SAVED" disabled state. Cleared by `update`. */
   markSaved(mapId: string): void {
     this.saved = true;
-    if (this.saveBg && this.saveLabel) {
-      this.saveBg.disableInteractive();
-      this.saveBg.setFillStyle(0x1a2222);
-      this.saveBg.setStrokeStyle(2, 0x334455);
-      this.saveLabel.setText("✓ SAVED").setColor("#556677");
+    if (this.saveBtn) {
+      this.saveBtn.setLabel("✓ SAVED");
+      this.saveBtn.el.style.background = "#1a2222";
+      this.saveBtn.el.style.borderColor = "#334455";
+      this.saveBtn.el.style.color = "#556677";
+      this.saveBtn.el.style.cursor = "default";
     }
-    this.savedAsText.setText(`Saved as ${mapId}`).setVisible(true);
+    this.savedAsText.setText(`Saved as ${mapId}`);
+    this.savedAsText.setVisible(true);
   }
 
   update(data: MapPreviewData): void {
@@ -277,24 +305,29 @@ export class MapPreviewOverlay {
     this.renderGrid(data);
     // A regenerated map is unsaved — re-enable the SAVE button.
     this.saved = false;
-    if (this.saveBg && this.saveLabel) {
-      this.saveBg.setInteractive({ useHandCursor: true });
-      this.saveBg.setFillStyle(0x2a3a55);
-      this.saveBg.setStrokeStyle(2, 0x5588aa);
-      this.saveLabel.setText("✓ SAVE").setColor("#cce4ff");
+    if (this.saveBtn) {
+      this.saveBtn.setLabel("✓ SAVE");
+      this.saveBtn.el.style.background = "#2a3a55";
+      this.saveBtn.el.style.borderColor = "#5588aa";
+      this.saveBtn.el.style.color = "#cce4ff";
+      this.saveBtn.el.style.cursor = "pointer";
     }
     this.savedAsText.setVisible(false);
   }
 
   setBusy(busy: boolean): void {
     this.busyText.setVisible(busy);
-    if (!this.regenBg || !this.regenLabel) return;
+    if (!this.regenBtn) return;
     if (busy) {
-      this.regenBg.disableInteractive().setFillStyle(0x1a2222);
-      this.regenLabel.setColor("#556677");
+      this.regenBtn.el.style.background = "#1a2222";
+      this.regenBtn.el.style.borderColor = "#334455";
+      this.regenBtn.el.style.color = "#556677";
+      this.regenBtn.el.style.cursor = "default";
     } else {
-      this.regenBg.setInteractive({ useHandCursor: true }).setFillStyle(0x1a3a2a);
-      this.regenLabel.setColor("#ffe9a8");
+      this.regenBtn.el.style.background = "#1a3a2a";
+      this.regenBtn.el.style.borderColor = "#2a6655";
+      this.regenBtn.el.style.color = "#ffe9a8";
+      this.regenBtn.el.style.cursor = "pointer";
     }
   }
 
@@ -306,6 +339,16 @@ export class MapPreviewOverlay {
       this.scene.input.off("pointerupoutside", this.upHandler);
     }
     this.container.destroy();
+    // Dispose every HTML chrome element. The handles' resize listeners stay
+    // attached to the scene until explicitly torn down here.
+    this.headerTag.dispose();
+    this.nameText.dispose();
+    this.descText.dispose();
+    this.busyText.dispose();
+    this.savedAsText.dispose();
+    this.closeBtn.dispose();
+    if (this.regenBtn) this.regenBtn.dispose();
+    if (this.saveBtn) this.saveBtn.dispose();
   }
 
   // ── Zoom + pan ──────────────────────────────────────────────────────────

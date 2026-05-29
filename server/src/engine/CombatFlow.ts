@@ -61,7 +61,10 @@ export function doStartCombat(ctx: GameContext, events: GameEvent[]): void {
   s.player.deathSaveSuccesses = 0;
   s.player.deathSaveFailures = 0;
 
-  const combatNpcs = s.npcs.filter((n) => n.disposition !== 'neutral' && n.hp > 0);
+  // Skip summons (Mage Hand, Unseen Servant) — they act only when the
+  // caster commands them, never roll initiative, and don't take their own
+  // turns.
+  const combatNpcs = s.npcs.filter((n) => n.disposition !== 'neutral' && n.hp > 0 && !n.summonSpellId);
   for (const npc of combatNpcs.filter((n) => !n.combatLabel)) ctx.assignCombatLabel(npc);
 
   // ── Roll Initiative for every combatant ─────────────────────────────────
@@ -388,11 +391,15 @@ export function finalizeNpcTurn(ctx: GameContext, npc: NpcState): void {
   const s = ctx.state;
   s.player.conditions = s.player.conditions.filter((c) => c !== 'hidden');
 
-  // Sleep re-save: per SRD, the Incapacitated condition from Sleep ends at the
-  // end of the target's next turn, at which point they re-save vs the original
-  // DC. Success ends the spell on this target; failure replaces Incapacitated
-  // with Unconscious for the spell's duration.
-  if (s.player.concentratingOn === 'sleep' && (npc.conditions.includes('incapacitated') || npc.conditions.includes('unconscious'))) {
+  // Sleep re-save: per SRD, the Incapacitated condition from Sleep ends at
+  // the end of the target's next turn, at which point they re-save vs the
+  // original DC. Success ends the spell on this target; failure replaces
+  // Incapacitated with Unconscious **for the duration** — once unconscious
+  // there are no further saves until the spell ends, so the re-save only
+  // fires while the target is still in the Incapacitated stage.
+  if (s.player.concentratingOn === 'sleep'
+    && npc.conditions.includes('incapacitated')
+    && !npc.conditions.includes('unconscious')) {
     const def = ctx.resolveMonsterDef(npc.defId);
     if (def) {
       const dc = 8 + ctx.playerDef.proficiencyBonus + (
@@ -405,13 +412,13 @@ export function finalizeNpcTurn(ctx: GameContext, npc: NpcState): void {
       const total = roll + saveMod;
       const success = total >= dc;
       ctx.addLog({
-        left: `${npc.name} ${success ? 'shakes off Sleep' : 'sinks deeper into Sleep'}`,
+        left: `${combatantDisplayName(npc, s.npcs)} ${success ? 'shakes off Sleep' : 'sinks deeper into Sleep'}`,
         right: `WIS d20(${roll})+${saveMod}=${total} vs DC ${dc}`,
         style: success ? 'status' : 'miss',
       });
       if (success) {
-        npc.conditions = npc.conditions.filter((c) => c !== 'incapacitated' && c !== 'unconscious');
-      } else if (npc.conditions.includes('incapacitated') && !npc.conditions.includes('unconscious')) {
+        npc.conditions = npc.conditions.filter((c) => c !== 'incapacitated');
+      } else {
         npc.conditions = npc.conditions.filter((c) => c !== 'incapacitated');
         npc.conditions.push('unconscious');
       }

@@ -46,6 +46,13 @@ export interface PlayerPanelActionState {
   features: PlayerPanelFeature[];
   /** When set, the action area is replaced with a "Select target for: NAME" banner instead of the usual buttons. */
   spellTargetPrompt: { spellName: string; asRitual: boolean } | null;
+  /** Active player-owned summons (Mage Hand, Unseen Servant). The panel
+   *  renders one DIRECT button per entry — clicking enters a "click a tile
+   *  to move the summon" mode in the GameScene. */
+  summons: Array<{ id: string; name: string; spellName: string }>;
+  /** True when a creature is currently selected as the target. The TALK
+   *  button needs a target so the line can be routed to a `sayto`. */
+  hasSelectedTarget: boolean;
 }
 
 export interface PlayerPanelCallbacks {
@@ -64,6 +71,17 @@ export interface PlayerPanelCallbacks {
   onToggleMoveMode: () => void;
   onEndTurn: () => void;
   onLeaveEncounter: () => void;
+  onLevelUp: () => void;
+  onLongRest: () => void;
+  onCommandSummon: (summonNpcId: string) => void;
+  /** Open the inline TALK input near the player token so the player can
+   *  type a line for the currently-selected target. No-op when no target
+   *  is selected — the button greys out in that state. */
+  onTalk: () => void;
+}
+
+function waitMs(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function hpColor(pct: number): string {
@@ -92,8 +110,9 @@ export class PlayerPanel {
   private pickerOpen = false;
   private lastActionState: PlayerPanelActionState | null = null;
   private readonly callbacks: PlayerPanelCallbacks;
-  private readonly playerDef: PlayerDef;
+  private playerDef: PlayerDef;
   private readonly scale: UIScale;
+  private readonly headerSubEl: HTMLElement;
 
   constructor(scale: UIScale, def: PlayerDef, callbacks: PlayerPanelCallbacks) {
     this.scale = scale;
@@ -118,7 +137,7 @@ export class PlayerPanel {
 
     this.el.innerHTML = `
       <div style="padding:14px 12px 0;font-size:12px;color:${colorHex};">${def.name}</div>
-      <div style="padding:2px 12px 4px;font-size:10px;color:#667788;">${def.speciesName} · ${def.className} ${def.level}</div>
+      <div data-header-sub style="padding:2px 12px 4px;font-size:10px;color:#667788;">${def.speciesName} · ${def.className} ${def.level}</div>
       <div class="gui-sep"></div>
 
       <div class="gui-label">HP</div>
@@ -155,6 +174,7 @@ export class PlayerPanel {
     this.questsEl  = ref('quests');
     this.objectiveEl = ref('objective');
     this.actionArea = ref('actions');
+    this.headerSubEl = ref('header-sub');
     this.searchBtn  = ref('search')   as HTMLButtonElement;
     this.endTurnBtn = ref('end-turn') as HTMLButtonElement;
 
@@ -172,16 +192,57 @@ export class PlayerPanel {
   }
 
 
+  /**
+   * Replace the cached `PlayerDef` (used after a level-up so the subtitle
+   * and `defaultSpellSlots` max-cap re-render with the new level + maxima).
+   * Triggers a refresh of the action panel.
+   */
+  setPlayerDef(def: PlayerDef): void {
+    this.playerDef = def;
+    this.headerSubEl.textContent = `${def.speciesName} · ${def.className} ${def.level}`;
+    if (this.lastActionState) this.refreshActions(this.lastActionState);
+  }
+
   show(): void {
     this.visible = true;
     this.el.style.display = 'block';
+    this.el.style.opacity = '1';
+    this.el.style.transition = '';
     if (this.lastActionState) this.refreshActions(this.lastActionState);
   }
 
   hide(): void {
     this.visible = false;
     this.el.style.display = 'none';
+    this.el.style.opacity = '1';
+    this.el.style.transition = '';
     this.pickerOpen = false;
+  }
+
+  /** Fade in over `durationMs` (default 250 ms) and resolve when the
+   *  transition completes. Pairs with `fadeOut` so callers can sequence the
+   *  panel ahead of / behind another visual (e.g. a focused announcement). */
+  fadeIn(durationMs = 250): Promise<void> {
+    this.visible = true;
+    this.el.style.display = 'block';
+    this.el.style.transition = '';
+    this.el.style.opacity = '0';
+    // Force a reflow so the new transition catches the opacity flip.
+    void this.el.offsetWidth;
+    this.el.style.transition = `opacity ${durationMs}ms ease-out`;
+    this.el.style.opacity = '1';
+    if (this.lastActionState) this.refreshActions(this.lastActionState);
+    return waitMs(durationMs);
+  }
+
+  fadeOut(durationMs = 250): Promise<void> {
+    this.visible = false;
+    this.el.style.transition = `opacity ${durationMs}ms ease-in`;
+    this.el.style.opacity = '0';
+    this.pickerOpen = false;
+    return waitMs(durationMs).then(() => {
+      this.el.style.display = 'none';
+    });
   }
 
   toggle(): void {
@@ -298,6 +359,13 @@ export class PlayerPanel {
     const { mode, actionUsed, bonusActionUsed, movesLeft, moveMode, availableActions: aa } = state;
     const btn = (label: string, bg: string, onClick: () => void) => this.makeBtn(label, bg, onClick);
 
+    // Cunning Action (Rogue L2+): Dash / Disengage / Hide are spent as a
+    // Bonus Action, so they render BLUE (the bonus-action accent) instead of
+    // GREEN (the action accent). The server's `spendCunningOrAction` helper
+    // mirrors the same fallback behaviour.
+    const hasCunningAction = (this.playerDef.defaultFeatureIds ?? []).includes('cunning-action');
+    const BONUS_BLUE = '#1a3a5a';
+
     if (mode === 'exploring') {
       const atkEl = this.makeTwoLineBtn('ATTACK', state.mainAttackName, '#1a4a1e', aa.canAttack ? this.callbacks.onAttack : () => {});
       atkEl.disabled = !aa.canAttack;
@@ -312,10 +380,34 @@ export class PlayerPanel {
 
       // Hide is available during exploring too — lets a Rogue set up a Sneak
       // Attack opener that triggers combat with Advantage on the first roll.
-      if (aa.canHide) this.actionArea.prepend(btn('HIDE', '#1a3a1a', this.callbacks.onHide));
+      const hideColor = hasCunningAction ? BONUS_BLUE : '#1a3a1a';
+      if (aa.canHide) this.actionArea.prepend(btn('HIDE', hideColor, this.callbacks.onHide));
+
+      // Player-owned summons during exploration — no action economy, just
+      // click DIRECT to move them.
+      for (const summon of state.summons) {
+        this.actionArea.prepend(this.makeBtn(`DIRECT ${summon.name.toUpperCase()}`, '#2a3a55', () => this.callbacks.onCommandSummon(summon.id)));
+      }
 
       const moveExEl = this.makeBtn('MOVE', moveMode ? '#5a4800' : '#3a3000', this.callbacks.onToggleMoveMode);
       this.actionArea.appendChild(moveExEl);
+
+      // TALK — opens an inline speech-bubble input near the player so the
+      // player can address the currently-selected target. Disabled when no
+      // target is selected (the bubble has no recipient to wrap into a
+      // `sayto`). Sits above MOVE in the action stack.
+      const talkExEl = this.makeBtn('TALK', '#1a3a4a', this.callbacks.onTalk);
+      talkExEl.disabled = !state.hasSelectedTarget;
+      this.actionArea.appendChild(talkExEl);
+
+      // LEVEL UP and LONG REST sit above the MOVE button. The action area uses
+      // `flex-direction: column-reverse`, so a later DOM child renders higher.
+      if (aa.canLevelUp) {
+        this.actionArea.appendChild(this.makeBtn('★ LEVEL UP', '#3a2a5a', this.callbacks.onLevelUp));
+      }
+      if (aa.canLongRest) {
+        this.actionArea.appendChild(this.makeBtn('☾ LONG REST', '#1a2a4a', this.callbacks.onLongRest));
+      }
 
     } else if (mode === 'player_turn') {
       const GREEN = '#1a4a1e';
@@ -328,8 +420,14 @@ export class PlayerPanel {
       throwEl.disabled = actionUsed || state.throwableItems.length === 0;
       this.actionArea.prepend(throwEl);
 
-      const disEl = this.makeBtn('DISENGAGE', GREEN, this.callbacks.onDisengage);
-      disEl.disabled = actionUsed;
+      // With Cunning Action, Dash / Disengage / Hide colour as Bonus Action
+      // (blue) and their eligibility flows through the server's `canDash` /
+      // `canDisengage` / `canHide` (which permit either economy when the
+      // feature is known and at least one of the two is free).
+      const dashDisColor = hasCunningAction ? BONUS_BLUE : GREEN;
+
+      const disEl = this.makeBtn('DISENGAGE', dashDisColor, this.callbacks.onDisengage);
+      disEl.disabled = !aa.canDisengage;
       this.actionArea.prepend(disEl);
 
       if (aa.canDetach) {
@@ -341,8 +439,8 @@ export class PlayerPanel {
       dodEl.disabled = actionUsed;
       this.actionArea.prepend(dodEl);
 
-      const dashEl = this.makeBtn('DASH', GREEN, this.callbacks.onDash);
-      dashEl.disabled = actionUsed;
+      const dashEl = this.makeBtn('DASH', dashDisColor, this.callbacks.onDash);
+      dashEl.disabled = !aa.canDash;
       this.actionArea.prepend(dashEl);
 
       // Class-specific features — iterate the character's known features and
@@ -356,11 +454,29 @@ export class PlayerPanel {
         this.actionArea.prepend(featEl);
       }
 
-      if (aa.canHide) this.actionArea.prepend(btn('HIDE', '#1a3a1a', this.callbacks.onHide));
+      // Player-owned summons (Mage Hand, Unseen Servant). One DIRECT button
+      // per summon — costs an Action when invoked.
+      for (const summon of state.summons) {
+        const sEl = this.makeBtn(`DIRECT ${summon.name.toUpperCase()}`, '#2a3a55', () => this.callbacks.onCommandSummon(summon.id));
+        sEl.disabled = actionUsed;
+        this.actionArea.prepend(sEl);
+      }
+
+      if (aa.canHide) {
+        const hideColor = hasCunningAction ? BONUS_BLUE : '#1a3a1a';
+        this.actionArea.prepend(btn('HIDE', hideColor, this.callbacks.onHide));
+      }
 
       const moveEl = this.makeBtn('MOVE', moveMode ? '#5a4800' : '#3a3000', this.callbacks.onToggleMoveMode);
       moveEl.disabled = movesLeft <= 0;
       this.actionArea.appendChild(moveEl);
+
+      // TALK — no action-economy cost (free-action speech). Mirrors the
+      // exploring-mode placement above the MOVE button; disabled when no
+      // target is selected so the line has somewhere to route.
+      const talkEl = this.makeBtn('TALK', '#1a3a4a', this.callbacks.onTalk);
+      talkEl.disabled = !state.hasSelectedTarget;
+      this.actionArea.appendChild(talkEl);
 
     } else if (mode === 'death_saves') {
       this.actionArea.prepend(btn('ROLL DEATH SAVE', '#5a1a1a', this.callbacks.onDeathSave));

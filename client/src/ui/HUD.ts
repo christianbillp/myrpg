@@ -130,6 +130,13 @@ export interface HUDCallbacks {
    *  GameScene iterates its NpcTokens and calls `setNameVisible(visible)`
    *  on each so nameplates show or hide in sync. */
   onLabelsToggle: (visible: boolean) => void;
+  /** Fires when the player sends a `sayto` chat message (either through the
+   *  HUD's chat input while the GM-mode dropup is set to `sayto`, or through
+   *  the TALK button on the Player Panel which routes through
+   *  `HUD.sendSayto`). The scene reads its own `selectedEntityId` to find
+   *  the avoid-target so the bubble flips below the player when it would
+   *  otherwise cover the target token. */
+  onPlayerSays?: (text: string) => void;
 }
 
 export class HUD {
@@ -256,9 +263,8 @@ export class HUD {
         scrollbar-width:thin;scrollbar-color:${ACCENT} transparent;
         background:#080812;padding:6px 10px;box-sizing:border-box;
         font-size:11px;line-height:1.55;color:#c8d8e8;"></div>
-      <div style="height:1px;background:#334455;flex-shrink:0;margin-top:6px;"></div>
-      <div data-gm-status style="font-size:10px;color:#b8960c;min-height:16px;padding:2px 0;flex-shrink:0;"></div>
-      <div style="height:1px;background:#334455;flex-shrink:0;margin-bottom:6px;"></div>
+      <div data-gm-status style="font-size:10px;color:#b8960c;padding:2px 0 4px;flex-shrink:0;min-height:0;"></div>
+      <div style="height:1px;background:#334455;flex-shrink:0;margin:0 0 6px;"></div>
       <div style="display:flex;gap:6px;flex-shrink:0;">
         <button data-gm-mode style="height:30px;padding:0 8px;flex-shrink:0;
           font-family:monospace;font-size:10px;cursor:pointer;
@@ -456,10 +462,36 @@ export class HUD {
     const text = this.gmInputEl.value.trim();
     if (!text || this.gmThinking) return;
     this.gmInputEl.value = '';
+    await this.dispatchPlayerMessage(text, this.gmMode);
+    this.gmInputEl.focus();
+    this.callbacks.onDisableKeyboard();
+  }
 
-    const prompt = (this.gmMode === 'sayto' && this.selectedNpcName)
+  /** Public entry point for the Player Panel's TALK button. Forces the
+   *  message through the `sayto` branch (wrapped + speech-bubble emitted)
+   *  using whichever target is currently selected. No-op when no target is
+   *  selected or the GM is already mid-response. */
+  async sendSayto(text: string): Promise<void> {
+    const trimmed = text.trim();
+    if (!trimmed || !this.selectedNpcName) return;
+    await this.dispatchPlayerMessage(trimmed, 'sayto');
+  }
+
+  /** Shared implementation behind both the in-HUD chat send and the Player
+   *  Panel TALK button. Emits the player-speech-bubble callback when the
+   *  message is a sayto, then ships the (possibly wrapped) prompt to the
+   *  AIGM streaming path. */
+  private async dispatchPlayerMessage(text: string, mode: 'gm' | 'sayto'): Promise<void> {
+    if (!text || this.gmThinking) return;
+    const isSayto = mode === 'sayto' && !!this.selectedNpcName;
+    const prompt = isSayto
       ? `[${this.playerName} says to ${this.selectedNpcName}]: ${text}`
       : text;
+    if (isSayto) {
+      // Surface the spoken line above the player token so the player sees
+      // their own dialogue visualised the same way NPC speech is.
+      this.callbacks.onPlayerSays?.(text);
+    }
 
     this.gmThinking = true;
     this.gmInputEl.disabled = true;
@@ -485,9 +517,7 @@ export class HUD {
 
     this.gmThinking = false;
     this.gmInputEl.disabled = false;
-    this.gmInputEl.focus();
     this.gmStatusEl.textContent = '';
-    this.callbacks.onDisableKeyboard();
   }
 
   // ── Streaming AIGM handlers (called from GameClient via GameScene) ─────────
@@ -732,5 +762,52 @@ export class HUD {
     this.offResize();
     this.hudEl.remove();
     this.turnOrderEl.remove();
+  }
+
+  /** Show / hide the HUD chrome (main bar + turn-order bar). Used by the
+   *  focused-announcement flow on the scene so the player can't read past
+   *  the announcement at the same time. Must restore the explicit `flex`
+   *  layout — the original cssText sets `display: flex` and the `.gui-panel`
+   *  class has no display rule, so an empty string would fall back to
+   *  block-layout and collapse the chat area + push the input upward. */
+  setVisible(visible: boolean): void {
+    this.hudEl.style.display = visible ? 'flex' : 'none';
+    this.hudEl.style.opacity = '1';
+    this.hudEl.style.transition = '';
+    // The turn-order bar's own visibility is driven by combat state; only
+    // hide it on top of that — the next `refresh()` flips it back to `flex`
+    // (combat) or `none` (out of combat) as appropriate.
+    if (!visible) this.turnOrderEl.style.display = 'none';
+  }
+
+  /** Animated counterpart to `setVisible(false)` — fades the HUD and turn
+   *  order bar out over `durationMs`. Resolves once the transition is done
+   *  and the elements have been moved to `display: none`. Pairs with
+   *  `fadeIn` for the focused-announcement lead-in / lead-out. */
+  fadeOut(durationMs = 250): Promise<void> {
+    if (this.hudEl.style.display === 'none') return Promise.resolve();
+    this.hudEl.style.transition = `opacity ${durationMs}ms ease-in`;
+    this.turnOrderEl.style.transition = `opacity ${durationMs}ms ease-in`;
+    this.hudEl.style.opacity = '0';
+    this.turnOrderEl.style.opacity = '0';
+    return new Promise<void>((resolve) => setTimeout(() => {
+      this.hudEl.style.display = 'none';
+      this.turnOrderEl.style.display = 'none';
+      resolve();
+    }, durationMs));
+  }
+
+  fadeIn(durationMs = 250): Promise<void> {
+    this.hudEl.style.display = 'flex';
+    this.hudEl.style.transition = '';
+    this.turnOrderEl.style.transition = '';
+    this.hudEl.style.opacity = '0';
+    this.turnOrderEl.style.opacity = '0';
+    void this.hudEl.offsetWidth;
+    this.hudEl.style.transition = `opacity ${durationMs}ms ease-out`;
+    this.turnOrderEl.style.transition = `opacity ${durationMs}ms ease-out`;
+    this.hudEl.style.opacity = '1';
+    this.turnOrderEl.style.opacity = '1';
+    return new Promise<void>((resolve) => setTimeout(resolve, durationMs));
   }
 }

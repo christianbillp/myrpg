@@ -1,0 +1,19 @@
+{
+  "id": "ray-of-sickness",
+  "name": "Ray of Sickness",
+  "level": 1,
+  "school": "necromancy",
+  "classes": ["sorcerer", "wizard"],
+  "castingTime": "action",
+  "range": "60 feet",
+  "rangeFeet": 60,
+  "components": { "verbal": true, "somatic": true, "material": null },
+  "duration": "instantaneous",
+  "concentration": false,
+  "ritual": false,
+  "attack": "ranged-spell",
+  "damage": { "dice": 2, "sides": 8, "type": "poison" },
+  "save": { "ability": "con", "halfOnSuccess": false },
+  "description": "A ray of sickening greenish energy lashes out toward a creature within range. Make a ranged spell attack. On a hit, the target takes 2d8 Poison damage and must succeed on a Constitution save or have the Poisoned condition until the end of your next turn.",
+  "scaling": "The damage increases by 1d8 for each spell slot level above 1."
+}

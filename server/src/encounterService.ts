@@ -16,6 +16,8 @@ export interface EncounterContext {
   startingZones?: StartingZonesLayer;
   /** Environmental flags consulted by combat resolvers (e.g. sunlit → triggers Sunlight Sensitivity). */
   environment?: EncounterEnvironment;
+  /** Mirror of `EncounterDef.allowsLongRest`. Drives the engine's `canLongRest` guard. */
+  allowsLongRest?: boolean;
   /**
    * Per-encounter override for the global faction-relation matrix. Layered
    * over `defs.factions[*].defaultRelations` at session boot. See
@@ -57,6 +59,7 @@ export interface EncounterStartRequest {
   startingZones?: StartingZonesLayer;
   environment?: EncounterEnvironment;
   factionRelations?: Record<string, Record<string, number>>;
+  allowsLongRest?: boolean;
 }
 
 const SECRET_POOL: SecretDef[] = [
@@ -140,5 +143,6 @@ export function buildEncounter(req: EncounterStartRequest): EncounterContext {
     startingZones: req.startingZones,
     environment:   req.environment,
     factionRelations: req.factionRelations,
+    allowsLongRest: req.allowsLongRest,
   };
 }

@@ -96,6 +96,12 @@ export function canUseFeature(ctx: GameContext, featureId: string): boolean {
   if (featureId === 'second-wind') {
     if (s.player.hp >= ctx.playerDef.maxHp) return false;
   }
+  if (featureId === 'action-surge') {
+    // Only meaningful during the player's combat turn AFTER the Action has
+    // been spent — Surging before using the Action is wasted economy.
+    if (s.phase !== 'player_turn') return false;
+    if (!s.player.actionUsed) return false;
+  }
 
   return true;
 }
@@ -106,15 +112,22 @@ export function usableFeatureIds(ctx: GameContext): string[] {
   return ids.filter((id) => canUseFeature(ctx, id));
 }
 
-/** Can the player Dash this turn? */
-export function canDash(ctx: GameContext): boolean { return canSpendAction(ctx); }
+/** Can the player Dash this turn? Rogues L2+ may spend a Bonus Action via Cunning Action instead. */
+export function canDash(ctx: GameContext): boolean {
+  return hasCunningAction(ctx)
+    ? (canSpendBonusAction(ctx) || canSpendAction(ctx))
+    : canSpendAction(ctx);
+}
 
 /** Can the player Dodge this turn? */
 export function canDodge(ctx: GameContext): boolean { return canSpendAction(ctx); }
 
-/** Can the player Disengage this turn? Requires a living enemy to be meaningful. */
+/** Can the player Disengage this turn? Requires a living enemy to be meaningful. Rogues L2+ may spend a Bonus Action via Cunning Action instead. */
 export function canDisengage(ctx: GameContext): boolean {
-  return canSpendAction(ctx) && hasLivingEnemies(ctx);
+  if (!hasLivingEnemies(ctx)) return false;
+  return hasCunningAction(ctx)
+    ? (canSpendBonusAction(ctx) || canSpendAction(ctx))
+    : canSpendAction(ctx);
 }
 
 /** Can the player Detach an attached creature this turn? */

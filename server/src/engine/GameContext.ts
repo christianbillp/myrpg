@@ -33,6 +33,8 @@ export interface GameContext {
   spawnEnemyNearPlayer(monsterId: string, minDist?: number, maxDist?: number): NpcState | null;
   /** Spawn an enemy at a specific tile, falling back to the nearest free tile when the target is occupied / impassable. */
   spawnEnemyAt(monsterId: string, tx: number, ty: number): NpcState | null;
+  /** Conjure a player-owned summon (Mage Hand, Unseen Servant) at a tile. Despawns any existing summon of the same `spellId`. */
+  spawnSummon(monsterId: string, spellId: string, tx: number, ty: number): NpcState | null;
 
   /** Synchronous event bus — see EventBus.ts. Publishers should call this at well-defined moments; subscribers (TriggerSystem etc.) react. */
   readonly bus: EventBus;

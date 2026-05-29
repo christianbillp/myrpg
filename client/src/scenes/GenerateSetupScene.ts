@@ -1495,8 +1495,18 @@ export class GenerateSetupScene extends Phaser.Scene {
       if (this.zonePainter)    this.zonePainter.setVisible(false);
       if (this.triggerEditor)  this.triggerEditor.setVisible(false);
       if (this.monsterPicker)  this.monsterPicker.setVisible(false);
+      // Hide every HTML chrome bucket — title / tab bar / chips / picker
+      // tabs / bottom-bar buttons / labels — so they don't float over the
+      // Phaser map-preview overlay at z-index 10.
+      for (const bucket of Object.keys(this.buckets) as BucketName[]) {
+        this.setBucketVisible(bucket, false);
+      }
     } else {
       this.setDomVisibility();
+      // Restore the always-visible bucket and re-apply the tab-scoped
+      // visibility (det/gen/detRight) by re-activating the current tab.
+      this.setBucketVisible("always", true);
+      this.activateTab(this.tab);
       if (this.statusEl) this.statusEl.style.display = "";
     }
   }

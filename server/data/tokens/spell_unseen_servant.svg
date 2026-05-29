@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <circle cx="32" cy="32" r="29" fill="#1a1a2a" stroke="#556677" stroke-width="2"/>
+  <!-- faint humanoid silhouette, very translucent -->
+  <g opacity="0.45">
+    <!-- shoulders + head -->
+    <ellipse cx="32" cy="22" rx="6" ry="6" fill="#aabbcc" stroke="#cce4ff" stroke-width="1"/>
+    <!-- torso -->
+    <path d="M22 30 Q22 28 26 28 L38 28 Q42 28 42 30 L40 46 Q32 50 24 46 Z" fill="#aabbcc" stroke="#cce4ff" stroke-width="1"/>
+  </g>
+  <!-- shimmer / wisp lines suggesting the unseen part -->
+  <g stroke="#cce4ff" stroke-width="1" stroke-linecap="round" opacity="0.6" fill="none">
+    <path d="M18 18 Q24 22 22 28"/>
+    <path d="M46 18 Q40 22 42 28"/>
+    <path d="M18 46 Q24 44 26 48"/>
+    <path d="M46 46 Q40 44 38 48"/>
+  </g>
+  <!-- question-mark style center to hint at invisibility -->
+  <text x="32" y="40" text-anchor="middle" font-family="monospace" font-size="14" fill="#cce4ff" opacity="0.7">?</text>
+</svg>

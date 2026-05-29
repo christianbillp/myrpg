@@ -56,6 +56,7 @@ import type {
   ServerWSMessage,
   GameState,
   PlayerState,
+  PlayerDef,
   EquipmentSlots,
   AdventureDef,
   AdventureSave,
@@ -544,6 +545,10 @@ interface CharSave {
   resources?: Record<string, number>;
   encounterLog?: EncounterRecord[];
   storylog?: StorylogEntry[];
+  /** Level-up history — one entry per level above 1. Replayed at session
+   *  start so the engine's per-session PlayerDef reaches the character's
+   *  current level with the recorded choices. */
+  levelUps?: import("../../shared/types.js").LevelUpChoices[];
 }
 
 async function saveWorldState(
@@ -793,6 +798,12 @@ interface EncounterDefJson {
   customIntroduction?: string;
   customContext?: string;
   objective?: string;
+  /** When true the encounter offers Long Rest (tavern, safehouse, etc.). */
+  allowsLongRest?: boolean;
+  /** Optional world-flag name that, when set, marks the encounter complete.
+   *  Mirrored into `GameState.encounterCompletionFlag` so the
+   *  `encounter_completed` engine event fires when the flag is set. */
+  completionFlag?: string;
   tileProperties?: import("./engine/types.js").EncounterTileProperty[];
   startingZones?: import("./engine/types.js").StartingZonesLayer;
   triggers?: import("./engine/types.js").EncounterTrigger[];
@@ -821,7 +832,7 @@ async function startAdventureChapter(
   characterId: string,
   adv: AdventureDef,
   save: AdventureSave,
-): Promise<{ sessionId: string; state: GameState } | { error: string }> {
+): Promise<{ sessionId: string; state: GameState; playerDef: PlayerDef } | { error: string }> {
   const chapter = adv.chapters[save.currentChapterIndex];
   if (!chapter) return { error: "No chapter at currentChapterIndex" };
   const playerDef = defs.playerDefs.find((p) => p.id === characterId);
@@ -852,6 +863,7 @@ async function startAdventureChapter(
     startingZones: encDef.startingZones,
     environment: encDef.environment,
     factionRelations: encDef.factionRelations,
+    allowsLongRest: encDef.allowsLongRest,
   });
 
   const adventureSeed = buildAdventureSeed(adv, save.currentChapterIndex, save);
@@ -870,6 +882,7 @@ async function startAdventureChapter(
     customIntroduction: encDef.customIntroduction,
     customContext: encDef.customContext,
     customObjective: encDef.objective,
+    completionFlag: encDef.completionFlag,
     tileProperties: encDef.tileProperties,
     startingZones: encDef.startingZones,
     triggers: encDef.triggers,
@@ -882,6 +895,7 @@ async function startAdventureChapter(
     resumeResources: charSave?.resources,
     resumeSpellSlots: charSave?.spellSlots,
     resumePreparedSpellIds: charSave?.preparedSpellIds,
+    resumeLevelUps: charSave?.levelUps,
   };
 
   const engine = GameEngine.createSession(sessionId, { ...req, encounterContext }, defs, savedMap);
@@ -892,7 +906,7 @@ async function startAdventureChapter(
   if (anyHostileToParty(engine.getState())) {
     engine.triggerCombat();
   }
-  return { sessionId, state: engine.getState() };
+  return { sessionId, state: engine.getState(), playerDef: engine.getPlayerDef() };
 }
 
 /**
@@ -1037,16 +1051,44 @@ server.post("/game/session", async (req, reply) => {
     customContext: body.customContext,
     customObjective: body.customObjective,
     startingZones: body.startingZones,
+    allowsLongRest: body.allowsLongRest,
   });
 
   const savedMap = body.savedMapId
     ? (defs.maps.find((m) => m.id === body.savedMapId) ?? undefined)
     : undefined;
 
+  // Server save is the source of truth for persistent character state —
+  // level-up history, prepared spells, spell slots, resource pools, HP.
+  // Fall back to whatever the client sent (legacy / freshly-imported
+  // characters with no server save).
+  const charSaveForResume = await readSaveIfExists(body.playerDefId);
+  const resumeLevelUps        = charSaveForResume?.levelUps        ?? body.resumeLevelUps;
+  const resumeSpellSlots      = charSaveForResume?.spellSlots      ?? body.resumeSpellSlots;
+  const resumePreparedSpellIds = charSaveForResume?.preparedSpellIds ?? body.resumePreparedSpellIds;
+  const resumeResources       = charSaveForResume?.resources       ?? body.resumeResources;
+  const resumeHp              = charSaveForResume?.hp              ?? body.resumeHp;
+  const resumeXp              = charSaveForResume?.xp              ?? body.resumeXp;
+  const resumeGold            = charSaveForResume?.gold            ?? body.resumeGold;
+  const resumeInventoryIds    = charSaveForResume?.inventoryIds    ?? body.resumeInventoryIds;
+  const resumeEquippedSlots   = charSaveForResume?.equippedSlots   ?? body.resumeEquippedSlots;
+
   const sessionId = randomUUID();
   const engine = GameEngine.createSession(
     sessionId,
-    { ...body, encounterContext },
+    {
+      ...body,
+      encounterContext,
+      resumeLevelUps,
+      resumeSpellSlots,
+      resumePreparedSpellIds,
+      resumeResources,
+      resumeHp,
+      resumeXp,
+      resumeGold,
+      resumeInventoryIds,
+      resumeEquippedSlots,
+    },
     defs,
     savedMap,
   );
@@ -1066,7 +1108,10 @@ server.post("/game/session", async (req, reply) => {
     engine.triggerCombat();
   }
 
-  return reply.send({ sessionId, state: engine.getState() });
+  // Include the engine's per-session PlayerDef (with any level-up history
+  // already replayed) so the client renders the HUD against the character's
+  // current level rather than the L1 starting state from the cached registry.
+  return reply.send({ sessionId, state: engine.getState(), playerDef: engine.getPlayerDef() });
 });
 
 /**
@@ -1083,6 +1128,135 @@ server.post("/game/session/:id/world-paused", async (req, reply) => {
   if (!getEngine(id)) return reply.code(404).send({ error: "Session not found" });
   setWorldPaused(id, body.paused);
   return reply.send({ paused: body.paused });
+});
+
+/**
+ * Build the SRD level-up preview for the session's character. Returns 200
+ * with `{ preview: null }` when the character isn't eligible yet (so the
+ * client can refresh without surfacing an error).
+ */
+server.get("/game/session/:id/level-up", async (req, reply) => {
+  const { id } = req.params as { id: string };
+  const engine = getEngine(id);
+  if (!engine) return reply.code(404).send({ error: "Session not found" });
+  try {
+    return reply.send({ preview: engine.buildLevelUpPreview() });
+  } catch (err) {
+    return reply.code(400).send({ error: err instanceof Error ? err.message : String(err) });
+  }
+});
+
+/**
+ * Build the Long Rest preview for the active session's character. Returns
+ * `{ preview: null }` when the encounter doesn't permit Long Rest or the
+ * player is in combat — the client treats both the same (no button).
+ */
+server.get("/game/session/:id/long-rest", async (req, reply) => {
+  const { id } = req.params as { id: string };
+  const engine = getEngine(id);
+  if (!engine) return reply.code(404).send({ error: "Session not found" });
+  return reply.send({ preview: engine.buildLongRestPreview() });
+});
+
+/**
+ * Apply a confirmed Long Rest. Body: `{ choices: LongRestChoices }`. Updates
+ * the runtime state (HP / hit dice / slots / resources / wizard prep / etc.)
+ * and persists the new running totals to the character save so the rested
+ * character survives a session restart.
+ */
+server.post("/game/session/:id/long-rest", async (req, reply) => {
+  const { id } = req.params as { id: string };
+  const engine = getEngine(id);
+  if (!engine) return reply.code(404).send({ error: "Session not found" });
+  const body = req.body as { choices?: import("../../shared/types.js").LongRestChoices } | undefined;
+  const choices = body?.choices ?? {};
+
+  let preview;
+  try {
+    preview = engine.commitLongRest(choices);
+  } catch (err) {
+    return reply.code(400).send({ error: err instanceof Error ? err.message : String(err) });
+  }
+
+  // Persist the post-rest state to the character save so the rested
+  // character survives session restart / chapter advance.
+  const playerDef = engine.getPlayerDef();
+  const state = engine.getState();
+  const existing = (await readSaveIfExists(playerDef.id)) ?? {
+    playerDefId: playerDef.id,
+    hp: state.player.hp,
+    xp: state.player.xp,
+    gold: state.player.gold,
+    inventoryIds: state.player.inventoryIds,
+  } as CharSave;
+  const updated: CharSave = {
+    ...existing,
+    hp: state.player.hp,
+    xp: state.player.xp,
+    gold: state.player.gold,
+    inventoryIds: state.player.inventoryIds,
+    equippedSlots: state.player.equippedSlots,
+    spellSlots: state.player.spellSlots,
+    preparedSpellIds: state.player.preparedSpellIds,
+    resources: state.player.resources,
+  };
+  await writeFile(saveFilePath(playerDef.id), JSON.stringify(updated, null, 2));
+
+  pushStateUpdate(id, [], state);
+
+  return reply.send({ preview, state, playerDef });
+});
+
+/**
+ * Apply a confirmed level-up. Body shape: `{ choices: LevelUpChoices }`.
+ * On success, persists the new level-up to the character save and broadcasts
+ * a `state_update` so connected clients refresh their playerDef + HUD.
+ */
+server.post("/game/session/:id/level-up", async (req, reply) => {
+  const { id } = req.params as { id: string };
+  const engine = getEngine(id);
+  if (!engine) return reply.code(404).send({ error: "Session not found" });
+  const body = req.body as { choices?: import("../../shared/types.js").LevelUpChoices } | undefined;
+  const choices = body?.choices ?? {};
+
+  let preview;
+  try {
+    preview = engine.commitLevelUp(choices);
+  } catch (err) {
+    return reply.code(400).send({ error: err instanceof Error ? err.message : String(err) });
+  }
+
+  // Persist the new level-up to the character save so the change survives
+  // session restart / chapter advance / app reload.
+  const playerDef = engine.getPlayerDef();
+  const existing = (await readSaveIfExists(playerDef.id)) ?? {
+    playerDefId: playerDef.id,
+    hp: engine.getState().player.hp,
+    xp: engine.getState().player.xp,
+    gold: engine.getState().player.gold,
+    inventoryIds: engine.getState().player.inventoryIds,
+  } as CharSave;
+  const history = (existing.levelUps ?? []).slice();
+  history.push(choices);
+  const updated: CharSave = {
+    ...existing,
+    hp: engine.getState().player.hp,
+    xp: engine.getState().player.xp,
+    gold: engine.getState().player.gold,
+    inventoryIds: engine.getState().player.inventoryIds,
+    equippedSlots: engine.getState().player.equippedSlots,
+    spellSlots: engine.getState().player.spellSlots,
+    preparedSpellIds: engine.getState().player.preparedSpellIds,
+    resources: engine.getState().player.resources,
+    levelUps: history,
+  };
+  await writeFile(saveFilePath(playerDef.id), JSON.stringify(updated, null, 2));
+
+  // Push a state_update so any connected websocket clients re-render the HUD
+  // with the new HP / spell slots.
+  pushStateUpdate(id, [], engine.getState());
+
+  return reply.send({ preview, state: engine.getState(), playerDef });
 });
 
 /**
@@ -1162,6 +1336,19 @@ server.post("/game/session/:id/aigm", async (req, reply) => {
 
   try {
     pushAdventureLines(id, [{ type: "dm_player", text: body.playerMessage }]);
+
+    // `[<player> says to <target>]: <line>` is the wrapper the HUD chat (and
+    // the Player Panel TALK button) emits when the player addresses an NPC.
+    // Surface the spoken line in the Event Log immediately and push a state
+    // update so the player sees their dialogue land in the log right away
+    // rather than waiting for the GM's response to ship the next state.
+    const saytoMatch = body.playerMessage.match(/^\[(.+?) says to (.+?)\]:\s*(.+)$/s);
+    if (saytoMatch) {
+      const [, sayer, target, line] = saytoMatch;
+      engine.addLog({ left: `${sayer} → ${target}: "${line.trim()}"`, style: 'status' });
+      pushStateUpdate(id, [], engine.getState());
+    }
+
     const logLengthBefore = engine.getState().eventLog.length;
     const archive = getAigmArchive(id);
 
@@ -1265,7 +1452,11 @@ server.get("/game/session/:id/ws", { websocket: true }, (socket, req) => {
   socket.send(
     JSON.stringify({
       type: "state_update",
-      events: [],
+      // Flush any events queued during session construction — notably the
+      // intro cinematic emitted by `encounter_started` triggers (supertitle,
+      // fade-in, opening announcement). The buffer is consumed once, so a
+      // mid-session WS reconnect doesn't re-replay the intro.
+      events: engine.consumeStartupEvents(),
       state: engine.getState(),
     } satisfies ServerWSMessage),
   );

@@ -174,6 +174,15 @@ export function doShortRest(ctx: GameContext): void {
     { left: `Short Rest — +${healed} HP restored`, right: `1d${ctx.playerDef.hitDieType}+CON(${conMod >= 0 ? '+' : ''}${conMod})=[${roll}]+${conMod}=${healed}`, style: 'heal' },
     { left: `HP: ${before} → ${s.player.hp}/${ctx.playerDef.maxHp}  (${remaining} Hit ${remaining === 1 ? 'Die' : 'Dice'} left)`, style: 'status' },
   ]);
+  // Refill every short-rest feature resource the character knows. New
+  // encounters already act as Long Rests via SessionBuilder seeding, so the
+  // refill only matters when the player stays in the same session.
+  for (const fid of ctx.playerDef.defaultFeatureIds ?? []) {
+    const def = ctx.defs.features.find((f) => f.id === fid);
+    if (def?.resource?.kind === 'uses-per-short-rest') {
+      s.player.resources[fid] = def.resource.max;
+    }
+  }
 }
 
 export function doUsePotion(ctx: GameContext): void {

@@ -1,0 +1,16 @@
+{
+  "id": "illusory-script",
+  "name": "Illusory Script",
+  "level": 1,
+  "school": "illusion",
+  "classes": ["bard", "warlock", "wizard"],
+  "castingTime": "minute",
+  "range": "touch",
+  "rangeFeet": 0,
+  "components": { "verbal": false, "somatic": true, "material": "ink worth 10+ GP, consumed by the spell" },
+  "duration": "10 days",
+  "durationRounds": 86400,
+  "concentration": false,
+  "ritual": true,
+  "description": "You write on parchment, paper, or another suitable writing material and imbue it with a potent illusion that lasts for the duration. To you and any creatures you designate when you cast the spell, the writing appears normal. To all others, it appears as gibberish or as written in an unfamiliar magical script. A creature with truesight can read the hidden message."
+}

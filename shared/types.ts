@@ -450,8 +450,23 @@ export interface SpellComponents {
 export interface SpellAttackOnly { kind: 'ranged-spell' | 'melee-spell' | 'auto-hit'; }
 export interface SpellSave { ability: 'str' | 'dex' | 'con' | 'int' | 'wis' | 'cha'; halfOnSuccess: boolean; }
 export interface SpellDamage { dice: number; sides: number; bonus?: number; type: string; }
-export interface SpellArea { shape: 'cone' | 'sphere' | 'cube' | 'line'; sizeFeet: number; }
-export interface SpellEffect { onFail?: string; onSecondFail?: string; }
+export interface SpellArea {
+  shape: 'cone' | 'sphere' | 'cube' | 'line';
+  sizeFeet: number;
+  /** SRD "each creature of your choice in the area" — when true the client
+   *  surfaces a second-step picker after the AOE is placed so the caster
+   *  decides which creatures in the area to affect (defaults to every
+   *  non-ally). Sleep uses this; Color Spray / Thunderwave / Grease do not. */
+  creaturesOfYourChoice?: boolean;
+}
+export interface SpellEffect {
+  /** Condition(s) applied to the target on a failed save. Accepts either a
+   *  single condition name (Sleep's `incapacitated`) or an array
+   *  (Hideous Laughter's `["prone", "incapacitated"]`). */
+  onFail?: string | string[];
+  /** Sleep's escalation: a second failed save replaces `onFail` with this. */
+  onSecondFail?: string;
+}
 
 export interface SpellDef {
   id: string;
@@ -475,6 +490,25 @@ export interface SpellDef {
   darts?: number;                  // Magic Missile: guaranteed-hit projectile count
   rider?: string;                  // narrative one-line secondary effect on hit
   effect?: SpellEffect;            // condition outcomes (Sleep)
+  /** Damage types the caster may choose from at cast time (Chromatic Orb,
+   *  Dragon's Breath, …). When present, the engine ignores `damage.type` and
+   *  uses the player's pick from this list instead. */
+  damageTypeChoices?: string[];
+  /** Spell that conjures a player-owned entity on the map (Mage Hand,
+   *  Unseen Servant). The cast targets a tile within `rangeFeet`; the
+   *  spawned NPC carries `summonSpellId` so the engine can route the
+   *  `commandSummon` action correctly and enforce tether / damage lifecycle. */
+  summon?: {
+    /** `MonsterDef.id` to instantiate at the targeted tile. */
+    monsterId: string;
+    /** Per-command movement allowance, in feet. Each command moves the
+     *  summon at most this far. */
+    moveRangeFeet: number;
+    /** Optional max distance the caster may stray from the summon before
+     *  the spell ends (Mage Hand's 30 ft tether). Omit for spells without
+     *  a tether (Unseen Servant). */
+    tetherFeet?: number;
+  };
   description: string;
   scaling?: string;
 }
@@ -634,6 +668,13 @@ export interface EncounterDef {
   customIntroduction?: string;
   customContext?: string;
   /**
+   * When true the encounter offers Long Rest — the Player Panel surfaces a
+   * LONG REST button during exploration. SRD: a Long Rest is "8 hours of
+   * extended downtime" so the gate should match settings where that fits
+   * (taverns, safehouses, established camps). Defaults to false.
+   */
+  allowsLongRest?: boolean;
+  /**
    * Per-GID semantics for the referenced map's tiles in this encounter.
    * Required to make any tile of the map passable; tiles without a matching
    * entry are treated as impassable by SessionBuilder.
@@ -679,6 +720,14 @@ export interface EncounterDef {
    * bandits.
    */
   factionRelations?: Record<string, Record<string, number>>;
+  /**
+   * Optional world-flag name that marks the encounter complete when set. When
+   * a `set_flag` action (or AIGM `set_world_flag` tool) writes this flag, the
+   * engine publishes the `encounter_completed` event and authored triggers
+   * fire their closing actions. Combat encounters auto-complete on enemy
+   * defeat regardless of this field.
+   */
+  completionFlag?: string;
 }
 
 export interface EncounterEnvironment {
@@ -703,6 +752,15 @@ export type EngineEvent =
   | { type: 'turn_ended'; combatantId: 'player' | string }
   | { type: 'combat_started' }
   | { type: 'combat_ended' }
+  /** Published once at session start AFTER triggers register, so encounter authors
+   *  can attach lifecycle reactions (intro supertitles, scripted lines, etc.).
+   *  The events emitted by these triggers are buffered into the engine's
+   *  startup event sink and flushed on the first WS state_update. */
+  | { type: 'encounter_started' }
+  /** Published once when the encounter resolves — combat ends with no enemies
+   *  left alive, OR the encounter's `completionFlag` is set. Authors can hook
+   *  closing cinematics, awards, or summary announcements off this. */
+  | { type: 'encounter_completed' }
   | { type: 'flag_set'; name: string; value: WorldFlagValue }
   /** Published whenever an entity takes damage. `target` is 'player' or an NPC id. */
   | { type: 'damage_dealt'; target: 'player' | string; amount: number; sourceId?: string }
@@ -733,6 +791,12 @@ export type WhenClause =
   | { event: 'turn_ended'; combatantId?: 'player' | string }
   | { event: 'combat_started' }
   | { event: 'combat_ended' }
+  /** Fires once at session start, after all engine subscribers register. Use
+   *  to attach intro cinematics (supertitle, fade-in, opening announcement). */
+  | { event: 'encounter_started' }
+  /** Fires once when the encounter resolves — combat-victory OR completionFlag
+   *  set. Use for closing announcements, post-victory supertitles, etc. */
+  | { event: 'encounter_completed' }
   | { event: 'damage_dealt'; target?: 'player' | string }
   | { event: 'hp_threshold_crossed'; target?: 'player' | string; ratio?: number; direction?: 'below' | 'above' }
   | { event: 'faction_changed'; factionId?: string }
@@ -783,8 +847,19 @@ export type TriggerAction =
   | { type: 'set_disposition_by_def_id'; defId: string; disposition: 'ally' | 'neutral' | 'enemy' }
   /** Kicks off combat when the engine is in the exploring phase and at least one enemy is alive. Idempotent — no-ops if either precondition fails. */
   | { type: 'trigger_combat' }
+  /** Award XP to the player. Use for trigger-fired story rewards (parley success, scouted clue, riddle solved) where no kill rolled the XP automatically. */
+  | { type: 'award_xp'; amount: number }
   /** Roll a player ability check server-side (d20 + the player's `skills[<skill>]` bonus) against `dc`. Fires `onPass` actions if the total ≥ DC, otherwise `onFail`. Either branch may be empty — an empty `onFail` is the standard way to write "perception check that silently does nothing on a miss". The roll itself is NOT logged so failed perception/stealth checks don't leak information about hidden content. */
-  | { type: 'player_ability_check'; skill: string; dc: number; onPass: TriggerAction[]; onFail: TriggerAction[] };
+  | { type: 'player_ability_check'; skill: string; dc: number; onPass: TriggerAction[]; onFail: TriggerAction[] }
+  /** Movie-style centred location title. Mirrors the `show_supertitle` AIGM tool — same `durationMs` semantics (default 3000, max 15000). */
+  | { type: 'show_supertitle'; text: string; durationMs?: number }
+  /** Centre-screen announcement card; also appended to the Event Log so the message persists. Mirrors the `show_announcement` AIGM tool.
+   *  `mode` defaults to `'focused'` (orange-bordered card; hides Player/Target/HUD panels; locks input; pauses world). Use `'unfocused'` for borderless atmospheric announcements that leave the UI and game running. */
+  | { type: 'show_announcement'; text: string; durationMs?: number; mode?: 'focused' | 'unfocused' }
+  /** Speech bubble above the named entity's token (same renderer the `npc_speaks` AIGM tool drives). `entity` accepts `player` or an NPC entity ref (`enemy_A`, `npc_<id>`). No-op when the entity can't be resolved. */
+  | { type: 'npc_speaks'; entity: string; text: string }
+  /** Black-out fade overlay. `mode: 'out'` fades to full black; `mode: 'in'` fades back to clear; `mode: 'dim'` fades to a 50% black overlay (atmospheric dim, world still visible). The overlay is sticky — pair every darkening fade ('out' or 'dim') with a matching `in`. Mirrors the `fade_screen` AIGM tool. */
+  | { type: 'fade_screen'; mode: 'in' | 'out' | 'dim'; durationMs?: number };
 
 export interface EncounterTrigger {
   /** Unique within the encounter; used as the dedupe key in `firedTriggerIds`. */
@@ -1056,6 +1131,108 @@ export interface AvailableActions {
    *  Detach as an action (consumes the action and removes the attach effects
    *  from that source). */
   canDetach: boolean;
+  /** True when the player's XP has reached the threshold to advance to the next level (per SRD Character Advancement). The Player Panel surfaces this as a `LEVEL UP` button. */
+  canLevelUp: boolean;
+  /** True when the current encounter permits Long Rest (`GameState.allowsLongRest`) AND the player is in the exploration phase. */
+  canLongRest: boolean;
+}
+
+// ── Level-up preview + choices ────────────────────────────────────────────────
+
+/**
+ * Server-computed preview of what a single level-up applies + which choices
+ * the player must make. The client fetches one via `GET /game/session/:id/level-up`
+ * to render the LevelUpOverlay; on CONFIRM the client POSTs the chosen
+ * `LevelUpChoices` back to `POST /game/session/:id/level-up`. The server
+ * applies the changes atomically.
+ */
+export interface LevelUpPreview {
+  /** Current level (the level the character is at *before* the level-up). */
+  fromLevel: number;
+  /** New level the character will reach. Always `fromLevel + 1`. */
+  toLevel: number;
+  /** Class name (display, taken from `PlayerDef.className`). */
+  className: string;
+  /** HP delta added to `maxHp` — `fixedHpForClass(className) + conMod`, minimum 1. */
+  hpGain: number;
+  /** Proficiency bonus before/after. Equal when no change at this level. */
+  proficiencyBefore: number;
+  proficiencyAfter: number;
+  /** Spell-slot deltas, indexed by `spellLevel − 1`. Empty for non-casters or no change. */
+  spellSlotDeltas: number[];
+  /** Class features the character gains at the new level (id + name + SRD description). */
+  newFeatures: Array<{ id: string; name: string; description: string }>;
+  /** Player-facing prompts; `LevelUpChoices` must answer every prompt's `kind`. */
+  choices: LevelUpChoicePrompt[];
+}
+
+/**
+ * Discriminated union of every choice prompt the SRD can require at a level
+ * boundary. Add new variants here when adding higher-level choice handling
+ * (subclass at L3, ASI/Feat at L4, fighting-style upgrade, etc.).
+ */
+export type LevelUpChoicePrompt =
+  | {
+      kind: 'scholar-expertise';
+      label: string;
+      description: string;
+      /** Skill ids the player has proficiency in AND that the SRD Scholar feature allows. */
+      options: string[];
+    }
+  | {
+      kind: 'wizard-spellbook-add';
+      label: string;
+      description: string;
+      /** Spell ids the player may add. Filtered to wizard spells of a level the
+       *  character can cast that aren't already in the spellbook. May be empty
+       *  if the player already knows every available option, in which case the
+       *  prompt is purely informational and `count` is 0. */
+      options: Array<{ id: string; name: string; level: number; school: string }>;
+      /** Number of spells the player must add. Typically 2 (Wizard L2+). */
+      count: number;
+    };
+
+/** Player-supplied answers to a `LevelUpPreview`. Each chosen value matches its prompt's `kind`. */
+export interface LevelUpChoices {
+  scholarExpertise?: string;
+  wizardSpellbookAdd?: string[];
+}
+
+// ── Long Rest preview + choices ──────────────────────────────────────────────
+
+/**
+ * Server-computed summary of what a Long Rest will restore for the active
+ * character. Drives the `LongRestOverlay` — the client renders one row per
+ * non-zero delta plus a Wizard spell-prep picker when applicable. The SRD
+ * grants every standard benefit (full HP / Hit Dice / spell slots / class
+ * features, exhaustion -1); the only authored choice surfaced here is the
+ * Wizard's prepared-spell list, which the SRD lets the player rebuild each
+ * Long Rest.
+ */
+export interface LongRestPreview {
+  /** HP that will be restored (maxHp − currentHp). */
+  hpRestored: number;
+  /** Hit Dice the rest will restore — SRD 5.2.1 restores ALL spent Hit Dice. */
+  hitDiceRestored: number;
+  /** Spell-slot delta to restore per slot level. `spellSlotsRestored[i]` is the change to slot level `i+1`. */
+  spellSlotsRestored: number[];
+  /** Feature resources to refill: `{ id, name, before, max }` per affected pool. */
+  featuresRestored: Array<{ id: string; name: string; before: number; max: number }>;
+  /** Whether the player has at least one Exhaustion level to remove. */
+  exhaustionReduced: boolean;
+  /** Wizard-only: prepared-spell picker state. Omitted for non-Wizard classes. */
+  wizardSpellPrep?: {
+    spellbookSpells: Array<{ id: string; name: string; level: number; school: string }>;
+    /** Currently prepared ids. The client seeds the picker with these. */
+    currentlyPrepared: string[];
+    /** Maximum allowed prepared spells (SRD Wizard Features table, or higher when feats grant extras). */
+    maxPrepared: number;
+  };
+}
+
+/** Player-supplied answers to the long-rest preview. Wizards must pass their chosen prepared-spell list. */
+export interface LongRestChoices {
+  wizardPreparedSpellIds?: string[];
 }
 
 // Unified NPC state — covers neutral social NPCs, allied combatants, and enemies.
@@ -1071,6 +1248,15 @@ export interface NpcState {
   combatLabel: string;
   revealedName?: string;
   combatPassive?: boolean;
+  /** When set, this NPC was conjured by a spell — Mage Hand, Unseen Servant.
+   *  Summons skip the normal NPC turn loop (they don't act on their own; the
+   *  caster commands them with the `commandSummon` PlayerAction), aren't
+   *  added to combat initiative, and use a `<spell-id>` faction. The value is
+   *  the spell id that spawned them. */
+  summonSpellId?: string;
+  /** Player def id of the caster — used to enforce range tethers (Mage Hand
+   *  ends when the caster ends a turn more than 30 ft from the hand). */
+  summonOwnerId?: string;
   hp: number;
   maxHp: number;
   isActive: boolean;
@@ -1142,6 +1328,8 @@ export interface GameState {
   turnOrderIds: string[];
   introduction: string;
   encounterContext: string;
+  /** Carried from `EncounterDef.allowsLongRest` (default `false`) — drives `AvailableActions.canLongRest`. */
+  allowsLongRest: boolean;
   npcPersonas: NpcPersona[];
   availableActions: AvailableActions;
   /** Set when the engine has paused on a reaction-eligible trigger. The next player action must be `resolveReaction`. Cleared on resolution. */
@@ -1193,6 +1381,8 @@ export interface GameState {
   adventureContext: AdventureSessionContext | null;
   /** Set true when the active chapter has been resolved (combat-ended or `completionFlag` set). Drives the END CHAPTER button. */
   chapterComplete: boolean;
+  /** Optional world-flag name that, when set, marks the encounter complete. Mirrors `EncounterDef.completionFlag` for standalone (non-adventure) encounters so the `encounter_completed` engine event can fire on flag-driven resolutions. */
+  encounterCompletionFlag?: string;
   /** Environmental flags consulted by combat resolvers — sourced from EncounterDef.environment at session creation. */
   environment: EncounterEnvironment;
 }
@@ -1249,7 +1439,34 @@ export type PendingReaction = PendingReactionOA | PendingReactionShield;
 
 export type GameEvent =
   | { type: 'entity_move'; entityId: string; toX: number; toY: number }
-  | { type: 'log'; lines: string[] };
+  | { type: 'log'; lines: string[] }
+  /** Show a speech-bubble above the named entity for a few seconds. Pushed by
+   *  the AIGM `npc_speaks` tool (and future trigger actions); the client
+   *  resolves the entity ref (`player` / `enemy_A` / `npc_<id>`) to a token
+   *  position and renders an absolutely-positioned bubble. */
+  | { type: 'npc_speech'; entityId: string; text: string }
+  /** Black-out fade overlay covering the entire canvas + every UI panel.
+   *  `mode: 'out'` runs opacity → 1 (full black); `mode: 'in'` runs → 0
+   *  (fully clear); `mode: 'dim'` runs → 0.5 (50% black — atmospheric dim
+   *  where the world remains visible underneath). The event blocks the
+   *  event queue for `durationMs` so subsequent events (e.g. a supertitle
+   *  during a fade-out hold) play in sequence. */
+  | { type: 'screen_fade'; mode: 'in' | 'out' | 'dim'; durationMs: number }
+  /** Movie-style location title — huge centred white text holding the screen
+   *  for `durationMs` (defaults applied client-side). Blocks the event queue
+   *  for the duration so callers can chain fade_out → supertitle → fade_in. */
+  | { type: 'supertitle'; text: string; durationMs?: number }
+  /** Centre-screen announcement intended to mirror the event log. The server
+   *  is responsible for also appending the text to `state.eventLog` so the
+   *  message persists after the announcement fades.
+   *
+   *  `mode` controls how the announcement integrates with the live game:
+   *    - `focused` (default for cinematic beats): orange-bordered card; the
+   *      Player Panel, Target Panel, and HUD are hidden; player movement /
+   *      actions are locked; world-tick is paused for the duration.
+   *    - `unfocused`: borderless card with a soft edge-fade gradient. The UI
+   *      stays visible, the world keeps ticking, the player can keep playing. */
+  | { type: 'announcement'; text: string; durationMs?: number; mode?: 'focused' | 'unfocused' };
 
 // ── Player actions ───────────────────────────────────────────────────────────
 
@@ -1258,9 +1475,13 @@ export type PlayerAction =
   | { type: 'moveTo'; tileX: number; tileY: number }
   | { type: 'attack'; targetId?: string }
   | { type: 'throw'; itemId: string; targetId?: string }
-  | { type: 'castSpell'; spellId: string; slotLevel: number; targetIds?: string[]; tile?: { x: number; y: number }; asRitual?: boolean }
+  | { type: 'castSpell'; spellId: string; slotLevel: number; targetIds?: string[]; tile?: { x: number; y: number }; asRitual?: boolean; damageTypeChoice?: string }
   | { type: 'hide' }
   | { type: 'useFeature'; featureId: string; targetId?: string; tile?: { x: number; y: number } }
+  /** Command a player-owned summon (Mage Hand, Unseen Servant) to move to `tile`.
+   *  The server validates the move range per spell and ends the spell if the
+   *  range / lifecycle conditions are violated. Consumes the player's Action. */
+  | { type: 'commandSummon'; summonNpcId: string; tile: { x: number; y: number } }
   | { type: 'resolveReaction'; accept: boolean }
   | { type: 'dash' }
   | { type: 'dodge' }
@@ -1314,6 +1535,10 @@ export interface CreateSessionRequest {
   customIntroduction?: string;
   customContext?: string;
   customObjective?: string;
+  /** Mirror of `EncounterDef.allowsLongRest`. Carried through to `GameState.allowsLongRest`. */
+  allowsLongRest?: boolean;
+  /** Mirror of `EncounterDef.completionFlag`. Seeded onto `GameState.encounterCompletionFlag` for the `encounter_completed` lifecycle event. */
+  completionFlag?: string;
   tileProperties?: EncounterTileProperty[];
   startingZones?: StartingZonesLayer;
   triggers?: EncounterTrigger[];
@@ -1337,6 +1562,10 @@ export interface CreateSessionRequest {
   resumePreparedSpellIds?: string[];
   resumeConcentratingOn?: string | null;
   resumeMageArmor?: boolean;
+  /** Level-up history — one `LevelUpChoices` per level above 1. Replayed at
+   *  session start so the per-session `playerDef` clone reaches its current
+   *  level with the player's recorded feature / spell / Expertise picks. */
+  resumeLevelUps?: LevelUpChoices[];
 }
 
 export interface CreateSessionResponse {

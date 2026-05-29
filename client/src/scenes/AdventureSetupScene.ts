@@ -2,6 +2,7 @@ import Phaser from "phaser";
 import { PlayerDef } from "../data/player";
 import { ItemDef } from "../data/equipment";
 import { gameClient } from "../net/GameClient";
+import { fixedHpForClass } from "../../../shared/xpTable";
 import type { GameState, AdventureDef, AdventureSave, EquipmentSlots, EncounterRecord, StorylogEntry } from "../net/types";
 import { StorylogOverlay } from "../ui/StorylogOverlay";
 import { tokenAssetForPlayer } from "../data/tokens";
@@ -42,10 +43,14 @@ interface LocalSave {
   equippedSlots?: EquipmentSlots;
   encounterLog?: EncounterRecord[];
   storylog?: StorylogEntry[];
+  /** Mirror of `CharSave.levelUps` — length tells us how many levels above 1 the character has reached. */
+  levelUps?: unknown[];
 }
 
 interface CharCardElems {
   cardBtn: HtmlButtonHandle;
+  subEl: HTMLDivElement;
+  statsEl: HTMLDivElement;
   infoEl: HTMLDivElement;
   equippedEl: HTMLDivElement;
   deleteBtn: HtmlButtonHandle;
@@ -154,6 +159,26 @@ export class AdventureSetupScene extends Phaser.Scene {
           this.refreshAdventureCards();
         }
       }).catch(() => {});
+
+      // Refresh the character save too — picks up any level-ups that
+      // happened in a prior session so the card shows the right level + HP.
+      gameClient.loadSave(char.id).then((data) => {
+        if (!this.scene.isActive() || !data) return;
+        const save = data as LocalSave;
+        localStorage.setItem(saveKey(char.id), JSON.stringify(save));
+        this.charSaves.set(char.id, save);
+        const elems = this.charCards.get(char.id);
+        if (!elems) return;
+        const effectiveLevel = char.level + (save.levelUps?.length ?? 0);
+        const maxHp = effectiveMaxHp(char, save);
+        const statMod = (v: number) => Math.floor((v - 10) / 2);
+        const atkMod = char.mainAttack.statKey === "str" ? statMod(char.str) : statMod(char.dex);
+        const atkBonus = atkMod + char.proficiencyBonus;
+        const initMod = statMod(char.dex);
+        elems.subEl.textContent = `${char.speciesName}  ${char.className} ${effectiveLevel}`;
+        elems.statsEl.textContent = `HP ${maxHp}   AC ${char.ac}   Speed ${char.speed} ft\nAttack +${atkBonus}   Initiative ${initMod >= 0 ? "+" : ""}${initMod}`;
+        elems.infoEl.textContent = this.saveInfoLine(save, char);
+      }).catch(() => {});
     }
 
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => this.teardown());
@@ -217,8 +242,9 @@ export class AdventureSetupScene extends Phaser.Scene {
     nameEl.style.cssText = "margin-top: 8px; font-size: 15px; color: #ffffff; text-align: center;";
     inner.appendChild(nameEl);
 
+    const effectiveLevel = def.level + (save?.levelUps?.length ?? 0);
     const subEl = document.createElement("div");
-    subEl.textContent = `${def.speciesName}  ${def.className} ${def.level}`;
+    subEl.textContent = `${def.speciesName}  ${def.className} ${effectiveLevel}`;
     subEl.style.cssText = "margin-top: 6px; font-size: 11px; color: #8899aa; text-align: center;";
     inner.appendChild(subEl);
 
@@ -226,8 +252,9 @@ export class AdventureSetupScene extends Phaser.Scene {
     divider1.style.cssText = "width: 88%; height: 1px; background: #334455; margin-top: 14px;";
     inner.appendChild(divider1);
 
+    const maxHp = effectiveMaxHp(def, save);
     const statsEl = document.createElement("div");
-    statsEl.textContent = `HP ${def.maxHp}   AC ${def.ac}   Speed ${def.speed} ft\nAttack +${atkBonus}   Initiative ${initMod >= 0 ? "+" : ""}${initMod}`;
+    statsEl.textContent = `HP ${maxHp}   AC ${def.ac}   Speed ${def.speed} ft\nAttack +${atkBonus}   Initiative ${initMod >= 0 ? "+" : ""}${initMod}`;
     statsEl.style.cssText = "margin-top: 10px; width: 88%; font-size: 11px; color: #aabbcc; text-align: center; line-height: 1.7; white-space: pre-line;";
     inner.appendChild(statsEl);
 
@@ -294,7 +321,7 @@ export class AdventureSetupScene extends Phaser.Scene {
       storylogBtn.setDisabled(true);
     }
 
-    this.charCards.set(def.id, { cardBtn, infoEl, equippedEl, deleteBtn, storylogBtn });
+    this.charCards.set(def.id, { cardBtn, subEl, statsEl, infoEl, equippedEl, deleteBtn, storylogBtn });
   }
 
   /**
@@ -338,7 +365,7 @@ export class AdventureSetupScene extends Phaser.Scene {
   }
 
   private saveInfoLine(save: LocalSave, def: PlayerDef): string {
-    return `HP ${save.hp}/${def.maxHp}  ·  ${save.xp} XP  ·  ${save.gold} GP`;
+    return `HP ${save.hp}/${effectiveMaxHp(def, save)}  ·  ${save.xp} XP  ·  ${save.gold} GP`;
   }
 
   private equippedLine(save: LocalSave, items: ItemDef[]): string {
@@ -477,8 +504,10 @@ export class AdventureSetupScene extends Phaser.Scene {
   private beginAdventure(): void {
     if (!this.selectedPlayer || !this.selectedAdventure) return;
     this.beginBtn.setDisabled(true);
-    gameClient.startAdventure(this.selectedPlayer.id, this.selectedAdventure.id).then((initialState: GameState) => {
-      this.scene.start("GameScene", { sessionId: initialState.sessionId, playerDef: this.selectedPlayer! });
+    gameClient.startAdventure(this.selectedPlayer.id, this.selectedAdventure.id).then(({ state, playerDef }) => {
+      // Use the server-returned PlayerDef so the HUD reflects the character's
+      // current level (level-up history already replayed engine-side).
+      this.scene.start("GameScene", { sessionId: state.sessionId, playerDef });
     }).catch((err: unknown) => {
       console.error("Failed to start adventure:", err);
       this.beginBtn.setDisabled(false);
@@ -499,4 +528,17 @@ export class AdventureSetupScene extends Phaser.Scene {
     this.charCards.clear();
     this.advCards.clear();
   }
+}
+
+/**
+ * Derive the character's current max HP from the L1 starting value plus
+ * recorded level-ups. Mirrors the SRD "Fixed Hit Points by Class" table the
+ * server's `Leveling.ts` applies on commit.
+ */
+function effectiveMaxHp(def: PlayerDef, save: LocalSave | null): number {
+  const levelsGained = save?.levelUps?.length ?? 0;
+  if (levelsGained === 0) return def.maxHp;
+  const conMod = Math.floor((def.con - 10) / 2);
+  const perLevel = Math.max(1, fixedHpForClass(def.className) + conMod);
+  return def.maxHp + levelsGained * perLevel;
 }

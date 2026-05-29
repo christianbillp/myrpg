@@ -1,0 +1,16 @@
+{
+  "id": "alarm",
+  "name": "Alarm",
+  "level": 1,
+  "school": "abjuration",
+  "classes": ["ranger", "wizard"],
+  "castingTime": "minute",
+  "range": "30 feet",
+  "rangeFeet": 30,
+  "components": { "verbal": true, "somatic": true, "material": "a bell and silver wire" },
+  "duration": "8 hours",
+  "durationRounds": 4800,
+  "concentration": false,
+  "ritual": true,
+  "description": "You set an alarm against intrusion. Choose a door, window, or area within range no larger than a 20-foot Cube. Until the spell ends, an alarm alerts you whenever a Tiny or larger creature touches or enters the area. You decide at casting time whether the alarm is mental (you receive a ping in your mind within 1 mile) or audible (an 80-foot-radius chime)."
+}

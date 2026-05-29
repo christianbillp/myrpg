@@ -157,6 +157,11 @@ function buildToolList() { return [
     input_schema: { type: 'object' as const, properties: { entity: { type: 'string' }, revealed_name: { type: 'string' } }, required: ['entity', 'revealed_name'] },
   },
   {
+    name: 'npc_speaks',
+    description: 'Show a brief speech bubble above an NPC (or the player) on the map for the line you pass. Call this **alongside** any in-fiction quote in your reply so the player can see at a glance who is speaking and where the sound is coming from — the bubble shows the same text you put between quotes in the narrative. Entity: the full ref from CURRENT STATE ("enemy_A", "ally_A", "npc_<id>", or "player"). Text: only the spoken line itself (no "she says" wrapping). Use a separate call per speaker if multiple characters speak in one reply.',
+    input_schema: { type: 'object' as const, properties: { entity: { type: 'string' }, text: { type: 'string' } }, required: ['entity', 'text'] },
+  },
+  {
     name: 'set_npc_passive',
     description: 'Mark an ally NPC as combat-passive (passive: true) so they skip their combat turn, or remove that restriction (passive: false). Use this when the player tells an ally to stay back, not fight, or stand down. Entity: the full entity ref from CURRENT STATE, e.g. "ally_A" or "npc_commoner_0".',
     input_schema: { type: 'object' as const, properties: { entity: { type: 'string' }, passive: { type: 'boolean' }, reason: { type: 'string' } }, required: ['entity', 'passive', 'reason'] },
@@ -195,6 +200,21 @@ function buildToolList() { return [
     name: 'set_world_flag',
     description: 'Write a value to `GameState.worldFlags[name]`. Use when a narrative resolution needs to influence encounter triggers — e.g. the player pays a toll and a "toll_paid" flag should prevent an ambush trigger from firing later. Values are booleans, numbers, or short strings. Triggers read these via `flag_set` / `flag_unset` / `flag_equals` guards. The flag is persisted with the world save.',
     input_schema: { type: 'object' as const, properties: { name: { type: 'string' }, value: { }, reason: { type: 'string' } }, required: ['name', 'value', 'reason'] },
+  },
+  {
+    name: 'fade_screen',
+    description: 'Fade the entire game screen (map + every UI panel) to or from black. Three modes — `"out"` fades to full black, `"in"` fades back to clear, `"dim"` fades to a 50% black overlay (atmospheric dim where the world is still visible underneath). Use for cinematic scene transitions — time-jumps, travel montages, dramatic reveals — and pair with show_supertitle / show_announcement between a fade-out and fade-in so the message lands against the black. The fade is sticky: a `mode: "out"` or `mode: "dim"` call leaves the overlay in place until a matching `mode: "in"` call (or the next chapter advance / long rest). `duration_ms` defaults to 1200 if omitted.',
+    input_schema: { type: 'object' as const, properties: { mode: { type: 'string', enum: ['in', 'out', 'dim'] }, duration_ms: { type: 'integer' }, reason: { type: 'string' } }, required: ['mode', 'reason'] },
+  },
+  {
+    name: 'show_supertitle',
+    description: 'Display a movie-style location title — huge bold white text centred on screen for a few seconds. Use sparingly to mark significant location or time changes (entering a new region, "Three Days Later", chapter-style cards). Pair with fade_screen for dramatic reveals. `duration_ms` controls the hold time (the fade-in and fade-out are added on top); defaults to 3000 if omitted.',
+    input_schema: { type: 'object' as const, properties: { text: { type: 'string' }, duration_ms: { type: 'integer' }, reason: { type: 'string' } }, required: ['text', 'reason'] },
+  },
+  {
+    name: 'show_announcement',
+    description: 'Display a large centred announcement card. The text is ALSO appended to the Event Log so the message persists after the visual fades. Use add_log_entry for routine log lines that do not need an attention-grabbing card.\n\n`mode` controls how the announcement integrates with play:\n  - `"focused"` (default) — orange-bordered card; the Player Panel, Target Panel, and HUD are hidden; player movement and actions are locked; world-tick is paused for the duration. Use for important beats the player MUST stop and read (quest reveal, major discovery).\n  - `"unfocused"` — borderless card with soft edge-fade; UI stays, world keeps ticking, player keeps playing. Use for atmospheric flavour (weather shift, distant thunder, time-of-day change).\n\n`duration_ms` defaults to 3500 if omitted.',
+    input_schema: { type: 'object' as const, properties: { text: { type: 'string' }, duration_ms: { type: 'integer' }, mode: { type: 'string', enum: ['focused', 'unfocused'] }, reason: { type: 'string' } }, required: ['text', 'reason'] },
   },
 ]; }
 
@@ -507,6 +527,30 @@ export function applyAIGMTool(
       toolResultContent = `${entity} is now known as "${revealedName}". The player has NOT been told the name yet — they only see your narrative reply. You MUST speak the name in this reply, in-character (e.g. "'I'm ${revealedName},' she says."). Use this name for all future references to this NPC.`;
       break;
     }
+    case 'npc_speaks': {
+      const entity = String(input['entity'] ?? '').trim();
+      const text = String(input['text'] ?? '').trim();
+      if (!entity || !text) {
+        toolResultContent = 'npc_speaks needs both entity and text.';
+        break;
+      }
+      // Resolve "player" → "player"; otherwise look up the NPC. Unknown
+      // entity refs are a no-op (with a hint so the model corrects itself).
+      let entityId: string | null = null;
+      if (entity === 'player') {
+        entityId = 'player';
+      } else {
+        const npc = engine.resolveNpcEntity(entity);
+        if (npc) entityId = npc.id;
+      }
+      if (!entityId) {
+        toolResultContent = `npc_speaks: unknown entity ref "${entity}". Use one from CURRENT STATE.`;
+        break;
+      }
+      events = [{ type: 'npc_speech', entityId, text }];
+      toolResultContent = `Speech bubble queued above ${entity}: "${text}".`;
+      break;
+    }
     case 'set_npc_passive': {
       events = engine.setNpcPassive(input['entity'] as string, input['passive'] as boolean);
       toolResultContent = `${input['entity']} is now ${input['passive'] ? 'passive — will skip combat turns' : 'active — will act normally in combat'}.`;
@@ -612,6 +656,52 @@ export function applyAIGMTool(
       }
       engine.setWorldFlag(name, rawValue);
       toolResultContent = `World flag "${name}" set to ${JSON.stringify(rawValue)}.`;
+      break;
+    }
+    case 'fade_screen': {
+      const rawMode = input['mode'];
+      const mode = rawMode === 'in' || rawMode === 'out' || rawMode === 'dim' ? rawMode : null;
+      if (!mode) { toolResultContent = 'fade_screen requires mode: "in", "out", or "dim".'; break; }
+      const rawDuration = input['duration_ms'];
+      const durationMs = typeof rawDuration === 'number' && rawDuration >= 0
+        ? Math.min(10000, Math.floor(rawDuration))
+        : 1200;
+      events = [{ type: 'screen_fade', mode, durationMs }];
+      toolResultContent = `Screen fade ${mode} queued (${durationMs} ms).`;
+      break;
+    }
+    case 'show_supertitle': {
+      const text = String(input['text'] ?? '').trim();
+      if (!text) { toolResultContent = 'show_supertitle requires non-empty text.'; break; }
+      const rawDuration = input['duration_ms'];
+      const durationMs = typeof rawDuration === 'number' && rawDuration > 0
+        ? Math.min(15000, Math.floor(rawDuration))
+        : undefined;
+      events = durationMs !== undefined
+        ? [{ type: 'supertitle', text, durationMs }]
+        : [{ type: 'supertitle', text }];
+      toolResultContent = `Supertitle queued: "${text}".`;
+      break;
+    }
+    case 'show_announcement': {
+      const text = String(input['text'] ?? '').trim();
+      if (!text) { toolResultContent = 'show_announcement requires non-empty text.'; break; }
+      const rawDuration = input['duration_ms'];
+      const durationMs = typeof rawDuration === 'number' && rawDuration > 0
+        ? Math.min(15000, Math.floor(rawDuration))
+        : undefined;
+      const rawMode = input['mode'];
+      const mode: 'focused' | 'unfocused' = rawMode === 'unfocused' ? 'unfocused' : 'focused';
+      // Mirror the announcement to the Event Log so it persists after the
+      // visual fades. The Event Log is canonical; the announcement is just an
+      // attention-grabbing visual on top.
+      engine.addLog(text);
+      const ev: import('../../../shared/types.js').GameEvent =
+        durationMs !== undefined
+          ? { type: 'announcement', text, durationMs, mode }
+          : { type: 'announcement', text, mode };
+      events = [ev];
+      toolResultContent = `Announcement queued (${mode}): "${text}" (also written to Event Log).`;
       break;
     }
   }

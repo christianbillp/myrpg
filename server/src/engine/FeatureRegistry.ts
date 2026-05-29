@@ -71,3 +71,21 @@ registerFeatureHandler('second-wind', (ctx, featureId) => {
   ]);
   s.player.bonusActionUsed = true;
 });
+
+/**
+ * Action Surge (Fighter L2+). Refreshes the Action this turn — the player
+ * may take one more Action (the SRD excludes the Magic action; we don't
+ * model that constraint yet because the engine has no concept of "the second
+ * Action this turn cannot be Magic" — revisit if it ever matters in practice).
+ * Consumes 1 use from the short-rest pool. Refilled on Short or Long Rest.
+ */
+registerFeatureHandler('action-surge', (ctx, featureId) => {
+  const s = ctx.state;
+  s.player.actionUsed = false;
+  s.player.resources[featureId] = Math.max(0, (s.player.resources[featureId] ?? 0) - 1);
+  const remaining = s.player.resources[featureId] ?? 0;
+  ctx.addLog({
+    left: `${ctx.playerDef.name} uses Action Surge — additional Action this turn (${remaining}/1 left until short rest)`,
+    style: 'status',
+  });
+});

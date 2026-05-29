@@ -24,13 +24,21 @@ export function endConcentration(ctx: GameContext, reason: string): void {
   const spell = ctx.defs.spells.find((sp) => sp.id === spellId);
   ctx.addLog({ left: `Concentration on ${spell?.name ?? spellId} ends — ${reason}`, style: 'status' });
 
-  // Drop spell-specific lasting effects when concentration ends.
-  if (spellId === 'sleep') {
-    for (const npc of s.npcs) {
-      const idx = npc.conditions.indexOf('incapacitated');
-      if (idx !== -1) npc.conditions.splice(idx, 1);
-      const u = npc.conditions.indexOf('unconscious');
-      if (u !== -1) npc.conditions.splice(u, 1);
+  // Strip every condition the spell's effect block applied (Sleep →
+  // incapacitated, unconscious; Hideous Laughter → prone, incapacitated;
+  // Charm Person → charmed). The cleanup is approximate — a creature with
+  // the same condition from another source loses it too — but acceptable
+  // given the shipped roster has no overlapping sources.
+  if (spell?.effect) {
+    const cleanup = new Set<string>();
+    const fail = spell.effect.onFail;
+    if (Array.isArray(fail))      for (const c of fail) cleanup.add(c);
+    else if (typeof fail === 'string') cleanup.add(fail);
+    if (spell.effect.onSecondFail) cleanup.add(spell.effect.onSecondFail);
+    if (cleanup.size > 0) {
+      for (const npc of s.npcs) {
+        npc.conditions = npc.conditions.filter((c) => !cleanup.has(c));
+      }
     }
   }
   s.player.concentratingOn = null;

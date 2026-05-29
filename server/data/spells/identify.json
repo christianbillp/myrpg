@@ -1,0 +1,15 @@
+{
+  "id": "identify",
+  "name": "Identify",
+  "level": 1,
+  "school": "divination",
+  "classes": ["bard", "wizard"],
+  "castingTime": "minute",
+  "range": "touch",
+  "rangeFeet": 0,
+  "components": { "verbal": true, "somatic": true, "material": "a pearl worth 100+ GP" },
+  "duration": "instantaneous",
+  "concentration": false,
+  "ritual": true,
+  "description": "You choose one object that you must touch throughout the casting of the spell. If it's a magic item or some other magic-imbued object, you learn its properties, how to use them, how many charges it has (if any), and whether it requires Attunement. If the object was created by a spell, you learn which spell. If you instead touch a creature throughout the casting, you learn what spells, if any, are currently affecting it."
+}

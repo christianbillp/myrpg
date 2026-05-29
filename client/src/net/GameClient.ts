@@ -1,5 +1,7 @@
 import type {
   GameState, GameEvent, PlayerAction, ServerWSMessage, CreateSessionRequest, StorylogEntry, AdventureSave,
+  LevelUpPreview, LevelUpChoices, PlayerDef,
+  LongRestPreview, LongRestChoices,
 } from './types';
 
 const API_URL = 'http://localhost:3000';
@@ -63,16 +65,16 @@ export class GameClient {
     }
   }
 
-  async createSession(req: CreateSessionRequest): Promise<GameState> {
+  async createSession(req: CreateSessionRequest): Promise<{ state: GameState; playerDef: PlayerDef }> {
     const res = await fetch(`${API_URL}/game/session`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(req),
     });
     if (!res.ok) throw new Error(`Failed to create session: ${res.status}`);
-    const { sessionId, state } = await res.json() as { sessionId: string; state: GameState };
+    const { sessionId, state, playerDef } = await res.json() as { sessionId: string; state: GameState; playerDef: PlayerDef };
     this.sessionId = sessionId;
-    return state;
+    return { state, playerDef };
   }
 
   connectWebSocket(): void {
@@ -128,6 +130,70 @@ export class GameClient {
       body: JSON.stringify(action),
     });
     // State update arrives via WebSocket
+  }
+
+  /**
+   * Fetch the SRD level-up preview for the active session's character.
+   * Returns `null` when the character isn't eligible yet — typically because
+   * the XP threshold hasn't been reached. The Player Panel already guards
+   * the LEVEL UP button on `availableActions.canLevelUp`, so a null return
+   * here just means the server's view is stale (e.g. XP awarded between
+   * frames).
+   */
+  async fetchLevelUpPreview(): Promise<LevelUpPreview | null> {
+    if (!this.sessionId) return null;
+    const res = await fetch(`${API_URL}/game/session/${this.sessionId}/level-up`);
+    if (!res.ok) throw new Error(`level-up preview failed: ${res.status}`);
+    const body = await res.json() as { preview: LevelUpPreview | null };
+    return body.preview;
+  }
+
+  /**
+   * Confirm a level-up. The server applies the changes, persists them to the
+   * character save, and returns the post-level-up state + updated PlayerDef
+   * so the client can refresh its cached copy.
+   */
+  async commitLevelUp(choices: LevelUpChoices): Promise<{ state: GameState; playerDef: PlayerDef; preview: LevelUpPreview }> {
+    if (!this.sessionId) throw new Error('No active session.');
+    const res = await fetch(`${API_URL}/game/session/${this.sessionId}/level-up`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ choices }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({})) as { error?: string };
+      throw new Error(err.error ?? `level-up commit failed: ${res.status}`);
+    }
+    return res.json() as Promise<{ state: GameState; playerDef: PlayerDef; preview: LevelUpPreview }>;
+  }
+
+  /**
+   * Fetch the SRD Long Rest preview for the active session. Returns `null`
+   * when the encounter doesn't permit Long Rest or the player is in combat
+   * — the PlayerPanel already gates the LONG REST button on
+   * `availableActions.canLongRest`, so a null here usually indicates a race.
+   */
+  async fetchLongRestPreview(): Promise<LongRestPreview | null> {
+    if (!this.sessionId) return null;
+    const res = await fetch(`${API_URL}/game/session/${this.sessionId}/long-rest`);
+    if (!res.ok) throw new Error(`long-rest preview failed: ${res.status}`);
+    const body = await res.json() as { preview: LongRestPreview | null };
+    return body.preview;
+  }
+
+  /** Confirm a Long Rest. Returns post-rest state + updated PlayerDef. */
+  async commitLongRest(choices: LongRestChoices): Promise<{ state: GameState; playerDef: PlayerDef; preview: LongRestPreview }> {
+    if (!this.sessionId) throw new Error('No active session.');
+    const res = await fetch(`${API_URL}/game/session/${this.sessionId}/long-rest`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ choices }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({})) as { error?: string };
+      throw new Error(err.error ?? `long-rest commit failed: ${res.status}`);
+    }
+    return res.json() as Promise<{ state: GameState; playerDef: PlayerDef; preview: LongRestPreview }>;
   }
 
   async sendAIGMMessage(
@@ -289,13 +355,20 @@ export class GameClient {
     triggers?: Array<{
       id: string;
       region: { x: number; y: number; w: number; h: number };
-      kind: "perception" | "log" | "aigm" | "combat";
+      kind:
+        | "perception" | "log" | "aigm" | "combat" | "xp"
+        | "supertitle" | "announcement" | "speech" | "fade";
       dc: number;
       passMessage: string;
       message: string;
       defId: string;
       /** Optional bulk-flip list for `combat` kind — RANDOMIZE flow fills this with every rolled enemy type. */
       defIds?: string[];
+      xpAmount?: number;
+      durationMs?: number;
+      entityRef?: string;
+      fadeMode?: "in" | "out" | "dim";
+      announcementMode?: "focused" | "unfocused";
     }>;
   }): Promise<{
     mapId: string;
@@ -355,12 +428,19 @@ export class GameClient {
     triggers?: Array<{
       id: string;
       region: { x: number; y: number; w: number; h: number };
-      kind: "perception" | "log" | "aigm" | "combat";
+      kind:
+        | "perception" | "log" | "aigm" | "combat" | "xp"
+        | "supertitle" | "announcement" | "speech" | "fade";
       dc: number;
       passMessage: string;
       message: string;
       defId: string;
       defIds?: string[];
+      xpAmount?: number;
+      durationMs?: number;
+      entityRef?: string;
+      fadeMode?: "in" | "out" | "dim";
+      announcementMode?: "focused" | "unfocused";
     }>;
   }): Promise<{ encounterId: string; mapId: string }> {
     const res = await fetch(`${API_URL}/generate/encounter/update`, {
@@ -479,7 +559,7 @@ export class GameClient {
    * encounter JSON from the server's /encounters listing, then calls the
    * standard session-create route with its fields.
    */
-  async startGeneratedEncounter(encounterId: string, characterId: string): Promise<GameState> {
+  async startGeneratedEncounter(encounterId: string, characterId: string): Promise<{ state: GameState; playerDef: PlayerDef }> {
     const list = await fetch(`${API_URL}/encounters`).then((r) => r.json()) as Array<{
       id: string; encounterTitle: string; mapId: string;
       npcIds?: string[]; allyIds?: string[]; enemyIds?: string[];
@@ -505,33 +585,34 @@ export class GameClient {
     });
   }
 
-  async startAdventure(characterId: string, adventureId: string): Promise<GameState> {
+  async startAdventure(characterId: string, adventureId: string): Promise<{ state: GameState; playerDef: PlayerDef }> {
     const res = await fetch(`${API_URL}/adventure/start`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ characterId, adventureId }),
     });
     if (!res.ok) throw new Error(`Adventure start failed: ${res.status}`);
-    const { sessionId, state } = await res.json() as { sessionId: string; state: GameState };
+    const { sessionId, state, playerDef } = await res.json() as { sessionId: string; state: GameState; playerDef: PlayerDef };
     this.sessionId = sessionId;
     state.sessionId = sessionId;
-    return state;
+    return { state, playerDef };
   }
 
   /**
    * Advance to the next chapter. Returns `{ complete: true }` when the
-   * adventure has been finished; otherwise the new chapter's GameState. The
-   * caller is responsible for closing the old WebSocket and connecting to
-   * the new session (see GameScene's chapter-advance handler).
+   * adventure has been finished; otherwise the new chapter's GameState +
+   * leveled-up PlayerDef. The caller is responsible for closing the old
+   * WebSocket and connecting to the new session (see GameScene's
+   * chapter-advance handler).
    */
-  async advanceChapter(characterId: string): Promise<{ complete: true } | { complete: false; sessionId: string; state: GameState }> {
+  async advanceChapter(characterId: string): Promise<{ complete: true } | { complete: false; sessionId: string; state: GameState; playerDef: PlayerDef }> {
     const res = await fetch(`${API_URL}/adventure/${characterId}/advance`, { method: 'POST' });
     if (!res.ok) throw new Error(`Adventure advance failed: ${res.status}`);
-    const body = await res.json() as { complete: boolean; sessionId?: string; state?: GameState };
+    const body = await res.json() as { complete: boolean; sessionId?: string; state?: GameState; playerDef?: PlayerDef };
     if (body.complete) return { complete: true };
     this.sessionId = body.sessionId!;
     body.state!.sessionId = body.sessionId!;
-    return { complete: false, sessionId: body.sessionId!, state: body.state! };
+    return { complete: false, sessionId: body.sessionId!, state: body.state!, playerDef: body.playerDef! };
   }
 
   async checkHealth(): Promise<boolean> {

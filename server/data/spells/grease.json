@@ -1,0 +1,18 @@
+{
+  "id": "grease",
+  "name": "Grease",
+  "level": 1,
+  "school": "conjuration",
+  "classes": ["sorcerer", "wizard"],
+  "castingTime": "action",
+  "range": "60 feet",
+  "rangeFeet": 60,
+  "components": { "verbal": true, "somatic": true, "material": "a bit of pork rind or butter" },
+  "duration": "1 minute",
+  "durationRounds": 10,
+  "concentration": false,
+  "ritual": false,
+  "save": { "ability": "dex", "halfOnSuccess": false },
+  "area": { "shape": "cube", "sizeFeet": 10 },
+  "description": "Slick grease covers the ground in a 10-foot square within range and turns it into difficult terrain for the duration. Each creature standing in the area when the spell is cast, and any creature that enters or ends its turn there, must succeed on a Dexterity save or fall Prone."
+}

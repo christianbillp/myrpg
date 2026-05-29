@@ -1,0 +1,15 @@
+{
+  "id": "action-surge",
+  "name": "Action Surge",
+  "classId": "fighter",
+  "minLevel": 2,
+  "description": "On your turn, take one additional Action (except the Magic action). Once per Short or Long Rest.",
+  "cost": { "kind": "free" },
+  "resource": { "kind": "uses-per-short-rest", "max": 1 },
+  "ui": {
+    "buttonLabel": "ACTION SURGE",
+    "buttonColor": "#5a2a1a",
+    "resourceLabel": "Action Surge: {remaining}/{max}"
+  },
+  "handler": "action-surge"
+}

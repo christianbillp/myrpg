@@ -39,6 +39,7 @@ export class TargetPanel {
   private readonly statsEl: HTMLElement;
   private readonly abilitiesEl: HTMLElement;
   private readonly conditionsEl: HTMLElement;
+  private readonly conditionsLabelEl: HTMLElement;
   private readonly factionEl: HTMLElement;
   private readonly factionSepEl: HTMLElement;
   private readonly offResize: () => void;
@@ -85,7 +86,8 @@ export class TargetPanel {
       <div style="padding:4px 12px;font-size:10px;color:#99aabb;line-height:1.8;white-space:pre;" data-abilities></div>
       <div class="gui-sep" style="margin-top:2px;"></div>
 
-      <div style="padding:4px 12px;font-size:10px;color:#cc8844;line-height:1.8;word-wrap:break-word;" data-conditions></div>
+      <div class="gui-label" data-conditions-label style="display:none;">CONDITIONS</div>
+      <div style="padding:4px 12px;font-size:10px;color:#cc8844;line-height:1.6;display:flex;flex-wrap:wrap;gap:4px;" data-conditions></div>
       <div class="gui-sep" style="margin-top:2px;" data-faction-sep></div>
       <div style="padding:4px 12px;font-size:10px;line-height:1.6;" data-faction></div>
     `;
@@ -98,6 +100,7 @@ export class TargetPanel {
     this.statsEl      = ref('stats');
     this.abilitiesEl  = ref('abilities');
     this.conditionsEl = ref('conditions');
+    this.conditionsLabelEl = ref('conditions-label');
     this.factionEl    = ref('faction');
     this.factionSepEl = ref('faction-sep');
 
@@ -175,6 +178,32 @@ export class TargetPanel {
 
   hide(): void {
     this.el.style.display = 'none';
+    this.el.style.opacity = '1';
+    this.el.style.transition = '';
+  }
+
+  /** Fade the panel out over `durationMs`. Used by the focused-announcement
+   *  flow so the player sees the UI dissolve before the announcement card
+   *  arrives, rather than disappearing in a single frame. */
+  fadeOut(durationMs = 250): Promise<void> {
+    if (this.el.style.display === 'none') return Promise.resolve();
+    this.el.style.transition = `opacity ${durationMs}ms ease-in`;
+    this.el.style.opacity = '0';
+    return new Promise<void>((resolve) => setTimeout(() => {
+      this.el.style.display = 'none';
+      resolve();
+    }, durationMs));
+  }
+
+  /** Mirror of `fadeOut` — opacity 0 → 1 with a starting display:block. */
+  fadeIn(durationMs = 250): Promise<void> {
+    this.el.style.display = 'block';
+    this.el.style.transition = '';
+    this.el.style.opacity = '0';
+    void this.el.offsetWidth;
+    this.el.style.transition = `opacity ${durationMs}ms ease-out`;
+    this.el.style.opacity = '1';
+    return new Promise<void>((resolve) => setTimeout(resolve, durationMs));
   }
 
   refresh(npcState: NpcState, maxHp: number, factions: FactionDef[] = [], discoveredFactions: string[] = []): void {
@@ -183,9 +212,27 @@ export class TargetPanel {
     this.hpFill.style.width = `${Math.floor(pct * 100)}%`;
     this.hpFill.style.background = hpColor(pct);
     this.hpText.textContent = `${npcState.hp} / ${maxHp}`;
-    this.conditionsEl.textContent = npcState.conditions.length > 0
-      ? npcState.conditions.map(c => `[${c.toUpperCase()}]`).join('  ')
-      : '';
+    // Render conditions as styled chips when present; hide the whole row
+    // (label + chips) when the creature has no conditions so the panel
+    // doesn't carry dead vertical space.
+    const conds = npcState.conditions;
+    this.conditionsEl.innerHTML = '';
+    if (conds.length > 0) {
+      this.conditionsLabelEl.style.display = '';
+      this.conditionsEl.style.display = 'flex';
+      for (const c of conds) {
+        const chip = document.createElement('span');
+        chip.textContent = c.toUpperCase();
+        chip.style.cssText = `
+          padding: 1px 6px; background: #2a1810; border: 1px solid #5a3220;
+          color: #d99966; font-size: 9px; letter-spacing: 1px;
+        `;
+        this.conditionsEl.appendChild(chip);
+      }
+    } else {
+      this.conditionsLabelEl.style.display = 'none';
+      this.conditionsEl.style.display = 'none';
+    }
     // Re-render the FACTION row on each tick so a mid-encounter
     // `reveal_faction` (AIGM tool or trigger) immediately flips the chip
     // from `???` to the faction name.

@@ -4,6 +4,7 @@ import { ItemDef } from "../data/equipment";
 import { EncounterDef } from "../data/encounterContext";
 import { SavedMapDef } from "../data/maps";
 import { gameClient } from "../net/GameClient";
+import { fixedHpForClass } from "../../../shared/xpTable";
 import type { GameState, EquipmentSlots, EncounterRecord, StorylogEntry } from "../net/types";
 import { StorylogOverlay } from "../ui/StorylogOverlay";
 import { tokenAssetForPlayer } from "../data/tokens";
@@ -48,10 +49,14 @@ interface LocalSave {
   equippedSlots?: EquipmentSlots;
   encounterLog?: EncounterRecord[];
   storylog?: StorylogEntry[];
+  /** Mirror of `CharSave.levelUps` — length tells us how many levels above 1 the character has reached. */
+  levelUps?: unknown[];
 }
 
 interface CharCardElems {
   cardBtn: HtmlButtonHandle;
+  subEl: HTMLDivElement;
+  statsEl: HTMLDivElement;
   infoEl: HTMLDivElement;
   equippedEl: HTMLDivElement;
   deleteBtn: HtmlButtonHandle;
@@ -213,6 +218,18 @@ export class EncounterSetupScene extends Phaser.Scene {
     const elems = this.charCards.get(def.id);
     if (!elems) return;
     const items = this.registry.get("equipment") as ItemDef[];
+    // Refresh the level subtitle + stats block from the save's level-up
+    // history — the initial render uses whatever localStorage held at scene
+    // start, which can be stale by one level-up after the player returns
+    // from a session.
+    const effectiveLevel = def.level + (save.levelUps?.length ?? 0);
+    const maxHp = effectiveMaxHp(def, save);
+    const statMod = (v: number) => Math.floor((v - 10) / 2);
+    const atkMod = def.mainAttack.statKey === "str" ? statMod(def.str) : statMod(def.dex);
+    const atkBonus = atkMod + def.proficiencyBonus;
+    const initMod = statMod(def.dex);
+    elems.subEl.textContent = `${def.speciesName}  ${def.className} ${effectiveLevel}`;
+    elems.statsEl.textContent = `HP ${maxHp}   AC ${def.ac}   Speed ${def.speed} ft\nAttack +${atkBonus}   Initiative ${initMod >= 0 ? "+" : ""}${initMod}`;
     elems.infoEl.textContent = this.saveInfoLine(save, def);
     elems.infoEl.style.color = "#aabbcc";
     elems.equippedEl.textContent = this.equippedLine(save, items);
@@ -221,7 +238,7 @@ export class EncounterSetupScene extends Phaser.Scene {
   }
 
   private saveInfoLine(save: LocalSave, def: PlayerDef): string {
-    return `HP ${save.hp}/${def.maxHp}  ·  ${save.xp} XP  ·  ${save.gold} GP`;
+    return `HP ${save.hp}/${effectiveMaxHp(def, save)}  ·  ${save.xp} XP  ·  ${save.gold} GP`;
   }
 
   private equippedLine(save: LocalSave, items: ItemDef[]): string {
@@ -240,6 +257,7 @@ export class EncounterSetupScene extends Phaser.Scene {
     const atkMod = def.mainAttack.statKey === "str" ? statMod(def.str) : statMod(def.dex);
     const atkBonus = atkMod + def.proficiencyBonus;
     const initMod = statMod(def.dex);
+    const maxHp = effectiveMaxHp(def, save);
 
     const left = cx - CHAR_CARD_W / 2;
     const top = cy - CHAR_CARD_H / 2;
@@ -295,8 +313,9 @@ export class EncounterSetupScene extends Phaser.Scene {
     nameEl.style.cssText = "margin-top: 8px; font-size: 15px; color: #ffffff; text-align: center;";
     inner.appendChild(nameEl);
 
+    const effectiveLevel = def.level + (save?.levelUps?.length ?? 0);
     const subEl = document.createElement("div");
-    subEl.textContent = `${def.speciesName}  ${def.className} ${def.level}`;
+    subEl.textContent = `${def.speciesName}  ${def.className} ${effectiveLevel}`;
     subEl.style.cssText = "margin-top: 6px; font-size: 11px; color: #8899aa; text-align: center;";
     inner.appendChild(subEl);
 
@@ -305,7 +324,7 @@ export class EncounterSetupScene extends Phaser.Scene {
     inner.appendChild(divider1);
 
     const statsEl = document.createElement("div");
-    statsEl.textContent = `HP ${def.maxHp}   AC ${def.ac}   Speed ${def.speed} ft\nAttack +${atkBonus}   Initiative ${initMod >= 0 ? "+" : ""}${initMod}`;
+    statsEl.textContent = `HP ${maxHp}   AC ${def.ac}   Speed ${def.speed} ft\nAttack +${atkBonus}   Initiative ${initMod >= 0 ? "+" : ""}${initMod}`;
     statsEl.style.cssText = "margin-top: 10px; width: 88%; font-size: 11px; color: #aabbcc; text-align: center; line-height: 1.7; white-space: pre-line;";
     inner.appendChild(statsEl);
 
@@ -389,7 +408,7 @@ export class EncounterSetupScene extends Phaser.Scene {
       storylogBtn.setDisabled(true);
     }
 
-    this.charCards.set(def.id, { cardBtn, infoEl, equippedEl, deleteBtn, storylogBtn });
+    this.charCards.set(def.id, { cardBtn, subEl, statsEl, infoEl, equippedEl, deleteBtn, storylogBtn });
   }
 
   private openStorylogOverlay(def: PlayerDef): void {
@@ -536,6 +555,8 @@ export class EncounterSetupScene extends Phaser.Scene {
           customIntroduction: enc.customIntroduction,
           customContext: enc.customContext,
           customObjective: enc.objective,
+          allowsLongRest: enc.allowsLongRest,
+          completionFlag: enc.completionFlag,
           tileProperties: enc.tileProperties,
           startingZones: enc.startingZones,
           triggers: enc.triggers,
@@ -545,8 +566,10 @@ export class EncounterSetupScene extends Phaser.Scene {
           resumeInventoryIds:  save?.inventoryIds,
           resumeEquippedSlots: save?.equippedSlots,
           resumeResources:     save?.resources,
-        }).then((initialState: GameState) => {
-          this.scene.start("GameScene", { sessionId: initialState.sessionId, playerDef: player });
+        }).then(({ state, playerDef }) => {
+          // Use the server-returned PlayerDef rather than the registry's L1
+          // copy — it already has the character's level-up history applied.
+          this.scene.start("GameScene", { sessionId: state.sessionId, playerDef });
         }).catch((err: unknown) => {
           console.error('Failed to create session:', err);
           this.beginBtn.setDisabled(false);
@@ -610,4 +633,18 @@ export class EncounterSetupScene extends Phaser.Scene {
     this.charCards.clear();
     this.encounterCards.clear();
   }
+}
+
+/**
+ * Derive the character's current max HP from the L1 starting value plus
+ * recorded level-ups. Mirrors the SRD "Fixed Hit Points by Class" table the
+ * server's `Leveling.ts` applies on commit — keep them in sync if the table
+ * ever changes.
+ */
+function effectiveMaxHp(def: PlayerDef, save: LocalSave | null): number {
+  const levelsGained = save?.levelUps?.length ?? 0;
+  if (levelsGained === 0) return def.maxHp;
+  const conMod = Math.floor((def.con - 10) / 2);
+  const perLevel = Math.max(1, fixedHpForClass(def.className) + conMod);
+  return def.maxHp + levelsGained * perLevel;
 }

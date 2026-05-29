@@ -1,6 +1,8 @@
 {
   "id": "mage-hand",
   "name": "Mage Hand",
+  "summon": { "monsterId": "mage_hand", "moveRangeFeet": 30, "tetherFeet": 30 },
+  "area": { "shape": "sphere", "sizeFeet": 0 },
   "level": 0,
   "school": "conjuration",
   "classes": ["bard", "sorcerer", "warlock", "wizard"],

@@ -208,13 +208,17 @@ export function createHtmlButton(opts: HtmlButtonOptions): HtmlButtonHandle {
     el.style.cursor = "pointer";
   };
 
+  // Use a CSS brightness filter for hover affordance rather than swapping
+  // the background. Callers frequently override `el.style.background` to
+  // colour-code state (terrain chips, picker tabs, etc.); a filter preserves
+  // whatever they set instead of resetting to the variant default on hover-off.
   el.addEventListener("mouseenter", () => {
     if (disabled || active) return;
-    el.style.background = VARIANT_STYLES[variant].hoverBg;
+    el.style.filter = "brightness(1.2)";
   });
   el.addEventListener("mouseleave", () => {
     if (disabled || active) return;
-    el.style.background = VARIANT_STYLES[variant].bg;
+    el.style.filter = "";
   });
   el.addEventListener("click", () => {
     if (disabled) return;

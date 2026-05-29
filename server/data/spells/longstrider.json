@@ -1,0 +1,17 @@
+{
+  "id": "longstrider",
+  "name": "Longstrider",
+  "level": 1,
+  "school": "transmutation",
+  "classes": ["bard", "druid", "ranger", "wizard"],
+  "castingTime": "action",
+  "range": "touch",
+  "rangeFeet": 0,
+  "components": { "verbal": true, "somatic": true, "material": "a pinch of dirt" },
+  "duration": "1 hour",
+  "durationRounds": 600,
+  "concentration": false,
+  "ritual": false,
+  "description": "You touch a creature. The target's Speed increases by 10 feet until the spell ends.",
+  "scaling": "You can target one additional creature for each spell slot level above 1."
+}

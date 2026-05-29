@@ -1,0 +1,8 @@
+{
+  "id": "scholar",
+  "name": "Scholar",
+  "classId": "wizard",
+  "minLevel": 2,
+  "description": "Choose one of Arcana, History, Investigation, Medicine, Nature, or Religion. You have Expertise in the chosen skill — your Proficiency Bonus counts twice.",
+  "cost": { "kind": "passive" }
+}

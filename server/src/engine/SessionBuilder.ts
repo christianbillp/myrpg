@@ -244,6 +244,7 @@ export function buildSessionState(
     turnOrderIds: [],
     introduction: req.encounterContext.introduction,
     encounterContext: req.encounterContext.context,
+    allowsLongRest: req.encounterContext.allowsLongRest === true,
     npcPersonas,
     availableActions: {
       canAttack: false, throwableItemIds: [],
@@ -251,6 +252,8 @@ export function buildSessionState(
       canDodge: false, canDisengage: false, canShortRest: false,
       castableSpellIds: [],
       canDetach: false,
+      canLevelUp: false,
+      canLongRest: false,
     },
     pendingReaction: null,
     triggers: req.triggers ?? [],
@@ -274,6 +277,7 @@ export function buildSessionState(
       priorChapterSummaries: req.adventureSeed.priorChapterSummaries,
     } : null,
     chapterComplete: false,
+    encounterCompletionFlag: req.completionFlag ?? req.adventureSeed?.completionFlag,
     environment: req.encounterContext.environment ?? {},
   };
 

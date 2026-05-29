@@ -36,6 +36,7 @@ export class MonsterPicker {
   private readonly allySelections = new Map<string, number>();
   private readonly neutralSelections = new Map<string, number>();
   private readonly enemySelections = new Map<string, number>();
+  private titleEl!: HTMLDivElement;
   private listEl!: HTMLDivElement;
   private summaryEl!: HTMLDivElement;
   private clearBtn!: HTMLButtonElement;
@@ -50,13 +51,27 @@ export class MonsterPicker {
     for (const id of opts.initialEnemyIds   ?? []) this.enemySelections.set(id, (this.enemySelections.get(id) ?? 0) + 1);
     for (const id of opts.initialNeutralIds ?? []) this.neutralSelections.set(id, (this.neutralSelections.get(id) ?? 0) + 1);
 
-    const { scene, parent, x, y, width, height } = opts;
+    const { x, y, width, height } = opts;
     const HEADER_H = 16;
     const SUMMARY_H = 76;
 
-    parent.add(scene.add.text(x, y, "MONSTERS — click +ALLY / +NEUTRAL / +ENEMY to add to the encounter", {
-      fontSize: "10px", color: "#778899", fontFamily: "monospace", letterSpacing: 1,
-    }).setOrigin(0, 0));
+    // HTML title — matches the rest of the picker's crisp HTML rendering
+    // instead of a blurry Phaser text. Rescaled with the canvas via attachPlace().
+    this.titleEl = document.createElement("div");
+    this.titleEl.textContent = "MONSTERS — click +ALLY / +NEUTRAL / +ENEMY to add to the encounter";
+    this.titleEl.style.cssText = `
+      position: absolute;
+      color: #778899;
+      font-family: monospace;
+      letter-spacing: 1px;
+      z-index: 9;
+      pointer-events: none;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    `;
+    document.body.appendChild(this.titleEl);
+    this.attachPlace(this.titleEl, x, y, width, HEADER_H);
 
     // Scrollable HTML list — fills the available height minus the summary.
     const listY = y + HEADER_H + 4;
@@ -126,6 +141,7 @@ export class MonsterPicker {
   getNeutralIds(): string[] { return this.expand(this.neutralSelections); }
 
   destroy(): void {
+    this.titleEl.remove();
     this.listEl.remove();
     this.summaryEl.remove();
     this.clearBtn.remove();
@@ -135,6 +151,7 @@ export class MonsterPicker {
 
   /** Show / hide every owned DOM element (used by the tab toggle). */
   setVisible(visible: boolean): void {
+    this.titleEl.style.display = visible ? "" : "none";
     this.listEl.style.display = visible ? "" : "none";
     this.summaryEl.style.display = visible ? "" : "none";
     this.clearBtn.style.display = visible ? "" : "none";
@@ -223,6 +240,7 @@ export class MonsterPicker {
       el.style.top  = `${rect.top  + y * s}px`;
       el.style.width  = `${w * s}px`;
       el.style.height = `${h * s}px`;
+      if (el === this.titleEl) el.style.fontSize = `${10 * s}px`;
     };
     place();
     this.scene.scale.on("resize", place);

@@ -1,0 +1,15 @@
+{
+  "id": "find-familiar",
+  "name": "Find Familiar",
+  "level": 1,
+  "school": "conjuration",
+  "classes": ["wizard"],
+  "castingTime": "hour",
+  "range": "10 feet",
+  "rangeFeet": 10,
+  "components": { "verbal": true, "somatic": true, "material": "burning incense worth 10+ GP, consumed by the spell" },
+  "duration": "instantaneous",
+  "concentration": false,
+  "ritual": true,
+  "description": "You gain the service of a familiar — a spirit that takes an animal form you choose (Bat, Cat, Crab, Frog/Toad, Hawk, Lizard, Octopus, Owl, Poisonous Snake, Fish, Rat, Raven, Sea Horse, Spider, or Weasel). It acts independently but always obeys your commands; the familiar can deliver touch spells you cast and is a useful scout and message-bearer. When the familiar drops to 0 HP it vanishes, leaving behind no physical form, and you can re-summon it by casting this spell again."
+}

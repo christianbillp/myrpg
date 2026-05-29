@@ -562,6 +562,77 @@ The shape mirrors `spells/`: data describes WHAT and WHEN; code describes HOW. N
 
 ---
 
+## Level Advancement
+
+SRD 5.2.1 character advancement. The XP-to-level table + helpers live in [`shared/xpTable.ts`](../shared/xpTable.ts) so the server (eligibility gate, level-up application) and client (preview rendering, button visibility) share a single source of truth.
+
+### Eligibility
+
+`AvailableActions.canLevelUp` flips true when **`state.phase === 'exploring'`** AND `xpForLevel(playerDef.level + 1) <= player.xp` AND `playerDef.level < 20`. Combat-phase advancement is intentionally blocked — the HP / spell-slot mutations would land mid-turn otherwise.
+
+### Server flow
+
+`server/src/engine/Leveling.ts` exposes three entry points:
+
+- **`previewForLevel(playerDef, toLevel, features, spells)`** — pure preview builder, no XP gate. Returns a `LevelUpPreview` (HP gain, proficiency before/after, spell-slot deltas, new feature list, required choices). Throws when `toLevel` isn't yet supported by the Tier 1 catalogue (current scope: L2 only for Fighter / Rogue / Wizard).
+- **`applyLevelUp({ playerDef, choices, ... preview })`** — mutates the cloned `playerDef` in place: bumps `level`, `maxHp`, `proficiencyBonus`, `defaultSpellSlots`, appends new feature ids to `defaultFeatureIds`, and applies class-specific choice payloads (Wizard L2: adds Scholar Expertise to `skills[chosen]`, appends spellbook additions to `defaultSpellbookIds`).
+- **`applyLevelUpHistory(playerDef, history, ...)`** — session-start replay. Iterates a recorded `LevelUpChoices[]` and applies each one so the engine's per-session clone reflects the character's current level.
+
+`GameEngine.buildLevelUpPreview()` and `GameEngine.commitLevelUp(choices)` wrap these for HTTP routes. Commit projects the new `maxHp` onto `state.player.hp` (heals the gained HP), tops up the player's runtime spell-slot pool by each delta, and initialises feature resource pools for newly-granted resourced features (e.g. Action Surge → 1/1).
+
+### Routes
+
+| Method | Path | Body / Response |
+|---|---|---|
+| GET | `/game/session/:id/level-up` | Returns `{ preview: LevelUpPreview \| null }`. `null` means the character isn't eligible — the client treats it as a no-op rather than an error. |
+| POST | `/game/session/:id/level-up` | Body `{ choices: LevelUpChoices }`. Server runs `commitLevelUp`, persists the new entry to the character save's `levelUps[]`, pushes a `state_update`, and responds with `{ preview, state, playerDef }`. The client refreshes its cached `playerDef`. |
+
+### Persistence
+
+The character save (`server/data/saves/{id}.json`, shape `CharSave`) carries `levelUps: LevelUpChoices[]` — one entry per level above 1. `GameEngine.createSession` replays these onto a fresh `PlayerDef` clone before `SessionBuilder` runs, so the initial state (`maxHp`, `defaultSpellSlots`, `defaultFeatureIds`) reflects the character's actual level. The route fills `resumeLevelUps` from the server save (source of truth) and only falls back to the request body when no server save exists.
+
+### Tier 1 catalogue (current scope)
+
+| Class → L2 | HP gain (fixed) | New features | Choices required |
+|---|---|---|---|
+| Wizard | 4 + Con mod | Scholar | Pick 1 of {Arcana, History, Investigation, Medicine, Nature, Religion} for Expertise; pick `min(2, available wizard L1 spells)` new spells for the spellbook |
+| Fighter | 6 + Con mod | Action Surge (1 use / Short Rest), Tactical Mind | None |
+| Rogue | 5 + Con mod | Cunning Action | None |
+
+L3 → subclass + L4 → ASI / Feat are intentionally out of scope for now; `previewForLevel` throws a clear error if asked for level 3+, surfaced as a `400` from the route.
+
+---
+
+## Long Rest
+
+SRD 5.2.1 Long Rest (Rules Glossary → Long Rest). Eligibility is per-encounter: `EncounterDef.allowsLongRest = true` ⇒ `GameState.allowsLongRest = true` ⇒ `AvailableActions.canLongRest = phase === 'exploring' && allowsLongRest`. The Player Panel surfaces the `☾ LONG REST` button when that flag is true; the flag should be set on safe-haven encounters (taverns, safehouses, established camps), never wilderness or hostile zones.
+
+### Server flow
+
+`server/src/engine/Resting.ts`:
+
+- **`buildLongRestPreview({ playerDef, player, features, spells })`** — pure read-only summary: HP gap to max, hit dice spent, per-slot spell deltas to max, every refillable feature pool with `before` / `max`, exhaustion flag, and (for Wizards) a `wizardSpellPrep` block carrying the spellbook list, current preparation, and the SRD `maxPrepared` cap.
+- **`applyLongRest(inputs, choices, preview)`** — mutates `PlayerState` in place: `hp = maxHp`, `hitDiceUsed = 0`, `spellSlots = max[]`, every non-unlimited feature resource set to `max`, `exhaustionLevel -= 1` if non-zero. Wizards replace `preparedSpellIds` with the picked list (validated against the spellbook + cap).
+
+`GameEngine.buildLongRestPreview()` / `commitLongRest(choices)` wrap these for the routes and write a "── Long Rest ──" header to the event log with the deltas.
+
+### Routes
+
+| Method | Path | Body / Response |
+|---|---|---|
+| GET | `/game/session/:id/long-rest` | Returns `{ preview: LongRestPreview \| null }`. `null` means the encounter doesn't permit Long Rest, or the player isn't in exploration. |
+| POST | `/game/session/:id/long-rest` | Body `{ choices: LongRestChoices }`. Server runs `commitLongRest`, persists the rested state to `CharSave` (HP, spell slots, prepared spells, resources), broadcasts a `state_update`, and returns `{ preview, state, playerDef }`. |
+
+### Wizard prepared-spell cap
+
+SRD Wizard Features table values for L1–L20, indexed by level (L1 = 4, L2 = 5, L5 = 9, …) live in `WIZARD_PREPARED_BY_LEVEL` inside `Resting.ts`. The effective cap is `max(table[level], currentlyPreparedCount)` so feat-granted extras (e.g. Magic Initiate adding a prepared spell at L1) survive rest.
+
+### Persistence
+
+`POST /game/session/:id/long-rest` rewrites `CharSave.hp / spellSlots / preparedSpellIds / resources` on disk. The `levelUps` history is untouched — Long Rest doesn't affect character advancement.
+
+---
+
 ## tokens/
 
 SVG token sprites rendered on the map and in the turn-order bar. One file per creature; the same artwork is used for the in-game token, the turn-order chip, and the character-card avatar on Encounter Setup / Adventure Setup.
@@ -855,7 +926,7 @@ A flavored combination of a map and one or more NPCs, with optional AIGM instruc
 | `customIntroduction` | string | *(optional)* Replaces the auto-generated introduction shown in the Introduction Overlay at encounter start. |
 | `customContext` | string | *(optional)* Replaces the auto-generated AIGM context string. Use this to give the AIGM specific instructions about the scenario, the NPCs, and what mechanics to use. |
 | `objective` | string | *(optional)* Player-facing one-line goal shown as the OBJECTIVE row at the top of the Player Panel's Quests section. When omitted, a default is derived from `encounterTypes` (combat → "Defeat the hostile creatures"; social → "Speak with the locals and resolve the situation"; exploration → "Search the area for hidden secrets"). |
-| `completionFlag` | string | *(optional, but **required for non-combat encounters used as adventure chapters**)* Name of a world flag that, when set via `set_world_flag`, marks the chapter complete. Pair with a `customContext` instruction telling the AIGM to set it at the narrative resolution. |
+| `completionFlag` | string | *(optional, but **required for non-combat encounters used as adventure chapters**)* Name of a world flag that, when set via `set_world_flag` (AIGM) or a `set_flag` trigger action, marks the encounter complete. Also seeds `GameState.encounterCompletionFlag` so the `encounter_completed` engine event fires when the flag lands (combat encounters auto-publish that event on enemy defeat regardless). Pair with a `customContext` instruction telling the AIGM to set it at the narrative resolution. |
 | `generated` | boolean | *(optional)* `true` for encounters authored by the AI generator (`POST /generate/encounter`, files prefixed `gen_<timestamp>_<slug>`). Surfaces a `✦ GENERATED` badge on the Encounter Setup card. |
 | `tileProperties` | object[] | Per-GID semantics for the referenced map's tiles **in this encounter**. See below. Required to make any tile passable. |
 | `startingZones` | object | *(optional)* Tiled-style tile layer marking spawn regions for the player, allies, neutral NPCs, and enemies. Same dimensions as the referenced map. See below. |
@@ -938,6 +1009,8 @@ Authored scripted events evaluated server-side via the engine event bus. Each tr
 | `turn_ended` | `combatantId?` | `CombatFlow.endPlayerTurn` / end of `NpcTurnRunners.runSingleEnemyTurn` / `runSingleAllyTurn` | A combatant's turn ends. |
 | `combat_started` | — | `CombatFlow.doStartCombat` | Initiative has been rolled. |
 | `combat_ended` | — | `CombatFlow.endCombat` | All enemies down or `end_combat` AIGM tool fired. |
+| `encounter_started` | — | `EncounterLifecycle.publishEncounterStarted` (GameEngine constructor) | Fires ONCE at session boot, after every subscriber is registered. Use for intro cinematics (`show_supertitle`, `fade_screen`, opening `show_announcement`). GameEvents emitted by triggers listening on this event are buffered into the engine's startup sink and flushed onto the first WS `state_update`. |
+| `encounter_completed` | — | `EncounterLifecycle` (subscribes to `combat_ended` and `flag_set`) | Fires ONCE when the encounter resolves: combat-victory with no living enemies, OR the encounter's `completionFlag` is set. Deduped — a second resolution path won't re-publish. Use for closing announcements, post-victory supertitles. |
 | `damage_dealt` | `target?` | `GameEngine.applyDamageToPlayer` + `ThresholdPublisher.publishNpcDamage` | An entity took damage. |
 | `hp_threshold_crossed` | `target?`, `ratio?`, `direction?` | `ThresholdPublisher.publishHpThresholdCrossings` | An entity's HP/maxHp ratio crossed 0.75, 0.5, or 0.25 (in either direction). |
 | `faction_changed` | `factionId?` | TriggerSystem `adjustFactionStanding` | A faction standing was adjusted (and actually changed). |
@@ -973,6 +1046,11 @@ Authored scripted events evaluated server-side via the engine event bus. Each tr
 | `record_rumor` | `id`, `text`, `salience?` (default 5) | Records a rumor into `GameState.rumors` (idempotent by `id`); publishes `rumor_propagated`. |
 | `set_disposition_by_def_id` | `defId`, `disposition` (`ally\|neutral\|enemy`) | Updates every living NPC matching `defId` to the given disposition. Auto-aggros faction-mates when `enemy`. Pair with `trigger_combat` to turn a peaceful encounter hostile. |
 | `trigger_combat` | — | Starts combat when the engine is in the `exploring` phase and at least one enemy is alive. Idempotent. |
+| `award_xp` | `amount` | Grants the player XP. Used for trigger-fired story rewards (parley success, scouted clue, riddle solved) where no kill rolled it automatically. No-ops on non-positive amounts. The `TriggerEditor` surfaces this as an "AWARD XP" trigger kind with a single AMOUNT input. |
+| `show_supertitle` | `text`, `durationMs?` (default 3000, max 15000) | Pushes a `supertitle` GameEvent — huge centred white serif text held for the duration, wrapping onto two lines for longer titles. Mirrors the AIGM `show_supertitle` tool. No-op when called outside an outer engine call (i.e. no `eventSink`), except during `encounter_started` where the engine routes events into a startup buffer. |
+| `show_announcement` | `text`, `durationMs?` (default 3500, max 15000), `mode?` (`'focused'` (default) or `'unfocused'`) | Pushes an `announcement` GameEvent — centred attention-grabbing card — AND appends the text to the Event Log so the message persists after the visual fades. **`focused`** draws an orange-bordered card AND triggers the player-control-loss flow on the client (Player Panel / Target Panel / HUD fade out before the card appears and fade back in after it leaves, world tick paused via `WorldPause`, player movement / actions locked). **`unfocused`** draws a borderless edge-fading card and leaves the UI / world / input alone. Mirrors the AIGM `show_announcement` tool. |
+| `npc_speaks` | `entity` (`player` or `npc_<id>` / `enemy_A` / `ally_A`), `text` | Pushes a `npc_speech` GameEvent — short bubble above the entity's token for ~6 s. Mirrors the AIGM `npc_speaks` tool. No-op when the entity ref doesn't resolve. |
+| `fade_screen` | `mode` (`'in'`, `'out'`, or `'dim'`), `durationMs?` (default 1200, max 10000) | Pushes a `screen_fade` GameEvent. `out` → opacity 1 (full black); `in` → opacity 0 (clear); `dim` → opacity 0.5 (50% black overlay; world still visible underneath; pointer events still pass through). The overlay is sticky — pair every darkening fade (`out` or `dim`) with a later `in`. Mirrors the AIGM `fade_screen` tool. |
 
 **Hook ordering** is load-bearing in a few places:
 
@@ -1186,6 +1264,7 @@ Key runtime fields of note:
 | `worldFlags['director:*']` | *(reserved key prefix)* The Director (`Director.ts`) tracks per-encounter round counts and "already-fired" flags under reserved keys (`director:round`, `director:assist_fired`, `director:pressure_fired`). Reset at every `combat_started`. Triggers can safely set their own `worldFlags` outside this prefix. |
 | `adventureContext` | *(top-level on `GameState`, optional)* When set, the current session is a chapter of an adventure. Carries `{ adventureId, adventureTitle, chapterId, chapterTitle, chapterIndex, totalChapters, priorChapterSummaries, completionFlag? }`. Null for single-encounter sessions. Drives the END CHAPTER overlay and the AIGM CURRENT STATE `ADVENTURE:` / `PRIOR CHAPTERS:` blocks. |
 | `chapterComplete` | *(top-level on `GameState`)* `true` once the active chapter has resolved (combat-ended with no remaining enemies, OR the chapter's `completionFlag` was set). One-way — set by `AdventureProgress.ts` subscribers, never cleared mid-session. The client opens the "Wrap Up Loose Ends" overlay once when this flips true; dismissing the overlay shows the persistent NEXT CHAPTER button. |
+| `encounterCompletionFlag` | *(top-level on `GameState`, optional)* The world-flag name that — when set — should publish the `encounter_completed` engine event for **standalone** (non-adventure) encounters. Seeded at session creation from `EncounterDef.completionFlag` (or from `adventureContext.completionFlag` when present). Used by `EncounterLifecycle.ts` to fire the lifecycle event off either a `combat_ended` with no living enemies OR a `flag_set` whose name matches this string. Encounter authors set the flag via `set_world_flag` (AIGM tool) or a `set_flag` trigger action at the narrative resolution. |
 | `objective` | *(top-level on `GameState`)* Player-facing one-line objective for the current encounter. Sourced from `EncounterDef.objective` when set, otherwise derived from `encounterTypes` by `encounterService.defaultObjective`. Rendered as the OBJECTIVE row at the top of the Player Panel's Quests section. |
 | `aigmHistory` | The **sliding-window** AIGM conversation persisted into `world.json` (serialised from server session memory). Bounded to ~20 verbatim messages plus an optional leading `[SUMMARY OF EARLIER TURNS]` assistant message that collapses anything older. `[CURRENT STATE]` prefixes are stripped from historical user messages before each API call so the model always reasons from the current injected state, not stale snapshots. The `GET /world` response surfaces this under the `gmHistory` field for client-side display. |
 
