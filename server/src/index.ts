@@ -15,6 +15,8 @@ import { buildEncounter } from "./encounterService.js";
 import { generateEncounter, generateMap } from "./encounterGenerator.js";
 import { registerGenerateRoutes } from "./routes/generate.js";
 import { processAIGMChat, AIGMChatRequest } from "./aigm.js";
+import { loadSettings } from "./settings.js";
+import { loadServerConfig, saveServerConfig } from "./serverConfig.js";
 import {
   generateStorylog,
   type EncounterRecord,
@@ -70,6 +72,26 @@ const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const DATA_DIR = join(__dirname, "../data");
 
+/**
+ * Resolve the effective Development Mode flags for a session-create call.
+ * Server-side file (in `server_config.json`) is the source of truth — it
+ * persists across server restarts and across browsers. Any flag the client
+ * also sent is OR-ed in so a one-off override still applies. Returns
+ * `undefined` when no flags are active so the per-session GameState stays
+ * clean and indistinguishable from a vanilla play session.
+ */
+async function resolveDevFlags(
+  clientFlags: import("../../shared/types.js").DevFlags | undefined,
+): Promise<import("../../shared/types.js").DevFlags | undefined> {
+  const file = (await loadServerConfig(DATA_DIR)).devFlags ?? {};
+  const merged: import("../../shared/types.js").DevFlags = {};
+  if (file.disableSupertitle   || clientFlags?.disableSupertitle)   merged.disableSupertitle = true;
+  if (file.unlimitedSpellSlots || clientFlags?.unlimitedSpellSlots) merged.unlimitedSpellSlots = true;
+  if (file.unlockAllSpells     || clientFlags?.unlockAllSpells)     merged.unlockAllSpells = true;
+  if (file.unlimitedActions    || clientFlags?.unlimitedActions)    merged.unlimitedActions = true;
+  return Object.keys(merged).length === 0 ? undefined : merged;
+}
+
 async function readDir<T>(dir: string): Promise<T[]> {
   const files = await readdir(dir);
   return Promise.all(
@@ -77,6 +99,18 @@ async function readDir<T>(dir: string): Promise<T[]> {
       .filter((f) => f.endsWith(".json"))
       .map(async (f) => JSON.parse(await readFile(join(dir, f), "utf-8")) as T),
   );
+}
+
+/**
+ * Resolve a setting-owned content directory under the active setting (e.g.
+ * `settings/the_sundered_reach/encounters`). Returns null when there is no
+ * active setting — callers treat that as "content unavailable" rather than
+ * falling through to a removed top-level path. Used by the HTTP routes and
+ * `loadEncounterDef` / `loadAdventureDef` to keep paths in one place.
+ */
+function settingSubDir(sub: string): string | null {
+  if (!defs.activeSetting) return null;
+  return join(DATA_DIR, "settings", defs.activeSetting.id, sub);
 }
 
 // ── Load all data at startup ───────────────────────────────────────────────────
@@ -94,10 +128,24 @@ const defs: GameDefs = {
   features: [],
   narration: [],
   factions: [],
+  settings: [],
+  activeSetting: null,
   tileLegend: { notes: "", tiles: {} },
 };
 
 async function loadDefs(): Promise<void> {
+  // Step 1 — load settings + pick active. Setting-owned content
+  // (characters, npcs, maps, factions, adventures, encounters, saves) is
+  // sourced from `settings/<active>/`; without an active setting those
+  // rosters stay empty (only shared SRD content loads).
+  const settingsResult = await loadSettings(DATA_DIR);
+  defs.settings = settingsResult.settings;
+  defs.activeSetting = settingsResult.active;
+  const settingSub = (sub: string): string | null =>
+    defs.activeSetting ? join(DATA_DIR, "settings", defs.activeSetting.id, sub) : null;
+  const readDirOrEmpty = async <T>(dir: string | null): Promise<T[]> => dir ? readDir<T>(dir) : [];
+
+  // Step 2 — shared SRD content + setting-owned content, in parallel.
   const [
     playerDefs,
     monsters,
@@ -112,18 +160,18 @@ async function loadDefs(): Promise<void> {
     narration,
     factions,
   ] = await Promise.all([
-    readDir<GameDefs["playerDefs"][0]>(join(DATA_DIR, "characters")),
+    readDirOrEmpty<GameDefs["playerDefs"][0]>(settingSub("characters")),
     readDir<GameDefs["monsters"][0]>(join(DATA_DIR, "monsters")),
-    readDir<GameDefs["npcs"][0]>(join(DATA_DIR, "npcs")),
+    readDirOrEmpty<GameDefs["npcs"][0]>(settingSub("npcs")),
     readDir<GameDefs["equipment"][0]>(join(DATA_DIR, "equipment")),
-    readDir<TiledMapFile>(join(DATA_DIR, "maps")),
+    readDirOrEmpty<TiledMapFile>(settingSub("maps")),
     readDir<GameDefs["feats"][0]>(join(DATA_DIR, "feats")),
     readDir<GameDefs["backgrounds"][0]>(join(DATA_DIR, "backgrounds")),
     readDir<GameDefs["species"][0]>(join(DATA_DIR, "species")),
     readDir<GameDefs["spells"][0]>(join(DATA_DIR, "spells")),
     readDir<GameDefs["features"][0]>(join(DATA_DIR, "features")),
     readDir<GameDefs["narration"][0]>(join(DATA_DIR, "narration")),
-    readDir<GameDefs["factions"][0]>(join(DATA_DIR, "factions")),
+    readDirOrEmpty<GameDefs["factions"][0]>(settingSub("factions")),
   ]) as [
     GameDefs["playerDefs"], GameDefs["monsters"], GameDefs["npcs"], GameDefs["equipment"],
     TiledMapFile[], GameDefs["feats"], GameDefs["backgrounds"], GameDefs["species"],
@@ -336,15 +384,138 @@ server.get("/backgrounds", async () => defs.backgrounds);
 server.get("/species", async () => defs.species);
 server.get("/spells", async () => defs.spells);
 server.get("/features", async () => defs.features);
-server.get("/encounters", async () => readDir(join(DATA_DIR, "encounters")));
-server.get("/adventures", async () => readDir(join(DATA_DIR, "adventures")));
+server.get("/encounters", async () => {
+  const dir = settingSubDir("encounters");
+  return dir ? readDir(dir) : [];
+});
+server.get("/adventures", async () => {
+  const dir = settingSubDir("adventures");
+  return dir ? readDir(dir) : [];
+});
+
+/**
+ * Upsert an authored adventure. Writes `<active-setting>/adventures/<id>.json`
+ * with the body as-is (after light shape validation) and reloads defs so
+ * subsequent /adventures reads include the new file. Used by the Adventure
+ * Creator's SAVE button.
+ */
+server.post<{
+  Body: import("../../shared/types.js").AdventureDef;
+}>("/adventure", async (req, reply) => {
+  const dir = settingSubDir("adventures");
+  if (!dir) return reply.code(400).send({ error: "No active setting" });
+  const body = req.body;
+  if (!body || typeof body !== "object") return reply.code(400).send({ error: "Body must be an AdventureDef object" });
+  if (!body.id || !/^[a-z0-9_]+$/.test(body.id)) {
+    return reply.code(400).send({ error: "adventure.id must be a snake_case slug (lowercase letters, digits, underscores)" });
+  }
+  if (!body.title || typeof body.title !== "string") return reply.code(400).send({ error: "adventure.title is required" });
+  if (!Array.isArray(body.chapters) || body.chapters.length === 0) {
+    return reply.code(400).send({ error: "adventure.chapters must be a non-empty array" });
+  }
+  const encountersDir = settingSubDir("encounters");
+  const validEncounterIds = new Set(
+    encountersDir
+      ? (await readDir<{ id: string }>(encountersDir).catch(() => [])).map((e) => e.id)
+      : [],
+  );
+  for (const ch of body.chapters) {
+    if (!ch.id || !ch.encounterId) return reply.code(400).send({ error: `chapter missing id/encounterId` });
+    if (validEncounterIds.size > 0 && !validEncounterIds.has(ch.encounterId)) {
+      return reply.code(400).send({ error: `chapter "${ch.id}" references unknown encounter "${ch.encounterId}"` });
+    }
+  }
+  if (body.restEncounterId && validEncounterIds.size > 0 && !validEncounterIds.has(body.restEncounterId)) {
+    return reply.code(400).send({ error: `restEncounterId "${body.restEncounterId}" is not a known encounter` });
+  }
+  try {
+    await mkdir(dir, { recursive: true });
+    await writeFile(join(dir, `${body.id}.json`), JSON.stringify(body, null, 2));
+    await loadDefs();
+    return reply.send({ adventureId: body.id });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error("[POST /adventure] failed", msg);
+    return reply.code(500).send({ error: msg });
+  }
+});
+/**
+ * GET /server-config — single endpoint backing the Configuration page. Returns
+ * the full persisted `ServerConfig` (active setting id + Development Mode
+ * flags) AND the list of every loaded setting so the picker can render in one
+ * round trip. Read once on scene mount.
+ */
+server.get("/server-config", async () => {
+  const config = await loadServerConfig(DATA_DIR);
+  return {
+    activeSettingId: defs.activeSetting?.id ?? null,
+    devFlags: config.devFlags ?? {},
+    settings: defs.settings.map((s) => ({ id: s.id, name: s.name, version: s.version, ruleset: s.ruleset, summary: s.summary, sections: s.sections })),
+  };
+});
+
+/**
+ * PUT /server-config — replace the persisted Configuration in one shot. Body
+ * accepts `activeSettingId` (string id, `null`, or omitted to leave
+ * unchanged) and `devFlags` (a subset of the 4 Development Mode toggles).
+ * Writes to `server_config.json` and reloads every JSON-backed def when the
+ * active setting changes. Returns the updated config + settings list so the
+ * client renders without an extra GET.
+ */
+server.put<{ Body: { activeSettingId?: string | null; devFlags?: import("../../shared/types.js").DevFlags } }>("/server-config", async (req, reply) => {
+  const body = req.body ?? {};
+
+  // Validate activeSettingId if the caller is changing it.
+  if (body.activeSettingId !== undefined && body.activeSettingId !== null) {
+    if (typeof body.activeSettingId !== 'string') {
+      return reply.code(400).send({ error: "activeSettingId must be a string or null" });
+    }
+    if (!defs.settings.find((s) => s.id === body.activeSettingId)) {
+      return reply.code(400).send({ error: `unknown setting id "${body.activeSettingId}"` });
+    }
+  }
+
+  const current = await loadServerConfig(DATA_DIR);
+  const next = { ...current };
+
+  if (body.activeSettingId !== undefined) {
+    next.activeSettingId = body.activeSettingId;
+  }
+  if (body.devFlags !== undefined) {
+    // Sanitise — only the known flags, always booleans, omitted-when-false.
+    const sanitised: import("../../shared/types.js").DevFlags = {};
+    if (body.devFlags.disableSupertitle)    sanitised.disableSupertitle = true;
+    if (body.devFlags.unlimitedSpellSlots)  sanitised.unlimitedSpellSlots = true;
+    if (body.devFlags.unlockAllSpells)      sanitised.unlockAllSpells = true;
+    if (body.devFlags.unlimitedActions)     sanitised.unlimitedActions = true;
+    if (body.devFlags.showDeleteSaveButton) sanitised.showDeleteSaveButton = true;
+    next.devFlags = sanitised;
+  }
+
+  await saveServerConfig(DATA_DIR, next);
+
+  // Reload all defs only when the active setting actually changed —
+  // characters, NPCs, factions, adventures, encounters, maps re-source from
+  // the new setting's folders. A dev-flag-only PUT skips this work.
+  const settingChanged = body.activeSettingId !== undefined && body.activeSettingId !== current.activeSettingId;
+  if (settingChanged) await loadDefs();
+
+  return reply.send({
+    activeSettingId: defs.activeSetting?.id ?? null,
+    devFlags: next.devFlags ?? {},
+    settings: defs.settings.map((s) => ({ id: s.id, name: s.name, version: s.version, ruleset: s.ruleset, summary: s.summary, sections: s.sections })),
+  });
+});
 
 // All /generate/* routes live in their own module — see routes/generate.ts.
 registerGenerateRoutes(server, {
   anthropic,
   getDefs: () => defs,
   loadDefs,
-  dataDir: DATA_DIR,
+  getSettingDataDir: () => {
+    if (!defs.activeSetting) throw new Error("Cannot generate content — no active setting.");
+    return join(DATA_DIR, "settings", defs.activeSetting.id);
+  },
 });
 
 
@@ -362,10 +533,10 @@ server.delete<{ Params: { characterId: string } }>(
   },
 );
 
-server.post<{ Body: { characterId: string; adventureId: string } }>(
+server.post<{ Body: { characterId: string; adventureId: string; devFlags?: import("../../shared/types.js").DevFlags } }>(
   "/adventure/start",
   async (req, reply) => {
-    const { characterId, adventureId } = req.body;
+    const { characterId, adventureId, devFlags } = req.body;
     const adv = await loadAdventureDef(adventureId);
     if (!adv) return reply.code(404).send({ error: "Unknown adventureId" });
     let save = await readAdventureSave(characterId);
@@ -373,16 +544,17 @@ server.post<{ Body: { characterId: string; adventureId: string } }>(
       save = makeAdventureSave(characterId, adventureId);
       await writeAdventureSave(save);
     }
-    const result = await startAdventureChapter(characterId, adv, save);
+    const result = await startAdventureChapter(characterId, adv, save, devFlags);
     if ("error" in result) return reply.code(400).send(result);
     return reply.send(result);
   },
 );
 
-server.post<{ Params: { characterId: string } }>(
+server.post<{ Params: { characterId: string }; Body: { devFlags?: import("../../shared/types.js").DevFlags } }>(
   "/adventure/:characterId/advance",
   async (req, reply) => {
     const { characterId } = req.params;
+    const advanceDevFlags = req.body?.devFlags;
     const save = await readAdventureSave(characterId);
     if (!save) return reply.code(404).send({ error: "No active adventure for this character" });
     const adv = await loadAdventureDef(save.adventureId);
@@ -422,7 +594,7 @@ server.post<{ Params: { characterId: string } }>(
     }
 
     await writeAdventureSave(save);
-    const result = await startAdventureChapter(characterId, adv, save);
+    const result = await startAdventureChapter(characterId, adv, save, advanceDevFlags);
     if ("error" in result) return reply.code(400).send(result);
     return reply.send({ complete: false, ...result });
   },
@@ -524,16 +696,27 @@ server.get<{ Params: { filename: string } }>(
 
 // ── Save routes (unchanged) ────────────────────────────────────────────────────
 
-const SAVES_DIR = join(DATA_DIR, "saves");
-const WORLD_SAVE_PATH = join(SAVES_DIR, "world.json");
 import { writeFile, mkdir, unlink, access } from "fs/promises";
 
-function saveFilePath(characterId: string): string {
-  return join(SAVES_DIR, `${characterId}.json`);
+/**
+ * Saves live inside the active setting (`settings/<id>/saves/`). A character
+ * created in The Sundered Reach can't be loaded in a generic-SRD game, and
+ * vice versa — the save path enforces that binding mechanically. Helpers
+ * throw when no setting is active so callers fail loudly rather than write
+ * to a stale path.
+ */
+function savesDir(): string {
+  if (!defs.activeSetting) throw new Error("Cannot resolve saves path — no active setting.");
+  return join(DATA_DIR, "settings", defs.activeSetting.id, "saves");
 }
-
+function worldSavePath(): string {
+  return join(savesDir(), "world.json");
+}
+function saveFilePath(characterId: string): string {
+  return join(savesDir(), `${characterId}.json`);
+}
 function adventureSaveFilePath(characterId: string): string {
-  return join(SAVES_DIR, `${characterId}_adventure.json`);
+  return join(savesDir(), `${characterId}_adventure.json`);
 }
 
 // Persistent player stats live in the character save; the world save only keeps
@@ -561,7 +744,8 @@ interface CharSave {
   playerDefId: string;
   hp: number;
   xp: number;
-  gold: number;
+  /** Coin purse balance in Copper Pieces — see `shared/currency.ts`. */
+  balanceCp: number;
   inventoryIds: string[];
   equippedSlots?: EquipmentSlots;
   spellSlots?: number[];
@@ -584,7 +768,7 @@ async function saveWorldState(
   const {
     hp: _hp,
     xp: _xp,
-    gold: _gold,
+    balanceCp: _balanceCp,
     inventoryIds: _inv,
     equippedSlots: _eq,
     resources: _r,
@@ -593,8 +777,8 @@ async function saveWorldState(
     ...sessionPlayer
   } = state.player;
   const worldSave: WorldSave = { ...state, player: sessionPlayer, aigmHistory };
-  await mkdir(SAVES_DIR, { recursive: true });
-  await writeFile(WORLD_SAVE_PATH, JSON.stringify(worldSave));
+  await mkdir(savesDir(), { recursive: true });
+  await writeFile(worldSavePath(), JSON.stringify(worldSave));
 }
 
 async function loadWorldState(): Promise<{
@@ -604,7 +788,7 @@ async function loadWorldState(): Promise<{
   let worldSave: WorldSave;
   try {
     const rawJson = JSON.parse(
-      await readFile(WORLD_SAVE_PATH, "utf-8"),
+      await readFile(worldSavePath(), "utf-8"),
     ) as Record<string, unknown>;
     // Migrate older saves authored before `combatLog` → `eventLog` rename.
     // Reading state always carries the new field name so downstream code
@@ -625,7 +809,7 @@ async function loadWorldState(): Promise<{
     ...worldSave.player,
     hp: charSave.hp,
     xp: charSave.xp,
-    gold: charSave.gold,
+    balanceCp: charSave.balanceCp,
     inventoryIds: charSave.inventoryIds ?? [],
     equippedSlots: charSave.equippedSlots ?? {
       armorId: null,
@@ -686,7 +870,7 @@ async function loadWorldState(): Promise<{
 
 async function deleteWorldSave(): Promise<void> {
   try {
-    await unlink(WORLD_SAVE_PATH);
+    await unlink(worldSavePath());
   } catch {
     /* already gone */
   }
@@ -717,7 +901,7 @@ async function defaultSave(characterId: string): Promise<unknown> {
     playerDefId: char?.id ?? characterId,
     hp: char?.maxHp ?? 1,
     xp: char?.xp ?? 0,
-    gold: char?.defaultGold ?? 0,
+    balanceCp: char?.defaultCp ?? 0,
     inventoryIds: [...(char?.defaultInventoryIds ?? [])],
     resources: Object.fromEntries(
       (char?.defaultFeatureIds ?? [])
@@ -731,7 +915,7 @@ async function defaultSave(characterId: string): Promise<unknown> {
 }
 
 async function writeSave(characterId: string, data: unknown): Promise<void> {
-  await mkdir(SAVES_DIR, { recursive: true });
+  await mkdir(savesDir(), { recursive: true });
   await writeFile(saveFilePath(characterId), JSON.stringify(data, null, 2));
 }
 
@@ -753,7 +937,7 @@ async function readAdventureSave(characterId: string): Promise<AdventureSave | n
 }
 
 async function writeAdventureSave(save: AdventureSave): Promise<void> {
-  await mkdir(SAVES_DIR, { recursive: true });
+  await mkdir(savesDir(), { recursive: true });
   await writeFile(adventureSaveFilePath(save.characterId), JSON.stringify(save, null, 2));
 }
 
@@ -831,6 +1015,8 @@ interface EncounterDefJson {
   completionFlag?: string;
   tileProperties?: import("./engine/types.js").EncounterTileProperty[];
   startingZones?: import("./engine/types.js").StartingZonesLayer;
+  placementMode?: 'zones' | 'exact';
+  placements?: import("./engine/types.js").EncounterPlacement[];
   triggers?: import("./engine/types.js").EncounterTrigger[];
   environment?: import("./engine/types.js").EncounterEnvironment;
   /** Optional per-encounter override for the global faction-relation matrix. */
@@ -838,12 +1024,16 @@ interface EncounterDefJson {
 }
 
 async function loadAdventureDef(adventureId: string): Promise<AdventureDef | null> {
-  const all = await readDir<AdventureDef>(join(DATA_DIR, "adventures"));
+  const dir = settingSubDir("adventures");
+  if (!dir) return null;
+  const all = await readDir<AdventureDef>(dir);
   return all.find((a) => a.id === adventureId) ?? null;
 }
 
 async function loadEncounterDef(encounterId: string): Promise<EncounterDefJson | null> {
-  const all = await readDir<EncounterDefJson>(join(DATA_DIR, "encounters"));
+  const dir = settingSubDir("encounters");
+  if (!dir) return null;
+  const all = await readDir<EncounterDefJson>(dir);
   return all.find((e) => e.id === encounterId) ?? null;
 }
 
@@ -857,6 +1047,7 @@ async function startAdventureChapter(
   characterId: string,
   adv: AdventureDef,
   save: AdventureSave,
+  devFlags?: import("../../shared/types.js").DevFlags,
 ): Promise<{ sessionId: string; state: GameState; playerDef: PlayerDef } | { error: string }> {
   const chapter = adv.chapters[save.currentChapterIndex];
   if (!chapter) return { error: "No chapter at currentChapterIndex" };
@@ -886,6 +1077,8 @@ async function startAdventureChapter(
     customContext: encDef.customContext,
     customObjective: encDef.objective,
     startingZones: encDef.startingZones,
+    placementMode: encDef.placementMode,
+    placements: encDef.placements,
     environment: encDef.environment,
     factionRelations: encDef.factionRelations,
     allowsLongRest: encDef.allowsLongRest,
@@ -910,17 +1103,20 @@ async function startAdventureChapter(
     completionFlag: encDef.completionFlag,
     tileProperties: encDef.tileProperties,
     startingZones: encDef.startingZones,
+    placementMode: encDef.placementMode,
+    placements: encDef.placements,
     triggers: encDef.triggers,
     adventureSeed,
     resumeHp: charSave?.hp,
     resumeXp: charSave?.xp,
-    resumeGold: charSave?.gold,
+    resumeCp: charSave?.balanceCp,
     resumeInventoryIds: charSave?.inventoryIds,
     resumeEquippedSlots: charSave?.equippedSlots,
     resumeResources: charSave?.resources,
     resumeSpellSlots: charSave?.spellSlots,
     resumePreparedSpellIds: charSave?.preparedSpellIds,
     resumeLevelUps: charSave?.levelUps,
+    devFlags: await resolveDevFlags(devFlags),
   };
 
   const engine = GameEngine.createSession(sessionId, { ...req, encounterContext }, defs, savedMap);
@@ -1076,6 +1272,8 @@ server.post("/game/session", async (req, reply) => {
     customContext: body.customContext,
     customObjective: body.customObjective,
     startingZones: body.startingZones,
+    placementMode: body.placementMode,
+    placements: body.placements,
     allowsLongRest: body.allowsLongRest,
   });
 
@@ -1094,11 +1292,12 @@ server.post("/game/session", async (req, reply) => {
   const resumeResources       = charSaveForResume?.resources       ?? body.resumeResources;
   const resumeHp              = charSaveForResume?.hp              ?? body.resumeHp;
   const resumeXp              = charSaveForResume?.xp              ?? body.resumeXp;
-  const resumeGold            = charSaveForResume?.gold            ?? body.resumeGold;
+  const resumeCp              = charSaveForResume?.balanceCp       ?? body.resumeCp;
   const resumeInventoryIds    = charSaveForResume?.inventoryIds    ?? body.resumeInventoryIds;
   const resumeEquippedSlots   = charSaveForResume?.equippedSlots   ?? body.resumeEquippedSlots;
 
   const sessionId = randomUUID();
+  const devFlags = await resolveDevFlags(body.devFlags);
   const engine = GameEngine.createSession(
     sessionId,
     {
@@ -1110,9 +1309,10 @@ server.post("/game/session", async (req, reply) => {
       resumeResources,
       resumeHp,
       resumeXp,
-      resumeGold,
+      resumeCp,
       resumeInventoryIds,
       resumeEquippedSlots,
+      devFlags,
     },
     defs,
     savedMap,
@@ -1150,8 +1350,17 @@ server.post("/game/session/:id/world-paused", async (req, reply) => {
   if (typeof body?.paused !== 'boolean') {
     return reply.code(400).send({ error: "world-paused requires { paused: boolean }" });
   }
-  if (!getEngine(id)) return reply.code(404).send({ error: "Session not found" });
-  setWorldPaused(id, body.paused);
+  const engine = getEngine(id);
+  if (!engine) return reply.code(404).send({ error: "Session not found" });
+  const previouslyPaused = setWorldPaused(id, body.paused);
+  // Paused → unpaused transition: the client has finished playing whatever
+  // opening overlay was up. If `encounter_started` deferred the first
+  // combat turn, flush it now and broadcast the resulting state so the
+  // animation plays under the player's attention rather than behind a modal.
+  if (previouslyPaused && !body.paused && engine.getState().pendingTurnAdvance) {
+    const events = engine.runPendingTurnAdvance();
+    pushStateUpdate(id, events, engine.getState());
+  }
   return reply.send({ paused: body.paused });
 });
 
@@ -1211,14 +1420,14 @@ server.post("/game/session/:id/long-rest", async (req, reply) => {
     playerDefId: playerDef.id,
     hp: state.player.hp,
     xp: state.player.xp,
-    gold: state.player.gold,
+    balanceCp: state.player.balanceCp,
     inventoryIds: state.player.inventoryIds,
   } as CharSave;
   const updated: CharSave = {
     ...existing,
     hp: state.player.hp,
     xp: state.player.xp,
-    gold: state.player.gold,
+    balanceCp: state.player.balanceCp,
     inventoryIds: state.player.inventoryIds,
     equippedSlots: state.player.equippedSlots,
     spellSlots: state.player.spellSlots,
@@ -1258,7 +1467,7 @@ server.post("/game/session/:id/level-up", async (req, reply) => {
     playerDefId: playerDef.id,
     hp: engine.getState().player.hp,
     xp: engine.getState().player.xp,
-    gold: engine.getState().player.gold,
+    balanceCp: engine.getState().player.balanceCp,
     inventoryIds: engine.getState().player.inventoryIds,
   } as CharSave;
   const history = (existing.levelUps ?? []).slice();
@@ -1267,7 +1476,7 @@ server.post("/game/session/:id/level-up", async (req, reply) => {
     ...existing,
     hp: engine.getState().player.hp,
     xp: engine.getState().player.xp,
-    gold: engine.getState().player.gold,
+    balanceCp: engine.getState().player.balanceCp,
     inventoryIds: engine.getState().player.inventoryIds,
     equippedSlots: engine.getState().player.equippedSlots,
     spellSlots: engine.getState().player.spellSlots,
@@ -1288,17 +1497,32 @@ server.post("/game/session/:id/level-up", async (req, reply) => {
  * Install the per-session 6-second world-tick interval. Called from every
  * session-creation path (the manual `/game/session` route + the chapter
  * advancer). The handle is cleared by `deleteSession`.
+ *
+ * The first tick is deferred so the supertitle, focused-announcement, and
+ * fade-in cinematic have time to play before any auto-combat-start path
+ * fires (the off-camera tick promotes hostile-NPC presence to combat via
+ * `doStartCombat`, which used to run during the opening seconds and steal
+ * the player's first combat round before they could see it).
  */
 function installWorldTick(sessionId: string, engine: GameEngine): void {
   const tickMs = 6000;  // One SRD round per real-time tick.
-  const handle = setInterval(() => {
-    if (!isWorldTickEligible(sessionId)) return;
-    const events = engine.runOffCameraTick();
-    if (events.length > 0) {
-      pushStateUpdate(sessionId, events, engine.getState());
-    }
-  }, tickMs);
-  setWorldTickHandle(sessionId, handle);
+  // Opening cinematic budget: supertitle (~2.5s) + focused announcement
+  // (~4-5s) + fade-in (~0.8s) + comfort margin. The tick continues to
+  // respect `isWorldTickEligible`, so any overlay holding the world pause
+  // (intro, supertitle, focused announcement, character sheet, …) extends
+  // the quiet window naturally.
+  const startupDelayMs = 9000;
+  const startInterval = (): void => {
+    const handle = setInterval(() => {
+      if (!isWorldTickEligible(sessionId)) return;
+      const events = engine.runOffCameraTick();
+      if (events.length > 0) {
+        pushStateUpdate(sessionId, events, engine.getState());
+      }
+    }, tickMs);
+    setWorldTickHandle(sessionId, handle);
+  };
+  setTimeout(startInterval, startupDelayMs);
 }
 
 server.post("/game/session/:id/action", async (req, reply) => {
@@ -1327,7 +1551,7 @@ server.post("/game/session/:id/action", async (req, reply) => {
     playerDefId: player.defId,
     hp: player.hp,
     xp: player.xp,
-    gold: player.gold,
+    balanceCp: player.balanceCp,
     inventoryIds: player.inventoryIds,
     resources: player.resources,
     equippedSlots: player.equippedSlots,
@@ -1422,7 +1646,7 @@ server.delete("/game/session/:id", async (req, reply) => {
       description: meta.description,
       encounterTitle: meta.encounterTitle,
       xpGained: state.player.xp - meta.xpStart,
-      goldGained: state.player.gold - meta.goldStart,
+      cpGained: state.player.balanceCp - meta.balanceCpStart,
       outcome:
         state.phase === "defeat" || state.player.hp <= 0
           ? "defeated"
@@ -1474,6 +1698,7 @@ server.get("/game/session/:id/ws", { websocket: true }, (socket, req) => {
     return;
   }
   registerWebSocket(id, socket);
+  const startupEvents = engine.consumeStartupEvents();
   socket.send(
     JSON.stringify({
       type: "state_update",
@@ -1481,10 +1706,27 @@ server.get("/game/session/:id/ws", { websocket: true }, (socket, req) => {
       // intro cinematic emitted by `encounter_started` triggers (supertitle,
       // fade-in, opening announcement). The buffer is consumed once, so a
       // mid-session WS reconnect doesn't re-replay the intro.
-      events: engine.consumeStartupEvents(),
+      events: startupEvents,
       state: engine.getState(),
     } satisfies ServerWSMessage),
   );
+  // Fallback for the no-opening-overlay case. When the startup events
+  // include no supertitle / announcement / introduction, the client never
+  // acquires the world pause and so the paused→unpaused transition never
+  // fires the deferred turn advance. Schedule it on a short timer; the
+  // world-paused endpoint takes precedence (clears the flag earlier) if
+  // an overlay does acquire the pause.
+  const opensWithOverlay = startupEvents.some((e) => e.type === "supertitle" || e.type === "announcement")
+    || !!engine.getState().introduction;
+  if (engine.getState().pendingTurnAdvance && !opensWithOverlay) {
+    setTimeout(() => {
+      const eng = getEngine(id);
+      if (!eng) return;
+      if (!eng.getState().pendingTurnAdvance) return;
+      const events = eng.runPendingTurnAdvance();
+      pushStateUpdate(id, events, eng.getState());
+    }, 1200);
+  }
 });
 
 // ── Start ──────────────────────────────────────────────────────────────────────

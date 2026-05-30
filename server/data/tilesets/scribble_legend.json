@@ -83,16 +83,16 @@
       "transparent": true
     },
     "7": {
-      "name": "wood_wall_top",
-      "passable": false,
+      "name": "wooden_plank",
+      "passable": true,
       "layer": "ground",
-      "description": "Light wooden plank wall segment along the top of the tile. Blocks movement and sight.",
+      "description": "Light wooden plank ground — a passable wooden surface. Use for tavern floors, dock boards, raised wooden platforms, and similar walkable wood. Pair with wood_floor (85) for variation.",
       "tags": [
         "wood",
-        "wall",
+        "floor",
         "tavern",
         "indoor",
-        "barrier"
+        "fill"
       ]
     },
     "8": {
@@ -192,16 +192,15 @@
       "transparent": true
     },
     "14": {
-      "name": "wood_wall_top_transparent",
-      "passable": false,
+      "name": "wooden_plank_transparent",
+      "passable": true,
       "layer": "object",
-      "description": "Light wooden plank wall segment along the top of the tile. Blocks movement and sight. Transparent background (no floor); overlay on top of a ground tile. Twin of wood_wall_top.",
+      "description": "Light wooden plank overlay — a passable wooden surface drawn on top of an existing ground tile. Transparent background. Use to add wooden detail (boards, planking, decking) over a non-wood ground without replacing it. Twin of wooden_plank.",
       "tags": [
         "wood",
-        "wall",
+        "floor",
         "tavern",
         "indoor",
-        "barrier",
         "transparent",
         "overlay",
         "no_background"

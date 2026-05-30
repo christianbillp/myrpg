@@ -46,20 +46,28 @@ export class MainMenuScene extends Phaser.Scene {
       align: "center",
     }));
 
-    this.makeMenuButton(w / 2, h * 0.40, "ADVENTURE", "A string of encounters with overarching narrative", () => {
+    this.makeMenuButton(w / 2, h * 0.34, "ADVENTURE", "A string of encounters with overarching narrative", () => {
       this.scene.start("AdventureSetupScene");
     });
 
-    this.makeMenuButton(w / 2, h * 0.52, "SINGLE ENCOUNTER", "Play a one-off scenario", () => {
+    this.makeMenuButton(w / 2, h * 0.43, "SINGLE ENCOUNTER", "Play a one-off scenario", () => {
       this.scene.start("EncounterSetupScene");
     });
 
-    this.makeMenuButton(w / 2, h * 0.64, "GENERATE ENCOUNTER", "Describe a scene; the GM authors a one-off encounter just for you", () => {
-      this.scene.start("GenerateSetupScene");
+    this.makeMenuButton(w / 2, h * 0.52, "MAP EDITOR", "Generate and save maps; the Encounter Creator picks them up", () => {
+      this.scene.start("MapEditorScene");
     });
 
-    this.makeMenuButton(w / 2, h * 0.76, "ENCOUNTER EDITOR", "Open and edit an existing encounter — title, monsters, zones, triggers", () => {
-      this.scene.start("EncounterEditorScene");
+    this.makeMenuButton(w / 2, h * 0.61, "ENCOUNTER CREATOR", "Build an encounter manually or with AI assistance — title, monsters, zones, triggers", () => {
+      this.scene.start("EncounterCreatorScene");
+    });
+
+    this.makeMenuButton(w / 2, h * 0.70, "ADVENTURE CREATOR", "String encounters into an adventure with overarching story, AI context, and a rest stop", () => {
+      this.scene.start("AdventureCreatorScene");
+    });
+
+    this.makeMenuButton(w / 2, h * 0.79, "CONFIGURATION", "Choose the active setting; future game-wide options live here", () => {
+      this.scene.start("ConfigurationScene");
     });
 
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => this.teardown());

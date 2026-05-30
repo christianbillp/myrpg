@@ -175,8 +175,9 @@ export interface PlayerDef {
   fightingStyleDefense: boolean;
   defaultEquipment: EquipmentSlots;
   defaultInventoryIds: string[];
-  /** Starting gold this character spawns with (per class + background bundle). Defaults to 0 when omitted. */
-  defaultGold?: number;
+  /** Starting coin purse this character spawns with, denominated in Copper
+   *  Pieces (SRD: 1 GP = 100 CP, 1 SP = 10 CP). Defaults to 0 when omitted. */
+  defaultCp?: number;
   // ── Spellcasting (optional — omit for non-casters) ──────────────────────────
   /** INT / WIS / CHA. Drives spell save DC, attack bonus, and damage-mod adds. */
   spellcastingAbility?: SpellcastingAbility;
@@ -189,6 +190,8 @@ export interface PlayerDef {
   /** Starting spell slots, indexed by `spell.level − 1`. e.g. `[2]` = 2 × L1, no higher slots. */
   defaultSpellSlots?: number[];
   mainAttack: PlayerAttack;
+  /** One-line tagline shown on the character carousel selector card. */
+  shortDescription?: string;
   description?: string;
   /** Path to the SVG used as this character's token sprite. Required — every
    *  character JSON must declare its token explicitly (no naming-convention
@@ -361,13 +364,14 @@ export interface ArmorDef {
   baseAc: number; addDex: boolean; maxDex: number | null;
   stealthDisadv?: boolean;
   minStr?: number | null;
-  cost?: number;
+  /** Shop price in Copper Pieces (SRD coin system — see `shared/currency.ts`). */
+  costCp?: number;
 }
 
 export interface ShieldDef {
   id: string; name: string; type: 'shield';
   acBonus: number;
-  cost?: number;
+  costCp?: number;
 }
 
 export type WeaponMastery = 'graze' | 'vex' | 'sap' | 'nick' | 'topple' | 'push' | 'cleave' | 'slow';
@@ -385,7 +389,7 @@ export interface WeaponDef {
   ammunitionType?: string;    // e.g. "arrow", "bolt", "bullet", "needle"
   loading?: boolean;          // one shot per Action/Bonus/Reaction
   heavy?: boolean;            // Disadvantage on ranged attacks if DEX < 13
-  cost?: number;
+  costCp?: number;
 }
 
 // Ammunition is its own equipment subtype so it's distinct from health potions
@@ -393,7 +397,7 @@ export interface WeaponDef {
 export interface AmmunitionDef {
   id: string; name: string; type: 'ammunition';
   ammunitionType: string;  // canonical key matching WeaponDef.ammunitionType
-  cost?: number;
+  costCp?: number;
 }
 
 // Gear is a catch-all for non-functional inventory items — class artifacts
@@ -403,7 +407,7 @@ export interface AmmunitionDef {
 export interface GearDef {
   id: string; name: string; type: 'gear';
   description?: string;
-  cost?: number;
+  costCp?: number;
 }
 
 export type EquipmentDef = ArmorDef | ShieldDef | WeaponDef;
@@ -548,23 +552,15 @@ export interface SpellDef {
   scaling?: string;
 }
 
-// ── Encounter / quest types ──────────────────────────────────────────────────
-
-export type QuestGoalType = 'kill' | 'collect' | 'explore' | 'talk';
+// ── Encounter types ──────────────────────────────────────────────────────────
 
 export type SecretReward =
-  | { type: 'gold'; amount: number }
+  | { type: 'coins'; cp: number }
   | { type: 'item'; itemId: string }
   | { type: 'lore'; text: string };
 
 export interface SecretDef {
   id: string; dc: number; reward: SecretReward; successText: string; failureText: string;
-}
-
-export interface QuestDef {
-  id: string; title: string;
-  goal: { type: QuestGoalType; target: number };
-  rewardXp: number; rewardGp: number;
 }
 
 /**
@@ -655,6 +651,71 @@ export interface EncounterTileProperty {
 }
 
 /**
+ * One worldbuilding "Setting" — a markdown-authored campaign world that both
+ * the dev AI (encounter generator) and the in-game GM reference as ground
+ * truth. Loaded from `server/data/settings/<id>/setting.md` at startup; the
+ * markdown's frontmatter populates the metadata fields, and each `## ` H2
+ * heading becomes an entry in `sectionsByName` (keyed by the section's
+ * kebab-cased title). The dev AI gets the full text injected as system
+ * context (one-shot, no tool loop), while the in-game GM gets the `summary`
+ * up-front and pulls specific sections via the `lookup_setting` tool on
+ * demand.
+ */
+export interface SettingDef {
+  /** Stable id, drawn from frontmatter. Used in paths and save persistence. */
+  id: string;
+  /** Display name shown to the player. */
+  name: string;
+  /** Author-supplied version string; bumped when the setting markdown changes
+   *  in a meaningful way. Pinned into the save on creation. */
+  version: string;
+  /** Optional ruleset tag (e.g. `srd-5.2.1`) for future cross-system support. */
+  ruleset?: string;
+  /** One-paragraph summary. Always injected into AI prompts when the setting
+   *  is active; covers tone, central conflict, and one or two specific cues. */
+  summary: string;
+  /** Kebab-cased H2 section ids found in the setting.md body (e.g.
+   *  `history`, `political-structure`). These are the **core canon** — always
+   *  in scope; the GM looks them up via `lookup_setting`. */
+  sections: string[];
+  /** Full text of each H2 section, keyed by section id. Carries the raw
+   *  markdown body (excluding the H2 heading line itself). */
+  sectionsByName: Record<string, string>;
+  /** Supplementary entries loaded from `<settingDir>/worldbook/*.md`. Each
+   *  file is one topic (faction, named NPC, location, event) the AIGM fetches
+   *  on demand via `lookup_worldbook`. Empty when the setting has no
+   *  worldbook folder. */
+  worldbook: WorldbookEntry[];
+  /** Same entries keyed by id for quick lookup. */
+  worldbookById: Record<string, WorldbookEntry>;
+}
+
+/**
+ * One supplementary worldbook topic — a faction dossier, named-NPC backstory,
+ * location entry, or world event that's too specific for the always-listed
+ * `setting.md` canon. Loaded from `<settingDir>/worldbook/*.md`.
+ */
+export interface WorldbookEntry {
+  /** Stable kebab-case id from frontmatter (falls back to the filename). */
+  id: string;
+  /** Display title (e.g. "The Concordat"). Defaults to `id` when absent. */
+  title: string;
+  /** Free-form category — common values: `"faction"`, `"npc"`,
+   *  `"location"`, `"event"`, `"system"`. Used for grouping in the prompt. */
+  type?: string;
+  /** Optional cross-link to a `factions/<id>.json` def so the worldbook
+   *  prose and the mechanical faction definition can find each other. */
+  relatedFactionId?: string;
+  /** Optional cross-link to an `npcs/<id>.json` def for named-NPC entries. */
+  relatedNpcId?: string;
+  /** Optional tags for grouping / search (e.g. `["magic-regulation"]`). */
+  tags?: string[];
+  /** Raw markdown body (everything after the closing `---` of the
+   *  frontmatter). Returned verbatim by `lookup_worldbook`. */
+  body: string;
+}
+
+/**
  * AI-facing tile legend loaded from server/data/tilesets/*_legend.json. The
  * legend describes each tile's semantics for both AI authoring (so an LLM can
  * generate maps) and as a passability fallback for encounters that don't
@@ -706,6 +767,19 @@ export interface StartingZonesLayer {
   data: number[];
 }
 
+/**
+ * Exact spawn binding for a single entity slot. Consumed only when the
+ * encounter's `placementMode === "exact"`. See `EncounterDef.placements`
+ * for the binding rules. The player role has no `index` (singleton); every
+ * other role's `index` is the position in `enemyIds[]` / `allyIds[]` /
+ * `npcIds[]` (0-based, ordering matches the encounter JSON).
+ */
+export type EncounterPlacement =
+  | { role: 'player'; x: number; y: number }
+  | { role: 'enemy';   index: number; x: number; y: number }
+  | { role: 'ally';    index: number; x: number; y: number }
+  | { role: 'neutral'; index: number; x: number; y: number };
+
 // Encounter card definition (the JSON files in server/data/encounters/).
 export interface EncounterDef {
   id: string;
@@ -743,6 +817,34 @@ export interface EncounterDef {
   tileProperties?: EncounterTileProperty[];
   startingZones?: StartingZonesLayer;
   /**
+   * Starting-location mode for this encounter:
+   *   • `"zones"` (default) — entities spawn randomly inside the rectangles
+   *     painted in `startingZones`. The current behaviour for every existing
+   *     encounter.
+   *   • `"exact"` — entities listed in `placements[]` spawn at the exact
+   *     tile they're bound to; any entity NOT in `placements` falls back to
+   *     the `"zones"` path (so partial exact authoring works without
+   *     reauthoring zone rectangles for every NPC).
+   * Omitted = `"zones"`.
+   */
+  placementMode?: 'zones' | 'exact';
+  /**
+   * Per-entity exact placements (consumed only when `placementMode: "exact"`).
+   * Each entry binds one entity slot to a tile. The `role` selects the
+   * relevant slot list; `index` is the position in that list (0-based) and
+   * matches `enemyIds[]` / `allyIds[]` / `npcIds[]` ordering. Player slots
+   * have no index — there's only one player per encounter.
+   *
+   *   { role: 'player', x, y }                  // player start tile
+   *   { role: 'enemy',   index: 0, x, y }       // enemyIds[0]
+   *   { role: 'ally',    index: 1, x, y }       // allyIds[1]
+   *   { role: 'neutral', index: 2, x, y }       // npcIds[2]
+   *
+   * Indices that don't have a matching slot are silently ignored. Slots
+   * without a placement entry fall back to the zone-based spawn search.
+   */
+  placements?: EncounterPlacement[];
+  /**
    * Authored gameplay scripts (ambushes, reinforcements, scripted reveals).
    * Each trigger declares a condition (player enters a tile region, an NPC
    * dies, etc.) and a list of actions to fire when the condition matches.
@@ -750,7 +852,7 @@ export interface EncounterDef {
    */
   triggers?: EncounterTrigger[];
   /**
-   * Player-facing one-line objective shown at the top of the Quests panel
+   * Player-facing one-line objective for this encounter
    * ("OBJECTIVE: Defeat the bandits", "OBJECTIVE: Investigate the dungeon").
    * Optional — when omitted, a generic "Complete the encounter" default is
    * supplied by `buildEncounter` in `encounterService.ts`.
@@ -873,6 +975,10 @@ export type WhenClause =
   | { event: 'damage_dealt'; target?: 'player' | string }
   | { event: 'hp_threshold_crossed'; target?: 'player' | string; ratio?: number; direction?: 'below' | 'above' }
   | { event: 'faction_changed'; factionId?: string }
+  /** Fires when a world flag is set via `set_flag` (or any other path that
+   *  publishes `flag_set`). `name` matches a specific flag; omitting it fires
+   *  on every flag write. `value` further filters by the assigned value. */
+  | { event: 'flag_set'; name?: string; value?: WorldFlagValue }
   | { event: 'custom'; name: string };
 
 export type ComparisonOp = 'lt' | 'le' | 'eq' | 'ge' | 'gt';
@@ -1083,6 +1189,14 @@ export interface AdventureDef {
   /** Player-facing prose shown on the adventure card and in the intro overlay before chapter 1. */
   introduction: string;
   chapters: AdventureChapter[];
+  /** Optional AI Game Master context — backstory, factions, themes, plot
+   *  hooks. Surfaced into the AIGM prompt for every encounter played as part
+   *  of this adventure so the GM keeps cross-chapter narrative coherence. */
+  aiContext?: string;
+  /** Optional rest encounter id — the inn / campsite the player can return
+   *  to between chapters when they pick REST. Resolves against the same
+   *  encounters/ pool as chapters. */
+  restEncounterId?: string;
 }
 
 /** Persisted at `server/data/saves/{characterId}_adventure.json`. Holds the cross-chapter state that survives a chapter transition. */
@@ -1146,7 +1260,9 @@ export interface PlayerState {
   tileY: number;
   hp: number;
   xp: number;
-  gold: number;
+  /** Coin purse balance in Copper Pieces. SRD: 1 PP = 1000 CP, 1 GP = 100
+   *  CP, 1 SP = 10 CP. Display via `formatCoins` from `shared/currency.ts`. */
+  balanceCp: number;
   inventoryIds: string[];
   equippedSlots: EquipmentSlots;
   /** Per-feature resource pools, keyed by feature id (Second Wind, Rage, Channel Divinity, …). Initialised from `FeatureDef.resource.max` on session start; decremented by feature handlers. */
@@ -1368,17 +1484,6 @@ export interface SecretState {
   def: SecretDef;
 }
 
-export interface QuestState {
-  id: string;
-  title: string;
-  goalType: QuestGoalType;
-  goalTarget: number;
-  rewardXp: number;
-  rewardGp: number;
-  progress: number;
-  completed: boolean;
-}
-
 export interface GameMap {
   passable: boolean[][];
   cols: number;
@@ -1417,9 +1522,8 @@ export interface GameState {
   logScrollOffset: number;
   mapName: string;
   encounterTitle: string;
-  /** Player-facing one-line goal for this encounter, shown atop the Quests panel. */
+  /** Player-facing one-line goal for this encounter. */
   objective: string;
-  quests: QuestState[];
   selectedTargetId: string | null;
   activeNpcIndex: number;
   turnOrderIds: string[];
@@ -1431,6 +1535,12 @@ export interface GameState {
   availableActions: AvailableActions;
   /** Set when the engine has paused on a reaction-eligible trigger. The next player action must be `resolveReaction`. Cleared on resolution. */
   pendingReaction: PendingReaction | null;
+  /** True when an `encounter_started` combat trigger fired during session
+   *  construction and the engine deferred `advanceTurn` so the player has
+   *  a chance to see the intro overlay / announcement before NPC turns
+   *  run. Consumed by `GameEngine.runPendingTurnAdvance()` once the client
+   *  signals readiness by releasing the world pause. */
+  pendingTurnAdvance?: boolean;
   /** Authored encounter triggers active for this session. Sourced from `EncounterDef.triggers` at session creation. */
   triggers: EncounterTrigger[];
   /** Ids of triggers that have already fired. Persisted in `world.json` so `once` semantics survive save/load. */
@@ -1482,6 +1592,40 @@ export interface GameState {
   encounterCompletionFlag?: string;
   /** Environmental flags consulted by combat resolvers — sourced from EncounterDef.environment at session creation. */
   environment: EncounterEnvironment;
+  /** Dev-mode overrides for the active session, copied from the
+   *  `CreateSessionRequest` at session boot. Engine consumers consult these
+   *  on every state push (see `GameEngine.getState`) to keep resources
+   *  "topped up" so the player can test freely without rerunning encounters. */
+  devFlags?: DevFlags;
+}
+
+/**
+ * Dev-mode session overrides. Set via the Configuration scene's
+ * "Development Mode" section. Persisted in the browser's localStorage and
+ * spliced into every `CreateSessionRequest`. Intended for testing — disabled
+ * by default in any normal play session. See `client/src/devMode.ts`.
+ */
+export interface DevFlags {
+  /** Skip the IntroductionOverlay supertitle at encounter start. The intro
+   *  text is still pushed to the GM chat so the narrative record is intact.
+   *  Client-only — server ignores this field. */
+  disableSupertitle?: boolean;
+  /** Spell slots are refilled to their max on every server state push, so
+   *  casting never decrements the visible slot counter. */
+  unlimitedSpellSlots?: boolean;
+  /** At session creation the player's `preparedSpellIds` is seeded with
+   *  every spell in the game (cantrips + leveled), and Wizards additionally
+   *  receive every spell in their spellbook. Lets the tester invoke any
+   *  spell without a level-up rebuild. */
+  unlockAllSpells?: boolean;
+  /** `actionUsed` and `bonusActionUsed` are reset to `false` on every server
+   *  state push, so a tester can spam attacks/spells in combat without
+   *  ending their turn. */
+  unlimitedActions?: boolean;
+  /** Show the DELETE SAVE button on the character setup detail panel. Off by
+   *  default so non-developers can't accidentally wipe a character's progress.
+   *  Client-only — server ignores this field. */
+  showDeleteSaveButton?: boolean;
 }
 
 export interface AdventureSessionContext {
@@ -1540,8 +1684,11 @@ export type GameEvent =
   /** Show a speech-bubble above the named entity for a few seconds. Pushed by
    *  the AIGM `npc_speaks` tool (and future trigger actions); the client
    *  resolves the entity ref (`player` / `enemy_A` / `npc_<id>`) to a token
-   *  position and renders an absolutely-positioned bubble. */
-  | { type: 'npc_speech'; entityId: string; text: string }
+   *  position and renders an absolutely-positioned bubble. `speakerName` is
+   *  the display name as the player knows it (revealed name when set,
+   *  otherwise the def's generic label) so the client can also mirror the
+   *  line into the GM chat as a scrollable record of the conversation. */
+  | { type: 'npc_speech'; entityId: string; text: string; speakerName: string }
   /** A noise was emitted at the given tile. The client renders a brief
    *  expanding circle (a "sound ring") at the source so the player gets
    *  visual feedback of audible events — useful when the noise came from
@@ -1651,6 +1798,10 @@ export interface CreateSessionRequest {
   completionFlag?: string;
   tileProperties?: EncounterTileProperty[];
   startingZones?: StartingZonesLayer;
+  /** Mirrors `EncounterDef.placementMode` — see that field for the rules. */
+  placementMode?: 'zones' | 'exact';
+  /** Mirrors `EncounterDef.placements`. */
+  placements?: EncounterPlacement[];
   triggers?: EncounterTrigger[];
   /** Seed adventure-scope state on session creation. Set when the new session is a chapter of an in-progress adventure. */
   adventureSeed?: AdventureSessionContext & {
@@ -1664,7 +1815,7 @@ export interface CreateSessionRequest {
   };
   resumeHp?: number;
   resumeXp?: number;
-  resumeGold?: number;
+  resumeCp?: number;
   resumeInventoryIds?: string[];
   resumeEquippedSlots?: EquipmentSlots;
   resumeResources?: Record<string, number>;
@@ -1676,6 +1827,10 @@ export interface CreateSessionRequest {
    *  session start so the per-session `playerDef` clone reaches its current
    *  level with the player's recorded feature / spell / Expertise picks. */
   resumeLevelUps?: LevelUpChoices[];
+  /** Dev-mode session overrides — see `DevFlags`. Copied straight onto
+   *  `GameState.devFlags` at session boot; `unlockAllSpells` is consumed
+   *  at boot to seed `preparedSpellIds`/`defaultSpellbookIds`. */
+  devFlags?: DevFlags;
 }
 
 export interface CreateSessionResponse {
@@ -1696,7 +1851,8 @@ export interface EncounterRecord {
   description: string;
   encounterTitle: string;
   xpGained: number;
-  goldGained: number;
+  /** Net change in the player's coin purse over this encounter, in CP. */
+  cpGained: number;
   outcome: 'survived' | 'defeated';
   lines: EncounterLogLine[];
 }

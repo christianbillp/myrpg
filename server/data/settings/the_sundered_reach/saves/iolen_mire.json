@@ -1,0 +1,189 @@
+{
+  "playerDefId": "iolen_mire",
+  "hp": 5,
+  "xp": 0,
+  "balanceCp": 1600,
+  "inventoryIds": [
+    "dagger",
+    "dagger",
+    "spellbook"
+  ],
+  "resources": {},
+  "spellSlots": [
+    2
+  ],
+  "preparedSpellIds": [
+    "alarm",
+    "burning-hands",
+    "charm-person",
+    "chromatic-orb",
+    "color-spray",
+    "comprehend-languages",
+    "detect-magic",
+    "disguise-self",
+    "expeditious-retreat",
+    "false-life",
+    "feather-fall",
+    "find-familiar",
+    "fire-bolt",
+    "floating-disk",
+    "fog-cloud",
+    "grease",
+    "hideous-laughter",
+    "ice-knife",
+    "identify",
+    "illusory-script",
+    "jump",
+    "light",
+    "longstrider",
+    "mage-armor",
+    "mage-hand",
+    "magic-missile",
+    "minor-illusion",
+    "prestidigitation",
+    "protection-from-evil-and-good",
+    "ray-of-frost",
+    "ray-of-sickness",
+    "shield",
+    "silent-image",
+    "sleep",
+    "thunderwave",
+    "unseen-servant"
+  ],
+  "encounterLog": [
+    {
+      "id": "3da359c5-30a7-4761-a300-80b11a175255",
+      "timestamp": "2026-05-30T18:03:02.251Z",
+      "description": "",
+      "encounterTitle": "Combttetf",
+      "xpGained": 0,
+      "cpGained": 0,
+      "outcome": "survived",
+      "lines": [
+        {
+          "type": "combat",
+          "text": "Iolen Mire HP: 5/8"
+        },
+        {
+          "type": "combat",
+          "text": "Commoner (A)'s turn"
+        },
+        {
+          "type": "combat",
+          "text": "Miss with Unarmed Strike  [d20(8)+2=10 vs AC 12]"
+        },
+        {
+          "type": "combat",
+          "text": "Commoner (B)'s turn"
+        },
+        {
+          "type": "combat",
+          "text": "Miss with Unarmed Strike  [d20(5)+2=7 vs AC 12]"
+        },
+        {
+          "type": "combat",
+          "text": "Commoner (D)'s turn"
+        },
+        {
+          "type": "combat",
+          "text": "Miss with Unarmed Strike  [d20(8)+2=10 vs AC 12]"
+        },
+        {
+          "type": "combat",
+          "text": "── Iolen Mire's turn — Action & Bonus refreshed ──"
+        }
+      ]
+    },
+    {
+      "id": "d56a2e72-436e-4cd4-bddc-080d28666fc2",
+      "timestamp": "2026-05-30T18:02:47.537Z",
+      "description": "",
+      "encounterTitle": "Combttetf",
+      "xpGained": 0,
+      "cpGained": 0,
+      "outcome": "survived",
+      "lines": []
+    },
+    {
+      "id": "fce9c6cf-3315-43b9-8c57-c69491b5dbec",
+      "timestamp": "2026-05-30T18:02:34.889Z",
+      "description": "",
+      "encounterTitle": "Combttetf",
+      "xpGained": 0,
+      "cpGained": 0,
+      "outcome": "survived",
+      "lines": [
+        {
+          "type": "combat",
+          "text": "⚡ Iolen Mire casts Shield (reaction) — +5 AC until next turn"
+        },
+        {
+          "type": "combat",
+          "text": "The attack glances off the magical barrier — miss"
+        },
+        {
+          "type": "combat",
+          "text": "── Iolen Mire's turn — Action & Bonus refreshed ──"
+        }
+      ]
+    },
+    {
+      "id": "1c56a047-a54e-4682-93d1-efaf90dba2bf",
+      "timestamp": "2026-05-30T18:01:32.052Z",
+      "description": "",
+      "encounterTitle": "Combttetf",
+      "xpGained": 0,
+      "cpGained": 0,
+      "outcome": "survived",
+      "lines": [
+        {
+          "type": "combat",
+          "text": "Iolen Mire HP: 7/8"
+        },
+        {
+          "type": "combat",
+          "text": "Commoner (C)'s turn"
+        },
+        {
+          "type": "combat",
+          "text": "Hit with Unarmed Strike — 1 bludgeoning  [d20(10)+2=12 vs AC 12 · 1d1[1]+0]"
+        },
+        {
+          "type": "combat",
+          "text": "⚡ Shield: Commoner (C) hits for 1 — react with Shield?"
+        },
+        {
+          "type": "combat",
+          "text": "Iolen Mire HP: 6/8"
+        },
+        {
+          "type": "combat",
+          "text": "Commoner (D)'s turn"
+        },
+        {
+          "type": "combat",
+          "text": "Miss with Unarmed Strike  [d20(6)+2=8 vs AC 12]"
+        },
+        {
+          "type": "combat",
+          "text": "── Iolen Mire's turn — Action & Bonus refreshed ──"
+        }
+      ]
+    },
+    {
+      "id": "3ee05f45-8365-4a06-9f10-c69583af16f7",
+      "timestamp": "2026-05-30T17:59:15.314Z",
+      "description": "The road between holdfasts has been quiet for too long. That kind of quiet means either the Bureau has finally stretched its patrols this far — or something worse has filled the gap. Two silhouettes step out from the scrub ahead, hands resting on weapon hilts, wearing the tired, hungry look of men who stopped waiting for honest work some seasons ago.",
+      "encounterTitle": "Toll on the Empty Road",
+      "xpGained": 0,
+      "cpGained": 0,
+      "outcome": "survived",
+      "lines": []
+    }
+  ],
+  "equippedSlots": {
+    "armorId": null,
+    "weaponId": "quarterstaff",
+    "shieldId": null
+  }
+}

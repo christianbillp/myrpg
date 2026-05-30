@@ -1,0 +1,21 @@
+{
+  "id": "circus_of_the_moon",
+  "name": "The Circus of the Moon",
+  "description": "Halfling power: travelling night-amusement and permanent opera houses, staffed by genuine first-rank performers — who are also the Empire's finest assassins. The acrobatics that delight a crowd at dusk put someone on a high windowsill at midnight. Bound to the other halfling Powers by the Oath of Non-Competition.",
+  "displayColor": "#404880",
+  "renown": 1,
+  "defaultRelations": {
+    "arcania": 20,
+    "white_capes": 0,
+    "bureau_of_adjustment": 10,
+    "hammer_guild": 10,
+    "wrench_guild": 10,
+    "silver_service": 80,
+    "circus_of_the_moon": 80,
+    "fortune_guards": 80,
+    "concordat": 0,
+    "bandits": -20,
+    "monsters": -40,
+    "party": 0
+  }
+}

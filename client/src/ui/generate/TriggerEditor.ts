@@ -1,6 +1,6 @@
 /**
  * TriggerEditor — inline UI for authoring encounter triggers from the
- * Adjudicator-tab of `GenerateSetupScene` and from `EncounterEditorScene`.
+ * Adjudicator-tab of `MapEditorScene` and from `EncounterCreatorScene`.
  *
  * Each trigger is a rectangular region on the map plus one of four action
  * templates (perception check, log message, AIGM cue, start combat). The
@@ -21,9 +21,10 @@ const HEADER_H = 16;
 
 export type TriggerActionKind =
   | "perception" | "log" | "aigm" | "combat" | "xp"
-  | "announcement" | "speech" | "fade";
+  | "announcement" | "speech" | "fade" | "set_flag";
 
-export type TriggerWhenEvent = "player_moved" | "encounter_started" | "encounter_completed";
+export type TriggerWhenEvent =
+  | "player_moved" | "encounter_started" | "encounter_completed" | "flag_set";
 
 export interface ComposedTrigger {
   id: string;
@@ -47,6 +48,10 @@ export interface ComposedTrigger {
   fadeMode?: "in" | "out" | "dim";
   /** Style for `announcement`. `focused` hides side panels + locks input + pauses world; `unfocused` keeps the UI live. */
   announcementMode?: "focused" | "unfocused";
+  /** Flag name the `flag_set` WHEN matcher listens for. Blank matches every flag write. */
+  whenFlagName?: string;
+  /** Flag name the `set_flag` THEN action writes (always to `true`). Required by the THEN action; ignored otherwise. */
+  setFlagName?: string;
 }
 
 export interface TriggerEditorOptions {
@@ -77,11 +82,12 @@ const KIND_LABEL: Record<TriggerActionKind, string> = {
   announcement: "ANNOUNCE",
   speech: "SPEECH",
   fade: "FADE",
+  set_flag: "SET FLAG",
 };
 
 /** Per-kind swatch colour shown next to each trigger's summary so authors
  *  can match a trigger row to its outline on the map preview. Matches
- *  `ZonePainter.TRIGGER_COLOR` / `MapPreviewOverlay.TRIGGER_COLOR`. */
+ *  `ZonePainter.TRIGGER_COLOR` / `EmbeddedMapPreview.TRIGGER_COLOR`. */
 export const KIND_SWATCH: Record<TriggerActionKind, string> = {
   perception:   "#88ccaa",
   log:          "#c8d8e8",
@@ -91,6 +97,7 @@ export const KIND_SWATCH: Record<TriggerActionKind, string> = {
   announcement: "#f4e6c1",
   speech:       "#5588aa",
   fade:         "#222222",
+  set_flag:     "#aa88ff",
 };
 
 const KIND_TOOLTIP: Record<TriggerActionKind, string> = {
@@ -102,6 +109,7 @@ const KIND_TOOLTIP: Record<TriggerActionKind, string> = {
   announcement: "Show a centered announcement card; mirrored to the Event Log.",
   speech: "Show a speech bubble above the named entity's token.",
   fade: "Fade the screen to or from black. Pair an OUT with an IN.",
+  set_flag: "Set a world flag to true. Pair with the encounter's completionFlag to end a non-combat encounter.",
 };
 
 export class TriggerEditor {
@@ -199,6 +207,23 @@ export class TriggerEditor {
     }));
   }
 
+  /** Replace the trigger list wholesale. Used by the AI accept flow when
+   *  the proposal includes a fresh trigger set. Rebuilds every row from
+   *  scratch and fires `onChange` so the host scene can sync the painter's
+   *  region overlays. */
+  setTriggers(triggers: ComposedTrigger[]): void {
+    this.triggers.length = 0;
+    for (const t of triggers) {
+      this.triggers.push({
+        ...t,
+        region: { ...t.region },
+        defIds: t.defIds ? [...t.defIds] : undefined,
+      });
+    }
+    this.rebuildRows();
+    this.opts.onChange?.();
+  }
+
   destroy(): void {
     for (const row of this.rowElements) row.remove();
     this.rowElements.length = 0;
@@ -258,6 +283,14 @@ export class TriggerEditor {
     }
   }
 
+  /**
+   * Build one trigger row. Orchestration only — each visual section delegates
+   * to a dedicated builder so this method stays the place a reader looks to
+   * understand the layout (head / WHEN / chips / region / flag-matcher / one
+   * of the per-kind blocks). Mutations from any builder route through a
+   * single `onChange` closure that re-summarises the row + refreshes the
+   * trigger-colour swatch + notifies the parent.
+   */
   private buildRow(trig: ComposedTrigger, i: number): HTMLDivElement {
     const row = document.createElement("div");
     row.style.cssText = `
@@ -271,23 +304,55 @@ export class TriggerEditor {
       color: #aabbcc;
     `;
 
-    // Summary line + REMOVE button.
+    const { head, summary, refreshSwatch } = this.buildHeadRow(trig, i);
+    const onChange = (): void => {
+      summary.textContent = this.summarise(trig);
+      refreshSwatch();
+      this.opts.onChange?.();
+    };
+
+    const regionRow   = this.buildRegionRow(trig, onChange);
+    const whenFlagRow = this.buildWhenFlagRow(trig, onChange);
+
+    // Build every per-kind block first so the chip-row's click handlers can
+    // flip block visibility by reference.
+    const blocks = new Map<TriggerActionKind, HTMLElement>([
+      ["perception",   this.buildPerceptionBlock(trig, onChange)],
+      ["log",          this.buildLogBlock(trig, onChange)],
+      ["aigm",         this.buildAigmBlock(trig, onChange)],
+      ["combat",       this.buildCombatBlock(trig, onChange)],
+      ["xp",           this.buildXpBlock(trig, onChange)],
+      ["announcement", this.buildAnnouncementBlock(trig, onChange)],
+      ["speech",       this.buildSpeechBlock(trig, onChange)],
+      ["fade",         this.buildFadeBlock(trig, onChange)],
+      ["set_flag",     this.buildSetFlagBlock(trig, onChange)],
+    ]);
+
+    const whenRow = this.buildWhenSelector(trig, regionRow, whenFlagRow, onChange);
+    const chipRow = this.buildChipRow(trig, blocks, onChange);
+
+    row.appendChild(head);
+    row.appendChild(whenRow);
+    row.appendChild(chipRow);
+    row.appendChild(regionRow);
+    row.appendChild(whenFlagRow);
+    for (const block of blocks.values()) row.appendChild(block);
+
+    this.refreshKindVisibility(blocks, trig.kind);
+    return row;
+  }
+
+  /** Head row — colour swatch + summary + REMOVE button. Returns the live
+   *  swatch refresher so kind/whenEvent changes can recolour it. */
+  private buildHeadRow(trig: ComposedTrigger, index: number):
+    { head: HTMLDivElement; summary: HTMLSpanElement; refreshSwatch: () => void } {
     const head = document.createElement("div");
     head.style.cssText = "display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; gap: 6px;";
     const summaryLine = document.createElement("div");
     summaryLine.style.cssText = "display: flex; align-items: center; gap: 6px; flex: 1; min-width: 0;";
 
-    // Region swatch — small square matching the trigger's outline colour on
-    // the map preview. Empty (hollow) for lifecycle triggers that have no
-    // region, so authors can tell at a glance which triggers paint outlines.
     const swatch = document.createElement("span");
-    const hasRegion = (trig.whenEvent ?? "player_moved") === "player_moved";
-    swatch.style.cssText = `
-      width: 12px; height: 12px; flex-shrink: 0;
-      border: 1px solid ${hasRegion ? KIND_SWATCH[trig.kind] : "#445566"};
-      background: ${hasRegion ? KIND_SWATCH[trig.kind] : "transparent"};
-      box-sizing: border-box;
-    `;
+    swatch.style.cssText = "width: 12px; height: 12px; flex-shrink: 0; box-sizing: border-box;";
     summaryLine.appendChild(swatch);
 
     const summary = document.createElement("span");
@@ -295,13 +360,15 @@ export class TriggerEditor {
     summary.textContent = this.summarise(trig);
     summaryLine.appendChild(summary);
     head.appendChild(summaryLine);
-    // Helper for child handlers to keep the swatch in sync after kind /
-    // whenEvent changes.
+
     const refreshSwatch = (): void => {
+      // Lifecycle / flag triggers paint no region outline, so the swatch
+      // renders hollow to match. Region triggers fill with the kind colour.
       const region = (trig.whenEvent ?? "player_moved") === "player_moved";
       swatch.style.background = region ? KIND_SWATCH[trig.kind] : "transparent";
-      swatch.style.borderColor = region ? KIND_SWATCH[trig.kind] : "#445566";
+      swatch.style.border = `1px solid ${region ? KIND_SWATCH[trig.kind] : "#445566"}`;
     };
+    refreshSwatch();
 
     const remove = document.createElement("button");
     remove.type = "button";
@@ -311,28 +378,33 @@ export class TriggerEditor {
       padding: 1px 8px; font-family: monospace; font-size: 9px;
       cursor: pointer; letter-spacing: 1px;
     `;
-    remove.addEventListener("click", () => this.removeTrigger(i));
+    remove.addEventListener("click", () => this.removeTrigger(index));
     head.appendChild(remove);
-    row.appendChild(head);
 
-    // WHEN selector — picks the engine event the trigger listens on. The
-    // region inputs below are only shown for `player_moved`. We declare
-    // `regionRow` as a forward-reference so the WHEN-button handlers can
-    // flip its display; it's populated further down once chip-row logic is
-    // in scope.
-    let regionRow: HTMLDivElement;
-    const whenRow = document.createElement("div");
-    whenRow.style.cssText = "display: flex; gap: 4px; margin-bottom: 6px; align-items: center;";
-    whenRow.appendChild(this.makeLabel("WHEN"));
-    const whenButtons = new Map<TriggerWhenEvent, HTMLButtonElement>();
-    const refreshWhenButtons = (active: TriggerWhenEvent): void => {
-      for (const [m, b] of whenButtons) {
+    return { head, summary, refreshSwatch };
+  }
+
+  /** WHEN selector — flips trigger.whenEvent and the visibility of the
+   *  region / flag-matcher rows the caller passes in by reference. */
+  private buildWhenSelector(
+    trig: ComposedTrigger,
+    regionRow: HTMLDivElement,
+    whenFlagRow: HTMLDivElement,
+    onChange: () => void,
+  ): HTMLDivElement {
+    const row = document.createElement("div");
+    row.style.cssText = "display: flex; gap: 4px; margin-bottom: 6px; align-items: center;";
+    row.appendChild(this.makeLabel("WHEN"));
+
+    const buttons = new Map<TriggerWhenEvent, HTMLButtonElement>();
+    const refresh = (active: TriggerWhenEvent): void => {
+      for (const [m, b] of buttons) {
         const on = m === active;
         b.style.background = on ? "#2a3a55" : "#1a1a2a";
         b.style.color = on ? "#cce4ff" : "#aabbcc";
       }
     };
-    const makeWhenBtn = (we: TriggerWhenEvent, label: string, tooltip: string): HTMLButtonElement => {
+    const make = (we: TriggerWhenEvent, label: string, tooltip: string): HTMLButtonElement => {
       const btn = document.createElement("button");
       btn.type = "button";
       btn.textContent = label;
@@ -345,27 +417,33 @@ export class TriggerEditor {
       `;
       btn.addEventListener("click", () => {
         trig.whenEvent = we;
-        refreshWhenButtons(we);
-        regionRow.style.display = we === "player_moved" ? "" : "none";
-        summary.textContent = this.summarise(trig);
-        refreshSwatch();
-        this.opts.onChange?.();
+        refresh(we);
+        regionRow.style.display   = we === "player_moved" ? "" : "none";
+        whenFlagRow.style.display = we === "flag_set"     ? "" : "none";
+        onChange();
       });
-      whenButtons.set(we, btn);
+      buttons.set(we, btn);
       return btn;
     };
-    whenRow.appendChild(makeWhenBtn("player_moved", "REGION", "Fires when the player walks into the region defined below."));
-    whenRow.appendChild(makeWhenBtn("encounter_started", "ON START", "Fires once when the encounter begins."));
-    whenRow.appendChild(makeWhenBtn("encounter_completed", "ON COMPLETE", "Fires once when the encounter resolves (combat-victory or completionFlag set)."));
-    refreshWhenButtons(trig.whenEvent ?? "player_moved");
-    row.appendChild(whenRow);
+    row.appendChild(make("player_moved",       "REGION",      "Fires when the player walks into the region defined below."));
+    row.appendChild(make("encounter_started",  "ON START",    "Fires once when the encounter begins."));
+    row.appendChild(make("encounter_completed","ON COMPLETE", "Fires once when the encounter resolves (combat-victory or completionFlag set)."));
+    row.appendChild(make("flag_set",           "ON FLAG",     "Fires when a world flag is set. Leave the flag-name blank to match every flag."));
+    refresh(trig.whenEvent ?? "player_moved");
+    return row;
+  }
 
-    // Kind chips row. Each chip selects the THEN action template.
-    const chipRow = document.createElement("div");
-    chipRow.style.cssText = "display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 6px;";
+  /** Kind chip row — selects which per-kind block is visible. */
+  private buildChipRow(
+    trig: ComposedTrigger,
+    blocks: Map<TriggerActionKind, HTMLElement>,
+    onChange: () => void,
+  ): HTMLDivElement {
+    const row = document.createElement("div");
+    row.style.cssText = "display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 6px;";
     const kinds: TriggerActionKind[] = [
       "perception", "log", "aigm", "combat", "xp",
-      "announcement", "speech", "fade",
+      "announcement", "speech", "fade", "set_flag",
     ];
     const chipBtns = new Map<TriggerActionKind, HTMLButtonElement>();
     for (const k of kinds) {
@@ -383,188 +461,190 @@ export class TriggerEditor {
         trig.kind = k;
         this.refreshChips(chipBtns, trig.kind);
         this.refreshKindVisibility(blocks, trig.kind);
-        summary.textContent = this.summarise(trig);
-        refreshSwatch();
-        this.opts.onChange?.();
+        onChange();
       });
       chipBtns.set(k, chip);
-      chipRow.appendChild(chip);
+      row.appendChild(chip);
     }
-    row.appendChild(chipRow);
+    this.refreshChips(chipBtns, trig.kind);
+    return row;
+  }
 
-    // Region inputs. Hidden when `whenEvent` is a lifecycle event.
-    regionRow = document.createElement("div");
-    regionRow.style.cssText = "display: flex; gap: 6px; margin-bottom: 6px; align-items: center;";
-    if ((trig.whenEvent ?? "player_moved") !== "player_moved") regionRow.style.display = "none";
-    regionRow.appendChild(this.makeLabel("REGION"));
-    const regionInputs: HTMLInputElement[] = [];
-    const labelNames: Array<keyof { x: 1; y: 1; w: 1; h: 1 }> = ["x", "y", "w", "h"];
-    for (const nm of labelNames) {
-      regionRow.appendChild(this.makeLabel(nm));
-      const input = this.makeNumberInput(String(trig.region[nm]), (val) => {
+  /** Region xywh inputs. Hidden when the trigger is not `player_moved`. */
+  private buildRegionRow(trig: ComposedTrigger, onChange: () => void): HTMLDivElement {
+    const row = document.createElement("div");
+    row.style.cssText = "display: flex; gap: 6px; margin-bottom: 6px; align-items: center;";
+    if ((trig.whenEvent ?? "player_moved") !== "player_moved") row.style.display = "none";
+    row.appendChild(this.makeLabel("REGION"));
+    const dims: Array<keyof { x: 1; y: 1; w: 1; h: 1 }> = ["x", "y", "w", "h"];
+    for (const nm of dims) {
+      row.appendChild(this.makeLabel(nm));
+      row.appendChild(this.makeNumberInput(String(trig.region[nm]), (val) => {
         const n = Math.max(0, Math.floor(Number(val) || 0));
-        if (nm === "x") trig.region.x = Math.min(n, this.opts.mapW - 1);
+        if      (nm === "x") trig.region.x = Math.min(n, this.opts.mapW - 1);
         else if (nm === "y") trig.region.y = Math.min(n, this.opts.mapH - 1);
         else if (nm === "w") trig.region.w = Math.max(1, Math.min(n, this.opts.mapW - trig.region.x));
-        else trig.region.h = Math.max(1, Math.min(n, this.opts.mapH - trig.region.y));
-        summary.textContent = this.summarise(trig);
-        this.opts.onChange?.();
-      });
-      regionInputs.push(input);
-      regionRow.appendChild(input);
+        else                 trig.region.h = Math.max(1, Math.min(n, this.opts.mapH - trig.region.y));
+        onChange();
+      }));
     }
-    row.appendChild(regionRow);
+    return row;
+  }
 
-    // Per-kind config blocks (only the active one is visible). One block per
-    // TriggerActionKind, keyed in a Map so adding a new kind only requires
-    // appending one entry plus a chip — no extra branches in the toggle.
-    const blocks = new Map<TriggerActionKind, HTMLElement>();
+  /** Flag-name matcher row. Hidden when WHEN is not `flag_set`. */
+  private buildWhenFlagRow(trig: ComposedTrigger, onChange: () => void): HTMLDivElement {
+    const row = document.createElement("div");
+    row.style.cssText = "display: flex; gap: 6px; margin-bottom: 6px; align-items: center;";
+    if ((trig.whenEvent ?? "player_moved") !== "flag_set") row.style.display = "none";
+    row.appendChild(this.makeLabel("FLAG NAME (blank = any)"));
+    row.appendChild(this.makeTextInput(trig.whenFlagName ?? "", "e.g. tutorial_complete", (val) => {
+      trig.whenFlagName = val.trim();
+      onChange();
+    }));
+    return row;
+  }
 
-    const perceptionBlock = document.createElement("div");
-    perceptionBlock.style.cssText = "display: flex; flex-direction: column; gap: 4px;";
+  // ── Per-kind THEN blocks ────────────────────────────────────────────────
+
+  private buildPerceptionBlock(trig: ComposedTrigger, onChange: () => void): HTMLElement {
+    const block = document.createElement("div");
+    block.style.cssText = "display: flex; flex-direction: column; gap: 4px;";
     const dcRow = document.createElement("div");
     dcRow.style.cssText = "display: flex; gap: 6px; align-items: center;";
     dcRow.appendChild(this.makeLabel("DC"));
     dcRow.appendChild(this.makeNumberInput(String(trig.dc), (val) => {
       trig.dc = Math.max(1, Math.min(30, Math.floor(Number(val) || 10)));
-      summary.textContent = this.summarise(trig);
-      this.opts.onChange?.();
+      onChange();
     }));
-    perceptionBlock.appendChild(dcRow);
-    perceptionBlock.appendChild(this.makeLabel("PASS MESSAGE"));
-    perceptionBlock.appendChild(this.makeTextarea(trig.passMessage, (val) => {
-      trig.passMessage = val;
-      this.opts.onChange?.();
-    }));
-    blocks.set("perception", perceptionBlock);
+    block.appendChild(dcRow);
+    block.appendChild(this.makeLabel("PASS MESSAGE"));
+    block.appendChild(this.makeTextarea(trig.passMessage, (val) => { trig.passMessage = val; onChange(); }));
+    return block;
+  }
 
-    const logBlock = document.createElement("div");
-    logBlock.appendChild(this.makeLabel("LOG MESSAGE"));
-    logBlock.appendChild(this.makeTextarea(trig.message, (val) => {
-      trig.message = val;
-      this.opts.onChange?.();
-    }));
-    blocks.set("log", logBlock);
+  private buildLogBlock(trig: ComposedTrigger, onChange: () => void): HTMLElement {
+    const block = document.createElement("div");
+    block.appendChild(this.makeLabel("LOG MESSAGE"));
+    block.appendChild(this.makeTextarea(trig.message, (val) => { trig.message = val; onChange(); }));
+    return block;
+  }
 
-    const aigmBlock = document.createElement("div");
-    aigmBlock.appendChild(this.makeLabel("AIGM CUE"));
-    aigmBlock.appendChild(this.makeTextarea(trig.message, (val) => {
-      trig.message = val;
-      this.opts.onChange?.();
-    }));
-    blocks.set("aigm", aigmBlock);
+  private buildAigmBlock(trig: ComposedTrigger, onChange: () => void): HTMLElement {
+    const block = document.createElement("div");
+    block.appendChild(this.makeLabel("AIGM CUE"));
+    block.appendChild(this.makeTextarea(trig.message, (val) => { trig.message = val; onChange(); }));
+    return block;
+  }
 
-    const combatBlock = document.createElement("div");
-    combatBlock.appendChild(this.makeLabel("DEF ID (optional — flips this id to enemy)"));
-    combatBlock.appendChild(this.makeTextInput(trig.defId, "e.g. cultist", (val) => {
-      trig.defId = val.trim();
-      this.opts.onChange?.();
-    }));
-    blocks.set("combat", combatBlock);
+  private buildCombatBlock(trig: ComposedTrigger, onChange: () => void): HTMLElement {
+    const block = document.createElement("div");
+    block.appendChild(this.makeLabel("DEF ID (optional — flips this id to enemy)"));
+    block.appendChild(this.makeTextInput(trig.defId, "e.g. cultist", (val) => { trig.defId = val.trim(); onChange(); }));
+    return block;
+  }
 
-    const xpBlock = document.createElement("div");
-    const xpRow = document.createElement("div");
-    xpRow.style.cssText = "display: flex; gap: 6px; align-items: center;";
-    xpRow.appendChild(this.makeLabel("AMOUNT"));
-    xpRow.appendChild(this.makeNumberInput(String(trig.xpAmount ?? 0), (val) => {
+  private buildXpBlock(trig: ComposedTrigger, onChange: () => void): HTMLElement {
+    const block = document.createElement("div");
+    const row = document.createElement("div");
+    row.style.cssText = "display: flex; gap: 6px; align-items: center;";
+    row.appendChild(this.makeLabel("AMOUNT"));
+    row.appendChild(this.makeNumberInput(String(trig.xpAmount ?? 0), (val) => {
       trig.xpAmount = Math.max(0, Math.floor(Number(val) || 0));
-      summary.textContent = this.summarise(trig);
-      this.opts.onChange?.();
+      onChange();
     }));
-    xpBlock.appendChild(xpRow);
-    blocks.set("xp", xpBlock);
+    block.appendChild(row);
+    return block;
+  }
 
-    const announcementBlock = this.buildTextDurationBlock(
+  private buildAnnouncementBlock(trig: ComposedTrigger, onChange: () => void): HTMLElement {
+    const block = this.buildTextDurationBlock(
       "ANNOUNCEMENT TEXT", trig.message, "DURATION (ms, default 3500)", trig.durationMs,
-      (text) => { trig.message = text; this.opts.onChange?.(); },
-      (ms)   => { trig.durationMs = ms; this.opts.onChange?.(); },
+      (text) => { trig.message = text; onChange(); },
+      (ms)   => { trig.durationMs = ms; onChange(); },
     );
-    // Mode toggle: FOCUSED (orange-bordered, hides UI, pauses world, locks
-    // input) vs UNFOCUSED (borderless edge-fade card, UI stays live).
-    const announceModeRow = document.createElement("div");
-    announceModeRow.style.cssText = "display: flex; gap: 6px; align-items: center; margin-top: 2px;";
-    announceModeRow.appendChild(this.makeLabel("MODE"));
-    const announceButtons = new Map<"focused" | "unfocused", HTMLButtonElement>();
-    const refreshAnnounceButtons = (active: "focused" | "unfocused"): void => {
-      for (const [m, b] of announceButtons) {
-        const on = m === active;
-        b.style.background = on ? "#2a3a55" : "#1a1a2a";
-        b.style.color = on ? "#cce4ff" : "#aabbcc";
-      }
-    };
-    const makeAnnounceBtn = (mode: "focused" | "unfocused", label: string): HTMLButtonElement => {
-      const btn = this.makeToggleButton(label, () => {
-        trig.announcementMode = mode;
-        refreshAnnounceButtons(mode);
-        this.opts.onChange?.();
-      });
-      announceButtons.set(mode, btn);
-      return btn;
-    };
-    announceModeRow.appendChild(makeAnnounceBtn("focused", "FOCUSED"));
-    announceModeRow.appendChild(makeAnnounceBtn("unfocused", "UNFOCUSED"));
-    refreshAnnounceButtons(trig.announcementMode ?? "focused");
-    announcementBlock.appendChild(announceModeRow);
-    blocks.set("announcement", announcementBlock);
+    // FOCUSED hides UI + pauses the world + locks input; UNFOCUSED keeps the
+    // UI live with an edge-fade card.
+    block.appendChild(this.buildModeToggleRow<"focused" | "unfocused">(
+      "MODE",
+      [["focused", "FOCUSED"], ["unfocused", "UNFOCUSED"]],
+      trig.announcementMode ?? "focused",
+      (mode) => { trig.announcementMode = mode; onChange(); },
+    ));
+    return block;
+  }
 
-    const speechBlock = document.createElement("div");
-    speechBlock.style.cssText = "display: flex; flex-direction: column; gap: 4px;";
-    speechBlock.appendChild(this.makeLabel("ENTITY (player, npc_<id>, enemy_A, ally_A)"));
-    speechBlock.appendChild(this.makeTextInput(trig.entityRef ?? "", "e.g. npc_wanderer_0", (val) => {
+  private buildSpeechBlock(trig: ComposedTrigger, onChange: () => void): HTMLElement {
+    const block = document.createElement("div");
+    block.style.cssText = "display: flex; flex-direction: column; gap: 4px;";
+    block.appendChild(this.makeLabel("ENTITY (player, npc_<id>, enemy_A, ally_A)"));
+    block.appendChild(this.makeTextInput(trig.entityRef ?? "", "e.g. npc_wanderer_0", (val) => {
       trig.entityRef = val.trim();
-      summary.textContent = this.summarise(trig);
-      this.opts.onChange?.();
+      onChange();
     }));
-    speechBlock.appendChild(this.makeLabel("SPOKEN LINE"));
-    speechBlock.appendChild(this.makeTextarea(trig.message, (val) => {
-      trig.message = val;
-      this.opts.onChange?.();
-    }));
-    blocks.set("speech", speechBlock);
+    block.appendChild(this.makeLabel("SPOKEN LINE"));
+    block.appendChild(this.makeTextarea(trig.message, (val) => { trig.message = val; onChange(); }));
+    return block;
+  }
 
-    const fadeBlock = document.createElement("div");
-    fadeBlock.style.cssText = "display: flex; flex-direction: column; gap: 4px;";
-    const fadeModeRow = document.createElement("div");
-    fadeModeRow.style.cssText = "display: flex; gap: 6px; align-items: center;";
-    fadeModeRow.appendChild(this.makeLabel("MODE"));
-    const fadeButtons = new Map<"in" | "out" | "dim", HTMLButtonElement>();
-    const refreshFadeButtons = (active: "in" | "out" | "dim"): void => {
-      for (const [m, b] of fadeButtons) {
+  private buildFadeBlock(trig: ComposedTrigger, onChange: () => void): HTMLElement {
+    const block = document.createElement("div");
+    block.style.cssText = "display: flex; flex-direction: column; gap: 4px;";
+    block.appendChild(this.buildModeToggleRow<"in" | "out" | "dim">(
+      "MODE",
+      [["out", "FADE OUT"], ["dim", "FADE DIM (50%)"], ["in", "FADE IN"]],
+      trig.fadeMode ?? "out",
+      (mode) => { trig.fadeMode = mode; onChange(); },
+    ));
+    const durRow = document.createElement("div");
+    durRow.style.cssText = "display: flex; gap: 6px; align-items: center;";
+    durRow.appendChild(this.makeLabel("DURATION (ms, default 1200)"));
+    durRow.appendChild(this.makeNumberInput(String(trig.durationMs ?? 1200), (val) => {
+      trig.durationMs = Math.max(0, Math.floor(Number(val) || 0));
+      onChange();
+    }));
+    block.appendChild(durRow);
+    return block;
+  }
+
+  /** SET FLAG block — writes the named flag to `true` when the trigger
+   *  fires. Pair with the encounter's COMPLETION FLAG to end non-combat
+   *  encounters from a trigger (e.g. parley success, region reached). */
+  private buildSetFlagBlock(trig: ComposedTrigger, onChange: () => void): HTMLElement {
+    const block = document.createElement("div");
+    block.style.cssText = "display: flex; flex-direction: column; gap: 4px;";
+    block.appendChild(this.makeLabel("FLAG NAME (snake_case, set to true)"));
+    block.appendChild(this.makeTextInput(trig.setFlagName ?? "", "e.g. tomb_opened", (val) => {
+      trig.setFlagName = val.trim();
+      onChange();
+    }));
+    return block;
+  }
+
+  /** Generic mode-toggle row — labelled chip strip with one option active.
+   *  Used by ANNOUNCE (FOCUSED / UNFOCUSED) and FADE (OUT / DIM / IN). */
+  private buildModeToggleRow<M extends string>(
+    label: string,
+    options: Array<readonly [M, string]>,
+    initial: M,
+    onSelect: (mode: M) => void,
+  ): HTMLDivElement {
+    const row = document.createElement("div");
+    row.style.cssText = "display: flex; gap: 6px; align-items: center; margin-top: 2px;";
+    row.appendChild(this.makeLabel(label));
+    const buttons = new Map<M, HTMLButtonElement>();
+    const refresh = (active: M): void => {
+      for (const [m, b] of buttons) {
         const on = m === active;
         b.style.background = on ? "#2a3a55" : "#1a1a2a";
         b.style.color = on ? "#cce4ff" : "#aabbcc";
       }
     };
-    const makeFadeBtn = (mode: "in" | "out" | "dim", label: string): HTMLButtonElement => {
-      const btn = this.makeToggleButton(label, () => {
-        trig.fadeMode = mode;
-        refreshFadeButtons(mode);
-        summary.textContent = this.summarise(trig);
-        this.opts.onChange?.();
-      });
-      fadeButtons.set(mode, btn);
-      return btn;
-    };
-    fadeModeRow.appendChild(makeFadeBtn("out", "FADE OUT"));
-    fadeModeRow.appendChild(makeFadeBtn("dim", "FADE DIM (50%)"));
-    fadeModeRow.appendChild(makeFadeBtn("in", "FADE IN"));
-    refreshFadeButtons(trig.fadeMode ?? "out");
-    fadeBlock.appendChild(fadeModeRow);
-    const fadeDurRow = document.createElement("div");
-    fadeDurRow.style.cssText = "display: flex; gap: 6px; align-items: center;";
-    fadeDurRow.appendChild(this.makeLabel("DURATION (ms, default 1200)"));
-    fadeDurRow.appendChild(this.makeNumberInput(String(trig.durationMs ?? 1200), (val) => {
-      trig.durationMs = Math.max(0, Math.floor(Number(val) || 0));
-      this.opts.onChange?.();
-    }));
-    fadeBlock.appendChild(fadeDurRow);
-    blocks.set("fade", fadeBlock);
-
-    for (const block of blocks.values()) row.appendChild(block);
-
-    this.refreshChips(chipBtns, trig.kind);
-    this.refreshKindVisibility(blocks, trig.kind);
-    void regionInputs;
+    for (const [mode, text] of options) {
+      const btn = this.makeToggleButton(text, () => { refresh(mode); onSelect(mode); });
+      buttons.set(mode, btn);
+      row.appendChild(btn);
+    }
+    refresh(initial);
     return row;
   }
 
@@ -623,10 +703,13 @@ export class TriggerEditor {
     if (t.kind === "xp")    tail = ` (+${t.xpAmount ?? 0})`;
     else if (t.kind === "fade") tail = ` ${(t.fadeMode ?? "out").toUpperCase()}`;
     else if (t.kind === "speech" && t.entityRef) tail = ` ${t.entityRef}`;
+    else if (t.kind === "set_flag") tail = ` ${(t.setFlagName ?? "?")}`;
     const when = t.whenEvent ?? "player_moved";
     const whenSuffix = when === "player_moved"
       ? `@ (${r.x},${r.y}) ${r.w}×${r.h}`
-      : when === "encounter_started" ? "ON START" : "ON COMPLETE";
+      : when === "encounter_started" ? "ON START"
+      : when === "encounter_completed" ? "ON COMPLETE"
+      : `ON FLAG ${(t.whenFlagName ?? "any")}`;
     return `${KIND_LABEL[t.kind]}${tail}  ${whenSuffix}`;
   }
 

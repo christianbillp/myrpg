@@ -2,10 +2,9 @@ import {
   GameState, GameEvent, PlayerAction,
   PlayerDef, MonsterDef,
   NpcState, Disposition,
-  QuestGoalType, LogEntry, GameDefs,
+  LogEntry, GameDefs,
   CreateSessionRequest,
 } from './types.js';
-import { advanceQuest as questAdvance, completeQuest as questComplete } from './QuestSystem.js';
 import type { EncounterContext } from '../encounterService.js';
 import {
   rollSkillCheck, rollSavingThrow,
@@ -25,6 +24,7 @@ import {
   triggerCombat as cfTriggerCombat, doStartCombat as cfDoStartCombat,
   enterEnemyPhase as cfEnterEnemyPhase, doRollDeathSave as cfDoRollDeathSave,
   doResolveReaction as cfDoResolveReaction,
+  advanceTurn as cfAdvanceTurn,
 } from './CombatFlow.js';
 import {
   doAttack as caDoAttack, throwItem as caThrowItem,
@@ -86,6 +86,14 @@ export class GameEngine {
     if (levelUpHistory.length > 0) {
       applyLevelUpHistory(this.playerDef, levelUpHistory, defs.features, defs.spells);
     }
+    // Dev mode `unlockAllSpells` — widen the cloned playerDef's spellbook so
+    // the Wizard `castableSpellIds` resolver treats every spell as known
+    // (other classes don't consult `defaultSpellbookIds` so this is a no-op
+    // for them). The clone above guarantees this mutation stays scoped to
+    // the current session.
+    if (state.devFlags?.unlockAllSpells) {
+      this.playerDef.defaultSpellbookIds = defs.spells.map((s) => s.id);
+    }
     this.defs = {
       ...defs,
       playerDefs: defs.playerDefs.map((p) => p.id === this.playerDef.id ? this.playerDef : p),
@@ -121,6 +129,7 @@ export class GameEngine {
     // the WS handler flushes that buffer onto the first state_update so any
     // intro cinematic plays the moment the client connects.
     this.ctx.eventSink = this.startupEvents;
+    this.ctx.isConstructing = true;
     try {
       publishEncounterStarted(this.ctx);
       // Auto-prepend the encounter title supertitle so every scene opens with
@@ -130,14 +139,39 @@ export class GameEngine {
       // fade_screen 'in' so the world reveals after the title — and so the
       // client's "no fade in startup events → unshift fade-in" guard sees a
       // fade event and doesn't add its own.
+      //
+      // Dev mode `disableSupertitle` skips the auto-prepend so the encounter
+      // starts immediately. We also omit the paired fade-in — the client's
+      // "no startup fade → add one" guard will supply a short fade-in on
+      // its own, so the world still reveals cleanly.
       const title = this.state.encounterTitle?.trim();
-      if (title) {
+      if (title && !this.state.devFlags?.disableSupertitle) {
         this.startupEvents.unshift({ type: 'supertitle', text: title, durationMs: 2500 });
         this.startupEvents.push({ type: 'screen_fade', mode: 'in', durationMs: 800 });
       }
     } finally {
       this.ctx.eventSink = null;
+      this.ctx.isConstructing = false;
     }
+  }
+
+  /** Run the first-turn `advanceTurn` that `doStartCombat` deferred during
+   *  session construction, if any. Idempotent — flips
+   *  `state.pendingTurnAdvance` off and returns the events that the
+   *  resulting NPC turn produced (entity_move, etc.). The WS layer
+   *  broadcasts them in a fresh state_update so the client animates them
+   *  AFTER the player has dismissed the opening overlay. */
+  runPendingTurnAdvance(): GameEvent[] {
+    if (!this.state.pendingTurnAdvance) return [];
+    this.state.pendingTurnAdvance = false;
+    const events: GameEvent[] = [];
+    this.ctx.eventSink = events;
+    try {
+      cfAdvanceTurn(this.ctx, events);
+    } finally {
+      this.ctx.eventSink = null;
+    }
+    return events;
   }
 
   /** Drains and returns the buffer of GameEvents emitted during session
@@ -161,7 +195,6 @@ export class GameEngine {
       resolveNpcByEntity: (e) => this.resolveNpcByEntity(e),
       assignCombatLabel: (npc) => this.assignCombatLabel(npc),
       aggroFaction: (npc) => this.aggroFaction(npc),
-      advanceQuest: (t) => this.advanceQuest(t),
       autoEndCombatIfNoEnemies: () => this.autoEndCombatIfNoEnemies(),
       resistMod: (d, t, def, n) => this.resistMod(d, t, def, n),
       applyDamageToPlayer: (d, ev) => this.applyDamageToPlayer(d, ev),
@@ -177,6 +210,7 @@ export class GameEngine {
       publish: (event) => this.bus.publish(event),
       removeNpc: (id) => this.removeNpcFromEncounter(id),
       eventSink: null,
+      isConstructing: false,
     };
   }
 
@@ -192,7 +226,40 @@ export class GameEngine {
     this.autoEndCombatIfNoEnemies();
   }
 
-  getState(): GameState { this.computeAvailableActions(); return this.state; }
+  getState(): GameState {
+    // Apply dev-mode resource topups BEFORE computing available actions so
+    // the "refilled" state is what drives `availableActions` for the client.
+    // This is the single chokepoint every server state push goes through, so
+    // resetting here is enough — the player will see slots/actions as
+    // available on every tick, regardless of how the underlying consumers
+    // decremented them.
+    this.applyDevFlagsTopup();
+    this.computeAvailableActions();
+    return this.state;
+  }
+
+  /** Dev-mode normalisation pass — called from `getState`. Idempotent. */
+  private applyDevFlagsTopup(): void {
+    const flags = this.state.devFlags;
+    if (!flags) return;
+    const p = this.state.player;
+    if (flags.unlimitedActions) {
+      p.actionUsed = false;
+      p.bonusActionUsed = false;
+    }
+    if (flags.unlimitedSpellSlots) {
+      // Restore each slot to the per-session playerDef's current max. The
+      // clone holds any level-up changes, so post-L2 slot counts are
+      // honoured. Spell levels with zero starting slots stay at zero — we
+      // never invent slots a level wouldn't have.
+      const max = this.playerDef.defaultSpellSlots ?? [];
+      for (let i = 0; i < max.length; i++) {
+        if ((max[i] ?? 0) > 0 && (p.spellSlots[i] ?? 0) < max[i]) {
+          p.spellSlots[i] = max[i];
+        }
+      }
+    }
+  }
   getMonsterDef(defId: string): MonsterDef | undefined { return this.resolveMonsterDef(defId); }
   /**
    * Run one off-camera world tick (Pass 3c). Resolves one round of NPC-vs-NPC
@@ -266,8 +333,13 @@ export class GameEngine {
       }
     }
 
-    this.computeAvailableActions();
-    return { events, state: this.state };
+    // Route through getState() so dev-mode resource topups (unlimited
+    // spell slots / unlimited actions) get applied to the state we hand
+    // back to the action POST response AND to the broadcast pushStateUpdate
+    // that follows. Without this, the action consumed the resource and the
+    // top-up never ran for this turn's reply.
+    const state = this.getState();
+    return { events, state };
     } finally {
       this.ctx.eventSink = null;
     }
@@ -316,10 +388,12 @@ export class GameEngine {
     return [];
   }
 
-  awardGold(amount: number): GameEvent[] {
-    const newGold = this.state.player.gold + amount;
-    if (newGold < 0) return [];
-    this.state.player.gold = newGold;
+  /** Add a signed CP delta to the player's coin purse. Negative deltas spend
+   *  coins; the call is a no-op when the spend would put the purse negative. */
+  awardCoins(cpDelta: number): GameEvent[] {
+    const next = this.state.player.balanceCp + cpDelta;
+    if (next < 0) return [];
+    this.state.player.balanceCp = next;
     return [];
   }
 
@@ -352,22 +426,71 @@ export class GameEngine {
     entries.forEach((e) => this.addLog(e));
   }
 
-  moveEntity(entity: string, tileX: number, tileY: number): GameEvent[] {
+  /**
+   * Teleport an entity to a tile. Returns events + an optional error string
+   * the caller can surface back to the AIGM. Validation:
+   *   1. Tile must be in-bounds.
+   *   2. Tile must be passable per the map's passability layer.
+   *   3. Tile must not be occupied by the player or any living NPC (other
+   *      than the moving entity itself — a no-op move to the current tile
+   *      is allowed and succeeds silently).
+   *   4. Entity must resolve. Unknown entity refs return an error.
+   * On any failure no state changes and `events` is empty — the AIGM sees
+   * the `error` string in the tool result and adjusts its narration.
+   */
+  moveEntity(entity: string, tileX: number, tileY: number): { events: GameEvent[]; error: string | null } {
     const s = this.state;
-    const events: GameEvent[] = [];
+    const { cols, rows, passable } = s.map;
+
+    if (!(tileX >= 0 && tileX < cols && tileY >= 0 && tileY < rows)) {
+      return { events: [], error: `tile (${tileX}, ${tileY}) is out of bounds — map is ${cols}×${rows}` };
+    }
+    if (!passable[tileY]?.[tileX]) {
+      return { events: [], error: `tile (${tileX}, ${tileY}) is impassable (wall, water, void, or a non-walkable object)` };
+    }
+
+    // Resolve the moving entity. A reference that doesn't match anything is
+    // an authoring error worth surfacing — silently failing leaves the AIGM
+    // narrating a move the engine never applied.
+    let movingNpc: NpcState | null = null;
+    let currentX: number, currentY: number;
+    if (entity === 'player') {
+      currentX = s.player.tileX;
+      currentY = s.player.tileY;
+    } else {
+      const resolved = this.resolveNpcByEntity(entity);
+      if (!resolved) {
+        return { events: [], error: `entity "${entity}" not found — check CURRENT STATE for valid refs` };
+      }
+      movingNpc = resolved;
+      currentX = movingNpc.tileX;
+      currentY = movingNpc.tileY;
+    }
+    // No-op: moving to the current tile is fine; emit no event.
+    if (currentX === tileX && currentY === tileY) {
+      return { events: [], error: null };
+    }
+    // Occupancy check — every living entity OTHER than the mover.
+    const playerThere = (entity !== 'player'
+      && s.player.tileX === tileX && s.player.tileY === tileY);
+    if (playerThere) {
+      return { events: [], error: `tile (${tileX}, ${tileY}) is occupied by the player` };
+    }
+    const blockingNpc = s.npcs.find((n) =>
+      n.hp > 0 && n !== movingNpc && n.tileX === tileX && n.tileY === tileY);
+    if (blockingNpc) {
+      return { events: [], error: `tile (${tileX}, ${tileY}) is occupied by ${blockingNpc.name} (${blockingNpc.id})` };
+    }
+
+    // All checks passed — apply.
     if (entity === 'player') {
       s.player.tileX = tileX;
       s.player.tileY = tileY;
-      events.push({ type: 'entity_move', entityId: 'player', toX: tileX, toY: tileY });
-    } else {
-      const npc = this.resolveNpcByEntity(entity);
-      if (npc) {
-        npc.tileX = tileX;
-        npc.tileY = tileY;
-        events.push({ type: 'entity_move', entityId: npc.id, toX: tileX, toY: tileY });
-      }
+      return { events: [{ type: 'entity_move', entityId: 'player', toX: tileX, toY: tileY }], error: null };
     }
-    return events;
+    movingNpc!.tileX = tileX;
+    movingNpc!.tileY = tileY;
+    return { events: [{ type: 'entity_move', entityId: movingNpc!.id, toX: tileX, toY: tileY }], error: null };
   }
 
   addItem(itemId: string): GameEvent[] {
@@ -559,11 +682,6 @@ export class GameEngine {
     return events;
   }
 
-  completeQuest(questId: string): GameEvent[] {
-    this.addLogs(questComplete(this.state, questId));
-    return [];
-  }
-
   setPlayerHidden(hidden: boolean): GameEvent[] {
     const conditions = this.state.player.conditions;
     if (hidden) {
@@ -686,10 +804,6 @@ export class GameEngine {
     setRelation(this.state, factionId, PLAYER_FACTION_ID, -100);
   }
 
-  private advanceQuest(type: QuestGoalType): void {
-    this.addLogs(questAdvance(this.state, type));
-  }
-
   private autoEndCombatIfNoEnemies(): void {
     cfAutoEndCombat(this.ctx);
   }
@@ -750,7 +864,6 @@ export class GameEngine {
     // skips any combatant whose hp <= 0; mutating the array mid-iteration
     // would shift indices and could cause a still-alive combatant to skip
     // their turn.
-    this.advanceQuest('kill');
     // Fire npc_killed triggers BEFORE autoEndCombatIfNoEnemies so a trigger
     // can spawn reinforcements that prevent combat from auto-ending.
     this.bus.publish({ type: 'npc_killed', npcId: dying.id, defId: dying.defId });

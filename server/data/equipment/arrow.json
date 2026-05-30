@@ -3,5 +3,5 @@
   "name": "Arrow",
   "type": "ammunition",
   "ammunitionType": "arrow",
-  "cost": 0
+  "costCp": 5
 }

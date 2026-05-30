@@ -1,6 +1,6 @@
 import {
   GameState, GameMap, GameDefs, EquipmentSlots, NpcState, MapItemState,
-  SecretState, QuestState, NpcPersona, CreateSessionRequest, EncounterTileProperty,
+  SecretState, NpcPersona, CreateSessionRequest, EncounterTileProperty,
   MapTilesetInfo, LogEntry,
 } from './types.js';
 import { PLAYER_FACTION_ID } from '../../../shared/types.js';
@@ -153,14 +153,26 @@ export function buildSessionState(
   const npcZone    = zoneMap.get('N');
   const enemyZone  = zoneMap.get('E');
 
-  const [pX, pY] = findPlayerSpawn(map, playerZone);
+  // Exact-mode placements: read only when the encounter opted in. In zones
+  // mode (default) we pass `undefined` so `findPlayerSpawn` / `populateNpcs`
+  // take their existing random-in-zone paths unchanged.
+  const placementMode = req.placementMode ?? req.encounterContext.placementMode ?? 'zones';
+  const placements = placementMode === 'exact'
+    ? (req.placements ?? req.encounterContext.placements)
+    : undefined;
+  const playerPlacement = placements?.find((p) => p.role === 'player');
+  const playerExactTile: [number, number] | undefined = playerPlacement
+    ? [playerPlacement.x, playerPlacement.y]
+    : undefined;
+
+  const [pX, pY] = findPlayerSpawn(map, playerZone, playerExactTile);
 
   const player = {
     defId: playerDef.id,
     tileX: pX, tileY: pY,
     hp: req.resumeHp ?? playerDef.maxHp,
     xp: req.resumeXp ?? playerDef.xp,
-    gold: req.resumeGold ?? playerDef.defaultGold ?? 0,
+    balanceCp: req.resumeCp ?? playerDef.defaultCp ?? 0,
     inventoryIds,
     equippedSlots,
     // Initialise per-feature resource pools: resume value wins; otherwise
@@ -188,7 +200,14 @@ export function buildSessionState(
     equippedSlotLabels: { armor: null, weapon: null, shield: null },
     ac: playerDef.ac,
     spellSlots: req.resumeSpellSlots ?? [...(playerDef.defaultSpellSlots ?? [])],
-    preparedSpellIds: req.resumePreparedSpellIds ?? [...(playerDef.defaultPreparedSpellIds ?? [])],
+    // Dev mode `unlockAllSpells`: seed every spell in the game as known +
+    // prepared so the tester can invoke any spell without a level-up
+    // rebuild. Wizards also get every spell pushed into their spellbook
+    // (mutating the per-session playerDef clone) so `castableSpellIds`
+    // includes the lot.
+    preparedSpellIds: req.devFlags?.unlockAllSpells
+      ? defs.spells.map((s) => s.id)
+      : (req.resumePreparedSpellIds ?? [...(playerDef.defaultPreparedSpellIds ?? [])]),
     concentratingOn: req.resumeConcentratingOn ?? null,
     mageArmor: req.resumeMageArmor ?? false,
     ongoingEffects: [],
@@ -212,6 +231,7 @@ export function buildSessionState(
       allyZone,
       enemyZone,
       npcZone,
+      placements,
     },
   );
 
@@ -221,17 +241,6 @@ export function buildSessionState(
       const def = defs.npcs.find((n) => n.id === ns.defId);
       return def?.persona ? [{ id: ns.id, name: def.name, persona: def.persona }] : [];
     });
-
-  const quests: QuestState[] = (req.encounterContext.quests ?? []).map((q) => ({
-    id: q.id,
-    title: q.title,
-    goalType: q.goal.type,
-    goalTarget: q.goal.target,
-    rewardXp: q.rewardXp,
-    rewardGp: q.rewardGp,
-    progress: 0,
-    completed: false,
-  }));
 
   // Seed the event log with the encounter header + introduction prose so a
   // player who runs the encounter without the GM tab has a scrollable record
@@ -288,7 +297,6 @@ export function buildSessionState(
     mapName: req.encounterContext.mapName ?? 'Unknown',
     encounterTitle: req.encounterTitle ?? '',
     objective: req.encounterContext.objective ?? '',
-    quests,
     selectedTargetId: null,
     activeNpcIndex: 0,
     turnOrderIds: [],
@@ -329,6 +337,7 @@ export function buildSessionState(
     chapterComplete: false,
     encounterCompletionFlag: req.completionFlag ?? req.adventureSeed?.completionFlag,
     environment: req.encounterContext.environment ?? {},
+    devFlags: req.devFlags,
   };
 
   return state;

@@ -3,8 +3,10 @@ import { BootScene } from "./scenes/BootScene";
 import { MainMenuScene } from "./scenes/MainMenuScene";
 import { EncounterSetupScene } from "./scenes/EncounterSetupScene";
 import { AdventureSetupScene } from "./scenes/AdventureSetupScene";
-import { GenerateSetupScene } from "./scenes/GenerateSetupScene";
-import { EncounterEditorScene } from "./scenes/EncounterEditorScene";
+import { MapEditorScene } from "./scenes/MapEditorScene";
+import { EncounterCreatorScene } from "./scenes/EncounterCreatorScene";
+import { AdventureCreatorScene } from "./scenes/AdventureCreatorScene";
+import { ConfigurationScene } from "./scenes/ConfigurationScene";
 import { GameScene } from "./scenes/GameScene";
 import { gameClient } from "./net/GameClient";
 import { ConnectionMonitor } from "./net/ConnectionMonitor";
@@ -29,7 +31,7 @@ function startPhaser(): void {
       mode: Phaser.Scale.FIT,
       autoCenter: Phaser.Scale.CENTER_BOTH,
     },
-    scene: [BootScene, MainMenuScene, EncounterSetupScene, AdventureSetupScene, GenerateSetupScene, EncounterEditorScene, GameScene],
+    scene: [BootScene, MainMenuScene, EncounterSetupScene, AdventureSetupScene, MapEditorScene, EncounterCreatorScene, AdventureCreatorScene, ConfigurationScene, GameScene],
   };
   new Phaser.Game(config);
 }

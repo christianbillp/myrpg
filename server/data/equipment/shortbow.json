@@ -17,5 +17,5 @@
   "ammunitionType": "arrow",
   "loading": false,
   "heavy": false,
-  "cost": 25
+  "costCp": 2500
 }

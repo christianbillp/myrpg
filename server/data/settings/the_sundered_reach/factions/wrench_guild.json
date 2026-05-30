@@ -1,0 +1,21 @@
+{
+  "id": "wrench_guild",
+  "name": "Masters of the Wrench",
+  "description": "Dwarven master-guild of dynamic construction — windmills, watermills, drilling rigs, lift mechanisms, lock gates, carts, clockwork. Where the Hammer builds the Empire's body, the Wrench builds its moving parts. Experimental and cross-racial.",
+  "displayColor": "#b88840",
+  "renown": 1,
+  "defaultRelations": {
+    "arcania": 30,
+    "white_capes": 10,
+    "bureau_of_adjustment": 30,
+    "hammer_guild": 60,
+    "wrench_guild": 80,
+    "silver_service": 20,
+    "circus_of_the_moon": 10,
+    "fortune_guards": 30,
+    "concordat": 0,
+    "bandits": -40,
+    "monsters": -40,
+    "party": 0
+  }
+}

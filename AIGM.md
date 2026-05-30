@@ -726,7 +726,7 @@ The AIGM reply is **streamed** to the client over the WebSocket. Text chunks app
 | `aigm_chunk` `{ text }`              | Each text delta from Claude                                   | Append `text` to the current bubble.                                                                                                      |
 | `aigm_checkpoint`                    | After a non-speculative response completes                    | Advance the discard baseline to the current bubble length (chunks before this point are now permanent).                                   |
 | `aigm_speculative_discard`           | After a response that called a roll-requesting tool completes | Roll the bubble back to the last baseline (the chunks were speculative — Claude will write the real text after the roll result is known). |
-| `aigm_done` `{ reply, rollResults }` | End of the turn                                               | Replace the streamed bubble with the canonical `reply`; insert any `rollResults` before it as 🎲 entries.                                 |
+| `aigm_done` `{ reply, rollResults }` | End of the turn                                               | Replace the streamed bubble's content **in place** with the canonical `reply` (the bubble is tracked by object reference via `HUD.gmStreamingBubble`, not by "last array entry", so mid-stream NPC-speech mirrors pushed by `addNpcSpeech` survive); splice any `rollResults` into `gmHistory` immediately before the bubble as 🎲 entries. |
 | `state_update`                       | Engine state changed via tool calls                           | Map and panels refresh (independent of the chat stream).                                                                                  |
 
 ### Speculative-text handling
@@ -762,7 +762,7 @@ For all other tools (`reveal_npc_name`, `set_disposition`, `award_gold`, …) th
 | File | Purpose |
 |------|---------|
 | `client/src/net/GameClient.ts` | WebSocket message dispatch — routes `aigm_start` / `aigm_chunk` / `aigm_checkpoint` / `aigm_speculative_discard` / `aigm_done` to handlers |
-| `client/src/ui/HUD.ts` | GM chat panel — streaming `aigmStart` / `aigmChunk` / `aigmCheckpoint` / `aigmSpeculativeDiscard` / `aigmDone` methods render text live with baseline-based rollback |
+| `client/src/ui/HUD.ts` | GM chat panel — streaming `aigmStart` / `aigmChunk` / `aigmCheckpoint` / `aigmSpeculativeDiscard` / `aigmDone` methods render text live with baseline-based rollback. The streaming bubble is tracked by object reference (`gmStreamingBubble: ChatMessage \| null`) rather than by "the last entry of `gmHistory`" so mid-stream `addNpcSpeech` calls (NPC speech bubble mirrors) don't shadow the bubble and get popped at `aigmDone`. |
 | `client/src/scenes/GameScene.ts` | Wires `GameClient` stream handlers to the HUD methods |
 
 ### Shared

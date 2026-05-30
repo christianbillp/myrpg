@@ -1,0 +1,21 @@
+{
+  "id": "monsters",
+  "name": "Monsters of the Reach",
+  "description": "Creatures the Spread brought into this world and the Sundering pulled wider through the door. Warbands, packs, broods, single ancient things with territory — most simply trying to live in a world that has too much magic in it. A few are something else.",
+  "displayColor": "#aa3333",
+  "renown": 1,
+  "defaultRelations": {
+    "arcania": -60,
+    "white_capes": -60,
+    "bureau_of_adjustment": -60,
+    "hammer_guild": -60,
+    "wrench_guild": -60,
+    "silver_service": -60,
+    "circus_of_the_moon": -60,
+    "fortune_guards": -60,
+    "concordat": -60,
+    "bandits": -40,
+    "monsters": 40,
+    "party": -60
+  }
+}

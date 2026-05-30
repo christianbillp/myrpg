@@ -169,11 +169,14 @@ export class HUD {
   private gmPersona: GMPersona = 'story';
   private gmThinking = false;
 
-  // Streaming AIGM state. While `gmStreaming` is true, the last entry of
-  // `gmHistory` is an assistant message being grown by aigm_chunk events;
+  // Streaming AIGM state. `gmStreamingBubble` is the specific assistant
+  // message reference being grown by aigm_chunk events — we track it by
+  // identity rather than "last entry" because mid-stream side-effects (NPC
+  // speech mirrors via `addNpcSpeech`) can push other entries after it.
   // `gmStreamBaseline` is the text length BEFORE the latest run of chunks so
   // aigm_speculative_discard can roll it back.
   private gmStreaming = false;
+  private gmStreamingBubble: ChatMessage | null = null;
   private gmStreamBaseline = 0;
 
   constructor(scale: UIScale, callbacks: HUDCallbacks) {
@@ -432,7 +435,9 @@ export class HUD {
     this.logTabBtn.style.color             = onLog ? '#ddeeff' : '#556677';
     this.gmTabBtn.style.borderBottomColor  = onLog ? 'transparent' : ACCENT;
     this.gmTabBtn.style.color              = onLog ? '#556677' : ACCENT;
-    if (!onLog) this.gmInputEl.focus();
+    // No auto-focus when revealing the GM tab. The user must explicitly
+    // click into the input to start typing — otherwise WASD keeps moving
+    // the player while the chat is visible.
   }
 
   private refreshDmChips(): void {
@@ -463,8 +468,10 @@ export class HUD {
     if (!text || this.gmThinking) return;
     this.gmInputEl.value = '';
     await this.dispatchPlayerMessage(text, this.gmMode);
-    this.gmInputEl.focus();
-    this.callbacks.onDisableKeyboard();
+    // No forced re-focus after send: if the user pressed Enter to send,
+    // focus is already on the input and they can keep typing. If they
+    // clicked SEND with the mouse, leaving focus on the body lets WASD
+    // movement work immediately.
   }
 
   /** Public entry point for the Player Panel's TALK button. Forces the
@@ -523,51 +530,49 @@ export class HUD {
   // ── Streaming AIGM handlers (called from GameClient via GameScene) ─────────
 
   aigmStart(): void {
-    // Open a fresh assistant bubble that incoming chunks will append to.
-    this.gmHistory.push({ role: 'assistant', content: '' });
+    // Open a fresh assistant bubble that incoming chunks will append to. Keep
+    // a reference to it so mid-stream pushes by addNpcSpeech don't shadow it.
+    const bubble: ChatMessage = { role: 'assistant', content: '' };
+    this.gmHistory.push(bubble);
+    this.gmStreamingBubble = bubble;
     this.gmStreaming = true;
     this.gmStreamBaseline = 0;
     this.renderDmHistory();
   }
 
   aigmChunk(text: string): void {
-    if (!this.gmStreaming) return;
-    const last = this.gmHistory[this.gmHistory.length - 1];
-    if (!last || last.role !== 'assistant') return;
-    last.content += text;
+    if (!this.gmStreaming || !this.gmStreamingBubble) return;
+    this.gmStreamingBubble.content += text;
     this.renderDmHistory();
   }
 
   aigmCheckpoint(): void {
-    if (!this.gmStreaming) return;
-    const last = this.gmHistory[this.gmHistory.length - 1];
-    if (!last || last.role !== 'assistant') return;
+    if (!this.gmStreaming || !this.gmStreamingBubble) return;
     // The current run of chunks is canonical — future discards can only revert
     // to here, not earlier.
-    this.gmStreamBaseline = last.content.length;
+    this.gmStreamBaseline = this.gmStreamingBubble.content.length;
   }
 
   aigmSpeculativeDiscard(): void {
-    if (!this.gmStreaming) return;
-    const last = this.gmHistory[this.gmHistory.length - 1];
-    if (!last || last.role !== 'assistant') return;
-    last.content = last.content.slice(0, this.gmStreamBaseline);
+    if (!this.gmStreaming || !this.gmStreamingBubble) return;
+    this.gmStreamingBubble.content = this.gmStreamingBubble.content.slice(0, this.gmStreamBaseline);
     this.renderDmHistory();
   }
 
   aigmDone(reply: string, rollResults: string[]): void {
-    if (this.gmStreaming) {
+    if (this.gmStreaming && this.gmStreamingBubble) {
       // Replace the streamed text with the canonical reply (handles any
-      // post-processing trim/whitespace differences) and append roll results.
-      const last = this.gmHistory[this.gmHistory.length - 1];
-      if (last && last.role === 'assistant') {
-        // Insert roll results BEFORE the final assistant reply so they appear
-        // in the same order as the non-streaming path.
-        this.gmHistory.pop();
-        for (const r of rollResults) {
-          this.gmHistory.push({ role: 'user', content: ROLL_PREFIX + r });
-        }
-        this.gmHistory.push({ role: 'assistant', content: reply });
+      // post-processing trim/whitespace differences) IN PLACE on the
+      // tracked bubble — never pop the array's last entry, because
+      // addNpcSpeech may have appended NPC-speech mirrors after the bubble
+      // mid-stream (popping would silently delete the last NPC line).
+      this.gmStreamingBubble.content = reply;
+      // Insert roll results immediately before the streaming bubble so they
+      // appear in the same order as the non-streaming path.
+      const idx = this.gmHistory.indexOf(this.gmStreamingBubble);
+      if (idx >= 0 && rollResults.length > 0) {
+        const rollMsgs: ChatMessage[] = rollResults.map((r) => ({ role: 'user', content: ROLL_PREFIX + r }));
+        this.gmHistory.splice(idx, 0, ...rollMsgs);
       }
     } else {
       for (const r of rollResults) {
@@ -576,6 +581,7 @@ export class HUD {
       this.gmHistory.push({ role: 'assistant', content: reply });
     }
     this.gmStreaming = false;
+    this.gmStreamingBubble = null;
     this.gmStreamBaseline = 0;
     this.renderDmHistory();
   }
@@ -604,6 +610,32 @@ export class HUD {
       this.gmHistory = [...history];
       this.renderDmHistory();
     }
+  }
+
+  /**
+   * Append a one-shot assistant message to the GM chat without going through
+   * the streaming pipeline. Used by the IntroductionOverlay close handler so
+   * the opening narration stays visible in the chat after the modal is
+   * dismissed.
+   */
+  addGmAssistantMessage(text: string): void {
+    const trimmed = text.trim();
+    if (!trimmed) return;
+    this.gmHistory.push({ role: 'assistant', content: trimmed });
+    this.renderDmHistory();
+  }
+
+  /**
+   * Mirror an NPC's spoken line into the GM chat so it persists as a
+   * scrollable record alongside the transient speech bubble above the
+   * speaker's token. Formats the entry so the speaker is visually distinct
+   * from regular GM prose.
+   */
+  addNpcSpeech(speakerName: string, text: string): void {
+    const t = text.trim();
+    if (!t) return;
+    this.gmHistory.push({ role: 'assistant', content: `**${speakerName}:** "${t}"` });
+    this.renderDmHistory();
   }
 
   refresh(state: HUDState): void {

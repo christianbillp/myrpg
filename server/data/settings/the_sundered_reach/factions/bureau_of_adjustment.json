@@ -1,0 +1,21 @@
+{
+  "id": "bureau_of_adjustment",
+  "name": "Bureau of Adjustment",
+  "description": "The Empire's legislative body and authority over all law and the regular military. Multi-racial — humans, dwarves, and halflings sit together here. Writes the laws, commands the armies, issues adjustment decrees against the Quota.",
+  "displayColor": "#c8a040",
+  "renown": 1,
+  "defaultRelations": {
+    "arcania": 60,
+    "white_capes": -10,
+    "bureau_of_adjustment": 80,
+    "hammer_guild": 30,
+    "wrench_guild": 30,
+    "silver_service": 10,
+    "circus_of_the_moon": 0,
+    "fortune_guards": 10,
+    "concordat": 30,
+    "bandits": -60,
+    "monsters": -40,
+    "party": 0
+  }
+}

@@ -248,7 +248,7 @@ function resolveAutoHitSpell(
 /**
  * Compute the set of tile coordinates affected by a cone of `lengthTiles`
  * originating at `(ox, oy)` pointing toward `(targetX, targetY)`. Models a
- * D&D 5e cone (length = base diameter, ~53° total angle): at distance d along
+ * SRD 5.2.1 cone (length = base diameter, ~53° total angle): at distance d along
  * the cone's axis, tiles within perpendicular distance ≤ d/2 + 0.5 are in.
  * Returns "x,y" strings for O(1) membership lookup.
  */

@@ -4,7 +4,8 @@ import { tokenAssetForPlayer, tokenAssetForMonster, tokenAssetForNpc } from "../
 import { Player } from "../entities/Player";
 import { NpcToken } from "../entities/NpcToken";
 import { MapItem } from "../entities/MapItem";
-import { PlayerPanel, QuestDisplay, PlayerPanelActionState } from "../ui/PlayerPanel";
+import { PlayerPanel, PlayerPanelActionState } from "../ui/PlayerPanel";
+import { buildPlayerStatusChips } from "../ui/PlayerStatus";
 import { TargetPanel } from "../ui/TargetPanel";
 import { HUD, HUDState } from "../ui/HUD";
 import { LevelUpOverlay } from "../ui/LevelUpOverlay";
@@ -199,6 +200,7 @@ export class GameScene extends Phaser.Scene {
       onAcceptReaction:  () => gameClient.sendAction({ type: "resolveReaction", accept: true }),
       onDeclineReaction: () => gameClient.sendAction({ type: "resolveReaction", accept: false }),
       onAdvanceChapter:  () => this.advanceChapter(),
+      onIntroClosed:     (intro) => this.hud.addGmAssistantMessage(intro),
       getItems:    () => this.registry.get("equipment") as ItemDef[],
       getSpells:   () => (this.registry.get("spells") ?? []) as SpellDef[],
     });
@@ -261,9 +263,24 @@ export class GameScene extends Phaser.Scene {
     this.gameState = state;
     const isFirst = this.awaitingFirstStateUpdate;
     this.awaitingFirstStateUpdate = false;
+    // npc_speech is normally spawned immediately so the bubble + chat line
+    // appear without an extra queue hop. When the IntroductionOverlay is
+    // about to mount (or already up), we defer them so the player isn't
+    // missing the speech behind the modal — they'll appear after dismissal
+    // in the same order they arrived.
+    const deferSpeech = this.overlays.isIntroBlocking || (isFirst && !!state.introduction && !DevMode.disableSupertitle);
     for (const ev of events) {
       if (ev.type === "entity_move") this.eventQueue.push(ev);
-      else if (ev.type === "npc_speech") this.speechBubbles.spawn(ev.entityId, ev.text);
+      else if (ev.type === "npc_speech") {
+        if (deferSpeech) {
+          // The queue handler in `processNextEvent` knows how to spawn a
+          // bubble + log the line when one of these comes back out.
+          this.eventQueue.push(ev);
+        } else {
+          this.speechBubbles.spawn(ev.entityId, ev.text);
+          this.hud.addNpcSpeech(ev.speakerName, ev.text);
+        }
+      }
       else if (ev.type === "sound_ring") this.visionMask?.pushSoundRing(ev.x, ev.y, ev.intensity);
       else if (ev.type === "play_sound") playSound(ev.sound);
       else if (ev.type === "screen_fade" || ev.type === "supertitle" || ev.type === "announcement") {
@@ -282,10 +299,35 @@ export class GameScene extends Phaser.Scene {
         this.eventQueue.unshift({ type: "screen_fade", mode: "in", durationMs: 400 });
       }
     }
-    if (!this.animating) this.processNextEvent();
+    // Mount the IntroductionOverlay BEFORE draining any events on the very
+    // first state, so encounter-start cinematics (supertitle, trigger
+    // speech, combat) don't play behind the modal. The dismissal callback
+    // resumes the queue. `processNextEvent` is also gated on
+    // `isIntroBlocking` to handle state_updates that arrive mid-overlay.
+    if (isFirst && state.introduction) {
+      this.overlays.showIntroIfNeeded(state, () => {
+        if (!this.animating) this.processNextEvent();
+      });
+    }
+    // Run applyState eagerly on the very first state so the map is drawn
+    // and every player / NPC token exists BEFORE any `entity_move` events
+    // try to animate them. Without this, the deferred enemy turns broadcast
+    // after the supertitle / announcement land their entity_moves against
+    // non-existent tokens (silent no-ops), the queue drains, the eventual
+    // `applyState` reconciles tokens at their FINAL positions, and the
+    // player sees the bandits already in place — exactly the "they had
+    // already moved" bug. The eagerly-shown intro overlay sits on top, so
+    // updating the HUD here doesn't leak anything visible to the player.
+    if (isFirst) this.applyState(state);
+    if (!this.animating && !this.overlays.isIntroBlocking) this.processNextEvent();
   }
 
   private processNextEvent(): void {
+    if (this.overlays.isIntroBlocking) {
+      // The introduction modal is up — hold every queued animation until the
+      // player dismisses it. The dismissal callback re-enters this method.
+      return;
+    }
     if (this.eventQueue.length === 0) {
       this.animatingEntityId = null;
       this.applyState(this.gameState);
@@ -319,8 +361,15 @@ export class GameScene extends Phaser.Scene {
         .then(() => { this.animating = false; this.processNextEvent(); });
       return;
     } else if (event.type === "supertitle") {
+      // Hold the server-side world pause for the duration of the title card
+      // so off-camera ticks and trigger evaluation don't advance behind it.
+      WorldPause.acquire('overlay:supertitle');
       this.screenEffects.showSupertitle(event.text, event.durationMs)
-        .then(() => { this.animating = false; this.processNextEvent(); });
+        .then(() => {
+          WorldPause.release('overlay:supertitle');
+          this.animating = false;
+          this.processNextEvent();
+        });
       return;
     } else if (event.type === "announcement") {
       const mode = event.mode ?? 'focused';
@@ -337,6 +386,12 @@ export class GameScene extends Phaser.Scene {
       // queue continues processing while the card floats in the world.
       void this.screenEffects.showAnnouncement(event.text, event.durationMs, mode);
       // Fall through to default (animating = false, processNextEvent).
+    } else if (event.type === "npc_speech") {
+      // Deferred-speech handler — the bubble + chat line normally fire from
+      // `handleStateUpdate`, but encounter-start speech queued behind the
+      // introduction overlay comes out via this path so it actually shows.
+      this.speechBubbles.spawn(event.entityId, event.text);
+      this.hud.addNpcSpeech(event.speakerName, event.text);
     }
     this.animating = false;
     this.processNextEvent();
@@ -813,6 +868,7 @@ export class GameScene extends Phaser.Scene {
           spellName: (allSpells.find((sp) => sp.id === n.summonSpellId)?.name) ?? n.name,
         })),
       hasSelectedTarget: !!state.selectedTargetId,
+      statusChips: buildPlayerStatusChips(state.player, concSpell?.name ?? null),
     };
   }
 
@@ -1131,18 +1187,10 @@ export class GameScene extends Phaser.Scene {
   }
 
   private updateHUD(state: GameState): void {
-    const quests: QuestDisplay[] = state.quests.map(q => ({
-      title:     q.title,
-      progress:  q.progress,
-      target:    q.goalTarget,
-      completed: q.completed,
-    }));
-
     const showSearch = state.secrets.length > 0;
     this.playerPanel.refresh(
       state.player.hp,
       this.playerDef.maxHp,
-      quests,
       showSearch,
       state.objective,
     );

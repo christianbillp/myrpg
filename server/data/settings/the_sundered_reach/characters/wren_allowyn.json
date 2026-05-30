@@ -1,0 +1,83 @@
+{
+  "id": "wren_allowyn",
+  "name": "Wren Allowyn",
+  "tokenAsset": "/tokens/player_halfling_rogue.svg",
+  "speciesName": "Halfling",
+  "speciesId": "halfling",
+  "speciesLineage": null,
+  "className": "Rogue",
+  "backgroundId": "criminal",
+  "featIds": [
+    "alert"
+  ],
+  "level": 1,
+  "maxHp": 10,
+  "str": 8,
+  "dex": 16,
+  "con": 14,
+  "int": 13,
+  "wis": 12,
+  "cha": 13,
+  "proficiencyBonus": 2,
+  "savingThrowProficiencies": [
+    "dex",
+    "int"
+  ],
+  "skills": {
+    "acrobatics": 5,
+    "animalHandling": 1,
+    "arcana": 1,
+    "athletics": -1,
+    "deception": 3,
+    "history": 1,
+    "insight": 1,
+    "intimidation": 1,
+    "investigation": 1,
+    "medicine": 1,
+    "nature": 1,
+    "perception": 3,
+    "performance": 1,
+    "persuasion": 3,
+    "religion": 1,
+    "sleightOfHand": 7,
+    "stealth": 7,
+    "survival": 1
+  },
+  "defaultFeatureIds": [
+    "cunning-action"
+  ],
+  "hitDieType": 8,
+  "sneakAttackDice": 1,
+  "color": 4218196,
+  "xp": 0,
+  "defaultEquipment": {
+    "armorId": "leather_armor",
+    "weaponId": "shortbow",
+    "shieldId": null
+  },
+  "defaultInventoryIds": [
+    "dagger",
+    "dagger",
+    "dagger",
+    "shortsword",
+    "arrow",
+    "arrow",
+    "arrow",
+    "arrow",
+    "arrow",
+    "arrow",
+    "arrow",
+    "arrow",
+    "arrow",
+    "arrow",
+    "arrow",
+    "arrow",
+    "arrow",
+    "arrow",
+    "arrow",
+    "arrow"
+  ],
+  "defaultCp": 1600,
+  "shortDescription": "Circus tumbler turned rogue, running from a contract she walked out on.",
+  "description": "Came up through the Circus of the Moon as a tumbler, the kind they put on a rope between two opera-house balconies because the crowd liked her. \"Wren Allowyn\" was the stage name — small body, a name with an elven flourish that played well from a balcony — and the only one she answers to now; the one before is in a Circus ledger she has not seen in two years. Trained for the other work too, the way every Circus performer is, and made it as far as the dressing-room door on the night of her first contract before she walked out. The Circus does not chase a runner immediately; it waits, in the way only the Circus knows how, until the runner is somewhere where being found will hurt the most. She wears a small painted moon medallion under her shirt that she should have given back. She has not, and she will not, and she knows what that means."
+}

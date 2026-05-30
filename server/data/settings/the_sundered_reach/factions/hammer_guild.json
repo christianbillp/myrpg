@@ -1,0 +1,21 @@
+{
+  "id": "hammer_guild",
+  "name": "Lords of the Hammer",
+  "description": "Dwarven master-guild of static construction — roads, bridges, walls, foundations, towers. Conservative, exacting, quietly proud that the Empire physically rests on their work. Cross-racial: open to any skilled craft.",
+  "displayColor": "#807070",
+  "renown": 1,
+  "defaultRelations": {
+    "arcania": 30,
+    "white_capes": 10,
+    "bureau_of_adjustment": 30,
+    "hammer_guild": 80,
+    "wrench_guild": 60,
+    "silver_service": 20,
+    "circus_of_the_moon": 10,
+    "fortune_guards": 30,
+    "concordat": 0,
+    "bandits": -40,
+    "monsters": -40,
+    "party": 0
+  }
+}

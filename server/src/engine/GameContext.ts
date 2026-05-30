@@ -1,5 +1,5 @@
 import {
-  GameState, GameEvent, NpcState, MonsterDef, LogEntry, QuestGoalType, GameDefs,
+  GameState, GameEvent, NpcState, MonsterDef, LogEntry, GameDefs,
 } from './types.js';
 import type { PlayerDef, EngineEvent } from './types.js';
 import type { EventBus } from './EventBus.js';
@@ -17,7 +17,6 @@ export interface GameContext {
   resolveNpcByEntity(entity: string): NpcState | undefined;
   assignCombatLabel(npc: NpcState): void;
   aggroFaction(npc: NpcState): void;
-  advanceQuest(type: QuestGoalType): void;
 
   autoEndCombatIfNoEnemies(): void;
   resistMod(damage: number, damageType: string, def: MonsterDef, displayName: string): { finalDamage: number; log: LogEntry | null };
@@ -56,4 +55,13 @@ export interface GameContext {
    * the client. Null when no outer call is in flight.
    */
   eventSink: GameEvent[] | null;
+
+  /**
+   * True only during `GameEngine`'s constructor, while the encounter_started
+   * triggers are firing. Read by `doStartCombat` to know it should defer
+   * `advanceTurn` — the first enemy turn must not run inside session
+   * construction or the client never gets a chance to see it animate.
+   * See `GameEngine.runPendingTurnAdvance` for the deferred path.
+   */
+  isConstructing: boolean;
 }

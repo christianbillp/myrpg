@@ -201,17 +201,17 @@
     },
     {
       "id": 6,
-      "type": "wood_wall_top",
+      "type": "wooden_plank",
       "properties": [
         {
           "name": "name",
           "type": "string",
-          "value": "wood_wall_top"
+          "value": "wooden_plank"
         },
         {
           "name": "passable",
           "type": "bool",
-          "value": false
+          "value": true
         },
         {
           "name": "layer",
@@ -221,12 +221,12 @@
         {
           "name": "description",
           "type": "string",
-          "value": "Light wooden plank wall segment along the top of the tile. Blocks movement and sight."
+          "value": "Light wooden plank ground — a passable wooden surface. Use for tavern floors, dock boards, raised wooden platforms, and similar walkable wood."
         },
         {
           "name": "tags",
           "type": "string",
-          "value": "wood,wall,tavern,indoor,barrier"
+          "value": "wood,floor,tavern,indoor,fill"
         }
       ]
     },

@@ -7,7 +7,8 @@ export interface EncounterRecord {
   description: string;
   encounterTitle: string;
   xpGained: number;
-  goldGained: number;
+  /** Net change in the player's coin purse over this encounter, in CP. */
+  cpGained: number;
   outcome: 'survived' | 'defeated';
   lines: EncounterLogLine[];
 }

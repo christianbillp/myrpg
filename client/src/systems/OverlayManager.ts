@@ -8,6 +8,7 @@ import { NextChapterButton } from "../ui/NextChapterButton";
 import type { GameState, SpellDef, PendingReaction } from "../net/types";
 import { UIScale } from "../ui/UIScale";
 import { WorldPause } from "../net/WorldPause";
+import { DevMode } from "../devMode";
 
 export interface OverlayCallbacks {
   onEquip: (slot: "armor" | "weapon" | "shield", itemId: string) => void;
@@ -23,6 +24,10 @@ export interface OverlayCallbacks {
   onDeclineReaction: () => void;
   /** Player pressed NEXT CHAPTER on the chapter-complete overlay. */
   onAdvanceChapter: () => void;
+  /** Player dismissed the IntroductionOverlay — push the introduction text
+   *  into the GM chat so it persists as the opening narration after the
+   *  modal closes. */
+  onIntroClosed: (introduction: string) => void;
   getItems: () => ItemDef[];
   getSpells: () => SpellDef[];
 }
@@ -75,16 +80,38 @@ export class OverlayManager {
     this.playerDef = def;
   }
 
-  showIntroIfNeeded(state: GameState): void {
+  /** True while the IntroductionOverlay is on screen — the host scene checks
+   *  this to gate event-queue processing so encounter-start triggers don't
+   *  animate behind the modal. */
+  get isIntroBlocking(): boolean { return !!this.introOverlay; }
+
+  showIntroIfNeeded(state: GameState, onDismissed?: () => void): void {
     if (this.introShown || !state.introduction) return;
     this.introShown = true;
+    const intro = state.introduction;
+    // Dev-mode bypass — when the supertitle is disabled, push the intro
+    // text straight to the GM chat without ever mounting the overlay. No
+    // WorldPause acquire/release pair because the overlay was never shown.
+    if (DevMode.disableSupertitle) {
+      this.callbacks.onIntroClosed(intro);
+      onDismissed?.();
+      return;
+    }
     WorldPause.acquire('overlay:introduction');
     this.introOverlay = new IntroductionOverlay(
       this.scale,
       state.encounterTitle,
       this.playerDef,
-      state.introduction,
-      () => { this.introOverlay = null; WorldPause.release('overlay:introduction'); },
+      intro,
+      () => {
+        this.introOverlay = null;
+        WorldPause.release('overlay:introduction');
+        // Persist the introduction text into the GM chat as the encounter's
+        // opening narration so the player can re-read it after dismissing
+        // the modal.
+        this.callbacks.onIntroClosed(intro);
+        onDismissed?.();
+      },
     );
   }
 

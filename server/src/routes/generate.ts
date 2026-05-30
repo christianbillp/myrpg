@@ -21,6 +21,7 @@ import { join } from "path";
 import { composeMap, type Terrain, type Feature } from "../engine/MapComposer.js";
 import { writeMapJson, isGeneratedId } from "../engine/MapPersistence.js";
 import { generateEncounter, generateMap } from "../encounterGenerator.js";
+import { refineEncounter, type EncounterDraftForRefine } from "../encounterRefiner.js";
 import type { GameDefs } from "../engine/types.js";
 import { STARTING_ZONE_PLAYER } from "../../../shared/startingZones.js";
 
@@ -30,11 +31,19 @@ export interface GenerateRoutesCtx {
   getDefs: () => GameDefs;
   /** Re-load all JSON-backed defs from disk. Awaited after every file write. */
   loadDefs: () => Promise<void>;
-  dataDir: string;
+  /**
+   * Path resolver for the active setting's data folder
+   * (`<DATA_DIR>/settings/<active-id>`). Read fresh on each request so a
+   * runtime setting switch is picked up without re-registering routes.
+   * Throws when no setting is active — generation requires a setting because
+   * the output is persisted under that setting's `maps/` + `encounters/`.
+   */
+  getSettingDataDir: () => string;
 }
 
 export function registerGenerateRoutes(server: FastifyInstance, ctx: GenerateRoutesCtx): void {
-  const { anthropic, getDefs, loadDefs, dataDir } = ctx;
+  const { anthropic, getDefs, loadDefs, getSettingDataDir } = ctx;
+  const dataDir = (): string => getSettingDataDir();
 
   /**
    * Compose a map from deterministic toggles (terrain + features) — the
@@ -83,17 +92,26 @@ export function registerGenerateRoutes(server: FastifyInstance, ctx: GenerateRou
       terrainData: number[];
       objectData: number[];
       tilesets?: Array<{ firstgid: number; source: string }>;
+      /** When set, overwrite an existing map instead of allocating a fresh
+       *  `gen_<stamp>_<slug>` id. Used by the Map Editor's LOAD MAP → edit
+       *  → SAVE MAP flow. */
+      existingMapId?: string;
     };
   }>("/generate/map/save", async (req, reply) => {
-    const { name, description, width, height, terrainData, objectData, tilesets } = req.body;
+    const { name, description, width, height, terrainData, objectData, tilesets, existingMapId } = req.body;
     if (!Array.isArray(terrainData) || terrainData.length !== width * height) {
       return reply.code(400).send({ error: `terrainData length ${terrainData?.length} ≠ width*height (${width * height})` });
     }
     try {
-      const stamp = Date.now();
-      const slug = (name ?? '').toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 32) || 'map';
-      const mapId = `gen_${stamp}_${slug}`;
-      await writeMapJson(dataDir, {
+      let mapId: string;
+      if (existingMapId) {
+        mapId = existingMapId;
+      } else {
+        const stamp = Date.now();
+        const slug = (name ?? '').toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 32) || 'map';
+        mapId = `gen_${stamp}_${slug}`;
+      }
+      await writeMapJson(dataDir(), {
         id: mapId,
         name,
         description,
@@ -126,8 +144,8 @@ export function registerGenerateRoutes(server: FastifyInstance, ctx: GenerateRou
     if (!encounterId) return reply.code(400).send({ error: "encounterId is required" });
     if (!isGeneratedId(encounterId)) return reply.code(400).send({ error: `encounter "${encounterId}" is not generated — nothing to promote` });
     try {
-      const encDir = join(dataDir, "encounters");
-      const mapDir = join(dataDir, "maps");
+      const encDir = join(dataDir(), "encounters");
+      const mapDir = join(dataDir(), "maps");
       const encPath = join(encDir, `${encounterId}.json`);
       const encJson = JSON.parse(await readFile(encPath, "utf-8")) as Record<string, unknown> & {
         id: string; encounterTitle?: string; mapId?: string; generated?: boolean;
@@ -194,6 +212,10 @@ export function registerGenerateRoutes(server: FastifyInstance, ctx: GenerateRou
       seed?: number;
       description?: string;
       startingZonesData?: number[];
+      /** Optional placement mode (zones | exact). When 'exact', `placements` is used. */
+      placementMode?: 'zones' | 'exact';
+      /** Per-entity exact-tile bindings (see EncounterDef.placements). */
+      placements?: import("../../../shared/types.js").EncounterPlacement[];
       allyIds?: string[];
       enemyIds?: string[];
       /** Creatures placed as NEUTRAL NPCs (do not auto-attack). Stored under `npcIds`. */
@@ -210,14 +232,18 @@ export function registerGenerateRoutes(server: FastifyInstance, ctx: GenerateRou
       triggers?: Array<{
         id: string;
         region: { x: number; y: number; w: number; h: number };
-        whenEvent?: "player_moved" | "encounter_started" | "encounter_completed";
+        whenEvent?: "player_moved" | "encounter_started" | "encounter_completed" | "flag_set";
         kind:
           | "perception" | "log" | "aigm" | "combat" | "xp"
-          | "announcement" | "speech" | "fade";
+          | "announcement" | "speech" | "fade" | "set_flag";
         dc: number;
         passMessage: string;
         message: string;
         defId: string;
+        /** Flag name the `flag_set` WHEN matcher listens for; blank = any. */
+        whenFlagName?: string;
+        /** Flag name the `set_flag` THEN action writes (always to `true`). */
+        setFlagName?: string;
         /**
          * Optional list of def ids to flip to enemy alongside `defId` when a
          * `combat`-kind trigger fires. Used by the RANDOMIZE flow, which
@@ -238,7 +264,7 @@ export function registerGenerateRoutes(server: FastifyInstance, ctx: GenerateRou
       }>;
     };
   }>("/generate/encounter/composed", async (req, reply) => {
-    const { existingMapId, terrain, features, width = 30, height = 22, seed, description, startingZonesData, allyIds, enemyIds, neutralIds, customTitle, customIntroduction, customObjective, completionFlag, triggers: composedTriggers } = req.body;
+    const { existingMapId, terrain, features, width = 30, height = 22, seed, description, startingZonesData, placementMode, placements, allyIds, enemyIds, neutralIds, customTitle, customIntroduction, customObjective, completionFlag, triggers: composedTriggers } = req.body;
     const defs = getDefs();
     const hasEnemies = (enemyIds ?? []).length > 0;
     try {
@@ -278,7 +304,7 @@ export function registerGenerateRoutes(server: FastifyInstance, ctx: GenerateRou
         objectData = composed.objectData;
         mapName = composed.name;
         mapDescription = composed.description;
-        await writeMapJson(dataDir, {
+        await writeMapJson(dataDir(), {
           id: mapId,
           name: composed.name,
           description: composed.description,
@@ -291,15 +317,27 @@ export function registerGenerateRoutes(server: FastifyInstance, ctx: GenerateRou
       }
 
       const cells = mapWidth * mapHeight;
+      // A player start is required: either a painted zone OR (in exact mode)
+      // an explicit `player` placement. The /generate/encounter/update
+      // endpoint already accepts both — this endpoint now matches.
+      const hasPlayerPlacement = placementMode === 'exact'
+        && (placements ?? []).some((p) => p.role === 'player');
       let zoneData: number[];
       if (startingZonesData && startingZonesData.length > 0) {
         if (startingZonesData.length !== cells) {
           return reply.code(400).send({ error: `startingZonesData length ${startingZonesData.length} ≠ width*height (${cells})` });
         }
-        if (!startingZonesData.some((z) => z === STARTING_ZONE_PLAYER)) {
-          return reply.code(400).send({ error: `startingZonesData must include at least one player-start (value ${STARTING_ZONE_PLAYER}) cell` });
+        const hasPlayerZone = startingZonesData.some((z) => z === STARTING_ZONE_PLAYER);
+        if (!hasPlayerZone && !hasPlayerPlacement) {
+          return reply.code(400).send({ error: `startingZonesData must include at least one player-start cell (or a 'player' placement in exact mode)` });
         }
         zoneData = startingZonesData;
+      } else if (hasPlayerPlacement) {
+        // Exact-mode draft with no painted zones at all — that's fine; the
+        // engine resolves the player placement from `placements` directly.
+        // Persist an empty zone layer so the saved encounter doesn't carry
+        // a stale auto-zone.
+        zoneData = new Array<number>(cells).fill(0);
       } else {
         zoneData = new Array<number>(cells).fill(0);
         const legend = defs.tileLegend.tiles;
@@ -330,9 +368,14 @@ export function registerGenerateRoutes(server: FastifyInstance, ctx: GenerateRou
       const triggers = (composedTriggers ?? []).map((t, i) => {
         const baseId = `${t.id || `gen_trigger_${i + 1}`}`;
         const whenEvent = t.whenEvent ?? 'player_moved';
+        // `flag_set` listens on flag writes; optionally narrowed by name.
+        // Region triggers use the painted rectangle; everything else fires on
+        // a lifecycle event with no body shape.
         const when: Record<string, unknown> = whenEvent === 'player_moved'
           ? { event: 'player_moved', in_area: t.region }
-          : { event: whenEvent };
+          : whenEvent === 'flag_set'
+            ? { event: 'flag_set', ...(t.whenFlagName && t.whenFlagName.trim() ? { name: sanitiseFlag(t.whenFlagName) } : {}) }
+            : { event: whenEvent };
         // `phase: exploring` guard only applies to region-walk triggers —
         // lifecycle triggers fire on engine events, not phase transitions.
         const guards = whenEvent === 'player_moved'
@@ -398,6 +441,11 @@ export function registerGenerateRoutes(server: FastifyInstance, ctx: GenerateRou
             }];
             break;
           }
+          case 'set_flag': {
+            const flag = (t.setFlagName ?? '').trim();
+            then = flag ? [{ type: 'set_flag', name: sanitiseFlag(flag), value: true }] : [];
+            break;
+          }
         }
         return { id: baseId, when, if: guards, then, once: true };
       });
@@ -416,11 +464,13 @@ export function registerGenerateRoutes(server: FastifyInstance, ctx: GenerateRou
         completionFlag: completionFlag?.trim() ? sanitiseFlag(completionFlag) : (hasEnemies ? undefined : `${slug}_resolved`),
         generated: true,
         startingZones: { width: mapWidth, height: mapHeight, data: zoneData },
+        ...(placementMode === 'exact' ? { placementMode: 'exact' as const } : {}),
+        ...(placements && placements.length > 0 ? { placements } : {}),
         ...(triggers.length > 0 ? { triggers } : {}),
       };
 
-      await mkdir(join(dataDir, 'encounters'), { recursive: true });
-      await writeFile(join(dataDir, 'encounters', `${encounterId}.json`), JSON.stringify(encounterJson, null, 2));
+      await mkdir(join(dataDir(), 'encounters'), { recursive: true });
+      await writeFile(join(dataDir(), 'encounters', `${encounterId}.json`), JSON.stringify(encounterJson, null, 2));
       await loadDefs();
       return reply.send({
         mapId,
@@ -457,6 +507,8 @@ export function registerGenerateRoutes(server: FastifyInstance, ctx: GenerateRou
       mapId?: string;
       description?: string;
       startingZonesData?: number[];
+      placementMode?: 'zones' | 'exact';
+      placements?: import("../../../shared/types.js").EncounterPlacement[];
       allyIds?: string[];
       enemyIds?: string[];
       neutralIds?: string[];
@@ -467,14 +519,18 @@ export function registerGenerateRoutes(server: FastifyInstance, ctx: GenerateRou
       triggers?: Array<{
         id: string;
         region: { x: number; y: number; w: number; h: number };
-        whenEvent?: "player_moved" | "encounter_started" | "encounter_completed";
+        whenEvent?: "player_moved" | "encounter_started" | "encounter_completed" | "flag_set";
         kind:
           | "perception" | "log" | "aigm" | "combat" | "xp"
-          | "announcement" | "speech" | "fade";
+          | "announcement" | "speech" | "fade" | "set_flag";
         dc: number;
         passMessage: string;
         message: string;
         defId: string;
+        /** Flag name the `flag_set` WHEN matcher listens for; blank = any. */
+        whenFlagName?: string;
+        /** Flag name the `set_flag` THEN action writes (always to `true`). */
+        setFlagName?: string;
         defIds?: string[];
         xpAmount?: number;
         durationMs?: number;
@@ -484,11 +540,11 @@ export function registerGenerateRoutes(server: FastifyInstance, ctx: GenerateRou
       }>;
     };
   }>("/generate/encounter/update", async (req, reply) => {
-    const { encounterId, mapId: requestedMapId, description, startingZonesData, allyIds, enemyIds, neutralIds, customTitle, customIntroduction, customObjective, completionFlag, triggers: composedTriggers } = req.body;
+    const { encounterId, mapId: requestedMapId, description, startingZonesData, placementMode, placements, allyIds, enemyIds, neutralIds, customTitle, customIntroduction, customObjective, completionFlag, triggers: composedTriggers } = req.body;
     if (!encounterId) return reply.code(400).send({ error: "encounterId is required" });
     const defs = getDefs();
     try {
-      const encDir = join(dataDir, "encounters");
+      const encDir = join(dataDir(), "encounters");
       const encPath = join(encDir, `${encounterId}.json`);
       let existing: Record<string, unknown>;
       try {
@@ -513,15 +569,19 @@ export function registerGenerateRoutes(server: FastifyInstance, ctx: GenerateRou
       }
 
       // Starting zones — if omitted, preserve the existing layer; otherwise
-      // require it to match the (possibly new) map's cell count and carry at
-      // least one player-start cell.
+      // require it to match the (possibly new) map's cell count. A player
+      // start is required: in zones mode that means a painted PLAYER cell;
+      // in exact mode an explicit `player` placement satisfies it instead.
       let zonesLayer: { width: number; height: number; data: number[] };
       if (startingZonesData && startingZonesData.length > 0) {
         if (startingZonesData.length !== cells) {
           return reply.code(400).send({ error: `startingZonesData length ${startingZonesData.length} ≠ width*height (${cells})` });
         }
-        if (!startingZonesData.some((z) => z === STARTING_ZONE_PLAYER)) {
-          return reply.code(400).send({ error: `startingZonesData must include at least one player-start cell` });
+        const hasPlayerZone = startingZonesData.some((z) => z === STARTING_ZONE_PLAYER);
+        const hasPlayerPlacement = placementMode === 'exact'
+          && (placements ?? []).some((p) => p.role === 'player');
+        if (!hasPlayerZone && !hasPlayerPlacement) {
+          return reply.code(400).send({ error: `startingZonesData must include at least one player-start cell (or a 'player' placement in exact mode)` });
         }
         zonesLayer = { width: mapWidth, height: mapHeight, data: startingZonesData };
       } else {
@@ -595,6 +655,11 @@ export function registerGenerateRoutes(server: FastifyInstance, ctx: GenerateRou
             }];
             break;
           }
+          case 'set_flag': {
+            const flag = (t.setFlagName ?? '').trim();
+            then = flag ? [{ type: 'set_flag', name: sanitiseFlag(flag), value: true }] : [];
+            break;
+          }
         }
         return { id: baseId, when, if: guards, then, once: true };
       });
@@ -623,6 +688,16 @@ export function registerGenerateRoutes(server: FastifyInstance, ctx: GenerateRou
       if (allyIds    !== undefined) updated.allyIds = allyIds.filter((id) => validIds.has(id));
       if (enemyIds   !== undefined) updated.enemyIds = enemyIds.filter((id) => validIds.has(id));
       if (neutralIds !== undefined) updated.npcIds  = neutralIds.filter((id) => validIds.has(id));
+      if (placementMode !== undefined) {
+        // Persist 'exact' explicitly; collapse 'zones' (the default) back to
+        // omitting the field so existing-encounter JSON stays diff-clean.
+        if (placementMode === 'exact') updated.placementMode = 'exact';
+        else delete updated.placementMode;
+      }
+      if (placements !== undefined) {
+        if (placements.length > 0) updated.placements = placements;
+        else delete updated.placements;
+      }
       if (composedTriggers !== undefined) {
         if (triggers.length > 0) updated.triggers = triggers;
         else delete updated.triggers;
@@ -684,14 +759,40 @@ export function registerGenerateRoutes(server: FastifyInstance, ctx: GenerateRou
   });
 
   /**
+   * Refine an in-progress encounter draft. Returns a partial patch
+   * (only fields the model wants to change) plus a short rationale.
+   * The frontend computes the diff vs the current draft and presents
+   * Accept/Reject — nothing is persisted by this endpoint.
+   */
+  server.post<{
+    Body: { draft: EncounterDraftForRefine; prompt: string };
+  }>("/generate/encounter/refine", async (req, reply) => {
+    const { draft, prompt } = req.body;
+    if (!draft || typeof draft !== "object") {
+      return reply.code(400).send({ error: "draft must be an object" });
+    }
+    if (!prompt || prompt.trim().length < 4) {
+      return reply.code(400).send({ error: "prompt must be at least 4 characters" });
+    }
+    try {
+      const result = await refineEncounter(anthropic, getDefs(), { draft, prompt });
+      return reply.send(result);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error("[generate/encounter/refine] failed", msg);
+      return reply.code(400).send({ error: msg });
+    }
+  });
+
+  /**
    * Delete every generated map and encounter — the `gen_*` namespace. Used by
    * the dev-mode "Delete all generated maps" button. Hand-authored ids MUST
    * NOT begin with `gen_` (see `isGeneratedId` in MapPersistence) or they'd
    * be wiped here.
    */
   server.delete("/generate/maps/all", async (_req, reply) => {
-    const mapsDir = join(dataDir, "maps");
-    const encDir = join(dataDir, "encounters");
+    const mapsDir = join(dataDir(), "maps");
+    const encDir = join(dataDir(), "encounters");
     let mapsDeleted = 0;
     let encountersDeleted = 0;
     try {

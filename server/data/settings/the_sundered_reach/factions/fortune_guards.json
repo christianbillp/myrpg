@@ -1,0 +1,21 @@
+{
+  "id": "fortune_guards",
+  "name": "The Fortune Guards",
+  "description": "Halfling power: bankers and lawyers, the wealthiest of the three. A Fortune Guard contract is honest and a Fortune Guard rate is fair — but a Fortune Guard creditor is ruthless without compromise, and has never in their history been found guilty of a single crime. Bound to the other halfling Powers by the Oath of Non-Competition.",
+  "displayColor": "#508060",
+  "renown": 1,
+  "defaultRelations": {
+    "arcania": 30,
+    "white_capes": 10,
+    "bureau_of_adjustment": 30,
+    "hammer_guild": 30,
+    "wrench_guild": 30,
+    "silver_service": 80,
+    "circus_of_the_moon": 80,
+    "fortune_guards": 80,
+    "concordat": 0,
+    "bandits": -40,
+    "monsters": -40,
+    "party": 0
+  }
+}

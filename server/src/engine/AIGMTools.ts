@@ -1,5 +1,7 @@
 import { GameEngine } from './GameEngine.js';
 import { GameEvent } from './types.js';
+import { getActiveSetting, lookupSettingSection, lookupWorldbookEntry } from '../settings.js';
+import { purseToCp, formatCoins } from '../../../shared/currency.js';
 
 export interface AIGMToolResult {
   // GameEvent[] only carries client-facing animation signals (e.g. entity_move).
@@ -37,9 +39,20 @@ function buildToolList() { return [
     input_schema: { type: 'object' as const, properties: { amount: { type: 'integer' }, reason: { type: 'string' } }, required: ['amount', 'reason'] },
   },
   {
-    name: 'award_gold',
-    description: 'Award gold pieces to the player.',
-    input_schema: { type: 'object' as const, properties: { amount: { type: 'integer' }, reason: { type: 'string' } }, required: ['amount', 'reason'] },
+    name: 'award_coins',
+    description: 'Adjust the player\'s coin purse using SRD denominations. Provide whichever of pp/gp/ep/sp/cp apply; omitted fields are treated as zero. Negative amounts spend coins — if the player cannot afford the total, the transaction is rejected and no state changes. Example: { gp: 5, sp: 2 } pays in 5 gold and 2 silver; { gp: -10 } debits 10 GP.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        pp: { type: 'integer', description: 'Platinum pieces (1 PP = 10 GP).' },
+        gp: { type: 'integer', description: 'Gold pieces (the base unit).' },
+        ep: { type: 'integer', description: 'Electrum pieces (1 EP = 1/2 GP).' },
+        sp: { type: 'integer', description: 'Silver pieces (1 SP = 1/10 GP).' },
+        cp: { type: 'integer', description: 'Copper pieces (1 CP = 1/100 GP).' },
+        reason: { type: 'string' },
+      },
+      required: ['reason'],
+    },
   },
   {
     name: 'adjust_npc_hp',
@@ -53,7 +66,7 @@ function buildToolList() { return [
   },
   {
     name: 'move_entity',
-    description: 'Teleport an entity to a tile. Entity: "player", "enemy_A" (enemy by label), "ally_A" (ally by combat label), or "npc_[id]" (any NPC by id).',
+    description: 'Teleport an entity to a tile. Entity: "player", "enemy_A" (enemy by label), "ally_A" (ally by combat label), or "npc_[id]" (any NPC by id). The move FAILS if the destination is out of bounds, impassable (wall, water, void, a blocking object), or occupied by the player or another living NPC — the tool result will explain the reason and no state will change. Pick a different tile or adjust the narration when this happens; do not narrate movement the engine refused.',
     input_schema: { type: 'object' as const, properties: { entity: { type: 'string' }, tile_x: { type: 'integer' }, tile_y: { type: 'integer' }, reason: { type: 'string' } }, required: ['entity', 'tile_x', 'tile_y', 'reason'] },
   },
   {
@@ -85,11 +98,6 @@ function buildToolList() { return [
     name: 'trigger_combat',
     description: 'Start combat if currently in the exploring phase and enemies are present.',
     input_schema: { type: 'object' as const, properties: { reason: { type: 'string' } }, required: ['reason'] },
-  },
-  {
-    name: 'complete_quest',
-    description: 'Force-complete a quest and award its rewards.',
-    input_schema: { type: 'object' as const, properties: { quest_id: { type: 'string' }, reason: { type: 'string' } }, required: ['quest_id', 'reason'] },
   },
   {
     name: 'set_player_hidden',
@@ -216,18 +224,22 @@ function buildToolList() { return [
     description: 'Display a large centred announcement card. The text is ALSO appended to the Event Log so the message persists after the visual fades. Use add_log_entry for routine log lines that do not need an attention-grabbing card.\n\n`mode` controls how the announcement integrates with play:\n  - `"focused"` (default) — orange-bordered card; the Player Panel, Target Panel, and HUD are hidden; player movement and actions are locked; world-tick is paused for the duration. Use for important beats the player MUST stop and read (quest reveal, major discovery).\n  - `"unfocused"` — borderless card with soft edge-fade; UI stays, world keeps ticking, player keeps playing. Use for atmospheric flavour (weather shift, distant thunder, time-of-day change).\n\n`duration_ms` defaults to 3500 if omitted.',
     input_schema: { type: 'object' as const, properties: { text: { type: 'string' }, duration_ms: { type: 'integer' }, mode: { type: 'string', enum: ['focused', 'unfocused'] }, reason: { type: 'string' } }, required: ['text', 'reason'] },
   },
+  {
+    name: 'lookup_setting',
+    description: 'Fetch the full body of an H2 section from the active setting\'s **core canon** (`setting.md` sections like "history", "political-structure", "peoples-of-the-reach"). The setting summary + a list of available section ids is already in the system prompt under "Available canon sections". Use this for foundational worldbuilding — the rules of the world, its history, its peoples. For specific factions, named NPCs, locations, or events use `lookup_worldbook` instead. Returns the raw markdown body, or a "section not found" message if the id does not match or no setting is active.',
+    input_schema: { type: 'object' as const, properties: { section: { type: 'string' }, reason: { type: 'string' } }, required: ['section', 'reason'] },
+  },
+  {
+    name: 'lookup_worldbook',
+    description: 'Fetch a worldbook entry — a supplementary dossier for one specific faction, named NPC, location, or world event. The list of available entry ids (grouped by type) is in the system prompt under "Available worldbook entries". Use this when you need detail beyond the summary on a specific topic: who the Concordat are, what the Quota does, who runs the Silver Service, what is happening at Stillweir. For broader foundational worldbuilding (history, politics, peoples) use `lookup_setting`. Returns the raw markdown body of the entry, or an "entry not found" message.',
+    input_schema: { type: 'object' as const, properties: { entry_id: { type: 'string' }, reason: { type: 'string' } }, required: ['entry_id', 'reason'] },
+  },
 ]; }
 
-// Tracks quests force-completed within a single AIGM turn so that subsequent
-// award_xp calls in the same turn can detect and reject double-credit attempts.
-// Reset between turns by callers (see resetTurnGuards).
-let questsCompletedThisTurn = new Set<string>();
-let xpAwardedThisTurnFromQuests = 0;
-
-export function resetTurnGuards(): void {
-  questsCompletedThisTurn = new Set();
-  xpAwardedThisTurnFromQuests = 0;
-}
+/** No-op kept exported because aigm.ts calls it at turn start. The quest
+ *  system was removed (no more per-turn quest reward bookkeeping); deleting
+ *  the call site is a follow-up cleanup. */
+export function resetTurnGuards(): void {}
 
 export function applyAIGMTool(
   engine: GameEngine,
@@ -252,24 +264,26 @@ export function applyAIGMTool(
     }
     case 'award_xp': {
       const amount = input['amount'] as number;
-      // Guard: if the AIGM already collected XP this turn via complete_quest,
-      // refuse direct award_xp calls — those would double-credit the player.
-      if (questsCompletedThisTurn.size > 0 && amount > 0) {
-        toolResultContent = `award_xp rejected — you already granted ${xpAwardedThisTurnFromQuests} XP this turn via complete_quest for: ${[...questsCompletedThisTurn].join(', ')}. Quest rewards are awarded automatically; do not also call award_xp for the same outcome.`;
-        break;
-      }
       events = engine.awardXp(amount);
       toolResultContent = `Awarded ${amount} XP. Total XP: ${engine.getState().player.xp}.`;
       break;
     }
-    case 'award_gold': {
-      const amount = input['amount'] as number;
-      if (amount < 0 && engine.getState().player.gold + amount < 0) {
-        toolResultContent = `Transaction rejected: player only has ${engine.getState().player.gold} GP and cannot pay ${Math.abs(amount)} GP. Do not narrate this payment as successful — inform the player they cannot afford it.`;
+    case 'award_coins': {
+      const purse = {
+        pp: (input['pp'] as number | undefined) ?? 0,
+        gp: (input['gp'] as number | undefined) ?? 0,
+        ep: (input['ep'] as number | undefined) ?? 0,
+        sp: (input['sp'] as number | undefined) ?? 0,
+        cp: (input['cp'] as number | undefined) ?? 0,
+      };
+      const cpDelta = purseToCp(purse);
+      const balanceCp = engine.getState().player.balanceCp;
+      if (cpDelta < 0 && balanceCp + cpDelta < 0) {
+        toolResultContent = `Transaction rejected: player only has ${formatCoins(balanceCp)} and cannot pay ${formatCoins(-cpDelta)}. Do not narrate this payment as successful — inform the player they cannot afford it.`;
       } else {
-        events = engine.awardGold(amount);
-        const s = engine.getState();
-        toolResultContent = `${amount >= 0 ? '+' : ''}${amount} GP. Player now has ${s.player.gold} GP.`;
+        events = engine.awardCoins(cpDelta);
+        const next = engine.getState().player.balanceCp;
+        toolResultContent = `${cpDelta >= 0 ? '+' : '-'}${formatCoins(Math.abs(cpDelta))}. Player now has ${formatCoins(next)}.`;
       }
       break;
     }
@@ -324,10 +338,16 @@ export function applyAIGMTool(
       const entity = input['entity'] as string;
       const tx = input['tile_x'] as number;
       const ty = input['tile_y'] as number;
-      events = engine.moveEntity(entity, tx, ty);
-      toolResultContent = events.length > 0
-        ? `${entity} moved to (${tx}, ${ty}).`
-        : `${entity} not found — no move performed.`;
+      const result = engine.moveEntity(entity, tx, ty);
+      events = result.events;
+      if (result.error) {
+        toolResultContent = `move_entity failed — ${result.error}. No state change. Pick a different tile or adjust the narration.`;
+      } else if (events.length === 0) {
+        // No-op (already at destination). Engine accepted but emitted no event.
+        toolResultContent = `${entity} is already at (${tx}, ${ty}) — no movement needed.`;
+      } else {
+        toolResultContent = `${entity} moved to (${tx}, ${ty}).`;
+      }
       break;
     }
     case 'add_item': {
@@ -379,19 +399,6 @@ export function applyAIGMTool(
       toolResultContent = before !== after
         ? `Combat triggered. Phase: ${before} → ${after}.`
         : 'No combat triggered (no living enemies or already in combat).';
-      break;
-    }
-    case 'complete_quest': {
-      const questId = input['quest_id'] as string;
-      const q = engine.getState().quests.find((q) => q.id === questId);
-      events = engine.completeQuest(questId);
-      if (q) {
-        questsCompletedThisTurn.add(q.title);
-        xpAwardedThisTurnFromQuests += q.rewardXp;
-        toolResultContent = `Quest "${q.title}" force-completed — rewards (+${q.rewardXp} XP, +${q.rewardGp} GP) granted automatically. Do NOT also call award_xp for this outcome.`;
-      } else {
-        toolResultContent = `Unknown quest_id "${questId}".`;
-      }
       break;
     }
     case 'set_player_hidden': {
@@ -557,7 +564,7 @@ export function applyAIGMTool(
       // player-sayto path does on the server side. Prefixed with the speech
       // bubble emoji so dialogue stands out at a glance.
       engine.addLog({ left: `💬 ${speakerName}: "${text}"`, style: 'status' });
-      events = [{ type: 'npc_speech', entityId, text }];
+      events = [{ type: 'npc_speech', entityId, text, speakerName }];
       toolResultContent = `Speech bubble queued above ${entity}: "${text}".`;
       break;
     }
@@ -712,6 +719,38 @@ export function applyAIGMTool(
           : { type: 'announcement', text, mode };
       events = [ev];
       toolResultContent = `Announcement queued (${mode}): "${text}" (also written to Event Log).`;
+      break;
+    }
+    case 'lookup_setting': {
+      const section = String(input['section'] ?? '').trim();
+      if (!section) { toolResultContent = 'lookup_setting requires a non-empty section id.'; break; }
+      const setting = getActiveSetting();
+      if (!setting) { toolResultContent = 'No setting is active — only core SRD rules apply. There is no setting lore to look up.'; break; }
+      const body = lookupSettingSection(section);
+      if (!body) {
+        toolResultContent = `Section "${section}" not found in setting "${setting.id}". Available canon sections: ${setting.sections.join(', ')}.`;
+        break;
+      }
+      toolResultContent = body;
+      break;
+    }
+    case 'lookup_worldbook': {
+      const entryId = String(input['entry_id'] ?? '').trim();
+      if (!entryId) { toolResultContent = 'lookup_worldbook requires a non-empty entry_id.'; break; }
+      const setting = getActiveSetting();
+      if (!setting) { toolResultContent = 'No setting is active — only core SRD rules apply. There is no worldbook to look up.'; break; }
+      const entry = lookupWorldbookEntry(entryId);
+      if (!entry) {
+        const available = setting.worldbook.map((e) => e.id).sort().join(', ');
+        toolResultContent = available.length > 0
+          ? `Worldbook entry "${entryId}" not found in setting "${setting.id}". Available entries: ${available}.`
+          : `Setting "${setting.id}" has no worldbook entries.`;
+        break;
+      }
+      // Prepend the title + type so the AI always knows what it's reading,
+      // independent of how the entry was authored.
+      const header = `# ${entry.title}${entry.type ? ` (${entry.type})` : ''}`;
+      toolResultContent = `${header}\n\n${entry.body}`;
       break;
     }
   }

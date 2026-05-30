@@ -42,7 +42,7 @@ function validateTrigger(trigger: EncounterTrigger, ctx: GameContext): void {
     'player_moved', 'npc_killed', 'item_picked_up',
     'turn_started', 'turn_ended', 'combat_started', 'combat_ended',
     'encounter_started', 'encounter_completed',
-    'damage_dealt', 'hp_threshold_crossed', 'faction_changed', 'custom',
+    'damage_dealt', 'hp_threshold_crossed', 'faction_changed', 'flag_set', 'custom',
   ];
   if (!validEvents.includes(trigger.when.event)) {
     warn(`unknown WHEN event "${trigger.when.event}"`);
@@ -124,6 +124,12 @@ function whenMatches(when: WhenClause, event: EngineEvent): boolean {
     case 'faction_changed': {
       const e = event as Extract<EngineEvent, { type: 'faction_changed' }>;
       return when.factionId === undefined || when.factionId === e.factionId;
+    }
+    case 'flag_set': {
+      const e = event as Extract<EngineEvent, { type: 'flag_set' }>;
+      if (when.name !== undefined && when.name !== e.name) return false;
+      if (when.value !== undefined && when.value !== e.value) return false;
+      return true;
     }
     case 'custom': {
       const e = event as Extract<EngineEvent, { type: 'custom' }>;
@@ -353,7 +359,7 @@ export function fireAction(ctx: GameContext, action: TriggerAction): void {
       ctx.addLog({ left: `💬 ${speakerName}: "${text}"`, style: 'status' });
       const sink = ctx.eventSink;
       if (!sink) return;
-      sink.push({ type: 'npc_speech', entityId, text });
+      sink.push({ type: 'npc_speech', entityId, text, speakerName });
       return;
     }
     case 'fade_screen': {

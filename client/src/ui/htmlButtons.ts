@@ -4,7 +4,7 @@
  * UI so buttons stay crisp at any zoom level instead of going blurry through
  * Phaser's canvas text rendering.
  *
- * Pattern mirrors `GenerateSetupScene.buildTextarea` — the element is parented
+ * Pattern mirrors `MapEditorScene.buildTextarea` — the element is parented
  * to `document.body` and a `resize` listener keeps its CSS position in sync
  * with the game canvas's bounding rect.
  */

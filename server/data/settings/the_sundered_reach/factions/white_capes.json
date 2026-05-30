@@ -1,0 +1,21 @@
+{
+  "id": "white_capes",
+  "name": "The White Capes",
+  "description": "State-sanctioned magical regulators — human-only, semi-autonomous, brutal. They license, confiscate, and execute as they judge the threat severe enough. Identifiable on purpose by white half-cloak, steel throat-ring, and grey leather gloves.",
+  "displayColor": "#c8c8d8",
+  "renown": 1,
+  "defaultRelations": {
+    "arcania": 60,
+    "white_capes": 80,
+    "bureau_of_adjustment": -10,
+    "hammer_guild": 20,
+    "wrench_guild": 20,
+    "silver_service": 10,
+    "circus_of_the_moon": 0,
+    "fortune_guards": 10,
+    "concordat": 20,
+    "bandits": -40,
+    "monsters": -40,
+    "party": -20
+  }
+}

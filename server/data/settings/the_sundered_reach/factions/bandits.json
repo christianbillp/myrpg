@@ -1,0 +1,21 @@
+{
+  "id": "bandits",
+  "name": "Bandits",
+  "description": "What the Empire's order produces at its edges — small, locally-rooted crews on the roads between great cities. Ex-soldiers, dispossessed villagers, refugees from the interregnum, the desperate. Each crew is its own faction with its own grievance.",
+  "displayColor": "#aa6633",
+  "renown": 1,
+  "defaultRelations": {
+    "arcania": -60,
+    "white_capes": -60,
+    "bureau_of_adjustment": -80,
+    "hammer_guild": -40,
+    "wrench_guild": -40,
+    "silver_service": -20,
+    "circus_of_the_moon": -20,
+    "fortune_guards": -60,
+    "concordat": -20,
+    "bandits": 40,
+    "monsters": -40,
+    "party": -40
+  }
+}

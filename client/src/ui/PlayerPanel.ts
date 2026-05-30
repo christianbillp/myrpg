@@ -2,6 +2,7 @@ import { PLAYER_PANEL_WIDTH, GRID_ROWS, TILE_SIZE, HUD_HEIGHT } from '../constan
 import { PlayerDef } from '../data/player';
 import { AvailableActions, CombatMode } from '../net/types';
 import { UIScale } from './UIScale';
+import { STATUS_TONE_COLOR } from './PlayerStatus';
 
 const GRID_H   = GRID_ROWS * TILE_SIZE;
 const PANEL_H  = GRID_H + HUD_HEIGHT;
@@ -9,13 +10,6 @@ const MAX_PICKER_SLOTS = 6;
 const PANEL_MIN_WIDTH = 120;
 const PANEL_MAX_WIDTH = 480;
 const PANEL_WIDTH_KEY = 'myrpg_player_panel_width';
-
-export interface QuestDisplay {
-  title: string;
-  progress: number;
-  target: number;
-  completed: boolean;
-}
 
 /** Display info for a class feature button + resource chip. */
 export interface PlayerPanelFeature {
@@ -46,6 +40,10 @@ export interface PlayerPanelActionState {
   features: PlayerPanelFeature[];
   /** When set, the action area is replaced with a "Select target for: NAME" banner instead of the usual buttons. */
   spellTargetPrompt: { spellName: string; asRitual: boolean } | null;
+  /** Resolved status chips — conditions, buffs, ongoing effects affecting
+   *  the player right now. Built by GameScene via `buildPlayerStatusChips`
+   *  in `client/src/ui/PlayerStatus.ts`. Empty when nothing applies. */
+  statusChips: import("./PlayerStatus").PlayerStatusChip[];
   /** Active player-owned summons (Mage Hand, Unseen Servant). The panel
    *  renders one DIRECT button per entry — clicking enters a "click a tile
    *  to move the summon" mode in the GameScene. */
@@ -99,7 +97,7 @@ export class PlayerPanel {
   private readonly slotsEl: HTMLElement;
   private readonly featureChipsEl: HTMLElement;
   private readonly concentrationEl: HTMLElement;
-  private readonly questsEl: HTMLElement;
+  private readonly statusEl: HTMLElement;
   private readonly objectiveEl: HTMLElement;
   private readonly actionArea: HTMLElement;
   private readonly searchBtn: HTMLButtonElement;
@@ -148,11 +146,10 @@ export class PlayerPanel {
       <div style="padding:2px 12px;font-size:10px;color:#8eb8e0;display:none;" data-slots></div>
       <div style="padding:2px 12px;font-size:10px;color:#a8c8e8;display:none;line-height:1.6;" data-feature-chips></div>
       <div style="padding:2px 12px;font-size:10px;color:#b8a8e8;display:none;" data-concentration></div>
+      <div style="padding:4px 12px 2px;display:none;flex-wrap:wrap;gap:3px;" data-status></div>
       <div class="gui-sep" style="margin-top:2px;"></div>
       <div class="gui-label">OBJECTIVE</div>
       <div style="padding:2px 12px 6px;font-size:10px;color:#e2b96f;line-height:1.4;" data-objective>—</div>
-      <div class="gui-label">QUESTS</div>
-      <div style="padding:2px 12px;font-size:10px;color:#aabbcc;line-height:1.8;white-space:pre-wrap;" data-quests></div>
 
       <div class="gui-sep" style="position:absolute;left:8px;right:0;bottom:108px;"></div>
       <div style="position:absolute;left:0;right:0;bottom:108px;display:flex;flex-direction:column-reverse;gap:4px;padding-bottom:4px;" data-actions></div>
@@ -171,7 +168,7 @@ export class PlayerPanel {
     this.slotsEl   = ref('slots');
     this.featureChipsEl = ref('feature-chips');
     this.concentrationEl = ref('concentration');
-    this.questsEl  = ref('quests');
+    this.statusEl = ref('status');
     this.objectiveEl = ref('objective');
     this.actionArea = ref('actions');
     this.headerSubEl = ref('header-sub');
@@ -285,17 +282,13 @@ export class PlayerPanel {
     return handle;
   }
 
-  refresh(hp: number, maxHp: number, quests: QuestDisplay[] = [], showSearch = false, objective = ''): void {
+  refresh(hp: number, maxHp: number, showSearch = false, objective = ''): void {
     const pct = maxHp > 0 ? hp / maxHp : 0;
     this.hpFill.style.width = `${Math.floor(pct * 100)}%`;
     this.hpFill.style.background = hpColor(pct);
     this.hpText.textContent = `${hp} / ${maxHp}`;
 
     this.objectiveEl.textContent = objective || '—';
-
-    this.questsEl.textContent = quests.length === 0
-      ? 'None'
-      : quests.map(q => q.completed ? `✓ ${q.title}` : `· ${q.title}  ${q.progress}/${q.target}`).join('\n');
 
     this.searchBtn.style.display = showSearch ? 'block' : 'none';
   }
@@ -329,13 +322,13 @@ export class PlayerPanel {
       this.featureChipsEl.style.display = 'none';
     }
 
-    // Concentration chip: visible only while concentrating; show spell name.
-    if (state.concentratingOn && state.concentratingOnName) {
-      this.concentrationEl.style.display = 'block';
-      this.concentrationEl.textContent = `🌀 Concentrating: ${state.concentratingOnName}`;
-    } else {
-      this.concentrationEl.style.display = 'none';
-    }
+    // Concentration is now folded into the unified status row beneath, so
+    // this dedicated chip stays hidden — kept in the DOM to avoid layout
+    // shift if anything else queries it.
+    this.concentrationEl.style.display = 'none';
+
+    // Status row: conditions, buffs, ongoing effects, concentration.
+    this.renderStatusChips(state.statusChips);
 
     if (!this.visible) return;
 
@@ -480,6 +473,37 @@ export class PlayerPanel {
 
     } else if (mode === 'death_saves') {
       this.actionArea.prepend(btn('ROLL DEATH SAVE', '#5a1a1a', this.callbacks.onDeathSave));
+    }
+  }
+
+  /** Render the unified status row beneath HP / slots / features —
+   *  conditions, buffs, debuffs, ongoing effects, concentration. Hides the
+   *  row entirely when nothing applies. */
+  private renderStatusChips(chips: import("./PlayerStatus").PlayerStatusChip[]): void {
+    if (!chips || chips.length === 0) {
+      this.statusEl.style.display = 'none';
+      this.statusEl.replaceChildren();
+      return;
+    }
+    this.statusEl.style.display = 'flex';
+    // Wipe + rebuild rather than diffing: chip count is tiny (single-digit
+    // typically) and any pop-in is invisible at panel render cadence.
+    this.statusEl.replaceChildren();
+    for (const c of chips) {
+      const palette = STATUS_TONE_COLOR[c.tone];
+      const chip = document.createElement('span');
+      chip.textContent = c.label;
+      if (c.tooltip) chip.title = c.tooltip;
+      chip.style.cssText = `
+        background:${palette.bg};
+        color:${palette.text};
+        border:1px solid ${palette.border};
+        padding:1px 6px;
+        font-size:9px;
+        line-height:1.5;
+        white-space:nowrap;
+      `;
+      this.statusEl.appendChild(chip);
     }
   }
 

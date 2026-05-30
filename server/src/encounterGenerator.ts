@@ -4,6 +4,7 @@ import { join, dirname } from "path";
 import { fileURLToPath } from "url";
 import type { GameDefs } from "./engine/types.js";
 import { buildMapJson as sharedBuildMapJson } from "./engine/MapPersistence.js";
+import { settingPromptBlock } from "./settings.js";
 
 /**
  * Encounter Generator — given a free-text prompt, asks Claude Sonnet to
@@ -175,8 +176,11 @@ function buildMapSystemPrompt(defs: GameDefs): string {
   const legendLines = Object.entries(defs.tileLegend.tiles).map(([gid, t]) => {
     return `  GID ${gid} (${t.name}, ${t.layer}, ${t.passable ? "passable" : "impassable"}): ${t.description}`;
   }).join("\n");
+  const setting = settingPromptBlock(defs.activeSetting, 'full');
 
-  return `You are a map author for a 2D tile-based RPG. Given a player's free-text scene description, you author a Tiled-compatible tile map. Submit the result via the submit_map tool — no plain-text reply.
+  return `${setting ? setting + '\n\n' : ''}You are a TILE MAP author for a 2D tile-based RPG. Given a player's free-text description of a PLACE, you produce a Tiled-compatible tile layout. Submit the result via the submit_map tool — no plain-text reply.
+
+YOUR JOB IS ARCHITECTURE, NOT STORY. You do NOT place NPCs, monsters, or any characters. You do NOT write dialogue or quest text. The map is a stage; another step authors who stands on it. If the player's prompt mentions creatures ("two bandits crouch in the rushes"), translate it into spatial features that *imply* the scene (the rushes, the ford) and IGNORE the creatures. Reeds, tents, campfires, broken walls — those go on the map. Bandits, hermits, wolves — those do not.
 
 TILE PALETTE (use only these GIDs, exact integers):
 ${legendLines}
@@ -192,15 +196,27 @@ VARIATION — instead of authoring one floor texture per zone, sprinkle ground v
 - Dungeon/indoor: mostly \`stone_floor\` (15) with occasional \`stone_floor_cracked\` (71), \`stone_floor_diamond\` (43), or \`stone_floor_inlay\` (57).
 - Then layer transparent-twin objects (flowers 96, tree 110, …) on top.
 
+COMPOSITION — design like a level designer, not a painter:
+- Pick a clear focal feature in the centre or off-centre (the courtyard, the hall, the campfire) and arrange other features around it. Avoid uniform fields of one tile.
+- Use walls / impassable terrain to shape sightlines and chokepoints. Open clearings should still have edges (tree line, river bank, ruin wall) that give the space definition.
+- Doors / archways / bridges go where the prompt implies natural entry — usually the perimeter or between two distinct regions.
+- Vary tile choices within a feature: a building's interior floor should differ from the dirt path outside; a campfire should sit on bumpy or cracked ground, not pristine grass.
+- Place transparent-twin decoration (flowers, small rocks, single trees) sparingly across passable terrain so the eye lands on the actual gameplay-relevant features rather than busy noise.
+
 MAP RULES:
-- Width × height between 12×8 and 30×22 inclusive.
+- Width × height between 12×8 and 30×22 inclusive. Pick a size that fits the described place — a single room is small (12×8 to 14×10); a multi-room layout or outdoor scene goes larger.
 - Both arrays must have length exactly width*height, row-major (top row first, left to right).
 - The map perimeter (outer ring of cells) should be impassable unless you specifically want creatures to be able to exit off the edge.
 - At least one connected region of 24+ passable cells should exist for play to happen in.
+- For room-based layouts: build CONNECTED rooms — every room must be reachable from every other via passable corridors or doorways. Never leave a room sealed off.
 
-TONE: gritty, grounded fantasy. Avoid clichés. Match the player's prompt closely.
+TONE: gritty, grounded fantasy. Avoid clichés. Match the player's prompt closely.${defs.activeSetting ? `
 
-NAMING: \`name\` is a short 2-4 word title; \`description\` is a 1-2 sentence flavour line for the map.`;
+SETTING-AWARE NAMING — when an active setting block is present at the top of this prompt, the map's \`name\` and \`description\` must read as part of that world. Prefer the setting's place names and glossary terms when they fit; match the setting's tone instead of defaulting to generic high fantasy.` : ''}
+
+NAMING:
+- \`name\` is a short 2-4 word PLACE name ("Old Mill Yard", "South Bridge Camp", "Three-Cell Crypt"). Not a scene title or quest name.
+- \`description\` is a 1-2 sentence flavour line describing the place. Describe what is THERE — terrain, structures, atmosphere — not what HAPPENS. No characters, no actions, no conflict.`;
 }
 
 function buildMapResponseTool() {
@@ -254,8 +270,17 @@ function buildSystemPrompt(defs: GameDefs): string {
 
   const monsterLines = defs.monsters.map((m) => `  ${m.id} — ${m.name} (CR ${m.cr})`).join("\n");
   const npcLines = defs.npcs.map((n) => `  ${n.id} — ${n.name}`).join("\n");
+  const setting = settingPromptBlock(defs.activeSetting, 'full');
+  const settingRules = defs.activeSetting ? `
 
-  return `You are an encounter author for a 2D tile-based D&D 5e SRD RPG. Given a player's free-text scene description, you author a complete one-off scenario: a Tiled-compatible tile map AND an encounter definition that references it. Submit the result via the submit_scenario tool — no plain-text reply.
+SETTING-AWARE AUTHORING — the active setting block at the top of this prompt is your worldbuilding canon. Every prose field you write (\`encounterTitle\`, \`description\`, \`customIntroduction\`, \`customContext\`, \`objective\`, \`mapName\`, \`mapdescription\`) must read as part of that world, not generic high fantasy. Specifically:
+- Match the setting's tone. Where it describes a specific mood (post-collapse, bureaucratic, bleak, etc.), evoke it in prose, NPC behaviour, and stakes — do not default to heroic-quest defaults.
+- Use the setting's faction names, place names, and glossary terms naturally whenever they fit the scene. A roadside ambush in a setting with a named imperial highway happens on THAT highway by name.
+- Do NOT invent named NPCs, locations, or factions outside the setting. For a generic creature, draw it from the shared monster roster as an unnamed type (\`a bandit\`, \`a wolf\`). For a NAMED character the setting describes, pick a roster id whose stats fit and assign the setting-canonical name via prose (\`customIntroduction\` / \`customContext\`) — the runtime engine never sees the canonical name as an id.
+- Treat any "tropes-to-avoid" content in the setting as a hard 'no'. Do not write content that violates it, even if the player's prompt suggests it.
+` : '';
+
+  return `${setting ? setting + '\n\n' : ''}You are an encounter author for a 2D tile-based SRD 5.2.1 RPG. Given a player's free-text scene description, you author a complete one-off scenario: a Tiled-compatible tile map AND an encounter definition that references it. Submit the result via the submit_scenario tool — no plain-text reply.${settingRules}
 
 TILE PALETTE (use only these GIDs, exact integers):
 ${legendLines}
@@ -294,7 +319,7 @@ ENCOUNTER FIELDS:
 - mapdescription: short flavour line for the map.
 - objective: one-line player-facing goal.
 - customIntroduction: 2-3 sentence opening prose in the player's POV (second person, present tense).
-- customContext: instructions for the in-game GM — what the scene is about, NPC motivations, escalation paths, and any flags you'd like set on resolution. Mention any completionFlag the GM should set with set_world_flag when the encounter is resolved.
+- customContext: instructions for the in-game GM — what the scene is about, NPC motivations, escalation paths, and any flags you'd like set on resolution. Mention any completionFlag the GM should set with set_world_flag when the encounter is resolved. When an active setting is present (see top of prompt), OPEN customContext with a single-sentence SETTING CUE that anchors this specific encounter in the world — name the local faction, the recent event, the regional pressure, or the specific stakes the setting implies. The GM uses this cue to ground its first beats; without it the GM falls back to generic medieval-fantasy framing.
 - completionFlag: short snake_case string (e.g. "tomb_opened", "diplomat_convinced"). Required when the encounter has no enemies (combat encounters auto-complete on enemy defeat).
 - enemyIds: monster ids spawned as hostile combatants. Use for combat scenes.
 - npcIds: NPC ids spawned as neutral conversationalists. Use for social scenes.

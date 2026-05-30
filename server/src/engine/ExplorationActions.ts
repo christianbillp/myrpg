@@ -8,6 +8,7 @@ import { isIncapacitated, isVisible } from './ConditionSystem.js';
 import { d, d20, mod } from './Dice.js';
 import { runPerceptionSweep } from './Vision.js';
 import { canShortRest as guardCanShortRest } from './ActionGuards.js';
+import { formatCoins } from '../../../shared/currency.js';
 
 export function doMove(ctx: GameContext, dx: number, dy: number, events: GameEvent[]): void {
   const s = ctx.state;
@@ -107,7 +108,6 @@ function checkItemPickup(ctx: GameContext): void {
     ctx.addLog(`Picked up ${def.name}!`);
   }
   s.mapItems.splice(idx, 1);
-  ctx.advanceQuest('collect');
   ctx.publish({ type: 'item_picked_up', defId: item.defId });
 }
 
@@ -158,12 +158,11 @@ export function doSearch(ctx: GameContext): void {
 
   const logs: LogEntry[] = [];
   if (success) {
-    ctx.advanceQuest('explore');
     logs.push({ left: `Search (${roll} vs DC ${secret.def.dc}) — ${secret.def.successText}`, style: 'hit' });
     const r = secret.def.reward;
-    if (r.type === 'gold') {
-      s.player.gold += r.amount;
-      logs.push({ left: `+${r.amount} GP`, style: 'status' });
+    if (r.type === 'coins') {
+      s.player.balanceCp += r.cp;
+      logs.push({ left: `+${formatCoins(r.cp)}`, style: 'status' });
     } else if (r.type === 'item') {
       const item = ctx.defs.equipment.find((i) => i.id === r.itemId);
       if (item) { s.player.inventoryIds.push(r.itemId); logs.push({ left: `Found: ${item.name}`, style: 'status' }); }

@@ -1,0 +1,70 @@
+{
+  "id": "halden_marrick",
+  "name": "Halden Marrick",
+  "tokenAsset": "/tokens/player_fighter_human.svg",
+  "speciesName": "Human",
+  "speciesId": "human",
+  "speciesLineage": null,
+  "className": "Fighter",
+  "backgroundId": "soldier",
+  "featIds": [
+    "savage-attacker",
+    "defense"
+  ],
+  "level": 1,
+  "maxHp": 12,
+  "str": 16,
+  "dex": 12,
+  "con": 15,
+  "int": 10,
+  "wis": 13,
+  "cha": 9,
+  "proficiencyBonus": 2,
+  "savingThrowProficiencies": [
+    "str",
+    "con"
+  ],
+  "skills": {
+    "acrobatics": 1,
+    "animalHandling": 1,
+    "arcana": 0,
+    "athletics": 5,
+    "deception": -1,
+    "history": 0,
+    "insight": 1,
+    "intimidation": 1,
+    "investigation": 0,
+    "medicine": 1,
+    "nature": 0,
+    "perception": 3,
+    "performance": -1,
+    "persuasion": -1,
+    "religion": 0,
+    "sleightOfHand": 1,
+    "stealth": 1,
+    "survival": 3
+  },
+  "defaultFeatureIds": [
+    "second-wind"
+  ],
+  "hitDieType": 10,
+  "sneakAttackDice": 0,
+  "color": 8425632,
+  "xp": 0,
+  "defaultEquipment": {
+    "armorId": "chain_mail",
+    "weaponId": "longsword",
+    "shieldId": "shield"
+  },
+  "defaultInventoryIds": [
+    "javelin",
+    "javelin",
+    "javelin",
+    "javelin",
+    "dagger",
+    "health_potion"
+  ],
+  "defaultCp": 1400,
+  "shortDescription": "Mustered-out Bureau corporal carrying a question he can't quite answer.",
+  "description": "Twelve years a corporal in the Bureau of Adjustment, posted to a frontier garrison at the edge of the Reach. He kept the road open against the things that crawled out of the old empire's ruins, watched men he'd trained get sent home in boxes, and signed off on more lawful corrections than he wants to count. Mustered out three months ago with a small pension and a quiet question he can't answer about whether what he served was worth what it cost. Speaks plainly, drinks little, sleeps with his sword in arm's reach."
+}

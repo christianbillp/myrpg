@@ -1,11 +1,37 @@
+/**
+ * DevMode — client-side dev/test toggles persisted in localStorage and
+ * spliced into the next encounter's session-create request. Read by:
+ *   - `OverlayManager.showIntroIfNeeded` for `disableSupertitle`
+ *   - Every `gameClient.createSession` call site for the server-relevant flags
+ *
+ * The `enabled` getter is a legacy gate for the [DEV] buttons scattered through
+ * the UI (see CLAUDE.md). The new feature toggles live in their own getters
+ * + setters so the Configuration scene can render them independently.
+ */
+import type { DevFlags } from "../../shared/types";
+
 const KEY = 'myrpg_dev_mode';
 const KEY_DISABLE_AIGM = 'myrpg_disable_aigm';
+const KEY_DISABLE_SUPERTITLE = 'myrpg_dev_disable_supertitle';
+const KEY_UNLIMITED_SPELL_SLOTS = 'myrpg_dev_unlimited_spell_slots';
+const KEY_UNLOCK_ALL_SPELLS = 'myrpg_dev_unlock_all_spells';
+const KEY_UNLIMITED_ACTIONS = 'myrpg_dev_unlimited_actions';
+const KEY_SHOW_DELETE_SAVE  = 'myrpg_dev_show_delete_save';
 
 function readUrlParam(name: string): boolean | null {
   const param = new URLSearchParams(window.location.search).get(name);
   if (param === 'true') return true;
   if (param === 'false') return false;
   return null;
+}
+
+function readBoolStorage(key: string): boolean {
+  return localStorage.getItem(key) === 'true';
+}
+
+function writeBoolStorage(key: string, value: boolean): void {
+  if (value) localStorage.setItem(key, 'true');
+  else localStorage.removeItem(key);
 }
 
 export const DevMode = {
@@ -26,5 +52,31 @@ export const DevMode = {
     const urlOverride = readUrlParam('disableAIGM');
     if (urlOverride !== null) return urlOverride;
     return localStorage.getItem(KEY_DISABLE_AIGM) === 'true';
+  },
+
+  // ── Development Mode toggles (Configuration scene) ──────────────────────
+  get disableSupertitle(): boolean      { return readBoolStorage(KEY_DISABLE_SUPERTITLE); },
+  set disableSupertitle(v: boolean)     { writeBoolStorage(KEY_DISABLE_SUPERTITLE, v); },
+  get unlimitedSpellSlots(): boolean    { return readBoolStorage(KEY_UNLIMITED_SPELL_SLOTS); },
+  set unlimitedSpellSlots(v: boolean)   { writeBoolStorage(KEY_UNLIMITED_SPELL_SLOTS, v); },
+  get unlockAllSpells(): boolean        { return readBoolStorage(KEY_UNLOCK_ALL_SPELLS); },
+  set unlockAllSpells(v: boolean)       { writeBoolStorage(KEY_UNLOCK_ALL_SPELLS, v); },
+  get unlimitedActions(): boolean       { return readBoolStorage(KEY_UNLIMITED_ACTIONS); },
+  set unlimitedActions(v: boolean)      { writeBoolStorage(KEY_UNLIMITED_ACTIONS, v); },
+  get showDeleteSaveButton(): boolean   { return readBoolStorage(KEY_SHOW_DELETE_SAVE); },
+  set showDeleteSaveButton(v: boolean)  { writeBoolStorage(KEY_SHOW_DELETE_SAVE, v); },
+
+  /** Snapshot the current flags for inclusion in a `CreateSessionRequest`.
+   *  Only set fields that are TRUE so the request stays lean. Returns
+   *  `undefined` when no dev flags are active, so the server never sees a
+   *  hollow `devFlags: {}` object. */
+  snapshotDevFlags(): DevFlags | undefined {
+    const flags: DevFlags = {};
+    if (this.disableSupertitle)    flags.disableSupertitle = true;
+    if (this.unlimitedSpellSlots)  flags.unlimitedSpellSlots = true;
+    if (this.unlockAllSpells)      flags.unlockAllSpells = true;
+    if (this.unlimitedActions)     flags.unlimitedActions = true;
+    if (this.showDeleteSaveButton) flags.showDeleteSaveButton = true;
+    return Object.keys(flags).length === 0 ? undefined : flags;
   },
 };

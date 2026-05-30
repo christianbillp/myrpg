@@ -1,17 +1,23 @@
 /**
- * MonsterPicker — scrollable list of monster defs with `+ ALLY`, `+ NEUTRAL`,
- * and `+ ENEMY` buttons per row. Used by the Adjudicator tab of
- * `GenerateSetupScene` and by `EncounterEditorScene` to populate an
- * encounter's `allyIds`, `npcIds`, and `enemyIds`.
+ * MonsterPicker — two stacked panels for assembling an encounter's monster
+ * roster:
  *
- * Rendering is HTML — the scrolling list is a `<div style="overflow:auto">`
- * with native browser scrolling, and per-row buttons are HTML `<button>`s.
- * This keeps text crisp at any zoom level and gives the in-list buttons
- * proper click targets that scroll with the rows (previously the Phaser
- * mask clipped rendering but not click hit-areas).
+ *   • CATALOG (top) — scrollable list of every monster def with
+ *     `+ ALLY`, `+ NEUTRAL`, and `+ ENEMY` buttons. Clicking appends to the
+ *     matching role.
+ *   • IN ENCOUNTER (bottom) — scrollable per-slot list. Each row shows the
+ *     encounter id (e.g. `E0`, `A1`, `N0`), the monster name, and a REMOVE
+ *     button. Removing a row splices it out and shifts higher indices down,
+ *     so the next time the user reads the list the labels stay sequential.
+ *
+ * The host scene wires `onSlotRemoved(role, removedIndex)` BEFORE
+ * `onSelectionChanged` so the ZonePainter can re-bind placements whose
+ * index needs to shift, instead of the roster prune dropping them.
  */
 import Phaser from "phaser";
 import type { MonsterDef } from "../../data/monsters";
+
+export type RosterRole = "ally" | "neutral" | "enemy";
 
 export interface MonsterPickerOptions {
   scene: Phaser.Scene;
@@ -20,25 +26,49 @@ export interface MonsterPickerOptions {
   x: number;
   y: number;
   width: number;
-  /** Total height the picker may consume (list + summary). */
+  /** Total height the picker may consume (catalog + in-encounter panel). */
   height: number;
   /** Scene width in logical pixels — used to scale absolutely-positioned DOM. */
   sceneWidth: number;
   initialAllyIds?: string[];
   initialEnemyIds?: string[];
   initialNeutralIds?: string[];
+  /** Fires whenever the roster changes — add, remove-at, clear, or wholesale
+   *  replace. Used by the EncounterCreator to push the new roster into the
+   *  ZonePainter. */
+  onSelectionChanged?: () => void;
+  /** Fires immediately BEFORE `onSelectionChanged` whenever a specific slot
+   *  is spliced out (REMOVE button). Lets the ZonePainter shift any
+   *  placements bound to higher indices down by one so they follow the
+   *  slot they were bound to. */
+  onSlotRemoved?: (role: RosterRole, removedIndex: number) => void;
 }
+
+/** Label prefix used in the in-encounter list (E0, A0, N0, ...). */
+const ROLE_PREFIX: Record<RosterRole, string> = {
+  ally:    "A",
+  neutral: "N",
+  enemy:   "E",
+};
+const ROLE_COLOR: Record<RosterRole, string> = {
+  ally:    "#cce4ff",
+  neutral: "#ffe9a8",
+  enemy:   "#ffcccc",
+};
 
 export class MonsterPicker {
   private readonly scene: Phaser.Scene;
   private readonly opts: MonsterPickerOptions;
   private readonly monsters: MonsterDef[];
-  private readonly allySelections = new Map<string, number>();
-  private readonly neutralSelections = new Map<string, number>();
-  private readonly enemySelections = new Map<string, number>();
+  /** Ordered slot arrays — index in each array is the encounter id (A0/E0/N0). */
+  private allySlots:    string[];
+  private enemySlots:   string[];
+  private neutralSlots: string[];
+
   private titleEl!: HTMLDivElement;
-  private listEl!: HTMLDivElement;
-  private summaryEl!: HTMLDivElement;
+  private catalogEl!: HTMLDivElement;
+  private rosterHeaderEl!: HTMLDivElement;
+  private rosterEl!: HTMLDivElement;
   private clearBtn!: HTMLButtonElement;
   private placeHandlers: Array<() => void> = [];
 
@@ -47,16 +77,25 @@ export class MonsterPicker {
     this.opts = opts;
     this.monsters = opts.monsters;
 
-    for (const id of opts.initialAllyIds    ?? []) this.allySelections.set(id, (this.allySelections.get(id) ?? 0) + 1);
-    for (const id of opts.initialEnemyIds   ?? []) this.enemySelections.set(id, (this.enemySelections.get(id) ?? 0) + 1);
-    for (const id of opts.initialNeutralIds ?? []) this.neutralSelections.set(id, (this.neutralSelections.get(id) ?? 0) + 1);
+    this.allySlots    = [...(opts.initialAllyIds    ?? [])];
+    this.enemySlots   = [...(opts.initialEnemyIds   ?? [])];
+    this.neutralSlots = [...(opts.initialNeutralIds ?? [])];
 
     const { x, y, width, height } = opts;
-    const HEADER_H = 16;
-    const SUMMARY_H = 76;
 
-    // HTML title — matches the rest of the picker's crisp HTML rendering
-    // instead of a blurry Phaser text. Rescaled with the canvas via attachPlace().
+    // Vertical layout:
+    //   title (16px)
+    //   catalog (45% of remaining)
+    //   roster header (16px)
+    //   roster (50% of remaining) + CLEAR button overlapping its header
+    const HEADER_H = 16;
+    const ROSTER_HEADER_H = 16;
+    const GAP = 6;
+    const innerH = height - HEADER_H - ROSTER_HEADER_H - GAP * 3;
+    const catalogH = Math.floor(innerH * 0.45);
+    const rosterH  = innerH - catalogH;
+
+    // Title
     this.titleEl = document.createElement("div");
     this.titleEl.textContent = "MONSTERS — click +ALLY / +NEUTRAL / +ENEMY to add to the encounter";
     this.titleEl.style.cssText = `
@@ -73,12 +112,10 @@ export class MonsterPicker {
     document.body.appendChild(this.titleEl);
     this.attachPlace(this.titleEl, x, y, width, HEADER_H);
 
-    // Scrollable HTML list — fills the available height minus the summary.
-    const listY = y + HEADER_H + 4;
-    const listH = height - HEADER_H - SUMMARY_H - 12;
-
-    this.listEl = document.createElement("div");
-    this.listEl.style.cssText = `
+    // Catalog list (scrollable add UI).
+    const catalogY = y + HEADER_H + GAP;
+    this.catalogEl = document.createElement("div");
+    this.catalogEl.style.cssText = `
       position: absolute;
       background: #0a0e16;
       border: 1px solid #334455;
@@ -88,31 +125,32 @@ export class MonsterPicker {
       z-index: 9;
       padding: 2px;
     `;
-    document.body.appendChild(this.listEl);
-    this.attachPlace(this.listEl, x, listY, width, listH);
-    this.renderRows();
+    document.body.appendChild(this.catalogEl);
+    this.attachPlace(this.catalogEl, x, catalogY, width, catalogH);
+    this.renderCatalog();
 
-    // Summary section (ALLIES / NEUTRALS / ENEMIES + CLEAR button).
-    const summaryY = listY + listH + 6;
-    this.summaryEl = document.createElement("div");
-    this.summaryEl.style.cssText = `
+    // Roster header.
+    const rosterHeaderY = catalogY + catalogH + GAP;
+    this.rosterHeaderEl = document.createElement("div");
+    this.rosterHeaderEl.textContent = "IN ENCOUNTER — slot id · monster";
+    this.rosterHeaderEl.style.cssText = `
       position: absolute;
-      box-sizing: border-box;
+      color: #778899;
       font-family: monospace;
-      font-size: 11px;
-      line-height: 1.3;
+      letter-spacing: 1px;
       z-index: 9;
-      padding: 4px 6px;
-      background: rgba(10, 14, 22, 0.6);
-      border: 1px solid #2a3340;
+      pointer-events: none;
+      white-space: nowrap;
       overflow: hidden;
+      text-overflow: ellipsis;
     `;
-    document.body.appendChild(this.summaryEl);
-    this.attachPlace(this.summaryEl, x, summaryY, width - 130, SUMMARY_H);
+    document.body.appendChild(this.rosterHeaderEl);
+    this.attachPlace(this.rosterHeaderEl, x, rosterHeaderY, width - 140, ROSTER_HEADER_H);
 
+    // CLEAR button — sits at the right of the roster header.
     this.clearBtn = document.createElement("button");
     this.clearBtn.type = "button";
-    this.clearBtn.textContent = "CLEAR MONSTERS";
+    this.clearBtn.textContent = "CLEAR ALL";
     this.clearBtn.style.cssText = `
       position: absolute;
       background: #222233; color: #aabbcc;
@@ -124,26 +162,50 @@ export class MonsterPicker {
     this.clearBtn.addEventListener("mouseenter", () => { this.clearBtn.style.background = "#2c2f44"; });
     this.clearBtn.addEventListener("mouseleave", () => { this.clearBtn.style.background = "#222233"; });
     this.clearBtn.addEventListener("click", () => {
-      this.allySelections.clear();
-      this.neutralSelections.clear();
-      this.enemySelections.clear();
-      this.refreshSummary();
+      this.allySlots = [];
+      this.enemySlots = [];
+      this.neutralSlots = [];
+      this.renderRoster();
+      this.opts.onSelectionChanged?.();
     });
     document.body.appendChild(this.clearBtn);
-    this.attachPlace(this.clearBtn, x + width - 126, summaryY + SUMMARY_H / 2 - 12, 120, 24);
+    this.attachPlace(this.clearBtn, x + width - 130, rosterHeaderY - 2, 124, 22);
 
-    this.refreshSummary();
+    // Roster — scrollable per-slot list.
+    const rosterY = rosterHeaderY + ROSTER_HEADER_H + GAP;
+    this.rosterEl = document.createElement("div");
+    this.rosterEl.style.cssText = `
+      position: absolute;
+      background: #0a0e16;
+      border: 1px solid #334455;
+      box-sizing: border-box;
+      overflow-y: auto;
+      overflow-x: hidden;
+      z-index: 9;
+      padding: 2px;
+    `;
+    document.body.appendChild(this.rosterEl);
+    this.attachPlace(this.rosterEl, x, rosterY, width, rosterH);
+    this.renderRoster();
   }
 
   /** Flat id list — `["bandit","bandit"]` for two bandits as allies. */
-  getAllyIds(): string[] { return this.expand(this.allySelections); }
-  getEnemyIds(): string[] { return this.expand(this.enemySelections); }
-  getNeutralIds(): string[] { return this.expand(this.neutralSelections); }
+  getAllyIds():    string[] { return [...this.allySlots]; }
+  getEnemyIds():   string[] { return [...this.enemySlots]; }
+  getNeutralIds(): string[] { return [...this.neutralSlots]; }
+
+  /** Replace the role wholesale. Used by the AI accept flow + by load
+   *  encounter / start-draft to seed initial state without firing remove
+   *  callbacks for each existing slot. */
+  setAllyIds(ids: string[]):    void { this.allySlots    = [...ids]; this.renderRoster(); this.opts.onSelectionChanged?.(); }
+  setEnemyIds(ids: string[]):   void { this.enemySlots   = [...ids]; this.renderRoster(); this.opts.onSelectionChanged?.(); }
+  setNeutralIds(ids: string[]): void { this.neutralSlots = [...ids]; this.renderRoster(); this.opts.onSelectionChanged?.(); }
 
   destroy(): void {
     this.titleEl.remove();
-    this.listEl.remove();
-    this.summaryEl.remove();
+    this.catalogEl.remove();
+    this.rosterHeaderEl.remove();
+    this.rosterEl.remove();
     this.clearBtn.remove();
     for (const h of this.placeHandlers) this.scene.scale.off("resize", h);
     this.placeHandlers = [];
@@ -151,16 +213,18 @@ export class MonsterPicker {
 
   /** Show / hide every owned DOM element (used by the tab toggle). */
   setVisible(visible: boolean): void {
-    this.titleEl.style.display = visible ? "" : "none";
-    this.listEl.style.display = visible ? "" : "none";
-    this.summaryEl.style.display = visible ? "" : "none";
-    this.clearBtn.style.display = visible ? "" : "none";
+    const d = visible ? "" : "none";
+    this.titleEl.style.display        = d;
+    this.catalogEl.style.display      = d;
+    this.rosterHeaderEl.style.display = d;
+    this.rosterEl.style.display       = d;
+    this.clearBtn.style.display       = d;
   }
 
   // ── Internal ────────────────────────────────────────────────────────────
 
-  private renderRows(): void {
-    this.listEl.innerHTML = "";
+  private renderCatalog(): void {
+    this.catalogEl.innerHTML = "";
     this.monsters.forEach((mon, i) => {
       const row = document.createElement("div");
       row.style.cssText = `
@@ -184,7 +248,72 @@ export class MonsterPicker {
       row.appendChild(neutBtn);
       row.appendChild(enemBtn);
 
-      this.listEl.appendChild(row);
+      this.catalogEl.appendChild(row);
+    });
+  }
+
+  /** Render the in-encounter per-slot list. One row per slot, with the
+   *  encounter id label, the monster name, and a REMOVE button. */
+  private renderRoster(): void {
+    this.rosterEl.innerHTML = "";
+    const empty = this.allySlots.length === 0
+              && this.enemySlots.length === 0
+              && this.neutralSlots.length === 0;
+    if (empty) {
+      const hint = document.createElement("div");
+      hint.style.cssText = "color: #445566; font-family: monospace; font-size: 11px; padding: 8px; font-style: italic;";
+      hint.textContent = "No monsters in this encounter yet. Pick from the catalog above.";
+      this.rosterEl.appendChild(hint);
+      return;
+    }
+    this.renderRosterSection("ENEMIES",  "enemy",   this.enemySlots);
+    this.renderRosterSection("ALLIES",   "ally",    this.allySlots);
+    this.renderRosterSection("NEUTRALS", "neutral", this.neutralSlots);
+  }
+
+  private renderRosterSection(label: string, role: RosterRole, slots: string[]): void {
+    if (slots.length === 0) return;
+    const header = document.createElement("div");
+    header.textContent = `${label} (${slots.length})`;
+    header.style.cssText = `
+      color: ${ROLE_COLOR[role]};
+      font-family: monospace; font-size: 10px; letter-spacing: 1px;
+      padding: 6px 6px 2px;
+    `;
+    this.rosterEl.appendChild(header);
+    slots.forEach((id, idx) => {
+      const mon = this.monsters.find((m) => m.id === id);
+      const row = document.createElement("div");
+      row.style.cssText = `
+        display: flex; align-items: center;
+        background: ${idx % 2 === 0 ? "#111122" : "#141426"};
+        padding: 3px 6px; box-sizing: border-box;
+        font-family: monospace; font-size: 11px; color: #aabbcc;
+      `;
+      const tag = document.createElement("span");
+      tag.textContent = `${ROLE_PREFIX[role]}${idx}`;
+      tag.style.cssText = `
+        color: ${ROLE_COLOR[role]};
+        font-weight: bold;
+        width: 32px; flex-shrink: 0;
+      `;
+      row.appendChild(tag);
+      const name = document.createElement("span");
+      name.style.cssText = "flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-right: 8px;";
+      name.textContent = mon?.name ?? id;
+      row.appendChild(name);
+      const removeBtn = document.createElement("button");
+      removeBtn.type = "button";
+      removeBtn.textContent = "REMOVE";
+      removeBtn.style.cssText = `
+        background: #2a1a1a; color: #ffaaaa; border: 1px solid #884444;
+        padding: 1px 8px; margin-left: 4px;
+        font-family: monospace; font-size: 9px; letter-spacing: 1px;
+        cursor: pointer; flex-shrink: 0;
+      `;
+      removeBtn.addEventListener("click", () => this.removeAt(role, idx));
+      row.appendChild(removeBtn);
+      this.rosterEl.appendChild(row);
     });
   }
 
@@ -201,35 +330,29 @@ export class MonsterPicker {
     return btn;
   }
 
-  private addMonster(id: string, side: "ally" | "neutral" | "enemy"): void {
-    const target = side === "ally" ? this.allySelections
-                 : side === "enemy" ? this.enemySelections
-                 : this.neutralSelections;
-    target.set(id, (target.get(id) ?? 0) + 1);
-    this.refreshSummary();
+  private addMonster(id: string, role: RosterRole): void {
+    const slots = this.slotsFor(role);
+    slots.push(id);
+    this.renderRoster();
+    this.opts.onSelectionChanged?.();
   }
 
-  private refreshSummary(): void {
-    const allyLine = this.formatSelected(this.allySelections, "ALLIES",   "#cce4ff");
-    const neutLine = this.formatSelected(this.neutralSelections, "NEUTRALS", "#ffe9a8");
-    const enemLine = this.formatSelected(this.enemySelections, "ENEMIES",  "#ffcccc");
-    this.summaryEl.innerHTML = `${allyLine}<br>${neutLine}<br>${enemLine}`;
+  /** Splice the slot out, shift indices, and notify in the right order:
+   *  `onSlotRemoved` first so the ZonePainter can shift placements before
+   *  `onSelectionChanged` triggers the roster prune. */
+  private removeAt(role: RosterRole, index: number): void {
+    const slots = this.slotsFor(role);
+    if (index < 0 || index >= slots.length) return;
+    slots.splice(index, 1);
+    this.opts.onSlotRemoved?.(role, index);
+    this.renderRoster();
+    this.opts.onSelectionChanged?.();
   }
 
-  private formatSelected(sel: Map<string, number>, label: string, color: string): string {
-    if (sel.size === 0) return `<span style="color: ${color}">${label}: (none)</span>`;
-    const parts = Array.from(sel.entries()).map(([id, n]) => {
-      const mon = this.monsters.find((m) => m.id === id);
-      const safe = (mon?.name ?? id).replace(/</g, "&lt;");
-      return `${safe}${n > 1 ? ` ×${n}` : ""}`;
-    });
-    return `<span style="color: ${color}">${label}: ${parts.join(", ")}</span>`;
-  }
-
-  private expand(sel: Map<string, number>): string[] {
-    const out: string[] = [];
-    for (const [id, n] of sel) for (let i = 0; i < n; i++) out.push(id);
-    return out;
+  private slotsFor(role: RosterRole): string[] {
+    return role === "ally" ? this.allySlots
+         : role === "enemy" ? this.enemySlots
+         : this.neutralSlots;
   }
 
   private attachPlace(el: HTMLElement, x: number, y: number, w: number, h: number): void {
@@ -240,7 +363,7 @@ export class MonsterPicker {
       el.style.top  = `${rect.top  + y * s}px`;
       el.style.width  = `${w * s}px`;
       el.style.height = `${h * s}px`;
-      if (el === this.titleEl) el.style.fontSize = `${10 * s}px`;
+      if (el === this.titleEl || el === this.rosterHeaderEl) el.style.fontSize = `${10 * s}px`;
     };
     place();
     this.scene.scale.on("resize", place);

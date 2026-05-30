@@ -1,0 +1,21 @@
+{
+  "id": "silver_service",
+  "name": "The Silver Service",
+  "description": "Halfling power: ruinously expensive restaurants whose private dining rooms are the Empire's premier venue for political intrigue. Absolute discretion, ruinous prices, and as likely to broker a deal as to poison the third course. Bound to the other halfling Powers by the Oath of Non-Competition.",
+  "displayColor": "#a8b0c0",
+  "renown": 1,
+  "defaultRelations": {
+    "arcania": 20,
+    "white_capes": 10,
+    "bureau_of_adjustment": 20,
+    "hammer_guild": 20,
+    "wrench_guild": 20,
+    "silver_service": 80,
+    "circus_of_the_moon": 80,
+    "fortune_guards": 80,
+    "concordat": 0,
+    "bandits": -20,
+    "monsters": -40,
+    "party": 0
+  }
+}

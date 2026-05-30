@@ -1,0 +1,21 @@
+{
+  "id": "arcania",
+  "name": "Arcania",
+  "description": "The largest human kingdom and seat of imperial government. To answer to Arcania is, in most of the Reach, simply to answer to the Empire.",
+  "displayColor": "#7050a0",
+  "renown": 1,
+  "defaultRelations": {
+    "arcania": 80,
+    "white_capes": 60,
+    "bureau_of_adjustment": 80,
+    "hammer_guild": 40,
+    "wrench_guild": 40,
+    "silver_service": 30,
+    "circus_of_the_moon": 30,
+    "fortune_guards": 30,
+    "concordat": 40,
+    "bandits": -60,
+    "monsters": -60,
+    "party": 0
+  }
+}

@@ -8,5 +8,5 @@
   "maxDex": 2,
   "stealthDisadv": false,
   "minStr": null,
-  "cost": 400
+  "costCp": 40000
 }

@@ -33,6 +33,7 @@ function escapeHtml(s: string): string {
 export class TargetPanel {
   private readonly el: HTMLDivElement;
   private readonly nameEl: HTMLElement;
+  private readonly aliasEl: HTMLElement;
   private readonly typeEl: HTMLElement;
   private readonly hpFill: HTMLElement;
   private readonly hpText: HTMLElement;
@@ -72,6 +73,7 @@ export class TargetPanel {
 
     this.el.innerHTML = `
       <div style="padding:14px 12px 0;font-size:12px;" data-name></div>
+      <div style="padding:1px 12px 0;font-size:10px;color:#778899;display:none;" data-alias></div>
       <div style="padding:2px 12px 4px;font-size:10px;color:#667788;" data-type></div>
       <div class="gui-sep"></div>
 
@@ -94,6 +96,7 @@ export class TargetPanel {
 
     const ref = (attr: string) => this.el.querySelector(`[data-${attr}]`) as HTMLElement;
     this.nameEl       = ref('name');
+    this.aliasEl      = ref('alias');
     this.typeEl       = ref('type');
     this.hpFill       = ref('hp-fill');
     this.hpText       = ref('hp-text');
@@ -132,8 +135,7 @@ export class TargetPanel {
     this.currentDef = def;
     this.currentNpcState = npcState;
     const colorHex = '#' + def.color.toString(16).padStart(6, '0');
-    this.nameEl.textContent = def.name;
-    this.nameEl.style.color = colorHex;
+    this.renderName(def, npcState, colorHex);
     this.typeEl.textContent = `${def.type}  CR ${def.cr}`;
     this.statsEl.textContent = `AC     ${def.ac}\nSpeed  ${def.speed} ft`;
 
@@ -147,6 +149,26 @@ export class TargetPanel {
 
     this.refresh(npcState, def.maxHp, factions, discoveredFactions);
     this.el.style.display = 'block';
+  }
+
+  /**
+   * Render the primary name + optional alias subtitle. When the NPC has
+   * spoken their name (via the AIGM `reveal_npc_name` tool), the main name
+   * shows the revealed name and the alias row shows the def's generic label
+   * in parentheses (e.g. main "Daven" / alias "(Concordat Overseer)"). When
+   * no name has been revealed yet, the alias row is hidden.
+   */
+  private renderName(def: MonsterDef, npcState: NpcState, colorHex: string): void {
+    const revealed = npcState.revealedName?.trim();
+    if (revealed) {
+      this.nameEl.textContent = revealed;
+      this.aliasEl.textContent = `(${def.name})`;
+      this.aliasEl.style.display = 'block';
+    } else {
+      this.nameEl.textContent = def.name;
+      this.aliasEl.style.display = 'none';
+    }
+    this.nameEl.style.color = colorHex;
   }
 
   /**
@@ -208,6 +230,13 @@ export class TargetPanel {
 
   refresh(npcState: NpcState, maxHp: number, factions: FactionDef[] = [], discoveredFactions: string[] = []): void {
     this.currentNpcState = npcState;
+    // Re-render the name on every tick so a mid-encounter `reveal_npc_name`
+    // (AIGM tool) flips the panel from the def's generic label to the
+    // revealed character name without requiring the player to reselect.
+    if (this.currentDef) {
+      const colorHex = '#' + this.currentDef.color.toString(16).padStart(6, '0');
+      this.renderName(this.currentDef, npcState, colorHex);
+    }
     const pct = maxHp > 0 ? npcState.hp / maxHp : 0;
     this.hpFill.style.width = `${Math.floor(pct * 100)}%`;
     this.hpFill.style.background = hpColor(pct);

@@ -1,16 +1,19 @@
-// Character sheet overlay — three tabs: Character (basic info), Inventory
-// (slots + carried items), and Spells (caster-only). Replaces the older
-// InventoryOverlay; the Inventory tab preserves all its old behaviour and
-// keyboard/pointer wiring.
+// Character sheet overlay — four tabs:
+//   - Stats     (ability scores, saving throws, skills, conditions/effects)
+//   - Story     (background description, origin, species)
+//   - Equipment (slots + carried items — same behaviour as the prior Inventory tab)
+//   - Spells    (caster-only, hidden when `spellcastingAbility` is absent)
 //
-// The Spells tab is hidden when the player isn't a caster (no
-// `spellcastingAbility` on PlayerDef).
+// Mirrors the setup-time CharacterDetail panel so the same character info
+// reads the same way before and during a session.
 
 import { BaseOverlay } from "./BaseOverlay";
 import { PlayerDef, PlayerAttack } from "../data/player";
 import { ItemDef, ArmorDef, WeaponDef, ShieldDef, EquipmentDef } from "../data/equipment";
 import { UIScale } from "./UIScale";
 import type { PlayerState, SpellDef } from "../net/types";
+import { buildPlayerStatusChips, STATUS_TONE_COLOR } from "./PlayerStatus";
+import { formatCoins } from "../../../shared/currency";
 
 function mod(score: number): number { return Math.floor((score - 10) / 2); }
 function signed(n: number): string { return n >= 0 ? `+${n}` : `${n}`; }
@@ -55,10 +58,43 @@ function escHtml(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
+function titleCase(s: string): string {
+  return s.replace(/[_-]+/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
 const ACCENT = "#7aadcc";
 const DIM    = "#334455";
 
-type TabId = "character" | "inventory" | "spells";
+type Ability = "str" | "dex" | "con" | "int" | "wis" | "cha";
+
+/** SRD 5.2.1 skill list with source ability. Keys match `PlayerDef.skills`
+ *  Record entries (`request_ability_check` reads the same keys). */
+const SKILLS: Array<{ key: string; label: string; ability: Ability }> = [
+  { key: "acrobatics",      label: "Acrobatics",       ability: "dex" },
+  { key: "animalHandling",  label: "Animal Handling",  ability: "wis" },
+  { key: "arcana",          label: "Arcana",           ability: "int" },
+  { key: "athletics",       label: "Athletics",        ability: "str" },
+  { key: "deception",       label: "Deception",        ability: "cha" },
+  { key: "history",         label: "History",          ability: "int" },
+  { key: "insight",         label: "Insight",          ability: "wis" },
+  { key: "intimidation",    label: "Intimidation",     ability: "cha" },
+  { key: "investigation",   label: "Investigation",    ability: "int" },
+  { key: "medicine",        label: "Medicine",         ability: "wis" },
+  { key: "nature",          label: "Nature",           ability: "int" },
+  { key: "perception",      label: "Perception",       ability: "wis" },
+  { key: "performance",     label: "Performance",      ability: "cha" },
+  { key: "persuasion",      label: "Persuasion",       ability: "cha" },
+  { key: "religion",        label: "Religion",         ability: "int" },
+  { key: "sleightOfHand",   label: "Sleight of Hand",  ability: "dex" },
+  { key: "stealth",         label: "Stealth",          ability: "dex" },
+  { key: "survival",        label: "Survival",         ability: "wis" },
+];
+
+const ABILITY_LABEL: Record<Ability, string> = {
+  str: "Str", dex: "Dex", con: "Con", int: "Int", wis: "Wis", cha: "Cha",
+};
+
+type TabId = "stats" | "story" | "equipment" | "spells";
 
 export interface CharacterSheetCallbacks {
   onEquip: (slot: "armor" | "weapon" | "shield", itemId: string) => void;
@@ -99,12 +135,12 @@ export class CharacterSheetOverlay extends BaseOverlay {
     scale: UIScale,
     inputs: CharacterSheetInputs,
     callbacks: CharacterSheetCallbacks,
-    initialTab: TabId = "inventory",
+    initialTab: TabId = "equipment",
   ) {
-    super(scale, 580, 480, ACCENT, callbacks.onClose);
+    super(scale, 760, 640, ACCENT, callbacks.onClose);
     this.inputs = inputs;
     this.callbacks = callbacks;
-    this.currentTab = inputs.playerDef.spellcastingAbility || initialTab !== "spells" ? initialTab : "inventory";
+    this.currentTab = inputs.playerDef.spellcastingAbility || initialTab !== "spells" ? initialTab : "equipment";
 
     const layout = document.createElement("div");
     layout.style.cssText = `padding:20px 20px 0;display:flex;flex-direction:column;height:calc(100% - 20px);box-sizing:border-box;`;
@@ -133,7 +169,7 @@ export class CharacterSheetOverlay extends BaseOverlay {
     Object.assign(this.inputs, inputs);
     // If the active tab is now invalid (e.g. spells tab open for a non-caster), fall back.
     if (this.currentTab === "spells" && !this.inputs.playerDef.spellcastingAbility) {
-      this.currentTab = "inventory";
+      this.currentTab = "equipment";
     }
     this.renderTabs();
     this.renderActiveTab();
@@ -144,8 +180,9 @@ export class CharacterSheetOverlay extends BaseOverlay {
   private renderTabs(): void {
     const hasSpells = !!this.inputs.playerDef.spellcastingAbility;
     const tabs: { id: TabId; label: string }[] = [
-      { id: "character", label: "Character" },
-      { id: "inventory", label: "Inventory" },
+      { id: "stats",     label: "Stats" },
+      { id: "story",     label: "Story" },
+      { id: "equipment", label: "Equipment" },
     ];
     if (hasSpells) tabs.push({ id: "spells", label: "Spells" });
 
@@ -173,15 +210,16 @@ export class CharacterSheetOverlay extends BaseOverlay {
   private renderActiveTab(): void {
     this.contentEl.innerHTML = "";
     switch (this.currentTab) {
-      case "character": this.renderCharacterTab(); break;
-      case "inventory": this.renderInventoryTab(); break;
+      case "stats":     this.renderStatsTab();     break;
+      case "story":     this.renderStoryTab();     break;
+      case "equipment": this.renderInventoryTab(); break;
       case "spells":    this.renderSpellsTab();    break;
     }
   }
 
-  // ── Character tab ──────────────────────────────────────────────────────────
+  // ── Stats tab ──────────────────────────────────────────────────────────────
 
-  private renderCharacterTab(): void {
+  private renderStatsTab(): void {
     const { playerDef, state, concentratingOnName } = this.inputs;
     const colorHex = "#" + playerDef.color.toString(16).padStart(6, "0");
     const dexMod = mod(playerDef.dex);
@@ -210,9 +248,41 @@ export class CharacterSheetOverlay extends BaseOverlay {
         </div>`;
     }).join("");
 
-    const concLine = state.concentratingOn && concentratingOnName
-      ? `<div style="font-size:10px;color:#b8a8e8;margin-top:6px;">🌀 Concentrating: ${escHtml(concentratingOnName)}</div>`
-      : "";
+    // Skills — derive proficiency tier from the stored total vs the raw
+    // ability mod. Difference of `proficiencyBonus` = proficient; `2× prof`
+    // = expertise (Scholar / Rogue Expertise); anything else = untrained,
+    // unless the total still differs from the raw mod (race/feat bonus —
+    // shown without a badge but with the actual number).
+    const prof = playerDef.proficiencyBonus;
+    const skillCells = SKILLS.map(({ key, label, ability }) => {
+      const abilityMod = mod(playerDef[ability]);
+      const total = playerDef.skills?.[key] ?? abilityMod;
+      const bonusFromProf = total - abilityMod;
+      let badge: string;
+      let color: string;
+      if (bonusFromProf >= prof * 2)      { badge = "◆"; color = "#e2b96f"; } // expertise
+      else if (bonusFromProf >= prof)     { badge = "●"; color = ACCENT;    } // proficient
+      else                                { badge = "○"; color = "#778899"; } // untrained
+      return `
+        <div style="display:flex;justify-content:space-between;padding:2px 0;">
+          <span style="font-size:10px;color:${color};overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
+            ${badge} ${label} <span style="color:#556677;">(${ABILITY_LABEL[ability]})</span>
+          </span>
+          <span style="font-size:10px;color:#aabbcc;flex-shrink:0;">${signed(total)}</span>
+        </div>`;
+    }).join("");
+
+    // Active conditions, buffs, debuffs, ongoing effects, and concentration
+    // — sourced from the same helper the Player Panel uses, so both views
+    // agree on what's affecting the character right now.
+    const statusChips = buildPlayerStatusChips(state, concentratingOnName);
+    const statusBlock = statusChips.length === 0
+      ? `<div style="font-size:11px;color:${DIM};font-style:italic;">No active conditions or effects.</div>`
+      : `<div style="display:flex;flex-wrap:wrap;gap:6px;">` + statusChips.map((c) => {
+          const palette = STATUS_TONE_COLOR[c.tone];
+          const title = c.tooltip ? ` title="${escHtml(c.tooltip)}"` : "";
+          return `<span${title} style="background:${palette.bg};color:${palette.text};border:1px solid ${palette.border};padding:3px 8px;font-size:10px;line-height:1.4;font-family:monospace;">${escHtml(c.label)}</span>`;
+        }).join("") + `</div>`;
 
     this.contentEl.insertAdjacentHTML("beforeend", `
       <div style="overflow-y:auto;scrollbar-width:thin;scrollbar-color:${ACCENT} transparent;flex:1;min-height:0;">
@@ -247,6 +317,11 @@ export class CharacterSheetOverlay extends BaseOverlay {
           </div>
         </div>
 
+        <div style="font-size:10px;color:#556677;letter-spacing:1px;margin-bottom:6px;">CONDITIONS &amp; EFFECTS</div>
+        <div style="margin-bottom:12px;">
+          ${statusBlock}
+        </div>
+
         <div style="font-size:10px;color:#556677;letter-spacing:1px;margin-bottom:6px;">ABILITY SCORES</div>
         <div style="display:flex;gap:4px;margin-bottom:10px;">${abilityCells}</div>
 
@@ -255,15 +330,44 @@ export class CharacterSheetOverlay extends BaseOverlay {
           ${saveCells}
         </div>
 
+        <div style="font-size:10px;color:#556677;letter-spacing:1px;margin-bottom:6px;">SKILLS  <span style="color:#445566;">○ untrained · ● proficient · ◆ expertise</span></div>
+        <div style="display:grid;grid-template-columns:repeat(3, 1fr);gap:0 16px;padding:0 4px;margin-bottom:10px;">
+          ${skillCells}
+        </div>
+
         <div style="font-size:10px;color:#556677;letter-spacing:1px;margin-bottom:6px;">RESOURCES</div>
         <div style="font-size:11px;color:#aabbcc;line-height:1.6;">
-          XP: ${state.xp} · Gold: ${state.gold} GP · Passive Perception: ${passivePerception}
-          ${concLine}
+          XP: ${state.xp} · Coins: ${escHtml(formatCoins(state.balanceCp))} · Passive Perception: ${passivePerception}
         </div>
       </div>`);
   }
 
-  // ── Inventory tab (preserves prior InventoryOverlay behaviour) ─────────────
+  // ── Story tab ──────────────────────────────────────────────────────────────
+
+  private renderStoryTab(): void {
+    const { playerDef } = this.inputs;
+    const origin = titleCase(playerDef.backgroundId);
+    const lineageTitle = playerDef.speciesLineage ? titleCase(playerDef.speciesLineage) : "";
+    // Skip the lineage suffix when it merely repeats the species name
+    // (e.g. "High Elf" / "high-elf").
+    const lineage = lineageTitle && lineageTitle.toLowerCase() !== playerDef.speciesName.toLowerCase()
+      ? ` · ${lineageTitle}` : "";
+    const description = playerDef.description ?? "No background description recorded.";
+
+    this.contentEl.insertAdjacentHTML("beforeend", `
+      <div style="overflow-y:auto;scrollbar-width:thin;scrollbar-color:${ACCENT} transparent;flex:1;min-height:0;">
+        <div style="font-size:10px;color:#556677;letter-spacing:1px;margin-bottom:6px;">ORIGIN</div>
+        <div style="font-size:11px;color:#c8d8e8;margin-bottom:12px;line-height:1.5;">${escHtml(origin)}</div>
+
+        <div style="font-size:10px;color:#556677;letter-spacing:1px;margin-bottom:6px;">SPECIES</div>
+        <div style="font-size:11px;color:#c8d8e8;margin-bottom:12px;line-height:1.5;">${escHtml(playerDef.speciesName)}${escHtml(lineage)}</div>
+
+        <div style="font-size:10px;color:#556677;letter-spacing:1px;margin-bottom:6px;">BACKGROUND</div>
+        <div style="font-size:11px;color:#aabbcc;line-height:1.6;white-space:pre-wrap;">${escHtml(description)}</div>
+      </div>`);
+  }
+
+  // ── Equipment tab (preserves prior InventoryOverlay behaviour) ─────────────
 
   private renderInventoryTab(): void {
     const { playerDef, state, equippedItems, inventory, canUseConsumable } = this.inputs;
@@ -390,7 +494,7 @@ export class CharacterSheetOverlay extends BaseOverlay {
 
       <div style="height:1px;background:${DIM};margin:6px 0;"></div>
       <div style="font-size:11px;color:${ACCENT};text-align:center;padding-bottom:4px;">
-        AC ${state.ac}${state.mageArmor ? " (Mage Armor)" : ""}  ·  ${state.gold} GP  ·  ${escHtml(playerDef.mainAttack.name)} ${escHtml(atkText)}
+        AC ${state.ac}${state.mageArmor ? " (Mage Armor)" : ""}  ·  ${escHtml(formatCoins(state.balanceCp))}  ·  ${escHtml(playerDef.mainAttack.name)} ${escHtml(atkText)}
       </div>
     `);
 

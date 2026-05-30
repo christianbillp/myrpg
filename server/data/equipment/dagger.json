@@ -12,5 +12,5 @@
   "thrown": true,
   "throwNormal": 20,
   "throwLong": 60,
-  "cost": 2
+  "costCp": 200
 }

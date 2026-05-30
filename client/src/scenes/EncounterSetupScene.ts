@@ -4,11 +4,11 @@ import { ItemDef } from "../data/equipment";
 import { EncounterDef } from "../data/encounterContext";
 import { SavedMapDef } from "../data/maps";
 import { gameClient } from "../net/GameClient";
-import { fixedHpForClass } from "../../../shared/xpTable";
 import type { GameState, EquipmentSlots, EncounterRecord, StorylogEntry } from "../net/types";
 import { StorylogOverlay } from "../ui/StorylogOverlay";
-import { tokenAssetForPlayer } from "../data/tokens";
 import { createHtmlButton, createHtmlText, type HtmlButtonHandle, type HtmlTextHandle } from "../ui/htmlButtons";
+import { CharacterCarousel } from "../ui/setup/CharacterCarousel";
+import { CharacterDetail } from "../ui/setup/CharacterDetail";
 import {
   TILE_SIZE,
   GRID_COLS,
@@ -21,16 +21,7 @@ import {
 const W = PLAYER_PANEL_WIDTH + GRID_COLS * TILE_SIZE + TARGET_PANEL_WIDTH;
 const H = GRID_ROWS * TILE_SIZE + HUD_HEIGHT;
 
-const API_URL = "http://localhost:3000";
-
 const CHAR_DIVIDER_X = 920;
-const CHAR1_CX = 155;
-const CHAR2_CX = 460;
-const CHAR3_CX = 765;
-const CHAR_CXS = [CHAR1_CX, CHAR2_CX, CHAR3_CX];
-const CHAR_CARD_W = 270;
-const CHAR_CARD_H = 550;
-const CONTENT_CY = Math.round(80 + (H - 80 - 100) / 2);
 
 const ENC_CARD_W = 360;
 const ENC_CARD_H = 155;
@@ -43,7 +34,9 @@ const saveKey = (id: string) => `myrpg_save_${id}`;
 
 interface LocalSave {
   playerDefId: string;
-  hp: number; xp: number; gold: number;
+  hp: number; xp: number;
+  /** Coin purse balance in Copper Pieces — see `shared/currency.ts`. */
+  balanceCp: number;
   inventoryIds: string[];
   resources?: Record<string, number>;
   equippedSlots?: EquipmentSlots;
@@ -51,16 +44,6 @@ interface LocalSave {
   storylog?: StorylogEntry[];
   /** Mirror of `CharSave.levelUps` — length tells us how many levels above 1 the character has reached. */
   levelUps?: unknown[];
-}
-
-interface CharCardElems {
-  cardBtn: HtmlButtonHandle;
-  subEl: HTMLDivElement;
-  statsEl: HTMLDivElement;
-  infoEl: HTMLDivElement;
-  equippedEl: HTMLDivElement;
-  deleteBtn: HtmlButtonHandle;
-  storylogBtn: HtmlButtonHandle;
 }
 
 interface EncCardElems {
@@ -71,12 +54,13 @@ export class EncounterSetupScene extends Phaser.Scene {
   private selectedPlayer: PlayerDef | null = null;
   private selectedEncounter: EncounterDef | null = null;
 
-  private charCards: Map<string, CharCardElems> = new Map();
   private encounterCards: Map<string, EncCardElems> = new Map();
   private htmlTexts: HtmlTextHandle[] = [];
   private htmlButtons: HtmlButtonHandle[] = [];
   private beginBtn!: HtmlButtonHandle;
   private promoteBtn!: HtmlButtonHandle;
+  private characterCarousel: CharacterCarousel | null = null;
+  private characterDetail: CharacterDetail | null = null;
 
   private characters: PlayerDef[] = [];
   private encounters: EncounterDef[] = [];
@@ -87,7 +71,7 @@ export class EncounterSetupScene extends Phaser.Scene {
     super({ key: "EncounterSetupScene" });
   }
 
-  /** Optional encounter id to pre-select on create. Set by GenerateSetupScene
+  /** Optional encounter id to pre-select on create. Set by MapEditorScene
    * after a fresh encounter has been authored so the player lands on the
    * character-pick screen with that encounter already highlighted. */
   private pendingEncounterId: string | null = null;
@@ -97,7 +81,6 @@ export class EncounterSetupScene extends Phaser.Scene {
     this.selectedEncounter = null;
     this.selectedSave = null;
     this.allSaves.clear();
-    this.charCards.clear();
     this.encounterCards.clear();
     this.pendingEncounterId = data?.presetEncounterId ?? null;
   }
@@ -118,7 +101,17 @@ export class EncounterSetupScene extends Phaser.Scene {
     for (const char of this.characters) {
       const raw = localStorage.getItem(saveKey(char.id));
       if (raw) {
-        try { this.allSaves.set(char.id, JSON.parse(raw) as LocalSave); } catch { /* ignore */ }
+        try {
+          const parsed = JSON.parse(raw) as LocalSave & { gold?: number };
+          // One-time migration: pre-currency saves stored `gold` (whole GP).
+          // Convert to CP and drop the legacy field.
+          if (parsed.balanceCp == null && typeof parsed.gold === "number") {
+            parsed.balanceCp = parsed.gold * 100;
+            delete parsed.gold;
+            localStorage.setItem(saveKey(char.id), JSON.stringify(parsed));
+          }
+          this.allSaves.set(char.id, parsed);
+        } catch { /* ignore */ }
       }
     }
 
@@ -149,9 +142,39 @@ export class EncounterSetupScene extends Phaser.Scene {
       fontSize: 11, color: "#556677", align: "center", letterSpacing: 2,
     }));
 
-    this.characters.forEach((char, i) => {
-      const cx = CHAR_CXS[i] ?? CHAR_CXS[CHAR_CXS.length - 1];
-      this.buildCharCard(char, cx, CONTENT_CY);
+    // ── Character column: carousel up top, full sheet below ────────────
+    // Carousel sits centered horizontally in the character column. The
+    // detail panel fills the remaining vertical space beneath it. Both
+    // components self-position via the scale-tracking attachPlace pattern.
+    const CHAR_COL_X = 24;
+    const CHAR_COL_W = CHAR_DIVIDER_X - CHAR_COL_X - 24;
+    const CAROUSEL_Y = 100;
+    const CAROUSEL_H = 240;
+    const DETAIL_Y = CAROUSEL_Y + CAROUSEL_H + 12;
+    const DETAIL_H = H - 100 - DETAIL_Y;  // 100px reserved for the bottom button band
+    const items = this.registry.get("equipment") as ItemDef[];
+    const spells = this.registry.get("spells") as import("../net/types").SpellDef[];
+    this.characterDetail = new CharacterDetail({
+      scene: this, sceneWidth: W,
+      x: CHAR_COL_X, y: DETAIL_Y, width: CHAR_COL_W, height: DETAIL_H,
+      equipment: items ?? [],
+      spells: spells ?? [],
+      callbacks: {
+        onDeleteSave: (def) => {
+          localStorage.removeItem(saveKey(def.id));
+          this.allSaves.delete(def.id);
+          if (this.selectedPlayer?.id === def.id) this.selectedSave = null;
+          gameClient.deleteSave(def.id).catch(() => {});
+          this.characterDetail?.setSave(null);
+        },
+        onStorylog: (def) => this.openStorylogOverlay(def),
+      },
+    });
+    this.characterCarousel = new CharacterCarousel({
+      scene: this, sceneWidth: W,
+      x: CHAR_COL_X, y: CAROUSEL_Y, width: CHAR_COL_W, height: CAROUSEL_H,
+      characters: this.characters,
+      onChange: (def) => this.selectChar(def),
     });
 
     const encPositions: [number, number][] = [
@@ -172,10 +195,7 @@ export class EncounterSetupScene extends Phaser.Scene {
     this.refreshPromoteButton();
 
     const lastId = localStorage.getItem(LAST_CHAR_KEY);
-    if (lastId) {
-      const def = this.characters.find((c) => c.id === lastId);
-      if (def) this.selectChar(def);
-    }
+    if (lastId) this.characterCarousel?.setSelectedId(lastId);
 
     if (this.pendingEncounterId) {
       const enc = this.encounters.find((e) => e.id === this.pendingEncounterId);
@@ -192,7 +212,12 @@ export class EncounterSetupScene extends Phaser.Scene {
         const save = data as LocalSave;
         localStorage.setItem(saveKey(char.id), JSON.stringify(save));
         this.allSaves.set(char.id, save);
-        this.updateSaveDisplay(char, save);
+        // Detail panel + cached selection state refresh only when the save
+        // we just received belongs to the character on display.
+        if (this.selectedPlayer?.id === char.id) {
+          this.selectedSave = save;
+          this.characterDetail?.setSave(save);
+        }
       }).catch(() => {});
     }
 
@@ -204,211 +229,10 @@ export class EncounterSetupScene extends Phaser.Scene {
   private clearStaleLocalSave(def: PlayerDef): void {
     localStorage.removeItem(saveKey(def.id));
     this.allSaves.delete(def.id);
-    if (this.selectedPlayer?.id === def.id) this.selectedSave = null;
-    const elems = this.charCards.get(def.id);
-    if (!elems) return;
-    elems.infoEl.textContent = "No save data";
-    elems.infoEl.style.color = "#445566";
-    elems.equippedEl.textContent = "";
-    elems.deleteBtn.setDisabled(true);
-    elems.storylogBtn.setDisabled(true);
-  }
-
-  private updateSaveDisplay(def: PlayerDef, save: LocalSave): void {
-    const elems = this.charCards.get(def.id);
-    if (!elems) return;
-    const items = this.registry.get("equipment") as ItemDef[];
-    // Refresh the level subtitle + stats block from the save's level-up
-    // history — the initial render uses whatever localStorage held at scene
-    // start, which can be stale by one level-up after the player returns
-    // from a session.
-    const effectiveLevel = def.level + (save.levelUps?.length ?? 0);
-    const maxHp = effectiveMaxHp(def, save);
-    const statMod = (v: number) => Math.floor((v - 10) / 2);
-    const atkMod = def.mainAttack.statKey === "str" ? statMod(def.str) : statMod(def.dex);
-    const atkBonus = atkMod + def.proficiencyBonus;
-    const initMod = statMod(def.dex);
-    elems.subEl.textContent = `${def.speciesName}  ${def.className} ${effectiveLevel}`;
-    elems.statsEl.textContent = `HP ${maxHp}   AC ${def.ac}   Speed ${def.speed} ft\nAttack +${atkBonus}   Initiative ${initMod >= 0 ? "+" : ""}${initMod}`;
-    elems.infoEl.textContent = this.saveInfoLine(save, def);
-    elems.infoEl.style.color = "#aabbcc";
-    elems.equippedEl.textContent = this.equippedLine(save, items);
-    elems.deleteBtn.setDisabled(false);
-    elems.storylogBtn.setDisabled(false);
-  }
-
-  private saveInfoLine(save: LocalSave, def: PlayerDef): string {
-    return `HP ${save.hp}/${effectiveMaxHp(def, save)}  ·  ${save.xp} XP  ·  ${save.gold} GP`;
-  }
-
-  private equippedLine(save: LocalSave, items: ItemDef[]): string {
-    const byId = Object.fromEntries(items.map((i) => [i.id, i]));
-    const weapon = save.equippedSlots?.weaponId ? byId[save.equippedSlots.weaponId]?.name : null;
-    const armor  = save.equippedSlots?.armorId  ? byId[save.equippedSlots.armorId]?.name  : null;
-    const shield = save.equippedSlots?.shieldId ? byId[save.equippedSlots.shieldId]?.name : null;
-    return [weapon, armor, shield].filter(Boolean).join("  ·  ") || "—";
-  }
-
-  private buildCharCard(def: PlayerDef, cx: number, cy: number): void {
-    const colorHex = "#" + def.color.toString(16).padStart(6, "0");
-    const statMod = (v: number) => Math.floor((v - 10) / 2);
-    const items = this.registry.get("equipment") as ItemDef[];
-    const save = this.allSaves.get(def.id) ?? null;
-    const atkMod = def.mainAttack.statKey === "str" ? statMod(def.str) : statMod(def.dex);
-    const atkBonus = atkMod + def.proficiencyBonus;
-    const initMod = statMod(def.dex);
-    const maxHp = effectiveMaxHp(def, save);
-
-    const left = cx - CHAR_CARD_W / 2;
-    const top = cy - CHAR_CARD_H / 2;
-
-    // The card itself is a clickable ghost button — we replace its inner DOM
-    // with structured content (avatar, name, stats, save block, two child
-    // buttons). The two child buttons are sibling HTML buttons absolutely-
-    // positioned over the card so their click handlers don't fire the card.
-    const cardBtn = createHtmlButton({
-      scene: this, sceneWidth: W,
-      x: left, y: top, w: CHAR_CARD_W, h: CHAR_CARD_H,
-      label: "", variant: "ghost",
-      onClick: () => this.selectChar(def),
-    });
-    cardBtn.el.textContent = "";
-    cardBtn.el.style.padding = "0";
-    cardBtn.el.style.background = "#111122";
-    cardBtn.el.style.borderColor = "#334455";
-    cardBtn.el.style.borderWidth = "2px";
-    cardBtn.el.style.display = "flex";
-    cardBtn.el.style.flexDirection = "column";
-    cardBtn.el.style.alignItems = "center";
-    cardBtn.el.style.justifyContent = "flex-start";
-    cardBtn.el.style.color = "#aabbcc";
-    cardBtn.el.style.fontFamily = "monospace";
-    cardBtn.el.style.whiteSpace = "normal";
-    cardBtn.el.style.overflow = "hidden";
-
-    // Layout: a top section (avatar / name / stats / description) that fills
-    // the free vertical space, and a bottom section (info / equipped + the
-    // two action buttons + SELECT footer) pinned to the bottom. Padding-bottom
-    // reserves a fixed band for the action buttons so the inner text never
-    // creeps under them.
-    const BOTTOM_BAND = 130;
-
-    const inner = document.createElement("div");
-    inner.style.cssText = `
-      display: flex; flex-direction: column; align-items: center;
-      width: 100%; height: 100%; padding: 18px 14px ${BOTTOM_BAND}px; box-sizing: border-box;
-      pointer-events: none;
-    `;
-    cardBtn.el.appendChild(inner);
-
-    // Avatar (SVG token loaded straight from the API).
-    const avatar = document.createElement("img");
-    avatar.src = `${API_URL}${tokenAssetForPlayer(def)}`;
-    avatar.alt = def.name;
-    avatar.style.cssText = "display: block; width: 64px; height: 64px;";
-    inner.appendChild(avatar);
-
-    const nameEl = document.createElement("div");
-    nameEl.textContent = def.name;
-    nameEl.style.cssText = "margin-top: 8px; font-size: 15px; color: #ffffff; text-align: center;";
-    inner.appendChild(nameEl);
-
-    const effectiveLevel = def.level + (save?.levelUps?.length ?? 0);
-    const subEl = document.createElement("div");
-    subEl.textContent = `${def.speciesName}  ${def.className} ${effectiveLevel}`;
-    subEl.style.cssText = "margin-top: 6px; font-size: 11px; color: #8899aa; text-align: center;";
-    inner.appendChild(subEl);
-
-    const divider1 = document.createElement("div");
-    divider1.style.cssText = "width: 88%; height: 1px; background: #334455; margin-top: 14px;";
-    inner.appendChild(divider1);
-
-    const statsEl = document.createElement("div");
-    statsEl.textContent = `HP ${maxHp}   AC ${def.ac}   Speed ${def.speed} ft\nAttack +${atkBonus}   Initiative ${initMod >= 0 ? "+" : ""}${initMod}`;
-    statsEl.style.cssText = "margin-top: 10px; width: 88%; font-size: 11px; color: #aabbcc; text-align: center; line-height: 1.7; white-space: pre-line;";
-    inner.appendChild(statsEl);
-
-    const divider2 = document.createElement("div");
-    divider2.style.cssText = "width: 88%; height: 1px; background: #334455; margin-top: 8px;";
-    inner.appendChild(divider2);
-
-    const descEl = document.createElement("div");
-    descEl.textContent = def.description ?? "";
-    descEl.style.cssText = "margin-top: 10px; width: 88%; font-size: 11px; color: #99bbcc; text-align: center; line-height: 1.55; overflow: hidden;";
-    inner.appendChild(descEl);
-
-    // Bottom info/equipped section pinned just above the reserved button band.
-    const divider3 = document.createElement("div");
-    divider3.style.cssText = "width: 88%; height: 1px; background: #223344; margin-top: auto;";
-    inner.appendChild(divider3);
-
-    const infoEl = document.createElement("div");
-    infoEl.textContent = save ? this.saveInfoLine(save, def) : "No save data";
-    infoEl.style.cssText = `margin-top: 8px; width: 88%; font-size: 10px; color: ${save ? "#aabbcc" : "#445566"}; text-align: center;`;
-    inner.appendChild(infoEl);
-
-    const equippedEl = document.createElement("div");
-    equippedEl.textContent = save ? this.equippedLine(save, items) : "";
-    equippedEl.style.cssText = "margin-top: 4px; width: 88%; font-size: 10px; color: #667788; text-align: center;";
-    inner.appendChild(equippedEl);
-
-    const selectFooter = document.createElement("div");
-    selectFooter.textContent = "SELECT";
-    selectFooter.style.cssText = `
-      position: absolute; left: 0; right: 0; bottom: 14px;
-      text-align: center; font-size: 13px; color: ${colorHex}; pointer-events: none;
-      letter-spacing: 2px;
-    `;
-    cardBtn.el.style.position = "absolute";
-    cardBtn.el.appendChild(selectFooter);
-
-    // The two action buttons. They sit just above the SELECT footer inside
-    // the reserved bottom band and need to absorb their own clicks so the
-    // card click handler doesn't also fire.
-    const btnW = 130;
-    const btnH = 22;
-    const deleteX = cx - btnW / 2;
-    const deleteY = top + CHAR_CARD_H - 80;
-    const deleteBtn = createHtmlButton({
-      scene: this, sceneWidth: W,
-      x: deleteX, y: deleteY, w: btnW, h: btnH,
-      label: "DELETE SAVE",
-      variant: "danger",
-      fontSize: 10,
-      onClick: () => {
-        localStorage.removeItem(saveKey(def.id));
-        this.allSaves.delete(def.id);
-        if (this.selectedPlayer?.id === def.id) this.selectedSave = null;
-        gameClient.deleteSave(def.id).catch(() => {});
-        const cur = this.charCards.get(def.id);
-        if (cur) {
-          cur.infoEl.textContent = "No save data";
-          cur.infoEl.style.color = "#445566";
-          cur.equippedEl.textContent = "";
-          cur.deleteBtn.setDisabled(true);
-          cur.storylogBtn.setDisabled(true);
-        }
-      },
-    });
-    deleteBtn.el.addEventListener("click", (e) => e.stopPropagation());
-
-    const storylogY = deleteY + btnH + 7;
-    const storylogBtn = createHtmlButton({
-      scene: this, sceneWidth: W,
-      x: deleteX, y: storylogY, w: btnW, h: btnH,
-      label: "STORY LOG",
-      variant: "primary",
-      fontSize: 10,
-      onClick: () => this.openStorylogOverlay(def),
-    });
-    storylogBtn.el.addEventListener("click", (e) => e.stopPropagation());
-
-    if (!save) {
-      deleteBtn.setDisabled(true);
-      storylogBtn.setDisabled(true);
+    if (this.selectedPlayer?.id === def.id) {
+      this.selectedSave = null;
+      this.characterDetail?.setSave(null);
     }
-
-    this.charCards.set(def.id, { cardBtn, subEl, statsEl, infoEl, equippedEl, deleteBtn, storylogBtn });
   }
 
   private openStorylogOverlay(def: PlayerDef): void {
@@ -430,16 +254,13 @@ export class EncounterSetupScene extends Phaser.Scene {
   }
 
   private selectChar(def: PlayerDef): void {
-    for (const [id, elems] of this.charCards) {
-      const active = id === def.id;
-      elems.cardBtn.el.style.borderColor = active
-        ? "#" + def.color.toString(16).padStart(6, "0")
-        : "#334455";
-    }
     this.selectedPlayer = def;
     this.selectedSave = this.allSaves.get(def.id) ?? null;
     localStorage.setItem(LAST_CHAR_KEY, def.id);
+    this.characterDetail?.setCharacter(def);
+    this.characterDetail?.setSave(this.selectedSave);
     this.refreshBeginButton();
+    this.refreshPromoteButton();
   }
 
   private buildEncounterCard(def: EncounterDef, cx: number, cy: number): void {
@@ -559,10 +380,12 @@ export class EncounterSetupScene extends Phaser.Scene {
           completionFlag: enc.completionFlag,
           tileProperties: enc.tileProperties,
           startingZones: enc.startingZones,
+          placementMode: enc.placementMode,
+          placements: enc.placements,
           triggers: enc.triggers,
           resumeHp:            save?.hp,
           resumeXp:            save?.xp,
-          resumeGold:          save?.gold,
+          resumeCp:            save?.balanceCp,
           resumeInventoryIds:  save?.inventoryIds,
           resumeEquippedSlots: save?.equippedSlots,
           resumeResources:     save?.resources,
@@ -622,29 +445,14 @@ export class EncounterSetupScene extends Phaser.Scene {
   private teardown(): void {
     for (const t of this.htmlTexts) t.dispose();
     for (const b of this.htmlButtons) b.dispose();
-    for (const c of this.charCards.values()) {
-      c.cardBtn.dispose();
-      c.deleteBtn.dispose();
-      c.storylogBtn.dispose();
-    }
     for (const c of this.encounterCards.values()) c.cardBtn.dispose();
     this.htmlTexts = [];
     this.htmlButtons = [];
-    this.charCards.clear();
     this.encounterCards.clear();
+    this.characterCarousel?.destroy();
+    this.characterCarousel = null;
+    this.characterDetail?.destroy();
+    this.characterDetail = null;
   }
 }
 
-/**
- * Derive the character's current max HP from the L1 starting value plus
- * recorded level-ups. Mirrors the SRD "Fixed Hit Points by Class" table the
- * server's `Leveling.ts` applies on commit — keep them in sync if the table
- * ever changes.
- */
-function effectiveMaxHp(def: PlayerDef, save: LocalSave | null): number {
-  const levelsGained = save?.levelUps?.length ?? 0;
-  if (levelsGained === 0) return def.maxHp;
-  const conMod = Math.floor((def.con - 10) / 2);
-  const perLevel = Math.max(1, fixedHpForClass(def.className) + conMod);
-  return def.maxHp + levelsGained * perLevel;
-}

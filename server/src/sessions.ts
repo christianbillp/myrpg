@@ -14,7 +14,9 @@ interface AdventureMeta {
   description: string;
   encounterTitle: string;
   xpStart: number;
-  goldStart: number;
+  /** Coin purse balance in CP at the moment the session was created.
+   *  Used by the encounter-finish flow to compute net coin delta. */
+  balanceCpStart: number;
 }
 
 interface Session {
@@ -52,7 +54,7 @@ export function createSession(sessionId: string, engine: GameEngine): void {
       description: s.introduction,
       encounterTitle: s.encounterTitle,
       xpStart: s.player.xp,
-      goldStart: s.player.gold,
+      balanceCpStart: s.player.balanceCp,
     },
     aigmBusy: false,
     worldPaused: false,
@@ -60,10 +62,16 @@ export function createSession(sessionId: string, engine: GameEngine): void {
   });
 }
 
-/** Toggle the per-session pause flag. Surfaced via `POST /game/session/:id/world-paused`. */
-export function setWorldPaused(sessionId: string, paused: boolean): void {
+/** Toggle the per-session pause flag. Surfaced via `POST /game/session/:id/world-paused`.
+ *  Returns the previous value so callers can detect transitions (in particular
+ *  paused→unpaused, which triggers the deferred first-turn advance for
+ *  combat that started during `encounter_started`). */
+export function setWorldPaused(sessionId: string, paused: boolean): boolean {
   const session = sessions.get(sessionId);
-  if (session) session.worldPaused = paused;
+  if (!session) return false;
+  const previous = session.worldPaused;
+  session.worldPaused = paused;
+  return previous;
 }
 
 /** True iff the off-camera tick is allowed to run this moment. */

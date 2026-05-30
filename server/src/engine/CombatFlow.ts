@@ -130,6 +130,16 @@ export function doStartCombat(ctx: GameContext, events: GameEvent[]): void {
 
   // ── Start the first combatant's turn ────────────────────────────────────
   s.activeNpcIndex = -1;
+  if (ctx.isConstructing) {
+    // The encounter just started and we're still inside `GameEngine`'s
+    // constructor (an `encounter_started` combat trigger fired this call).
+    // Don't auto-advance — the client needs a chance to play the intro
+    // overlay / supertitle / focused announcement first. The deferred
+    // `runPendingTurnAdvance` on the engine drains this once the client
+    // releases the world pause.
+    s.pendingTurnAdvance = true;
+    return;
+  }
   advanceTurn(ctx, events);
 }
 

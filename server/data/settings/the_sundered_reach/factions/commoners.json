@@ -1,0 +1,22 @@
+{
+  "id": "commoners",
+  "name": "Commoners",
+  "description": "Ordinary subjects of the Empire — farmers, woodcutters, miners, shopkeepers, refugees. Not organised, not aligned, not safe. The vast majority of everyone living in the Reach.",
+  "displayColor": "#88a070",
+  "renown": 1,
+  "defaultRelations": {
+    "arcania": 20,
+    "white_capes": -20,
+    "bureau_of_adjustment": 0,
+    "hammer_guild": 0,
+    "wrench_guild": 0,
+    "silver_service": 0,
+    "circus_of_the_moon": 0,
+    "fortune_guards": 0,
+    "concordat": 0,
+    "commoners": 40,
+    "bandits": -40,
+    "monsters": -60,
+    "party": 0
+  }
+}

@@ -1,5 +1,5 @@
 /**
- * D&D 5e SRD 5.2.1 Character Advancement table — XP required to reach each
+ * SRD 5.2.1 Character Advancement table — XP required to reach each
  * level and the proficiency bonus at that level. Source: Creating a
  * Character → Level Advancement.
  *

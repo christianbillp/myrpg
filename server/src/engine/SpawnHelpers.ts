@@ -45,7 +45,15 @@ export function pickFromZone(zone: Zone, occupied: Set<string>): [number, number
   return free[Math.floor(Math.random() * free.length)];
 }
 
-export function findPlayerSpawn(map: GameMap, zone?: Zone): [number, number] {
+export function findPlayerSpawn(map: GameMap, zone?: Zone, exactTile?: [number, number]): [number, number] {
+  // Exact placement wins when the bound tile is in bounds and passable.
+  // Anything else falls through to the zone / left-third defaults so an
+  // accidentally-wall-bound exact placement doesn't strand the player.
+  if (exactTile) {
+    const [ex, ey] = exactTile;
+    const { cols, rows, passable } = map;
+    if (ex >= 0 && ex < cols && ey >= 0 && ey < rows && passable[ey][ex]) return [ex, ey];
+  }
   if (zone) {
     const pick = zone[Math.floor(Math.random() * zone.length)];
     if (pick) return pick;
@@ -85,6 +93,15 @@ export function spawnNpc(
   defId: string, px: number, py: number,
   disposition: 'neutral' | 'ally' | 'enemy' = 'neutral',
   zone?: Zone,
+  /**
+   * Exact tile bound to this slot via the encounter's `placements[]` array
+   * (when `placementMode === 'exact'`). When set and passable + free, the
+   * spawn lands there unconditionally; the zone-based search is skipped.
+   * On a blocked / occupied / out-of-bounds tile we fall through to the
+   * normal zone / distance-gated search so the encounter still produces a
+   * working spawn instead of silently dropping the NPC.
+   */
+  exactTile?: [number, number],
 ): void {
   // Resolve the def: NPC roster first (named characters with personas),
   // then the monster roster (raw creature stats). This lets the
@@ -123,6 +140,34 @@ export function spawnNpc(
     `${px},${py}`,
     ...out.map((n) => `${n.tileX},${n.tileY}`),
   ]);
+
+  // Exact placement wins when the bound tile is in bounds, passable, and
+  // not already claimed by the player or a previously-spawned NPC. Anything
+  // else falls through to the zone path so authors can't accidentally erase
+  // a spawn by binding it to a wall or another entity.
+  if (exactTile) {
+    const [ex, ey] = exactTile;
+    const { cols, rows, passable } = map;
+    if (ex >= 0 && ex < cols && ey >= 0 && ey < rows && passable[ey][ex] && !occupied.has(`${ex},${ey}`)) {
+      let combatLabel = '';
+      if (disposition === 'enemy') {
+        const enemyCount = out.filter((n) => n.disposition === 'enemy').length;
+        combatLabel = String.fromCharCode(65 + enemyCount);
+      }
+      out.push({
+        id: disposition === 'enemy' ? `enemy_${out.filter((n) => n.disposition === 'enemy').length}` : `${defId}_${out.length}`,
+        defId,
+        name,
+        tileX: ex, tileY: ey,
+        disposition, factionId,
+        combatLabel,
+        hp: maxHp, maxHp,
+        isActive: false,
+        reactionUsed: false, conditions: [], inventoryIds: [], ongoingEffects: [],
+      });
+      return;
+    }
+  }
 
   let candidates: [number, number][];
   if (zone) {
@@ -204,6 +249,14 @@ export interface PopulateNpcsInput {
   allyZone?: Zone;
   enemyZone?: Zone;
   npcZone?: Zone;
+  /**
+   * Per-entity exact tile overrides — only the entries whose `role` matches
+   * `ally` / `enemy` / `neutral` are consumed here (the `player` role is
+   * applied earlier, in `findPlayerSpawn`). For each spawn iteration we look
+   * up `(role, index)` and pass the bound tile to `spawnNpc`, which falls
+   * back to the zone path if the tile is blocked/occupied.
+   */
+  placements?: import('../../../shared/types.js').EncounterPlacement[];
 }
 
 export function populateNpcs(
@@ -213,17 +266,27 @@ export function populateNpcs(
   input: PopulateNpcsInput,
 ): void {
   const { allyIds, enemyIds, npcIds, secretDefs,
-          playerX, playerY, allyZone, enemyZone, npcZone } = input;
+          playerX, playerY, allyZone, enemyZone, npcZone, placements } = input;
 
-  for (const defId of allyIds ?? []) {
-    spawnNpc(out.npcs, map, defs.npcs, defs.monsters, defId, playerX, playerY, 'ally', allyZone);
+  // Build a per-role lookup: index → [x, y]. Faster than scanning the array
+  // for every spawn (encounters with many NPCs would otherwise be O(n²)).
+  const placementByRoleIndex: Record<string, [number, number]> = {};
+  for (const p of placements ?? []) {
+    if (p.role === 'player') continue;
+    placementByRoleIndex[`${p.role}:${p.index}`] = [p.x, p.y];
   }
-  for (const defId of enemyIds ?? []) {
-    spawnNpc(out.npcs, map, defs.npcs, defs.monsters, defId, playerX, playerY, 'enemy', enemyZone);
-  }
-  for (const defId of npcIds ?? []) {
-    spawnNpc(out.npcs, map, defs.npcs, defs.monsters, defId, playerX, playerY, 'neutral', npcZone);
-  }
+  const exactFor = (role: 'ally' | 'enemy' | 'neutral', index: number): [number, number] | undefined =>
+    placementByRoleIndex[`${role}:${index}`];
+
+  (allyIds ?? []).forEach((defId, i) => {
+    spawnNpc(out.npcs, map, defs.npcs, defs.monsters, defId, playerX, playerY, 'ally', allyZone, exactFor('ally', i));
+  });
+  (enemyIds ?? []).forEach((defId, i) => {
+    spawnNpc(out.npcs, map, defs.npcs, defs.monsters, defId, playerX, playerY, 'enemy', enemyZone, exactFor('enemy', i));
+  });
+  (npcIds ?? []).forEach((defId, i) => {
+    spawnNpc(out.npcs, map, defs.npcs, defs.monsters, defId, playerX, playerY, 'neutral', npcZone, exactFor('neutral', i));
+  });
   if ((enemyIds ?? []).length > 0) {
     spawnItems(out.mapItems, map, defs.equipment, playerX, playerY, out.npcs);
   }

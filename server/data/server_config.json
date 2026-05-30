@@ -1,0 +1,9 @@
+{
+  "activeSettingId": "the_sundered_reach",
+  "devFlags": {
+    "unlimitedSpellSlots": true,
+    "unlockAllSpells": true,
+    "unlimitedActions": true,
+    "showDeleteSaveButton": true
+  }
+}

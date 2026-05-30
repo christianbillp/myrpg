@@ -3,6 +3,7 @@ import type {
   LevelUpPreview, LevelUpChoices, PlayerDef,
   LongRestPreview, LongRestChoices,
 } from './types';
+import { DevMode } from '../devMode';
 
 const API_URL = 'http://localhost:3000';
 const WS_URL  = 'ws://localhost:3000';
@@ -22,6 +23,96 @@ export interface ComposedMapAnchors {
   ruins?: Array<{ x: number; y: number; w: number; h: number }>;
   pathEndpoints?: Array<{ x: number; y: number }>;
   inlandBand?: Array<{ x: number; y: number }>;
+}
+
+/** Compact exact-tile spawn shape used in both the refine request (current
+ *  state) and the response (the AI's proposal). */
+export interface SpawnTile {
+  /** Slot index into the role's id array — e.g. `{ index: 1, x, y }` binds
+   *  the second entry of `enemyIds`. Omitted on the player spawn. */
+  index?: number;
+  x: number;
+  y: number;
+}
+
+/** Subset of the editor's `ComposedTrigger` carried over the wire. */
+export interface RefinerTrigger {
+  id: string;
+  whenEvent?: 'player_moved' | 'encounter_started' | 'encounter_completed' | 'flag_set';
+  region: { x: number; y: number; w: number; h: number };
+  kind: 'perception' | 'log' | 'aigm' | 'combat' | 'xp' | 'announcement' | 'speech' | 'fade' | 'set_flag';
+  dc?: number;
+  passMessage?: string;
+  message: string;
+  defId?: string;
+  defIds?: string[];
+  xpAmount?: number;
+  durationMs?: number;
+  entityRef?: string;
+  fadeMode?: 'in' | 'out' | 'dim';
+  announcementMode?: 'focused' | 'unfocused';
+  whenFlagName?: string;
+  setFlagName?: string;
+}
+
+/** Shape of the encounter draft sent to `/generate/encounter/refine`. Mirrors
+ *  `EncounterDraftForRefine` on the server. The AI may modify any subset of
+ *  text, rosters, spawn positions, and triggers. Read-only context (current
+ *  trigger summaries) is included so its edits stay coherent. */
+export interface EncounterRefineDraft {
+  title: string;
+  introduction: string;
+  description: string;
+  objective: string;
+  completionFlag: string;
+  allyIds: string[];
+  enemyIds: string[];
+  neutralIds: string[];
+  /** One-line summaries of the encounter's current triggers — read-only. */
+  triggers: string[];
+  /** Full trigger objects — the baseline the AI replaces wholesale when
+   *  proposing `triggerObjects`. */
+  triggerObjects: RefinerTrigger[];
+  /** Map this draft is built on. Server reads it to build the passability
+   *  grid the AI uses for spatial decisions. */
+  mapId: string;
+  /** Currently bound exact-mode placements. */
+  playerPlacement: { x: number; y: number } | null;
+  enemyPlacements: SpawnTile[];
+  allyPlacements: SpawnTile[];
+  neutralPlacements: SpawnTile[];
+  /** Zone-based starts — `[x, y]` pairs per role. */
+  playerZones: Array<[number, number]>;
+  allyZones: Array<[number, number]>;
+  enemyZones: Array<[number, number]>;
+  neutralZones: Array<[number, number]>;
+}
+
+/** Subset of `EncounterRefineDraft` the AI is allowed to propose. */
+export interface EncounterRefineProposed {
+  title?: string;
+  introduction?: string;
+  description?: string;
+  objective?: string;
+  completionFlag?: string;
+  allyIds?: string[];
+  enemyIds?: string[];
+  neutralIds?: string[];
+  /** Single exact tile for the player. */
+  playerSpawn?: { x: number; y: number };
+  /** Per-slot exact tiles for each role. */
+  enemySpawns?: SpawnTile[];
+  allySpawns?: SpawnTile[];
+  neutralSpawns?: SpawnTile[];
+  /** Full trigger objects — replaces the existing trigger list wholesale. */
+  triggerObjects?: RefinerTrigger[];
+}
+
+/** Response from `/generate/encounter/refine`. `proposed` is a partial — only
+ *  fields the model wants to change are present. */
+export interface EncounterRefineResponse {
+  proposed: EncounterRefineProposed;
+  rationale: string;
 }
 
 export type StateUpdateHandler = (state: GameState, events: GameEvent[]) => void;
@@ -66,10 +157,16 @@ export class GameClient {
   }
 
   async createSession(req: CreateSessionRequest): Promise<{ state: GameState; playerDef: PlayerDef }> {
+    // Auto-attach the current Dev Mode toggles so every session-create call
+    // site picks them up without having to thread DevMode through manually.
+    // Caller-supplied `devFlags` (if any) win — explicit > implicit.
+    const body: CreateSessionRequest = req.devFlags
+      ? req
+      : { ...req, devFlags: DevMode.snapshotDevFlags() };
     const res = await fetch(`${API_URL}/game/session`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(req),
+      body: JSON.stringify(body),
     });
     if (!res.ok) throw new Error(`Failed to create session: ${res.status}`);
     const { sessionId, state, playerDef } = await res.json() as { sessionId: string; state: GameState; playerDef: PlayerDef };
@@ -257,9 +354,31 @@ export class GameClient {
   }
 
   /**
+   * Ask the AI to refine an in-progress encounter draft. The server returns
+   * a partial patch (only fields the model wants to change) plus a short
+   * rationale. The caller computes the diff and shows Accept / Reject — the
+   * server does NOT persist anything.
+   */
+  async refineEncounter(
+    draft: EncounterRefineDraft,
+    prompt: string,
+  ): Promise<EncounterRefineResponse> {
+    const res = await fetch(`${API_URL}/generate/encounter/refine`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ draft, prompt }),
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({ error: `HTTP ${res.status}` })) as { error?: string };
+      throw new Error(body.error ?? `Refine failed: ${res.status}`);
+    }
+    return res.json() as Promise<EncounterRefineResponse>;
+  }
+
+  /**
    * Compose a map deterministically from terrain + features toggles. Used
    * when the player has set any of the map-style toggles on
-   * `GenerateSetupScene` — bypasses Claude entirely and returns a map built
+   * `MapEditorScene` — bypasses Claude entirely and returns a map built
    * by the rule-based composer in `engine/MapComposer.ts`.
    */
   async composeMap(args: {
@@ -298,9 +417,10 @@ export class GameClient {
   }
 
   /**
-   * Persist a previously-composed map preview. Returns the new mapId — the
-   * caller is responsible for tracking it on the preview so the encounter
-   * builder can reference it.
+   * Persist a map. Returns the mapId. When `existingMapId` is set the
+   * server overwrites that map in place (used by the Map Editor's LOAD MAP
+   * → edit → SAVE flow); otherwise a fresh `gen_<stamp>_<slug>` id is
+   * allocated.
    */
   async saveMap(args: {
     name: string;
@@ -310,6 +430,7 @@ export class GameClient {
     terrainData: number[];
     objectData: number[];
     tilesets?: Array<{ firstgid: number; source: string }>;
+    existingMapId?: string;
   }): Promise<{ mapId: string }> {
     const res = await fetch(`${API_URL}/generate/map/save`, {
       method: 'POST',
@@ -355,10 +476,10 @@ export class GameClient {
     triggers?: Array<{
       id: string;
       region: { x: number; y: number; w: number; h: number };
-      whenEvent?: "player_moved" | "encounter_started" | "encounter_completed";
+      whenEvent?: "player_moved" | "encounter_started" | "encounter_completed" | "flag_set";
       kind:
         | "perception" | "log" | "aigm" | "combat" | "xp"
-        | "announcement" | "speech" | "fade";
+        | "announcement" | "speech" | "fade" | "set_flag";
       dc: number;
       passMessage: string;
       message: string;
@@ -370,6 +491,8 @@ export class GameClient {
       entityRef?: string;
       fadeMode?: "in" | "out" | "dim";
       announcementMode?: "focused" | "unfocused";
+      whenFlagName?: string;
+      setFlagName?: string;
     }>;
   }): Promise<{
     mapId: string;
@@ -408,8 +531,33 @@ export class GameClient {
     return res.json() as Promise<unknown[]>;
   }
 
+  /** Fetch all authored adventures from the active setting. Used by the
+   *  Adventure Creator's LOAD button + by the player-side AdventureSetupScene
+   *  refresh path. */
+  async listAdventures(): Promise<unknown[]> {
+    const res = await fetch(`${API_URL}/adventures`);
+    if (!res.ok) throw new Error(`List adventures failed: ${res.status}`);
+    return res.json() as Promise<unknown[]>;
+  }
+
+  /** Upsert an authored adventure. Body is an `AdventureDef`; the server
+   *  writes `<active-setting>/adventures/<id>.json` and reloads defs.
+   *  Returns the persisted id. */
+  async saveAdventure(adventure: import("./types").AdventureDef): Promise<{ adventureId: string }> {
+    const res = await fetch(`${API_URL}/adventure`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(adventure),
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({ error: `HTTP ${res.status}` })) as { error?: string };
+      throw new Error(body.error ?? `Adventure save failed: ${res.status}`);
+    }
+    return res.json() as Promise<{ adventureId: string }>;
+  }
+
   /**
-   * Update an existing encounter in place — used by `EncounterEditorScene`.
+   * Update an existing encounter in place — used by `EncounterCreatorScene`.
    * Mirrors `composeEncounter`'s body shape but requires an `encounterId`
    * and skips map composition (the encounter's existing `mapId` is reused
    * unless the caller supplies a new one).
@@ -419,6 +567,10 @@ export class GameClient {
     mapId?: string;
     description?: string;
     startingZonesData?: number[];
+    /** Starting-location mode (`'zones'` = random in zones, `'exact'` = per-entity tiles). */
+    placementMode?: 'zones' | 'exact';
+    /** Per-entity exact-tile bindings (consumed only when `placementMode === 'exact'`). */
+    placements?: import("../../../shared/types").EncounterPlacement[];
     allyIds?: string[];
     enemyIds?: string[];
     neutralIds?: string[];
@@ -429,10 +581,10 @@ export class GameClient {
     triggers?: Array<{
       id: string;
       region: { x: number; y: number; w: number; h: number };
-      whenEvent?: "player_moved" | "encounter_started" | "encounter_completed";
+      whenEvent?: "player_moved" | "encounter_started" | "encounter_completed" | "flag_set";
       kind:
         | "perception" | "log" | "aigm" | "combat" | "xp"
-        | "announcement" | "speech" | "fade";
+        | "announcement" | "speech" | "fade" | "set_flag";
       dc: number;
       passMessage: string;
       message: string;
@@ -443,6 +595,8 @@ export class GameClient {
       entityRef?: string;
       fadeMode?: "in" | "out" | "dim";
       announcementMode?: "focused" | "unfocused";
+      whenFlagName?: string;
+      setFlagName?: string;
     }>;
   }): Promise<{ encounterId: string; mapId: string }> {
     const res = await fetch(`${API_URL}/generate/encounter/update`, {
@@ -495,7 +649,7 @@ export class GameClient {
 
   /**
    * Delete every map and encounter in the `gen_*` namespace. Used by the
-   * dev-mode button on GenerateSetupScene so iterating on prompts doesn't
+   * dev-mode button on MapEditorScene so iterating on prompts doesn't
    * accumulate clutter in the maps list.
    */
   async deleteAllGeneratedMaps(): Promise<{ mapsDeleted: number; encountersDeleted: number }> {
@@ -591,7 +745,7 @@ export class GameClient {
     const res = await fetch(`${API_URL}/adventure/start`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ characterId, adventureId }),
+      body: JSON.stringify({ characterId, adventureId, devFlags: DevMode.snapshotDevFlags() }),
     });
     if (!res.ok) throw new Error(`Adventure start failed: ${res.status}`);
     const { sessionId, state, playerDef } = await res.json() as { sessionId: string; state: GameState; playerDef: PlayerDef };
@@ -608,7 +762,11 @@ export class GameClient {
    * chapter-advance handler).
    */
   async advanceChapter(characterId: string): Promise<{ complete: true } | { complete: false; sessionId: string; state: GameState; playerDef: PlayerDef }> {
-    const res = await fetch(`${API_URL}/adventure/${characterId}/advance`, { method: 'POST' });
+    const res = await fetch(`${API_URL}/adventure/${characterId}/advance`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ devFlags: DevMode.snapshotDevFlags() }),
+    });
     if (!res.ok) throw new Error(`Adventure advance failed: ${res.status}`);
     const body = await res.json() as { complete: boolean; sessionId?: string; state?: GameState; playerDef?: PlayerDef };
     if (body.complete) return { complete: true };

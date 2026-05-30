@@ -1,0 +1,21 @@
+{
+  "id": "concordat",
+  "name": "The Concordat",
+  "description": "The elven representative body — elves-only in membership, imperially-appointed in leadership. Hated by the people it administers and indispensable to the Empire that installed it: the elves' own secret police, dressed as their advocates.",
+  "displayColor": "#b0a0c0",
+  "renown": 1,
+  "defaultRelations": {
+    "arcania": 20,
+    "white_capes": 30,
+    "bureau_of_adjustment": 30,
+    "hammer_guild": 0,
+    "wrench_guild": 0,
+    "silver_service": 0,
+    "circus_of_the_moon": 0,
+    "fortune_guards": 0,
+    "concordat": 40,
+    "bandits": -20,
+    "monsters": -40,
+    "party": 0
+  }
+}

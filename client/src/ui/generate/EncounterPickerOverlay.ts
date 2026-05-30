@@ -5,250 +5,345 @@ import { decodeTileGid, TILE_VOID_GID } from "../../../../shared/tileGid";
 
 /**
  * Modal overlay listing every encounter in the registry as clickable cards.
- * Used by the `EncounterEditorScene` OPEN ENCOUNTER button. Each card shows a
- * thumbnail of the encounter's referenced map (rendered with the map's own
- * tilesets) plus the encounter title and a one-line context preview.
+ * Used by the `EncounterCreatorScene` OPEN ENCOUNTER button.
  *
- * Lifecycle mirrors `MapSelectorOverlay`: backdrop + panel + scrollable
- * card grid + CLOSE button.
+ * Pure HTML implementation: a single full-page `<div>` overlay laid out with
+ * CSS grid, no Phaser game objects. Tile thumbnails are drawn into per-card
+ * `<canvas>` elements using the same Phaser-loaded spritesheet textures
+ * (read via `scene.textures.get(...).getSourceImage()`) the in-scene
+ * renderer uses, so the tile art matches the editor's preview exactly.
+ *
+ * Styling follows the project palette used by EncounterSetupScene /
+ * AdventureSetupScene / ConfigurationScene: `#0d0d1e` panel background,
+ * `#88ccaa` editor accent, `#e2b96f` card titles, `#334455` dividers,
+ * monospace by default with `sans-serif` for prose descriptions.
  */
-const PANEL_W = 1100;
-const PANEL_H = 700;
-const HEADER_H = 90;
-const FOOTER_H = 70;
-const CARD_PAD = 16;
-const CARD_W = 240;
-const CARD_H = 220;
-const CARD_THUMB_H = 132;
-const CARD_TILE_PX = 6;
+const COLOR_BG_BACKDROP   = "rgba(0,0,0,0.75)";
+const COLOR_PANEL         = "#141426";
+const COLOR_PANEL_BORDER  = "#88ccaa";
+const COLOR_CARD          = "#1a1a2e";
+const COLOR_CARD_HOVER    = "#23233a";
+const COLOR_CARD_BORDER   = "#334455";
+const COLOR_TITLE         = "#e2b96f";
+const COLOR_SUBLABEL      = "#88ccaa";
+const COLOR_TEXT          = "#aabbcc";
+const COLOR_TEXT_DIM      = "#667788";
+const COLOR_PROSE         = "#8899aa";
+const COLOR_ERR           = "#883333";
+const COLOR_THUMB_BG      = "#0a0e16";
+
+const CARD_THUMB_MAX_PX   = 6;
+
+interface PickerCallbacks {
+  onSelect: (encounter: EncounterDef) => void;
+  onClose: () => void;
+}
 
 export class EncounterPickerOverlay {
   private readonly scene: Phaser.Scene;
-  private readonly container: Phaser.GameObjects.Container;
-  private readonly listContainer: Phaser.GameObjects.Container;
+  private readonly mapsById: Map<string, SavedMapDef>;
   private readonly fallbackTilesetKey: string;
-  private readonly maps: Map<string, SavedMapDef>;
-  private wheelHandler?: (
-    pointer: Phaser.Input.Pointer,
-    gameObjects: Phaser.GameObjects.GameObject[],
-    deltaX: number,
-    deltaY: number,
-  ) => void;
-  private scrollY = 0;
-  private maxScroll = 0;
+  private root: HTMLDivElement | null = null;
+  private onKeyDown: ((e: KeyboardEvent) => void) | null = null;
 
   constructor(
     scene: Phaser.Scene,
     encounters: EncounterDef[],
     maps: SavedMapDef[],
-    callbacks: { onSelect: (encounter: EncounterDef) => void; onClose: () => void },
+    callbacks: PickerCallbacks,
   ) {
     this.scene = scene;
-    this.maps = new Map(maps.map((m) => [m.id, m]));
-    const w = scene.scale.width;
-    const h = scene.scale.height;
-
+    this.mapsById = new Map(maps.map((m) => [m.id, m]));
     this.fallbackTilesetKey = pickTilesetKey(scene);
-
-    this.container = scene.add.container(0, 0).setDepth(1000);
-
-    const backdrop = scene.add.rectangle(w / 2, h / 2, w, h, 0x000000, 0.75).setInteractive();
-    backdrop.on("pointerdown", () => { /* swallow */ });
-    this.container.add(backdrop);
-
-    const panel = scene.add.rectangle(w / 2, h / 2, PANEL_W, PANEL_H, 0x141426)
-      .setStrokeStyle(2, 0x88ccaa);
-    this.container.add(panel);
-
-    const top = h / 2 - PANEL_H / 2;
-    const left = w / 2 - PANEL_W / 2;
-
-    const headerTag = scene.add.text(w / 2, top + 22, "OPEN ENCOUNTER", {
-      fontSize: "11px", color: "#88ccaa", fontFamily: "monospace", letterSpacing: 2,
-    }).setOrigin(0.5, 0);
-    this.container.add(headerTag);
-
-    const sub = scene.add.text(w / 2, top + 44, `${encounters.length} saved encounter${encounters.length === 1 ? "" : "s"}`, {
-      fontSize: "13px", color: "#aabbcc", fontFamily: "monospace",
-    }).setOrigin(0.5, 0);
-    this.container.add(sub);
-
-    const listTop = top + HEADER_H;
-    const listH = PANEL_H - HEADER_H - FOOTER_H;
-    const listLeft = left + 24;
-    const listRight = left + PANEL_W - 24;
-    const listW = listRight - listLeft;
-
-    const viewportHit = scene.add.rectangle(
-      w / 2, listTop + listH / 2, listW, listH, 0x000000, 0,
-    ).setInteractive();
-    this.container.add(viewportHit);
-
-    this.listContainer = scene.add.container(listLeft, listTop);
-    this.container.add(this.listContainer);
-
-    const maskShape = scene.make.graphics({ x: 0, y: 0 }, false);
-    maskShape.fillStyle(0xffffff);
-    maskShape.fillRect(listLeft, listTop, listW, listH);
-    this.listContainer.setMask(maskShape.createGeometryMask());
-
-    if (encounters.length === 0) {
-      const empty = scene.add.text(listW / 2, listH / 2, "No saved encounters yet.", {
-        fontSize: "13px", color: "#556677", fontFamily: "monospace", align: "center",
-      }).setOrigin(0.5);
-      this.listContainer.add(empty);
-    } else {
-      this.renderCards(encounters, listW, callbacks.onSelect);
-    }
-
-    this.wheelHandler = (pointer, _objs, _dx, deltaY) => {
-      if (
-        pointer.x < listLeft || pointer.x > listRight ||
-        pointer.y < listTop || pointer.y > listTop + listH
-      ) return;
-      if (this.maxScroll <= 0) return;
-      this.scrollY = Phaser.Math.Clamp(this.scrollY + deltaY, 0, this.maxScroll);
-      this.listContainer.y = listTop - this.scrollY;
-    };
-    scene.input.on("wheel", this.wheelHandler);
-
-    const closeX = left + PANEL_W - 130;
-    const closeY = top + PANEL_H - 36;
-    const closeBg = scene.add.rectangle(closeX, closeY, 220, 40, 0x222233)
-      .setStrokeStyle(2, 0x556677).setInteractive({ useHandCursor: true });
-    const closeLabel = scene.add.text(closeX, closeY, "CLOSE", {
-      fontSize: "13px", color: "#aabbcc", fontFamily: "monospace",
-    }).setOrigin(0.5);
-    closeBg.on("pointerdown", () => callbacks.onClose());
-    this.container.add(closeBg);
-    this.container.add(closeLabel);
+    this.buildOverlay(encounters, callbacks);
   }
 
   destroy(): void {
-    if (this.wheelHandler) this.scene.input.off("wheel", this.wheelHandler);
-    this.container.destroy();
+    if (this.onKeyDown) {
+      window.removeEventListener("keydown", this.onKeyDown);
+      this.onKeyDown = null;
+    }
+    this.root?.remove();
+    this.root = null;
   }
 
-  private renderCards(
-    encounters: EncounterDef[],
-    listW: number,
-    onSelect: (encounter: EncounterDef) => void,
-  ): void {
-    const cardsPerRow = Math.max(1, Math.floor((listW + CARD_PAD) / (CARD_W + CARD_PAD)));
-    const rowGap = CARD_PAD;
-    const usedRowW = cardsPerRow * CARD_W + (cardsPerRow - 1) * CARD_PAD;
-    const leftPad = Math.max(0, Math.floor((listW - usedRowW) / 2));
+  private buildOverlay(encounters: EncounterDef[], cb: PickerCallbacks): void {
+    const root = document.createElement("div");
+    root.style.cssText = `
+      position: fixed; inset: 0;
+      z-index: 1000;
+      background: ${COLOR_BG_BACKDROP};
+      display: flex; align-items: center; justify-content: center;
+      font-family: monospace;
+    `;
+    this.root = root;
 
-    encounters.forEach((enc, idx) => {
-      const col = idx % cardsPerRow;
-      const row = Math.floor(idx / cardsPerRow);
-      const cx = leftPad + col * (CARD_W + CARD_PAD);
-      const cy = row * (CARD_H + rowGap);
-      this.renderCard(enc, cx, cy, onSelect);
+    // Swallow clicks on the backdrop so they don't reach the Phaser canvas
+    // underneath; explicit CLOSE button handles dismissal.
+    root.addEventListener("click", (ev) => {
+      if (ev.target === root) ev.stopPropagation();
     });
 
-    const rows = Math.ceil(encounters.length / cardsPerRow);
-    const totalH = rows * CARD_H + (rows - 1) * rowGap;
-    const visibleH = PANEL_H - HEADER_H - FOOTER_H;
-    this.maxScroll = Math.max(0, totalH - visibleH);
-  }
+    // Escape closes the picker — matches the keyboard convention other
+    // overlays in the project use.
+    this.onKeyDown = (e) => { if (e.key === "Escape") cb.onClose(); };
+    window.addEventListener("keydown", this.onKeyDown);
 
-  private renderCard(
-    encounter: EncounterDef,
-    x: number,
-    y: number,
-    onSelect: (encounter: EncounterDef) => void,
-  ): void {
-    const bg = this.scene.add.rectangle(x + CARD_W / 2, y + CARD_H / 2, CARD_W, CARD_H, 0x1a1a2e)
-      .setStrokeStyle(1, 0x334455).setInteractive({ useHandCursor: true });
-    bg.on("pointerover", () => bg.setStrokeStyle(2, 0x88ccaa));
-    bg.on("pointerout",  () => bg.setStrokeStyle(1, 0x334455));
-    bg.on("pointerdown", () => onSelect(encounter));
-    this.listContainer.add(bg);
+    // ── Panel ──────────────────────────────────────────────────────────
+    const panel = document.createElement("div");
+    panel.style.cssText = `
+      width: 1100px; max-width: 92vw;
+      height: 700px; max-height: 88vh;
+      background: ${COLOR_PANEL};
+      border: 2px solid ${COLOR_PANEL_BORDER};
+      display: flex; flex-direction: column;
+      color: ${COLOR_TEXT};
+      overflow: hidden;
+      box-sizing: border-box;
+    `;
+    root.appendChild(panel);
 
-    const thumbCx = x + CARD_W / 2;
-    const thumbCy = y + 8 + CARD_THUMB_H / 2;
-    const map = this.maps.get(encounter.mapId);
-    if (map) this.renderThumbnail(map, thumbCx, thumbCy);
-    else {
-      this.listContainer.add(this.scene.add.text(thumbCx, thumbCy, `(missing map: ${encounter.mapId})`, {
-        fontSize: "10px", color: "#883333", fontFamily: "monospace",
-      }).setOrigin(0.5));
+    // ── Header ─────────────────────────────────────────────────────────
+    const header = document.createElement("div");
+    header.style.cssText = `
+      padding: 22px 24px 14px; text-align: center;
+      border-bottom: 1px solid ${COLOR_CARD_BORDER};
+    `;
+    const headerTag = document.createElement("div");
+    headerTag.textContent = "OPEN ENCOUNTER";
+    headerTag.style.cssText = `
+      font-size: 11px; color: ${COLOR_SUBLABEL};
+      letter-spacing: 2px; margin-bottom: 8px;
+    `;
+    const sub = document.createElement("div");
+    sub.textContent = `${encounters.length} saved encounter${encounters.length === 1 ? "" : "s"}`;
+    sub.style.cssText = `font-size: 13px; color: ${COLOR_TEXT};`;
+    header.appendChild(headerTag);
+    header.appendChild(sub);
+    panel.appendChild(header);
+
+    // ── Body — scrollable card grid ────────────────────────────────────
+    const body = document.createElement("div");
+    body.style.cssText = `
+      flex: 1; overflow-y: auto; padding: 16px 24px;
+      scrollbar-width: thin; scrollbar-color: ${COLOR_SUBLABEL} transparent;
+    `;
+    panel.appendChild(body);
+
+    if (encounters.length === 0) {
+      const empty = document.createElement("div");
+      empty.textContent = "No saved encounters yet.";
+      empty.style.cssText = `
+        font-size: 13px; color: ${COLOR_TEXT_DIM};
+        text-align: center; padding: 80px 0;
+      `;
+      body.appendChild(empty);
+    } else {
+      const grid = document.createElement("div");
+      grid.style.cssText = `
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+        gap: 16px;
+      `;
+      for (const enc of encounters) {
+        grid.appendChild(this.buildCard(enc, cb.onSelect));
+      }
+      body.appendChild(grid);
     }
 
-    const titleY = y + 8 + CARD_THUMB_H + 8;
-    const title = this.scene.add.text(x + 10, titleY, encounter.encounterTitle, {
-      fontSize: "13px", color: "#e2b96f", fontFamily: "monospace",
-      wordWrap: { width: CARD_W - 20 },
-    }).setOrigin(0, 0);
-    this.listContainer.add(title);
+    // ── Footer — CLOSE ────────────────────────────────────────────────
+    const footer = document.createElement("div");
+    footer.style.cssText = `
+      padding: 14px 24px;
+      border-top: 1px solid ${COLOR_CARD_BORDER};
+      display: flex; justify-content: flex-end;
+    `;
+    const closeBtn = document.createElement("button");
+    closeBtn.type = "button";
+    closeBtn.textContent = "CLOSE";
+    closeBtn.style.cssText = `
+      background: #222233; color: ${COLOR_TEXT};
+      border: 2px solid #556677;
+      font-family: monospace; font-size: 13px;
+      letter-spacing: 1.5px;
+      padding: 8px 36px;
+      cursor: pointer;
+      min-width: 220px;
+    `;
+    closeBtn.addEventListener("click", () => cb.onClose());
+    footer.appendChild(closeBtn);
+    panel.appendChild(footer);
 
-    const generatedTag = encounter.generated ? " ✦ generated" : "";
-    const subtitle = `${encounter.id}${generatedTag}`;
-    const sub = this.scene.add.text(x + 10, titleY + 20, subtitle, {
-      fontSize: "9px", color: "#667788", fontFamily: "monospace",
-      wordWrap: { width: CARD_W - 20 },
-    }).setOrigin(0, 0);
-    this.listContainer.add(sub);
-
-    const desc = this.scene.add.text(x + 10, titleY + 34, encounter.description || "", {
-      fontSize: "10px", color: "#8899aa", fontFamily: "sans-serif",
-      wordWrap: { width: CARD_W - 20 }, lineSpacing: 2,
-    }).setOrigin(0, 0);
-    this.listContainer.add(desc);
+    document.body.appendChild(root);
   }
 
-  private renderThumbnail(map: SavedMapDef, cx: number, cy: number): void {
-    const maxW = CARD_W - 20;
-    const maxH = CARD_THUMB_H;
+  private buildCard(encounter: EncounterDef, onSelect: (encounter: EncounterDef) => void): HTMLDivElement {
+    const card = document.createElement("div");
+    card.style.cssText = `
+      background: ${COLOR_CARD};
+      border: 1px solid ${COLOR_CARD_BORDER};
+      display: flex; flex-direction: column;
+      cursor: pointer;
+      padding: 10px;
+      transition: border-color 0.1s;
+    `;
+    card.addEventListener("mouseenter", () => {
+      card.style.borderColor = COLOR_PANEL_BORDER;
+      card.style.background = COLOR_CARD_HOVER;
+    });
+    card.addEventListener("mouseleave", () => {
+      card.style.borderColor = COLOR_CARD_BORDER;
+      card.style.background = COLOR_CARD;
+    });
+    card.addEventListener("click", () => onSelect(encounter));
+
+    // Thumbnail — canvas if the map exists, otherwise a stub line.
+    const thumbWrap = document.createElement("div");
+    thumbWrap.style.cssText = `
+      width: 100%; height: 132px;
+      background: ${COLOR_THUMB_BG};
+      border: 1px solid #2a3340;
+      display: flex; align-items: center; justify-content: center;
+      box-sizing: border-box;
+      margin-bottom: 8px;
+    `;
+    const map = this.mapsById.get(encounter.mapId);
+    if (map) {
+      const canvas = document.createElement("canvas");
+      this.drawThumbnail(canvas, map);
+      canvas.style.cssText = `image-rendering: pixelated;`;
+      thumbWrap.appendChild(canvas);
+    } else {
+      const missing = document.createElement("div");
+      missing.textContent = `(missing map: ${encounter.mapId})`;
+      missing.style.cssText = `font-size: 10px; color: ${COLOR_ERR};`;
+      thumbWrap.appendChild(missing);
+    }
+    card.appendChild(thumbWrap);
+
+    // Title.
+    const title = document.createElement("div");
+    title.textContent = encounter.encounterTitle;
+    title.style.cssText = `
+      font-size: 13px; color: ${COLOR_TITLE};
+      margin-bottom: 4px;
+      word-wrap: break-word;
+    `;
+    card.appendChild(title);
+
+    // Subtitle — id, with a generated marker when applicable.
+    const subEl = document.createElement("div");
+    subEl.textContent = `${encounter.id}${encounter.generated ? " ✦ generated" : ""}`;
+    subEl.style.cssText = `
+      font-size: 9px; color: ${COLOR_TEXT_DIM};
+      margin-bottom: 6px;
+      word-wrap: break-word;
+    `;
+    card.appendChild(subEl);
+
+    // Description, prose style. Empty descriptions get nothing rather than
+    // an empty paragraph so the card height stays compact.
+    if (encounter.description) {
+      const desc = document.createElement("div");
+      desc.textContent = encounter.description;
+      desc.style.cssText = `
+        font-size: 10px; color: ${COLOR_PROSE};
+        font-family: sans-serif;
+        line-height: 1.5;
+        word-wrap: break-word;
+        overflow: hidden;
+        display: -webkit-box;
+        -webkit-line-clamp: 3;
+        -webkit-box-orient: vertical;
+      `;
+      card.appendChild(desc);
+    }
+
+    return card;
+  }
+
+  /**
+   * Paint a map preview into a canvas using the same tilesets the Phaser
+   * scene loaded. We pull each tileset's underlying HTMLImageElement off the
+   * texture cache and draw spritesheet frames directly. Rotations and flips
+   * are honoured via canvas transform around the tile's centre, matching
+   * Tiled's flip-bit semantics.
+   */
+  private drawThumbnail(canvas: HTMLCanvasElement, map: SavedMapDef): void {
+    const maxW = 220;
+    const maxH = 132;
     const tileSize = Math.min(
       Math.floor(maxW / map.cols),
       Math.floor(maxH / map.rows),
-      CARD_TILE_PX,
+      CARD_THUMB_MAX_PX,
     );
     const thumbW = tileSize * map.cols;
     const thumbH = tileSize * map.rows;
-    const startX = cx - thumbW / 2;
-    const startY = cy - thumbH / 2;
-
-    const back = this.scene.add.rectangle(cx, cy, thumbW + 2, thumbH + 2, 0x0a0e16)
-      .setStrokeStyle(1, 0x2a3340);
-    this.listContainer.add(back);
+    canvas.width = thumbW;
+    canvas.height = thumbH;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    ctx.imageSmoothingEnabled = false;
 
     const routing = (map.tilesets ?? [])
       .map((ts) => ({ firstgid: ts.firstgid, key: tilesetTextureKey(ts.imageUrl) }))
       .sort((a, b) => b.firstgid - a.firstgid);
-    const owners = routing.length > 0 ? routing : [{ firstgid: 1, key: this.fallbackTilesetKey }];
+    const owners = routing.length > 0
+      ? routing
+      : [{ firstgid: 1, key: this.fallbackTilesetKey }];
 
     for (let r = 0; r < map.rows; r++) {
       for (let c = 0; c < map.cols; c++) {
-        const tx = startX + c * tileSize + tileSize / 2;
-        const ty = startY + r * tileSize + tileSize / 2;
+        const x = c * tileSize;
+        const y = r * tileSize;
         const groundGid = map.gidGrid[r]?.[c] ?? 0;
-        if (groundGid > 0) this.drawTile(tx, ty, tileSize, groundGid, owners);
+        if (groundGid > 0) this.drawTileToCanvas(ctx, x, y, tileSize, groundGid, owners);
         const objectGid = map.objectGidGrid?.[r]?.[c] ?? 0;
-        if (objectGid > 0) this.drawTile(tx, ty, tileSize, objectGid, owners);
+        if (objectGid > 0) this.drawTileToCanvas(ctx, x, y, tileSize, objectGid, owners);
       }
     }
   }
 
-  private drawTile(
-    tx: number, ty: number, size: number, rawGid: number,
+  private drawTileToCanvas(
+    ctx: CanvasRenderingContext2D,
+    x: number, y: number, size: number, rawGid: number,
     owners: Array<{ firstgid: number; key: string }>,
   ): void {
     const dec = decodeTileGid(rawGid);
     if (dec.gid === TILE_VOID_GID) {
-      this.listContainer.add(this.scene.add.rectangle(tx, ty, size, size, 0x000000));
+      ctx.fillStyle = "#000000";
+      ctx.fillRect(x, y, size, size);
       return;
     }
     const owner = owners.find((t) => dec.gid >= t.firstgid);
-    if (!owner || !this.scene.textures.exists(owner.key)) return;
+    if (!owner) return;
+    const texture = this.scene.textures.get(owner.key);
+    if (!texture || texture.key === "__MISSING") return;
+    const source = texture.getSourceImage() as HTMLImageElement | HTMLCanvasElement;
+    if (!source) return;
+
+    // Spritesheet frame layout: Phaser's texture frame `frameWidth`/Height
+    // are stored on the source object during load. Pull the first frame to
+    // resolve them; all frames share the same dimensions.
     const frame = dec.gid - owner.firstgid;
-    const img = this.scene.add.image(tx, ty, owner.key, frame).setDisplaySize(size, size);
-    if (dec.angle !== 0) img.setAngle(dec.angle);
-    if (dec.flipX) img.setFlipX(true);
-    if (dec.flipY) img.setFlipY(true);
-    this.listContainer.add(img);
+    const frameObj = texture.get(frame);
+    if (!frameObj) return;
+    const sx = frameObj.cutX;
+    const sy = frameObj.cutY;
+    const sw = frameObj.cutWidth;
+    const sh = frameObj.cutHeight;
+
+    // Apply rotation / flip around the tile centre, then draw.
+    const cx = x + size / 2;
+    const cy = y + size / 2;
+    ctx.save();
+    ctx.translate(cx, cy);
+    if (dec.angle !== 0) ctx.rotate((dec.angle * Math.PI) / 180);
+    const fx = dec.flipX ? -1 : 1;
+    const fy = dec.flipY ? -1 : 1;
+    if (fx !== 1 || fy !== 1) ctx.scale(fx, fy);
+    ctx.drawImage(source, sx, sy, sw, sh, -size / 2, -size / 2, size, size);
+    ctx.restore();
   }
 }
 

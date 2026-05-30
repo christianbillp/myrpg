@@ -1,0 +1,87 @@
+{
+  "id": "iolen_mire",
+  "name": "Iolen Mire",
+  "tokenAsset": "/tokens/player_elf_wizard.svg",
+  "speciesName": "High Elf",
+  "speciesId": "elf",
+  "speciesLineage": "high-elf",
+  "className": "Wizard",
+  "backgroundId": "criminal",
+  "featIds": [
+    "alert"
+  ],
+  "level": 1,
+  "maxHp": 8,
+  "str": 8,
+  "dex": 14,
+  "con": 14,
+  "int": 17,
+  "wis": 12,
+  "cha": 10,
+  "proficiencyBonus": 2,
+  "savingThrowProficiencies": [
+    "int",
+    "wis"
+  ],
+  "skills": {
+    "acrobatics": 2,
+    "animalHandling": 1,
+    "arcana": 5,
+    "athletics": -1,
+    "deception": 0,
+    "history": 3,
+    "insight": 1,
+    "intimidation": 0,
+    "investigation": 5,
+    "medicine": 1,
+    "nature": 3,
+    "perception": 1,
+    "performance": 0,
+    "persuasion": 0,
+    "religion": 3,
+    "sleightOfHand": 4,
+    "stealth": 4,
+    "survival": 1
+  },
+  "hitDieType": 6,
+  "sneakAttackDice": 0,
+  "color": 7434915,
+  "xp": 0,
+  "defaultEquipment": {
+    "armorId": null,
+    "weaponId": "quarterstaff",
+    "shieldId": null
+  },
+  "defaultInventoryIds": [
+    "dagger",
+    "dagger",
+    "spellbook"
+  ],
+  "defaultCp": 1600,
+  "spellcastingAbility": "int",
+  "defaultCantripIds": [
+    "fire-bolt",
+    "mage-hand",
+    "prestidigitation",
+    "ray-of-frost"
+  ],
+  "defaultSpellbookIds": [
+    "magic-missile",
+    "shield",
+    "mage-armor",
+    "sleep",
+    "feather-fall",
+    "detect-magic"
+  ],
+  "defaultPreparedSpellIds": [
+    "magic-missile",
+    "shield",
+    "mage-armor",
+    "sleep"
+  ],
+  "defaultSpellSlots": [
+    2
+  ],
+  "shortDescription": "Unlicensed elf wizard hunted by the White Capes, quiet and never in one place long.",
+  "description": "An elf who taught herself the work from books she was not supposed to have. Her first spellbook came out of a half-flooded chamber in an Old Empire ruin; her second she wrote herself from memory; the third, which is the one she carries, she stole from a White Cape supply convoy three years ago and has been a hunted woman ever since. She has no licence and will never have one — for an elf, the licence does not exist as a category. She has stayed alive by being mobile, by never casting where anyone official might see, and by treating every stranger as the one who will eventually turn her in. Quiet, patient, watchful. Speaks little and remembers everything. The Capes do not know her name. She intends to keep it that way."
+}

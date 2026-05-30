@@ -326,7 +326,7 @@ export function composeMap(opts: ComposeOptions): ComposedMap {
     terrainData: flatten(terrainGrid),
     objectData: flatten(objectGrid),
     name: composeName(terrain, features),
-    description: composeDescription(terrain, features),
+    description: composeDescription(terrain, features, anchors, width, height),
     tilesets,
     anchors,
   };
@@ -867,18 +867,123 @@ function composeName(terrain: Terrain, features: Feature[]): string {
   return adj ? `${adj} ${t}` : t;
 }
 
-function composeDescription(terrain: Terrain, features: Feature[]): string {
+/**
+ * Build a richer, layout-aware description from the placed features. Lists
+ * specific spatial details (building count + positions, path direction,
+ * coastline side, etc.) so the encounter author and the AIGM both have
+ * concrete anchors to refer to instead of vague flavour text.
+ */
+function composeDescription(terrain: Terrain, features: Feature[], anchors: MapAnchors, W: number, H: number): string {
   if (terrain === 'dungeon') {
-    const n = features.includes('5-room') ? 'five' : 'three';
-    return `A stone dungeon of ${n} rooms linked by short corridors. The entrance opens onto the southern edge of the map.`;
+    const rooms = anchors.rooms ?? [];
+    const n = rooms.length || (features.includes('5-room') ? 5 : 3);
+    const entry = anchors.entrance ? cardinalEdge(anchors.entrance, W, H) : 'south';
+    const vault = anchors.vault ? cardinalEdge(anchors.vault, W, H) : null;
+    const parts = [`A stone dungeon of ${n} rooms linked by short corridors.`];
+    parts.push(`Entrance on the ${entry} side${vault ? `; deepest chamber lies to the ${vault}` : ''}.`);
+    return parts.join(' ');
   }
   const base = terrain === 'forest'
     ? 'A wooded clearing under thick canopy.'
     : 'Open grassland stretches across the map.';
-  const tail = features.length === 0 ? '' :
-    features.length === 1 ? ` Scattered ${features[0]} dot the area.` :
-    ` ${features.map(f => `${f.charAt(0).toUpperCase()}${f.slice(1)}`).join(', ')} share the ground here.`;
-  return base + tail;
+  const layout: string[] = [];
+  if (features.includes('coastline')) {
+    const side = waterSide(anchors, W, H);
+    layout.push(`Water along the ${side} edge of the map`);
+  }
+  if (features.includes('path')) {
+    const dir = pathDirection(anchors);
+    layout.push(`a dirt path runs ${dir}`);
+  }
+  if (features.includes('buildings')) {
+    const n = anchors.buildings?.length ?? 0;
+    const where = listPositions(anchors.buildings, W, H);
+    layout.push(`${plural(n, 'building')}${where ? ` at the ${where}` : ''}`);
+  }
+  if (features.includes('ruins')) {
+    const n = anchors.ruins?.length ?? 0;
+    const where = listPositions(anchors.ruins, W, H);
+    layout.push(`${plural(n, 'ruin')}${where ? ` at the ${where}` : ''}`);
+  }
+  if (features.includes('campsites')) {
+    const n = anchors.campfires?.length ?? 0;
+    const where = listPositions(anchors.campfires, W, H);
+    layout.push(`${plural(n, 'campfire')}${where ? ` at the ${where}` : ''}`);
+  }
+  if (layout.length === 0) return base;
+  // Capitalise the first detail and join with semicolons for readability.
+  const detailLine = layout.map((s, i) => i === 0 ? s.charAt(0).toUpperCase() + s.slice(1) : s).join('; ');
+  return `${base} ${detailLine}.`;
+}
+
+/** Cardinal compass position of a point in the map ("south", "north-west"). */
+function cardinalEdge(p: { x: number; y: number }, W: number, H: number): string {
+  return cardinal({ ...p, w: 0, h: 0 }, W, H);
+}
+function cardinal(rect: { x: number; y: number; w: number; h: number }, W: number, H: number): string {
+  const cx = rect.x + rect.w / 2;
+  const cy = rect.y + rect.h / 2;
+  const thirdX = W / 3;
+  const thirdY = H / 3;
+  const horiz = cx < thirdX ? 'west' : cx > 2 * thirdX ? 'east' : '';
+  const vert  = cy < thirdY ? 'north' : cy > 2 * thirdY ? 'south' : '';
+  if (vert && horiz) return `${vert}-${horiz}`;
+  if (vert)  return vert;
+  if (horiz) return horiz;
+  return 'centre';
+}
+
+/** Pretty list of rect / point positions: "north-west and south-east corners",
+ *  "north edge, centre, and south-east corner". */
+function listPositions(items: Array<{ x: number; y: number; w?: number; h?: number }> | undefined, W: number, H: number): string {
+  if (!items || items.length === 0) return '';
+  const labels = items.map((it) => cardinal({ x: it.x, y: it.y, w: it.w ?? 0, h: it.h ?? 0 }, W, H));
+  // Dedupe while preserving order so "two at the south" reads naturally
+  // when both items fall in the same third.
+  const unique: string[] = [];
+  for (const l of labels) if (!unique.includes(l)) unique.push(l);
+  if (unique.length === 1) return unique[0];
+  if (unique.length === 2) return `${unique[0]} and ${unique[1]}`;
+  return `${unique.slice(0, -1).join(', ')}, and ${unique[unique.length - 1]}`;
+}
+
+/** Compass direction of a path from its two endpoints. */
+function pathDirection(anchors: MapAnchors): string {
+  const ends = anchors.pathEndpoints;
+  if (!ends || ends.length < 2) return 'across the map';
+  const a = ends[0];
+  const b = ends[1];
+  const dx = Math.abs(a.x - b.x);
+  const dy = Math.abs(a.y - b.y);
+  if (dx > dy * 1.5) return 'east to west';
+  if (dy > dx * 1.5) return 'north to south';
+  return 'diagonally across the map';
+}
+
+/** Which edge of the map is mostly water. Derived from where the dry
+ *  (inland) band lies — the opposite side holds the sea. */
+function waterSide(anchors: MapAnchors, W: number, H: number): string {
+  const band = anchors.inlandBand;
+  if (!band || band.length === 0) return 'one edge';
+  let sumX = 0, sumY = 0;
+  for (const c of band) { sumX += c.x; sumY += c.y; }
+  const cx = sumX / band.length;
+  const cy = sumY / band.length;
+  // The water is the OPPOSITE side from where the dry band centroid sits.
+  const dxFromCenter = cx - W / 2;
+  const dyFromCenter = cy - H / 2;
+  if (Math.abs(dxFromCenter) > Math.abs(dyFromCenter)) {
+    return dxFromCenter > 0 ? 'west' : 'east';
+  }
+  return dyFromCenter > 0 ? 'north' : 'south';
+}
+
+function plural(n: number, noun: string): string {
+  if (n === 1) return `one ${noun}`;
+  if (n === 2) return `two ${noun}s`;
+  if (n === 3) return `three ${noun}s`;
+  if (n === 4) return `four ${noun}s`;
+  return `${n} ${noun}s`;
 }
 
 function flatten(grid: number[][]): number[] {
