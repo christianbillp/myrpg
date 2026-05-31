@@ -239,6 +239,9 @@ export function enterPlayerTurn(ctx: GameContext): void {
   s.player.bonusActionUsed = false;
   s.player.reactionUsed = false;
   s.player.freeObjectInteractionUsed = false;
+  // SRD Sneak Attack — "Once per turn". Reset at the start of every player
+  // turn so the next eligible hit can ride.
+  s.player.sneakAttackUsedThisTurn = false;
   // SRD Shield: the +5 AC bonus ends at the start of the caster's next
   // turn. Drop the flag and recompute AC so the bonus disappears before
   // anything reads it this turn.

@@ -1,0 +1,8 @@
+{
+  "id": "second-story-work",
+  "name": "Second-Story Work",
+  "classId": "rogue",
+  "minLevel": 3,
+  "description": "You gain a Climb Speed equal to your Speed (Climber). You can determine your jump distance using your Dexterity rather than your Strength (Jumper).",
+  "cost": { "kind": "passive" }
+}

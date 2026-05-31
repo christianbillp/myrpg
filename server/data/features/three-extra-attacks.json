@@ -1,0 +1,8 @@
+{
+  "id": "three-extra-attacks",
+  "name": "Three Extra Attacks",
+  "classId": "fighter",
+  "minLevel": 20,
+  "description": "You can attack four times instead of once whenever you take the Attack action on your turn. Track value `extra-attacks` rises to 4 at this level.",
+  "cost": { "kind": "passive" }
+}

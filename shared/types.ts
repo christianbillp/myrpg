@@ -123,10 +123,18 @@ export interface PlayerAttack {
   /** Optional secondary damage riders applied alongside the primary roll. */
   bonusDamage?: BonusDamage[];
   savageAttacker: boolean;
+  /** Finesse weapon (Daggers, Rapiers, Scimitars, …). Lets DEX replace STR
+   *  for attack and damage rolls (`makePlayerAttack` already picks the
+   *  higher mod) — and qualifies the weapon for Sneak Attack. */
+  finesse: boolean;
   graze: boolean;
   vex: boolean;
   sap: boolean;
   slow: boolean;
+  /** Push mastery — on hit, the attacker can shove the target 10 ft away. */
+  push: boolean;
+  /** Topple mastery — on hit, target makes a Con save or falls Prone. */
+  topple: boolean;
   // Ranged-weapon fields. Absence of rangeNormal means melee (5 ft / 1 tile reach).
   // For ranged weapons, rangeNormal/rangeLong are in feet (1 tile = 5 ft); beyond
   // normal range imposes Disadvantage, beyond long range cannot fire.
@@ -197,6 +205,18 @@ export interface PlayerDef {
    *  character JSON must declare its token explicitly (no naming-convention
    *  fallback). */
   tokenAsset: string;
+  /** Per-character scaling track values resolved from `ClassDef.tracksByLevel`
+   *  at each level-up. Engine subsystems consult this map instead of
+   *  hard-coded class knowledge — e.g. the attack resolver reads
+   *  `tracks['extra-attacks']` to decide the loop count, the Rogue resolver
+   *  reads `tracks['sneak-attack-dice']`. Per-feature use pools (Second Wind
+   *  uses, Action Surge uses, …) land in `tracks['<feature-id>-uses']`. */
+  tracks?: Record<string, number | string>;
+  /** Subclass id picked at the class's subclass-choice level (typically L3).
+   *  References a `SubclassDef.id` in `defs.subclasses`. The level-up
+   *  resolver walks the subclass progression in addition to the class's own
+   *  every time the character reaches one of the parent's `subclassLevels`. */
+  subclassId?: string;
 }
 
 export interface MonsterAttack {
@@ -777,6 +797,186 @@ export interface FeatureDef {
    * character-load (Unarmored Defense, Expertise, etc.).
    */
   handler?: string;
+}
+
+// ── Class definitions ────────────────────────────────────────────────────────
+//
+// SRD 5.2.1 class advancement encoded as data. The engine reads
+// `server/data/classes/*.json` at boot and drives the level-up resolver,
+// character build defaults, and resource-pool scaling off these. Subclasses
+// live in `server/data/subclasses/*.json` and reference their parent class
+// via `classId`; the engine walks both progression arrays at each level.
+
+export type AbilityKey = 'str' | 'dex' | 'con' | 'int' | 'wis' | 'cha';
+
+/** A per-level scaling value. `number` covers counts/feet/points; `string`
+ *  covers dice expressions like `"1d6"` for Monk Martial Arts or Bard Bardic
+ *  Die. The engine parses the dice form lazily — for arithmetic uses you'd
+ *  still want numbers. */
+export type TrackValue = number | string;
+
+/** Track values that scale from an ability mod (Bardic Inspiration uses) or
+ *  proficiency bonus (Druid Wild Companion). Resolved at level-up and on stat
+ *  changes — the resolver substitutes the live value. Used when a per-level
+ *  array would be wrong because the value depends on the character's stats. */
+export type ClassResourceFormula =
+  | { kind: 'ability-mod'; ability: AbilityKey; min?: number }
+  | { kind: 'proficiency-bonus'; min?: number }
+  | { kind: 'class-level'; multiplier?: number; offset?: number };
+
+/** Per-level class spellcasting metadata. The two discriminators
+ *  (`slotTableKind`, `learnModel`) cover every shape the SRD ships:
+ *
+ *  | Class                      | slotTableKind | learnModel        | recovery   |
+ *  |----------------------------|---------------|-------------------|------------|
+ *  | Wizard                     | full          | spellbook         | long-rest  |
+ *  | Cleric / Druid / Bard      | full          | from-class-list   | long-rest  |
+ *  | Sorcerer                   | full          | known             | long-rest  |
+ *  | Paladin / Ranger           | half          | from-class-list   | long-rest  |
+ *  | Warlock                    | pact-magic    | known             | short-rest |
+ *  | Fighter / Rogue / Barb /…  | none          | innate            | (n/a)      | */
+export interface ClassSpellcasting {
+  ability: AbilityKey;
+  slotTableKind: 'full' | 'half' | 'pact-magic' | 'none';
+  learnModel: 'spellbook' | 'from-class-list' | 'known' | 'innate';
+  recovery?: 'long-rest' | 'short-rest';
+  /** Cosmetic — what the caster channels through. */
+  focus?: string[];
+  /** "always-prepared" (Wizard Ritual Adept): ritual tag spells can be cast
+   *  from spellbook without preparing. "ritual-only" (Cleric/Druid/Bard):
+   *  ritual tag spells are cast normally, just slower. "none": no ritual rule. */
+  ritual?: 'always-prepared' | 'ritual-only' | 'none';
+  /** 20-element array. Index by `level - 1`. */
+  cantripsKnownByLevel?: number[];
+  /** 20-element array — number of L1+ spells the caster can hold prepared. */
+  preparedSpellsByLevel?: number[];
+  /** 20-element array — number of L1+ spells the caster permanently "knows"
+   *  (Sorcerer / Warlock). Mutually exclusive with `preparedSpellsByLevel`. */
+  spellsKnownByLevel?: number[];
+  /** Outer index = level-1; inner = slot-level-1. For half-casters the inner
+   *  array is shorter (5 entries). Omitted for `slotTableKind: 'none'` and
+   *  `'pact-magic'` (use `pactMagic` block instead). */
+  spellSlotsByLevel?: number[][];
+  /** Warlock Pact Magic — few same-level slots that refresh on Short Rest. */
+  pactMagic?: {
+    /** Number of pact slots at each character level. */
+    slotsByLevel: number[];
+    /** Spell level of every pact slot at each character level. */
+    slotLevelByLevel: number[];
+  };
+  /** Warlock Mystic Arcanum — one L6/7/8/9 spell unlocked at the listed
+   *  levels, each used once per Long Rest, not a slot. */
+  mysticArcanum?: {
+    atLevels: number[];
+    spellLevels: number[];
+  };
+  /** Wizard-only — starting spellbook size at L1. */
+  initialSpellbookSize?: number;
+  /** Wizard-only — spells added to the spellbook on each level after 1. */
+  spellbookGrowthPerLevel?: number;
+  /** Most full casters can swap one cantrip on a Long Rest / level-up. */
+  cantripSwapPerLevel?: boolean;
+  /** Per-level swap allowance for known/prepared lists (Sorcerer = 1, Bard L10
+   *  Magical Secrets adds more on specific levels via choices). */
+  spellSwapPerLevel?: number;
+}
+
+/** Authored choice template stored in class/subclass JSONs. At level-up the
+ *  resolver expands each template into a fully-populated `LevelUpChoicePrompt`
+ *  (filling in `options` from the live character + game defs). Keeping the
+ *  templates separate from the runtime prompt keeps JSONs static and lets the
+ *  options list change as content grows (new feats, new spells, etc.). */
+export type LevelUpChoiceTemplate =
+  | { kind: 'scholar-expertise' }
+  | { kind: 'wizard-spellbook-add'; count?: number }
+  | { kind: 'asi-or-feat' }
+  | { kind: 'subclass-choice' }
+  | { kind: 'cantrip-known'; count?: number }
+  | { kind: 'cantrip-swap' }
+  | { kind: 'spell-swap'; count?: number }
+  | { kind: 'expertise-pick'; count: number }
+  | { kind: 'fighting-style-pick' }
+  | { kind: 'metamagic-pick'; count: number }
+  | { kind: 'invocation-pick'; count: number }
+  | { kind: 'mystic-arcanum-pick'; spellLevel: number }
+  | { kind: 'magical-secrets-pick'; count: number }
+  | { kind: 'epic-boon-choice' };
+
+/** A single entry in `ClassDef.progression` — what happens when the character
+ *  reaches the given level. Features list ids that must exist in
+ *  `defs.features`. `choices` are templates the resolver expands into runtime
+ *  prompts surfaced by the LevelUpOverlay; their kinds map to handlers in
+ *  `LevelUpChoiceHandlers.ts`. `subclass: true` marks levels at which the
+ *  chosen subclass's own progression entry should fire. */
+export interface ClassProgressionEntry {
+  level: number;
+  features?: string[];
+  subclass?: boolean;
+  choices?: LevelUpChoiceTemplate[];
+}
+
+export interface ClassDef {
+  id: string;
+  name: string;
+  description: string;
+  primaryAbility: AbilityKey[];
+  /** Hit Point Die (Wizard = 6, Fighter = 10, …). Used for HP rolls; the
+   *  engine uses `fixedHpPerLevel` for level-up so this is informational. */
+  hitDie: number;
+  /** SRD "Fixed Hit Points by Class" — added to CON mod on each level-up. */
+  fixedHpPerLevel: number;
+  savingThrows: AbilityKey[];
+  skillChoices: { count: number; options: string[] };
+  weaponProficiencies: string[];
+  armorTraining: string[];
+  toolProficiencies: string[];
+  /** Class levels at which the chosen subclass grants a feature. Mirrors
+   *  the subclass's `progression[].level` values so the level-up resolver
+   *  knows when to look up subclass content. */
+  subclassLevels: number[];
+  spellcasting?: ClassSpellcasting;
+  /** Per-level scaling values — every count/die/distance that varies with
+   *  level lives here. Keys are class-specific track ids (e.g.
+   *  `"sneak-attack-dice"`, `"second-wind-uses"`, `"martial-arts-die"`,
+   *  `"rage-damage"`, `"unarmored-movement-feet"`). Engine consumers read
+   *  via `trackAt(classDef, trackId, level)`. */
+  tracksByLevel?: Record<string, TrackValue[]>;
+  /** Tracks whose value can't be encoded as a per-level array because they
+   *  depend on the live character (Bardic Inspiration uses = max(1, CHA mod)). */
+  trackFormulas?: Record<string, ClassResourceFormula>;
+  progression: ClassProgressionEntry[];
+}
+
+/** A single per-level entry for a subclass. Mirrors `ClassProgressionEntry`
+ *  but adds the always-prepared spell lists granted by Domains / Oaths /
+ *  Circles / Patrons (which extend the prepared list without counting toward
+ *  the prep cap). */
+export interface SubclassProgressionEntry {
+  level: number;
+  features?: string[];
+  /** Spells that become always-prepared once this level is reached. */
+  grantedSpells?: string[];
+  /** Cantrips that become permanently known once this level is reached. */
+  grantedCantrips?: string[];
+  /** Per-level tracks the subclass overrides or adds (e.g. an Eldritch
+   *  Invocation-style scaling). */
+  tracksByLevel?: Record<string, TrackValue[]>;
+}
+
+export interface SubclassDef {
+  id: string;
+  classId: string;
+  name: string;
+  description: string;
+  progression: SubclassProgressionEntry[];
+  /** Some subclasses graft spellcasting onto an otherwise-non-caster class
+   *  (Eldritch Knight, Arcane Trickster). When present this block overrides
+   *  the class's own `spellcasting` for affected characters. Not used by any
+   *  SRD 5.2.1 subclass we ship today but the engine honours it. */
+  spellcasting?: ClassSpellcasting;
+  /** When this subclass uses a different class's spell list (Eldritch Knight
+   *  → Wizard, Arcane Trickster → Wizard), name the source class. */
+  spellListClassId?: string;
 }
 
 // ── Spell definitions ─────────────────────────────────────────────────────────
@@ -1728,6 +1928,16 @@ export interface PlayerState {
   // ── Spellcasting runtime state ───────────────────────────────────────────
   /** Currently remaining spell slots, indexed by `spell.level − 1`. Empty array for non-casters. */
   spellSlots: number[];
+  /** Warlock Pact Magic — slots that recover on Short Rest. `level` is the
+   *  spell-slot level every pact slot casts at (1 → 5). Absent for
+   *  non-Warlocks. Distinct from `spellSlots` because the recovery rule and
+   *  upcast semantics differ. */
+  pactMagic?: { remaining: number; max: number; level: number };
+  /** Warlock Mystic Arcanum — one L6/7/8/9 spell per slot, used once per
+   *  Long Rest. Maps spell level → { spellId, used }. Absent for everyone
+   *  else. The picker is fired from the LevelUpOverlay (`mystic-arcanum-pick`
+   *  prompt) at L11/13/15/17. */
+  mysticArcanum?: Record<number, { spellId: string; used: boolean }>;
   /** Currently prepared spell ids (mutable across Long Rests). */
   preparedSpellIds: string[];
   /** Spell currently concentrated on, or null. Cleared by damage CON save, casting another concentration spell, or incapacitation. */
@@ -1750,6 +1960,14 @@ export interface PlayerState {
   expeditiousRetreat: boolean;
   /** Multiplier on jump distance set by Jump (×3). Defaults to 1. */
   jumpMultiplier: number;
+  /** SRD Sneak Attack — "Once per turn". Flag flips when the rider fires
+   *  and resets at the start of the player's next turn. Reset is also
+   *  implicit at combat start (every player turn boundary). */
+  sneakAttackUsedThisTurn?: boolean;
+  /** SRD Arcane Recovery — once per Long Rest. Set when the wizard uses the
+   *  Short Rest recovery; cleared by `applyLongRest`. Wizard-only — absent
+   *  on non-wizards. */
+  arcaneRecoveryUsed?: boolean;
   /** Currently active periodic effects (DoTs, attach bites, …). Each fires at the start of its `sourceNpcId`'s turn — see OngoingEffectsSystem. */
   ongoingEffects: OngoingEffect[];
 }
@@ -1833,12 +2051,74 @@ export type LevelUpChoicePrompt =
       options: Array<{ id: string; name: string; level: number; school: string }>;
       /** Number of spells the player must add. Typically 2 (Wizard L2+). */
       count: number;
+    }
+  | {
+      kind: 'subclass-choice';
+      label: string;
+      description: string;
+      /** Subclasses authored for the character's class, with their description
+       *  surfaced so the picker can preview the playstyle. */
+      options: Array<{ id: string; name: string; description: string }>;
+    }
+  | {
+      kind: 'asi-or-feat';
+      label: string;
+      description: string;
+      /** Feats the character is eligible for at this level (filtered server-
+       *  side; the picker UI shows id+name+description). */
+      featOptions: Array<{ id: string; name: string; description: string }>;
+      /** Ability scores the player may increase, with the current value of
+       *  each so the picker can grey out anything already at 20. */
+      abilityScores: Array<{ key: AbilityKey; current: number }>;
+    }
+  | {
+      kind: 'expertise-pick';
+      label: string;
+      description: string;
+      /** Skill ids the player is currently proficient in (so Expertise can
+       *  stack PB on them). Computed server-side from the character's
+       *  pre-baked skill totals vs ability mod. */
+      options: string[];
+      /** How many skills the player must promote to Expertise (Rogue L1 / L6
+       *  both grant 2). */
+      count: number;
+    }
+  | {
+      kind: 'fighting-style-pick';
+      label: string;
+      description: string;
+      /** Fighting Style feat ids the player may take. Excludes any the
+       *  character already has — Fighting Style can be swapped on later
+       *  level-up but not duplicated. */
+      options: Array<{ id: string; name: string; description: string }>;
     };
 
-/** Player-supplied answers to a `LevelUpPreview`. Each chosen value matches its prompt's `kind`. */
+/** Player-supplied answers to a `LevelUpPreview`. Each chosen value matches
+ *  its prompt's `kind`. Optional because not every level surfaces every
+ *  prompt — the engine validates that every prompt the preview surfaces
+ *  has a matching answer. */
 export interface LevelUpChoices {
   scholarExpertise?: string;
   wizardSpellbookAdd?: string[];
+  /** Subclass id picked at L3 (or whenever the parent class fires its
+   *  `subclass-choice` template). Stored on `playerDef.subclassId` by the
+   *  handler so subclass progression entries fire on subsequent levels. */
+  subclassChoice?: string;
+  /** Answer to the ASI-or-Feat prompt (every L4 / L8 / L12 / L16, plus
+   *  Fighter L6 / L14 and class-19 boons). One of three shapes:
+   *  - `{ kind: 'asi-plus-2', ability }` — +2 to a single ability (max 20).
+   *  - `{ kind: 'asi-plus-1', abilities: [a, b] }` — +1 to two abilities.
+   *  - `{ kind: 'feat', featId }` — take a feat instead of an ASI. */
+  asiOrFeat?:
+    | { kind: 'asi-plus-2'; ability: AbilityKey }
+    | { kind: 'asi-plus-1'; abilities: [AbilityKey, AbilityKey] }
+    | { kind: 'feat'; featId: string };
+  /** Rogue Expertise picks. The handler stacks PB on each named skill so the
+   *  total = ability mod + 2 * PB after this level-up. */
+  expertisePick?: string[];
+  /** Fighting Style feat id chosen at Fighter L1 or any later level-up that
+   *  surfaces the prompt (Champion L7 Additional Fighting Style). */
+  fightingStylePick?: string;
 }
 
 // ── Long Rest preview + choices ──────────────────────────────────────────────

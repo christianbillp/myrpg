@@ -518,6 +518,115 @@ Each spell carries SRD metadata (level, school, classes, casting time, range, co
 
 ---
 
+## classes/ and subclasses/
+
+`server/data/classes/<id>.json` encodes a full SRD class as data — core traits (hit die, primary ability, saves, skills, weapon/armor proficiencies), spellcasting model, per-level scaling tracks, and a `progression[]` array that lists per-level features and choice prompts. The engine reads these via `shared/classProgression.ts` resolvers; nothing in [Leveling.ts](../server/src/engine/Leveling.ts) or [GameEngine.ts](../server/src/engine/GameEngine.ts) hard-codes per-class behaviour any more.
+
+`server/data/subclasses/<id>.json` mirrors the same shape for the chosen subclass. Each subclass references its parent via `classId`; the level-up resolver walks the subclass's `progression[]` at every level the parent class lists in `subclassLevels`. Subclass entries may also grant always-prepared spells (`grantedSpells`) and always-known cantrips (`grantedCantrips`) — these extend the player's prepared list without counting against the prep cap.
+
+### Class spellcasting models
+
+The `spellcasting.slotTableKind` × `spellcasting.learnModel` pair covers every SRD caster shape:
+
+| Class | `slotTableKind` | `learnModel` | `recovery` |
+|---|---|---|---|
+| Wizard | `full` | `spellbook` | `long-rest` |
+| Cleric / Druid / Bard | `full` | `from-class-list` | `long-rest` |
+| Sorcerer | `full` | `known` | `long-rest` |
+| Paladin / Ranger | `half` | `from-class-list` | `long-rest` |
+| Warlock | `pact-magic` | `known` | `short-rest` |
+| Fighter / Rogue / Barbarian / Monk | `none` | `innate` | (n/a) |
+
+Pact Magic gets its own `pactMagic: { slotsByLevel, slotLevelByLevel }` block on the spellcasting object (separate from the 9-column `spellSlotsByLevel`), because the slots refill on Short Rest and all live at the same level. Mystic Arcanum (Warlock L11/13/15/17) is `spellcasting.mysticArcanum: { atLevels, spellLevels }` — one spell per level, used once per Long Rest, never a slot. Runtime state for both lives on `PlayerState.pactMagic` and `PlayerState.mysticArcanum`.
+
+### Class progression entries
+
+Each entry in `progression[]` maps a level to:
+
+- `features?: string[]` — feature ids granted at this level. Must exist in `defs.features`.
+- `choices?: LevelUpChoiceTemplate[]` — prompts the LevelUpOverlay surfaces. Each template (`{kind, count?}`) is expanded at runtime by `expandChoices` in [Leveling.ts](../server/src/engine/Leveling.ts) into a fully-populated `LevelUpChoicePrompt` (with `options` derived from the live character). Handlers live in [LevelUpChoiceHandlers.ts](../server/src/engine/LevelUpChoiceHandlers.ts).
+- `subclass?: true` — marks a level at which the chosen subclass's own progression entry should fire.
+
+### Scaling tracks
+
+`tracksByLevel` is the single hook for per-level scaling values that aren't resource pools authored as features:
+
+```jsonc
+"tracksByLevel": {
+  "extra-attacks":          [1,1,1,1,2,2,2,2,2,2,3,3,3,3,3,3,3,3,3,4],
+  "sneak-attack-dice":      [1,1,2,2,3,3,4,4,5,5,6,6,7,7,8,8,9,9,10,10],
+  "martial-arts-die":       ["1d6","1d6","1d6","1d6","1d8","1d8", ...],
+  "second-wind-uses":       [2,2,2,3,3,3,3,3,3,4, ...],
+  "unarmored-movement-feet":[0,10,10,10,10,15,15,15,15,20, ...]
+}
+```
+
+Engine subsystems consume them via `playerDef.tracks[id]` (set on level-up by `syncTracks` in Leveling.ts). Adding a new scaling track for a new class is data-only — no engine code change.
+
+### Subclass JSON shape
+
+```jsonc
+{
+  "id": "evoker", "classId": "wizard",
+  "name": "Evoker", "description": "...",
+  "progression": [
+    { "level":  3, "features": ["evocation-savant", "potent-cantrip"] },
+    { "level":  6, "features": ["sculpt-spells"] }
+  ],
+  // Optional: subclasses that graft spellcasting onto a non-caster class
+  // (Eldritch Knight, Arcane Trickster — not in SRD 5.2.1) supply their own
+  // `spellcasting` block, and may reference a different class's spell list
+  // via `spellListClassId`.
+  "spellcasting": null,
+  "spellListClassId": null
+}
+```
+
+Subclass progression entries may carry `grantedSpells: string[]` (Cleric Domain spells, Paladin Oath spells, Druid Circle spells, Warlock Patron spells) and `grantedCantrips: string[]` — both extend the player's list at the level they're first declared and survive future long rests.
+
+### Level-up choice prompts
+
+`Leveling.expandChoices` (in `server/src/engine/Leveling.ts`) maps each `LevelUpChoiceTemplate` (authored in the class/subclass JSON) to a fully-populated `LevelUpChoicePrompt` by filling in the runtime `options`. The pure handlers live in `server/src/engine/LevelUpChoiceHandlers.ts` and mutate the cloned `PlayerDef`. Currently implemented:
+
+| Template kind | Options derived from | Handler effect |
+|---|---|---|
+| `scholar-expertise` | The six SRD Scholar skills | Stacks PB on the chosen skill |
+| `wizard-spellbook-add` | Wizard L1+ spells the character can cast and doesn't yet know | Appends to `defaultSpellbookIds`; count comes from `spellbookGrowthPerLevel` |
+| `subclass-choice` | Subclasses with `classId === classDef.id` | Sets `playerDef.subclassId`; subclass features at the current level land in step 6 of `applyLevelUp` |
+| `asi-or-feat` | Feat catalogue minus existing feats; live ability scores | Either `+2 one ability`, `+1/+1 two abilities` (both gated to ≤ 20), or appends a feat id |
+| `expertise-pick` | Skills the character is currently proficient in (inferred from pre-baked `skills[k] - mod(ability) >= PB`) | Stacks PB on each chosen skill |
+| `fighting-style-pick` | Feats with `category === 'fighting-style'` minus existing | Appends feat id; rider applied by `applyFeats` on next session boot |
+
+Unimplemented but reserved: `cantrip-known`, `cantrip-swap`, `spell-swap`, `metamagic-pick`, `invocation-pick`, `mystic-arcanum-pick`, `magical-secrets-pick`, `epic-boon-choice` — all surface as no-op prompts so an authored level entry doesn't crash the preview.
+
+### Track-driven engine consumers
+
+`playerDef.tracks` (set by `syncTracks` during level-up and by `syncCharacterTracks` at engine boot) is the single source of truth for per-level scaling values. Current consumers:
+
+| Track id | Read by | Effect |
+|---|---|---|
+| `extra-attacks` | `CombatActions.attacksPerAction` | Number of weapon attacks per Attack action (1 → 4 across Fighter L1-L20) |
+| `sneak-attack-dice` | `CombatSystem.resolvePlayerAttack` (via legacy `playerDef.sneakAttackDice` shim) | d6 count added on a Sneak Attack hit |
+| `second-wind-uses`, `action-surge-uses`, `indomitable-uses` | Feature handlers in `FeatureRegistry` | Per-rest pools refilled to the track value on level-up + Long Rest |
+| `weapon-mastery-count` | (unconsumed; data only) | Per-character cap on weapons with active Mastery — picker UI not yet authored |
+
+### Subclass-aware feature-id checks
+
+A handful of features short-circuit on `playerDef.defaultFeatureIds.includes(...)` to apply their effect without a dedicated handler:
+
+| Feature id | Engine path | Effect |
+|---|---|---|
+| `improved-critical` (Champion L3) | `CombatSystem.resolvePlayerAttack` — `critFloor` | Critical hits on natural 19-20 |
+| `superior-critical` (Champion L15) | same | Critical hits on natural 18-20 (additive) |
+| `potent-cantrip` (Evoker L3) | `SpellSystem.resolveAttackRollSpell` miss path + `SpellSystem.damageAfterSave` | Damaging cantrips deal half on a miss / successful save |
+| `arcane-recovery` (Wizard L1) | `ExplorationActions.doShortRest` | Greedy slot recovery up to ⌈level/2⌉ levels, ≤ L5, once per Long Rest |
+
+### Routes
+
+`GET /classes` and `GET /subclasses` return the loaded def arrays. Used by character-creation and the LevelUpOverlay's subclass-choice picker.
+
+---
+
 ## features/
 
 Class abilities authored as data + handler. Each file describes a single feature; characters list the features they know via `defaultFeatureIds`. At session start the engine initializes one resource pool per feature with `resource.kind !== 'unlimited'` into `PlayerState.resources[featureId]`, and the [`FeatureRegistry`](../server/src/engine/FeatureRegistry.ts) maps `handler` ids to the TypeScript functions that resolve the mechanical effect.
@@ -578,11 +687,12 @@ SRD 5.2.1 character advancement. The XP-to-level table + helpers live in [`share
 
 ### Server flow
 
-`server/src/engine/Leveling.ts` exposes three entry points:
+`server/src/engine/Leveling.ts` exposes three entry points, all driven by class JSON data via `shared/classProgression.ts`:
 
-- **`previewForLevel(playerDef, toLevel, features, spells)`** — pure preview builder, no XP gate. Returns a `LevelUpPreview` (HP gain, proficiency before/after, spell-slot deltas, new feature list, required choices). Throws when `toLevel` isn't yet supported by the Tier 1 catalogue (current scope: L2 only for Fighter / Rogue / Wizard).
-- **`applyLevelUp({ playerDef, choices, ... preview })`** — mutates the cloned `playerDef` in place: bumps `level`, `maxHp`, `proficiencyBonus`, `defaultSpellSlots`, appends new feature ids to `defaultFeatureIds`, and applies class-specific choice payloads (Wizard L2: adds Scholar Expertise to `skills[chosen]`, appends spellbook additions to `defaultSpellbookIds`).
+- **`previewForLevel(playerDef, toLevel, features, spells, classes, subclasses)`** — pure preview builder, no XP gate. Returns a `LevelUpPreview` (HP gain, proficiency before/after, spell-slot deltas, new feature list, required choices). Reads `classDef.fixedHpPerLevel`, `cpFeaturesAt`, `spellSlotDelta`, and `subclassFeaturesAt` — no hard-coded level logic remains. When the target class isn't yet authored as data the preview falls back to "no features granted" rather than throwing.
+- **`applyLevelUp({ playerDef, choices, ... classes, subclasses, preview })`** — mutates the cloned `playerDef` in place: bumps `level`, `maxHp`, `proficiencyBonus`, `defaultSpellSlots`, appends new feature ids to `defaultFeatureIds`, dispatches choice payloads through `LevelUpChoiceHandlers.applyAllChoices`, syncs `playerDef.tracks` from `classDef.tracksByLevel`, and applies subclass-granted always-prepared spells / cantrips when the level is one of the parent's `subclassLevels`.
 - **`applyLevelUpHistory(playerDef, history, ...)`** — session-start replay. Iterates a recorded `LevelUpChoices[]` and applies each one so the engine's per-session clone reflects the character's current level.
+- **`syncCharacterTracks(playerDef, classes)`** — projects the class's track values onto `playerDef.tracks` for the character's current level. Called once at engine boot after the level-up replay.
 
 `GameEngine.buildLevelUpPreview()` and `GameEngine.commitLevelUp(choices)` wrap these for HTTP routes. Commit projects the new `maxHp` onto `state.player.hp` (heals the gained HP), tops up the player's runtime spell-slot pool by each delta, and initialises feature resource pools for newly-granted resourced features (e.g. Action Surge → 1/1).
 

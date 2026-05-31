@@ -749,8 +749,13 @@ export class TriggerEditor {
 
   private buildCombatBlock(trig: ComposedTrigger | ComposedAction, onChange: () => void): HTMLElement {
     const block = document.createElement("div");
-    block.appendChild(this.makeLabel("DEF ID (optional — flips this id to enemy)"));
-    block.appendChild(this.makeTextInput(trig.defId ?? "", "e.g. cultist", (val) => { trig.defId = val.trim(); onChange(); }));
+    // Accepts either a bare def id (flips every instance — e.g. "commoner"
+    // flips all four commoners) or an instance id (flips just that one —
+    // e.g. "commoner_3" flips only the third commoner). Instance ids are
+    // assigned at spawn time: singletons keep the bare def, duplicates get
+    // a 1-based ordinal suffix walked in ally → enemy → neutral order.
+    block.appendChild(this.makeLabel("DEF ID — bare (e.g. \"cultist\") flips all instances; suffixed (e.g. \"commoner_3\") flips one"));
+    block.appendChild(this.makeTextInput(trig.defId ?? "", "e.g. cultist or commoner_3", (val) => { trig.defId = val.trim(); onChange(); }));
     return block;
   }
 

@@ -1,0 +1,8 @@
+{
+  "id": "improved-critical",
+  "name": "Improved Critical",
+  "classId": "fighter",
+  "minLevel": 3,
+  "description": "Your attack rolls with weapons and Unarmed Strikes can score a Critical Hit on a roll of 19 or 20 on the d20.",
+  "cost": { "kind": "passive" }
+}

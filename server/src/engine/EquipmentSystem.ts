@@ -39,10 +39,13 @@ export function makePlayerAttack(playerDef: PlayerDef, weapon: WeaponDef): Playe
     damageSides: weapon.damageSides,
     damageType: weapon.damageType,
     savageAttacker: playerDef.savageAttacker,
+    finesse: !!weapon.finesse,
     graze: weapon.mastery === 'graze',
     vex: weapon.mastery === 'vex',
     sap: weapon.mastery === 'sap',
     slow: weapon.mastery === 'slow',
+    push: weapon.mastery === 'push',
+    topple: weapon.mastery === 'topple',
     rangeNormal: isRanged ? weapon.rangeNormal : undefined,
     rangeLong:   isRanged ? weapon.rangeLong : undefined,
     ammunitionType: isRanged ? weapon.ammunitionType : undefined,
@@ -144,5 +147,5 @@ export function applyEquipment(
   playerDef.ac = computeAC(playerDef, armor, shield, mageArmor, shieldSpellActive);
   playerDef.mainAttack = weapon
     ? makePlayerAttack(playerDef, weapon)
-    : { name: 'Unarmed Strike', statKey: 'str', damageDice: 1, damageSides: 1, damageType: 'bludgeoning', savageAttacker: false, graze: false, vex: false, sap: false, slow: false };
+    : { name: 'Unarmed Strike', statKey: 'str', damageDice: 1, damageSides: 1, damageType: 'bludgeoning', savageAttacker: false, finesse: false, graze: false, vex: false, sap: false, slow: false, push: false, topple: false };
 }

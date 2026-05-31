@@ -55,7 +55,7 @@ import { registerEncounterLifecycle, publishEncounterStarted } from './Encounter
 import { EventBus } from './EventBus.js';
 import { publishHpThresholdCrossings } from './ThresholdPublisher.js';
 import { WeaponDef } from './types.js';
-import { buildLevelUpPreview, applyLevelUp, applyLevelUpHistory } from './Leveling.js';
+import { buildLevelUpPreview, applyLevelUp, applyLevelUpHistory, syncCharacterTracks } from './Leveling.js';
 import { canLevelUp } from '../../../shared/xpTable.js';
 import type { LevelUpPreview, LevelUpChoices, LongRestPreview, LongRestChoices } from '../../../shared/types.js';
 import { buildLongRestPreview, applyLongRest } from './Resting.js';
@@ -89,8 +89,13 @@ export class GameEngine {
     // Replay recorded level-ups onto the clone BEFORE applyEquipment so AC /
     // proficiency-bonus-derived skills land at the character's current level.
     if (levelUpHistory.length > 0) {
-      applyLevelUpHistory(this.playerDef, levelUpHistory, defs.features, defs.spells);
+      applyLevelUpHistory(this.playerDef, levelUpHistory, defs.features, defs.spells, defs.classes, defs.subclasses, defs.feats);
     }
+    // Project the class's per-level scaling tracks onto the clone so engine
+    // subsystems can read `playerDef.tracks[id]` regardless of how the
+    // character got to this level (fresh build, level-up replay, AIGM
+    // forced advancement). Idempotent — safe to run after the replay above.
+    syncCharacterTracks(this.playerDef, defs.classes);
     // Dev mode `unlockAllSpells` — widen the cloned playerDef's spellbook
     // and cantrip list so `castableSpellIds` treats every spell of the
     // character's class as known. Cantrips need explicit treatment because
@@ -1057,6 +1062,9 @@ export class GameEngine {
       xp: this.state.player.xp,
       features: this.defs.features,
       spells: this.defs.spells,
+      classes: this.defs.classes,
+      subclasses: this.defs.subclasses,
+      feats: this.defs.feats,
     });
   }
 
@@ -1079,6 +1087,9 @@ export class GameEngine {
       choices,
       features: this.defs.features,
       spells: this.defs.spells,
+      classes: this.defs.classes,
+      subclasses: this.defs.subclasses,
+      feats: this.defs.feats,
       preview,
     });
 
@@ -1258,7 +1269,7 @@ export class GameEngine {
       const base = defs.playerDefs.find((p) => p.id === req.playerDefId);
       if (base) {
         const leveled = JSON.parse(JSON.stringify(base)) as PlayerDef;
-        applyLevelUpHistory(leveled, history, defs.features, defs.spells);
+        applyLevelUpHistory(leveled, history, defs.features, defs.spells, defs.classes, defs.subclasses, defs.feats);
         defsForBuild = {
           ...defs,
           playerDefs: defs.playerDefs.map((p) => p.id === base.id ? leveled : p),

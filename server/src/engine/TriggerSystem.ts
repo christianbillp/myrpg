@@ -63,6 +63,12 @@ function validateTrigger(trigger: EncounterTrigger, ctx: GameContext): void {
   // ally/enemy slots after SpawnHelpers.populateNpcs runs, so authors don't
   // have to maintain a separate manifest.
   const spawnedDefIds = new Set(ctx.state.npcs.map((n) => n.defId));
+  // Runtime instance ids assigned by `SpawnHelpers.populateNpcs` —
+  // `${defId}` for singletons, `${defId}_${ordinal}` for duplicates. Used
+  // by per-instance disposition flips (`set_disposition_by_def_id` accepts
+  // either a bare def or an instance id), so the validation below treats
+  // a hit on either set as "spawned".
+  const spawnedInstanceIds = new Set(ctx.state.npcs.map((n) => n.id));
 
   // SRD-style "any flag" wildcard listeners are almost always authoring slips —
   // every other flag write in the same encounter pings them. The wildcard
@@ -94,7 +100,9 @@ function validateTrigger(trigger: EncounterTrigger, ctx: GameContext): void {
         warn(`set_npc_dead defId "${a.defId}" is not spawned in this encounter — action will no-op`);
       }
     }
-    if (a.type === 'set_disposition_by_def_id' && !spawnedDefIds.has(a.defId)) {
+    if (a.type === 'set_disposition_by_def_id'
+        && !spawnedDefIds.has(a.defId)
+        && !spawnedInstanceIds.has(a.defId)) {
       warn(`set_disposition_by_def_id defId "${a.defId}" is not spawned in this encounter — action will no-op`);
     }
     if (a.type === 'npc_speaks' && /^(enemy|neutral|ally)_(\d+)$/.test(a.entity)) {
@@ -372,20 +380,45 @@ export function fireAction(ctx: GameContext, action: TriggerAction): void {
       // standing with `party` to the corresponding pole. Mirror to the matrix
       // so Pass 3 readers (off-camera tick, NPC-vs-NPC AI) see the same view
       // as the existing combat-start condition that still reads disposition.
+      //
+      // The action's `defId` field accepts either:
+      //   • a bare def id (`"commoner"`) — flips every spawned NPC with that
+      //     def, the historical "the bandits attack" shape;
+      //   • an instance id (`"commoner_3"`) — flips just that one NPC, so an
+      //     author can wire "the third commoner reveals himself" without
+      //     pulling every other commoner into combat with them.
+      // The runtime instance id is whatever `instanceIdForSlot` produced at
+      // spawn time (`${defId}` for singletons, `${defId}_${ordinal}` for
+      // duplicates), so the editor's free-text input can target either.
       const standingByDisp = action.disposition === 'enemy' ? -100
                             : action.disposition === 'ally' ? 100
                             : 0;
+      // Detect instance-targeted vs def-targeted before iterating: when the
+      // action's `defId` resolves to a unique NPC instance (`commoner_3`),
+      // only that one creature flips — aggroing the rest of its faction
+      // would drag every other instance with it, defeating the point of
+      // calling out a single duplicate. Bare-def flips keep the historical
+      // faction-wide aggro since the author meant "everyone with this def".
+      const isInstanceTargeted = ctx.state.npcs.some((n) => n.id === action.defId);
+      const matches = ctx.state.npcs.filter((n) =>
+        n.hp > 0 && (n.defId === action.defId || n.id === action.defId),
+      );
       const touchedFactions = new Set<string>();
-      for (const npc of ctx.state.npcs.filter((n) => n.defId === action.defId && n.hp > 0)) {
+      for (const npc of matches) {
         npc.disposition = action.disposition;
         if ((action.disposition === 'ally' || action.disposition === 'enemy') && !npc.combatLabel) {
           ctx.assignCombatLabel(npc);
         }
-        if (action.disposition === 'enemy') ctx.aggroFaction(npc);
+        if (action.disposition === 'enemy' && !isInstanceTargeted) ctx.aggroFaction(npc);
         touchedFactions.add(npc.factionId);
       }
-      for (const factionId of touchedFactions) {
-        setRelation(ctx.state, factionId, PLAYER_FACTION_ID, standingByDisp);
+      // Faction-level matrix flip only applies to a def-targeted action —
+      // an instance-targeted flip is a single-NPC event, not a faction
+      // realignment, and shouldn't move the standings dial.
+      if (!isInstanceTargeted) {
+        for (const factionId of touchedFactions) {
+          setRelation(ctx.state, factionId, PLAYER_FACTION_ID, standingByDisp);
+        }
       }
       return;
     }

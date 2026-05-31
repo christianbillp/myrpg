@@ -70,7 +70,12 @@ function resolvePlayerAttack(
   playerHidden = false,
   /** SRD Cover AC bonus: half +2, three-quarters +5, total = auto-miss. */
   coverAcBonus = 0,
-): { damage: number; isHit: boolean; isCrit: boolean; attackTotal: number; naturalRoll: number; logs: LogEntry[]; vexApplied: boolean; slowApplied: boolean; bonusComponents: RolledBonusDamage[] } {
+  /** Caller-computed flag: SRD Sneak Attack eligibility for THIS attack.
+   *  Encapsulates Finesse/Ranged weapon check, once-per-turn gate, ally-
+   *  adjacent alternative, and the "no Disadvantage" rider. When `false`,
+   *  Sneak dice are NOT added even if the attack has Advantage. */
+  sneakAttackAllowed = false,
+): { damage: number; isHit: boolean; isCrit: boolean; attackTotal: number; naturalRoll: number; logs: LogEntry[]; vexApplied: boolean; slowApplied: boolean; bonusComponents: RolledBonusDamage[]; sneakAttackFired: boolean } {
   const statMod = attack.statKey === 'str' ? mod(player.str) : mod(player.dex);
   const attackBonus = statMod + profBonus;
   const logs: LogEntry[] = [];
@@ -94,23 +99,38 @@ function resolvePlayerAttack(
   }
 
   const total = naturalRoll + attackBonus;
-  const natural20 = naturalRoll === 20;
   const natural1 = naturalRoll === 1;
   const effectiveAc = enemy.ac + coverAcBonus;
-  const wouldHit = natural20 || total >= effectiveAc;
+  // SRD Champion Improved Critical (L3): crit on 19-20. Superior Critical
+  // (L15): crit on 18-20. Read off the granted feature ids — both are
+  // additive so a Champion L15 has both ids on the playerDef. Crits always
+  // hit regardless of AC, so the crit-range floor expands `wouldHit` too.
+  const featIds = player.defaultFeatureIds ?? [];
+  const critFloor = featIds.includes('superior-critical') ? 18
+                  : featIds.includes('improved-critical') ? 19
+                  : 20;
+  const inCritRange = naturalRoll >= critFloor;
+  const wouldHit = inCritRange || total >= effectiveAc;
   const isHit = wouldHit && !natural1;
-  const isCrit = natural20 || (autoCrit && isHit);
+  const isCrit = inCritRange || (autoCrit && isHit);
   const coverNote = coverAcBonus > 0 ? ` (+${coverAcBonus} cover)` : '';
   const atkPart = `${rollPart}+${attackBonus}=${total} vs AC ${effectiveAc}${coverNote}`;
 
   let damage = 0, vexApplied = false, slowApplied = false;
+  let sneakAttackFired = false;
+  // SRD Sneak Attack: extra damage only fires on a hit, only if the caller
+  // has declared the attack eligible (Finesse / Ranged + once-per-turn +
+  // (Advantage OR (ally-adjacent && !Disadvantage)) — see
+  // `sneakAttackEligible` in CombatActions).
+  const wantsSneak = (isHit || isCrit) && sneakAttackAllowed && player.sneakAttackDice > 0;
 
   if (isCrit) {
     const { total: diceTot, rolls: diceRolls } = rollDice(attack.damageDice * 2, attack.damageSides);
     let sneakTot = 0, sneakRolls: number[] = [];
-    if (withAdvantage && player.sneakAttackDice > 0) {
+    if (wantsSneak) {
       const s = rollDice(player.sneakAttackDice * 2, 6);
       sneakTot = s.total; sneakRolls = s.rolls;
+      sneakAttackFired = true;
     }
     damage = diceTot + statMod + sneakTot;
     const sneakPart = sneakTot > 0 ? ` + sneak[${sneakRolls.join(',')}]=${sneakTot}` : '';
@@ -131,9 +151,10 @@ function resolvePlayerAttack(
       diceTotal = r.total; diceRolls = r.rolls;
     }
     let sneakTot = 0, sneakRolls: number[] = [];
-    if (withAdvantage && player.sneakAttackDice > 0) {
+    if (wantsSneak) {
       const s = rollDice(player.sneakAttackDice, 6);
       sneakTot = s.total; sneakRolls = s.rolls;
+      sneakAttackFired = true;
     }
     damage = diceTotal + statMod + sneakTot;
     const sneakSuffix = sneakTot > 0 ? ` (+${sneakTot} sneak)` : '';
@@ -163,7 +184,7 @@ function resolvePlayerAttack(
     ? rollAllBonusDamage(attack.bonusDamage, isCrit)
     : [];
 
-  return { damage, isHit, isCrit, attackTotal: total, naturalRoll, logs, vexApplied, slowApplied, bonusComponents };
+  return { damage, isHit, isCrit, attackTotal: total, naturalRoll, logs, vexApplied, slowApplied, bonusComponents, sneakAttackFired };
 }
 
 export function playerMeleeAttack(
@@ -174,8 +195,9 @@ export function playerMeleeAttack(
   autoCrit = false,
   playerHidden = false,
   coverAcBonus = 0,
-): { damage: number; isHit: boolean; isCrit: boolean; attackTotal: number; naturalRoll: number; logs: LogEntry[]; vexApplied: boolean; slowApplied: boolean; bonusComponents: RolledBonusDamage[] } {
-  return resolvePlayerAttack(player, player.mainAttack, enemy, withAdvantage, withDisadvantage, player.proficiencyBonus, autoCrit, playerHidden, coverAcBonus);
+  sneakAttackAllowed = false,
+): { damage: number; isHit: boolean; isCrit: boolean; attackTotal: number; naturalRoll: number; logs: LogEntry[]; vexApplied: boolean; slowApplied: boolean; bonusComponents: RolledBonusDamage[]; sneakAttackFired: boolean } {
+  return resolvePlayerAttack(player, player.mainAttack, enemy, withAdvantage, withDisadvantage, player.proficiencyBonus, autoCrit, playerHidden, coverAcBonus, sneakAttackAllowed);
 }
 
 export function playerThrowAttack(
@@ -188,8 +210,9 @@ export function playerThrowAttack(
   autoCrit = false,
   playerHidden = false,
   coverAcBonus = 0,
-): { damage: number; isHit: boolean; isCrit: boolean; attackTotal: number; naturalRoll: number; logs: LogEntry[]; vexApplied: boolean; slowApplied: boolean; bonusComponents: RolledBonusDamage[] } {
-  return resolvePlayerAttack(player, attack, enemy, withAdvantage, withDisadvantage, profBonus ?? player.proficiencyBonus, autoCrit, playerHidden, coverAcBonus);
+  sneakAttackAllowed = false,
+): { damage: number; isHit: boolean; isCrit: boolean; attackTotal: number; naturalRoll: number; logs: LogEntry[]; vexApplied: boolean; slowApplied: boolean; bonusComponents: RolledBonusDamage[]; sneakAttackFired: boolean } {
+  return resolvePlayerAttack(player, attack, enemy, withAdvantage, withDisadvantage, profBonus ?? player.proficiencyBonus, autoCrit, playerHidden, coverAcBonus, sneakAttackAllowed);
 }
 
 /**

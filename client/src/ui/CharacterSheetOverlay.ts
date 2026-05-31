@@ -11,7 +11,8 @@ import { BaseOverlay } from "./BaseOverlay";
 import { PlayerDef, PlayerAttack } from "../data/player";
 import { ItemDef, ArmorDef, WeaponDef, ShieldDef, EquipmentDef } from "../data/equipment";
 import { UIScale } from "./UIScale";
-import type { PlayerState, SpellDef } from "../net/types";
+import type { PlayerState, SpellDef, FeatureDef, ClassDef, SubclassDef } from "../net/types";
+import { featuresAt as cpFeaturesAt, subclassFeaturesAt, subclassGrantedSpellsAt, subclassGrantedCantripsAt } from "../../../shared/classProgression";
 import { buildPlayerStatusChips, STATUS_TONE_COLOR } from "./PlayerStatus";
 import { formatCoins } from "../../../shared/currency";
 
@@ -94,7 +95,7 @@ const ABILITY_LABEL: Record<Ability, string> = {
   str: "Str", dex: "Dex", con: "Con", int: "Int", wis: "Wis", cha: "Cha",
 };
 
-type TabId = "stats" | "story" | "equipment" | "spells";
+type TabId = "stats" | "features" | "story" | "equipment" | "spells";
 
 export interface CharacterSheetCallbacks {
   onEquip: (slot: "armor" | "weapon" | "shield", itemId: string) => void;
@@ -122,6 +123,18 @@ export interface CharacterSheetInputs {
   castableSpellIds: string[];
   /** Phase — gates ritual casting (exploring-only). */
   isExploring: boolean;
+  /** Feature defs (full catalogue). The Features tab cross-references the
+   *  character's class progression against this list to render id → name +
+   *  description for every feature the character has at their current level. */
+  features: FeatureDef[];
+  /** Class defs (full catalogue). Used by the Features tab to walk the
+   *  class's progression entries 1..currentLevel and list every granted
+   *  feature alongside the level it was granted at. */
+  classes: ClassDef[];
+  /** Subclass defs (full catalogue). When the player picks a subclass
+   *  (`playerDef.subclassId`), the Features tab also walks its progression
+   *  for the levels the parent class reaches. */
+  subclasses: SubclassDef[];
 }
 
 export class CharacterSheetOverlay extends BaseOverlay {
@@ -181,6 +194,7 @@ export class CharacterSheetOverlay extends BaseOverlay {
     const hasSpells = !!this.inputs.playerDef.spellcastingAbility;
     const tabs: { id: TabId; label: string }[] = [
       { id: "stats",     label: "Stats" },
+      { id: "features",  label: "Features" },
       { id: "story",     label: "Story" },
       { id: "equipment", label: "Equipment" },
     ];
@@ -211,6 +225,7 @@ export class CharacterSheetOverlay extends BaseOverlay {
     this.contentEl.innerHTML = "";
     switch (this.currentTab) {
       case "stats":     this.renderStatsTab();     break;
+      case "features":  this.renderFeaturesTab();  break;
       case "story":     this.renderStoryTab();     break;
       case "equipment": this.renderInventoryTab(); break;
       case "spells":    this.renderSpellsTab();    break;
@@ -339,6 +354,106 @@ export class CharacterSheetOverlay extends BaseOverlay {
         <div style="font-size:11px;color:#aabbcc;line-height:1.6;">
           XP: ${state.xp} · Coins: ${escHtml(formatCoins(state.balanceCp))} · Passive Perception: ${passivePerception}
         </div>
+      </div>`);
+  }
+
+  // ── Features tab ───────────────────────────────────────────────────────────
+  //
+  // Walks the class JSON's `progression[]` from L1 up through the character's
+  // current level, listing every feature granted at each level. If a
+  // subclass has been chosen (`playerDef.subclassId`), the subclass's
+  // `progression[]` is walked in parallel for the same level range and
+  // surfaced under a labelled section. Features that exist as data in
+  // `defs.features` render with their full SRD description; ids without a
+  // file render with the id as a fallback name and a placeholder description
+  // so a content gap is visible rather than silent.
+
+  private renderFeaturesTab(): void {
+    const { playerDef, features, classes, subclasses } = this.inputs;
+    const className = (playerDef.className ?? "").toLowerCase();
+    const classDef = classes.find((c) => c.id.toLowerCase() === className) ?? null;
+    const subclassDef = playerDef.subclassId
+      ? (subclasses.find((s) => s.id === playerDef.subclassId) ?? null)
+      : null;
+    const currentLevel = Math.max(1, Math.min(20, playerDef.level));
+
+    type Row = { level: number; featureId: string; source: string };
+
+    const classRows: Row[] = [];
+    if (classDef) {
+      const seen = new Set<string>();
+      for (let lvl = 1; lvl <= currentLevel; lvl++) {
+        for (const fid of cpFeaturesAt(classDef, lvl)) {
+          if (seen.has(fid)) continue;
+          seen.add(fid);
+          classRows.push({ level: lvl, featureId: fid, source: `${classDef.name} L${lvl}` });
+        }
+      }
+    }
+
+    const subclassRows: Row[] = [];
+    let subclassGrantedSpellIds: string[] = [];
+    let subclassGrantedCantripIds: string[] = [];
+    if (classDef && subclassDef) {
+      const seen = new Set<string>();
+      for (let lvl = 1; lvl <= currentLevel; lvl++) {
+        for (const fid of subclassFeaturesAt(subclassDef, lvl)) {
+          if (seen.has(fid)) continue;
+          seen.add(fid);
+          subclassRows.push({ level: lvl, featureId: fid, source: `${subclassDef.name} L${lvl}` });
+        }
+        subclassGrantedSpellIds = subclassGrantedSpellIds.concat(subclassGrantedSpellsAt(subclassDef, lvl));
+        subclassGrantedCantripIds = subclassGrantedCantripsAt
+          ? subclassGrantedCantripIds.concat(subclassGrantedCantripsAt(subclassDef, lvl))
+          : subclassGrantedCantripIds;
+      }
+    }
+
+    const renderFeatureRow = (row: Row): string => {
+      const def = features.find((f) => f.id === row.featureId);
+      const name = def?.name ?? titleCase(row.featureId.replace(/-/g, " "));
+      const desc = def?.description ?? `(No data authored for "${row.featureId}" — feature granted but its mechanics are not yet implemented.)`;
+      return `
+        <div style="border-left:2px solid #2a6655;padding:6px 12px;margin-bottom:10px;">
+          <div style="display:flex;justify-content:space-between;align-items:baseline;gap:8px;">
+            <div style="font-size:13px;color:${ACCENT};font-weight:bold;">${escHtml(name)}</div>
+            <div style="font-size:9px;color:#556677;letter-spacing:1px;flex-shrink:0;">${escHtml(row.source.toUpperCase())}</div>
+          </div>
+          <div style="margin-top:4px;font-size:11px;color:#aabbcc;line-height:1.55;">${escHtml(desc)}</div>
+        </div>`;
+    };
+
+    const classBlock = classRows.length === 0
+      ? `<div style="font-size:11px;color:${DIM};font-style:italic;">No class features yet.</div>`
+      : classRows.map(renderFeatureRow).join("");
+
+    const subclassHeader = subclassDef
+      ? `
+        <div style="font-size:10px;color:#556677;letter-spacing:2px;margin:18px 0 8px;">${escHtml(subclassDef.name.toUpperCase())} — SUBCLASS</div>
+        <div style="font-size:11px;color:#889aaa;line-height:1.55;margin-bottom:10px;">${escHtml(subclassDef.description)}</div>`
+      : "";
+    const subclassBlock = !subclassDef
+      ? ""
+      : subclassRows.length === 0
+        ? `<div style="font-size:11px;color:${DIM};font-style:italic;">No subclass features unlocked yet at L${currentLevel}.</div>`
+        : subclassRows.map(renderFeatureRow).join("");
+
+    const grantedSpellsBlock = (subclassGrantedSpellIds.length === 0 && subclassGrantedCantripIds.length === 0)
+      ? ""
+      : `
+        <div style="font-size:10px;color:#556677;letter-spacing:2px;margin:18px 0 6px;">SUBCLASS-GRANTED SPELLS</div>
+        <div style="font-size:11px;color:#aabbcc;line-height:1.5;">
+          ${[...subclassGrantedCantripIds, ...subclassGrantedSpellIds].map((id) => escHtml(id)).join(", ")}
+        </div>
+        <div style="font-size:9px;color:#556677;margin-top:4px;font-style:italic;">Always prepared — does not count against your prep limit.</div>`;
+
+    this.contentEl.insertAdjacentHTML("beforeend", `
+      <div style="overflow-y:auto;scrollbar-width:thin;scrollbar-color:${ACCENT} transparent;flex:1;min-height:0;">
+        <div style="font-size:10px;color:#556677;letter-spacing:2px;margin-bottom:8px;">${escHtml((classDef?.name ?? playerDef.className).toUpperCase())} — CLASS</div>
+        ${classBlock}
+        ${subclassHeader}
+        ${subclassBlock}
+        ${grantedSpellsBlock}
       </div>`);
   }
 

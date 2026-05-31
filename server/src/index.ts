@@ -141,6 +141,8 @@ const defs: GameDefs = {
   activeSetting: null,
   tileLegend: { notes: "", tiles: {} },
   conversations: [],
+  classes: [],
+  subclasses: [],
 };
 
 async function loadDefs(): Promise<void> {
@@ -170,6 +172,8 @@ async function loadDefs(): Promise<void> {
     narration,
     factions,
     conversations,
+    classes,
+    subclasses,
   ] = await Promise.all([
     readDirOrEmpty<GameDefs["playerDefs"][0]>(settingSub("characters")),
     readDir<GameDefs["monsters"][0]>(join(DATA_DIR, "monsters")),
@@ -184,11 +188,13 @@ async function loadDefs(): Promise<void> {
     readDir<GameDefs["narration"][0]>(join(DATA_DIR, "narration")),
     readDirOrEmpty<GameDefs["factions"][0]>(settingSub("factions")),
     readDirOrEmpty<GameDefs["conversations"][0]>(settingSub("conversations")),
+    readDirOrEmpty<GameDefs["classes"][0]>(join(DATA_DIR, "classes")),
+    readDirOrEmpty<GameDefs["subclasses"][0]>(join(DATA_DIR, "subclasses")),
   ]) as [
     GameDefs["playerDefs"], GameDefs["monsters"], GameDefs["npcs"], GameDefs["equipment"],
     TiledMapFile[], GameDefs["feats"], GameDefs["backgrounds"], GameDefs["species"],
     GameDefs["spells"], GameDefs["features"], GameDefs["narration"], GameDefs["factions"],
-    GameDefs["conversations"],
+    GameDefs["conversations"], GameDefs["classes"], GameDefs["subclasses"],
   ];
   defs.playerDefs = playerDefs;
   defs.monsters = monsters;
@@ -202,6 +208,8 @@ async function loadDefs(): Promise<void> {
   defs.narration = narration;
   defs.factions = factions;
   defs.conversations = conversations;
+  defs.classes = classes;
+  defs.subclasses = subclasses;
   for (const p of defs.playerDefs) {
     applySpecies(p, defs.species);
     applyFeats(p, defs.feats);
@@ -407,6 +415,8 @@ server.get("/backgrounds", async () => defs.backgrounds);
 server.get("/species", async () => defs.species);
 server.get("/spells", async () => defs.spells);
 server.get("/features", async () => defs.features);
+server.get("/classes", async () => defs.classes);
+server.get("/subclasses", async () => defs.subclasses);
 server.get("/encounters", async () => {
   const dir = settingSubDir("encounters");
   return dir ? readDir(dir) : [];

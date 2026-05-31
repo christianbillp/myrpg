@@ -1,0 +1,13 @@
+{
+  "id": "evoker",
+  "classId": "wizard",
+  "name": "Evoker",
+  "description": "Wizard subclass focused on explosive elemental effects — bitter cold, searing flame, rolling thunder, crackling lightning, and burning acid. SRD 5.2.1.",
+
+  "progression": [
+    { "level":  3, "features": ["evocation-savant", "potent-cantrip"] },
+    { "level":  6, "features": ["sculpt-spells"] },
+    { "level": 10, "features": ["empowered-evocation"] },
+    { "level": 14, "features": ["overchannel"] }
+  ]
+}

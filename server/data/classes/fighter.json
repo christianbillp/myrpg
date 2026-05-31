@@ -1,0 +1,49 @@
+{
+  "id": "fighter",
+  "name": "Fighter",
+  "description": "Master of weapons and armour, trained for any battlefield. SRD 5.2.1 (2024) class data; covers levels 1–20 of the base class. Subclass features (Champion / others) live in separate JSONs.",
+
+  "primaryAbility": ["str", "dex"],
+  "hitDie": 10,
+  "fixedHpPerLevel": 6,
+  "savingThrows": ["str", "con"],
+  "skillChoices": {
+    "count": 2,
+    "options": ["acrobatics", "animalHandling", "athletics", "history", "insight", "intimidation", "persuasion", "perception", "survival"]
+  },
+  "weaponProficiencies": ["simple", "martial"],
+  "armorTraining": ["light", "medium", "heavy", "shields"],
+  "toolProficiencies": [],
+  "subclassLevels": [3, 7, 10, 15, 18],
+
+  "tracksByLevel": {
+    "extra-attacks": [1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 3, 3, 3, 4],
+    "weapon-mastery-count": [3, 3, 3, 4, 4, 4, 4, 4, 4, 5, 5, 5, 5, 5, 5, 6, 6, 6, 6, 6],
+    "second-wind-uses": [2, 2, 2, 3, 3, 3, 3, 3, 3, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4],
+    "action-surge-uses": [0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2, 2, 2, 2],
+    "indomitable-uses": [0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3]
+  },
+
+  "progression": [
+    { "level":  1, "features": ["fighting-style", "second-wind", "weapon-mastery"], "choices": [{ "kind": "fighting-style-pick" }] },
+    { "level":  2, "features": ["action-surge", "tactical-mind"] },
+    { "level":  3, "choices": [{ "kind": "subclass-choice" }] },
+    { "level":  4, "choices": [{ "kind": "asi-or-feat" }] },
+    { "level":  5, "features": ["extra-attack", "tactical-shift"] },
+    { "level":  6, "choices": [{ "kind": "asi-or-feat" }] },
+    { "level":  7, "subclass": true },
+    { "level":  8, "choices": [{ "kind": "asi-or-feat" }] },
+    { "level":  9, "features": ["indomitable", "tactical-master"] },
+    { "level": 10, "subclass": true },
+    { "level": 11, "features": ["two-extra-attacks"] },
+    { "level": 12, "choices": [{ "kind": "asi-or-feat" }] },
+    { "level": 13, "features": ["studied-attacks"] },
+    { "level": 14, "choices": [{ "kind": "asi-or-feat" }] },
+    { "level": 15, "subclass": true },
+    { "level": 16, "choices": [{ "kind": "asi-or-feat" }] },
+    { "level": 17 },
+    { "level": 18, "subclass": true },
+    { "level": 19, "features": ["epic-boon"], "choices": [{ "kind": "epic-boon-choice" }] },
+    { "level": 20, "features": ["three-extra-attacks"] }
+  ]
+}

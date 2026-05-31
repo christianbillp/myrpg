@@ -1,0 +1,8 @@
+{
+  "id": "fast-hands",
+  "name": "Fast Hands",
+  "classId": "rogue",
+  "minLevel": 3,
+  "description": "As a Bonus Action, you can make a Dexterity (Sleight of Hand) check to pick a lock, disarm a trap, or pick a pocket; or take the Utilize action; or take the Magic action to use a magic item that requires that action.",
+  "cost": { "kind": "bonus-action" }
+}

@@ -1,0 +1,14 @@
+{
+  "id": "champion",
+  "classId": "fighter",
+  "name": "Champion",
+  "description": "Fighter subclass that pursues physical excellence in combat. SRD 5.2.1.",
+
+  "progression": [
+    { "level":  3, "features": ["improved-critical", "remarkable-athlete"] },
+    { "level":  7, "features": ["additional-fighting-style"], "choices": [{ "kind": "fighting-style-pick" }] },
+    { "level": 10, "features": ["heroic-warrior"] },
+    { "level": 15, "features": ["superior-critical"] },
+    { "level": 18, "features": ["survivor"] }
+  ]
+}

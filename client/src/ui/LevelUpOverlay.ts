@@ -182,6 +182,264 @@ export class LevelUpOverlay extends BaseOverlay {
       return wrap;
     }
 
+    if (prompt.kind === "expertise-pick") {
+      if (prompt.options.length === 0) {
+        const note = document.createElement("div");
+        note.textContent = "No proficient skills available — Expertise can't be applied.";
+        note.style.cssText = "font-size: 10px; color: #aa7733; font-style: italic; margin-top: 4px;";
+        wrap.appendChild(note);
+        this.choices.expertisePick = [];
+        return wrap;
+      }
+      const counter = document.createElement("div");
+      counter.style.cssText = "font-size: 11px; color: #88aacc; margin-top: 4px;";
+      const updateCounter = () => {
+        const picked = (this.choices.expertisePick ?? []).length;
+        counter.textContent = `${picked} / ${prompt.count} chosen`;
+      };
+      updateCounter();
+      wrap.appendChild(counter);
+      const chips = document.createElement("div");
+      chips.style.cssText = "display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px;";
+      for (const skill of prompt.options) {
+        const chip = document.createElement("button");
+        chip.textContent = titleCase(skill);
+        chip.style.cssText = this.chipCss(false);
+        chip.dataset.skillId = skill;
+        chip.addEventListener("click", () => {
+          const current = this.choices.expertisePick ?? [];
+          const idx = current.indexOf(skill);
+          if (idx >= 0) current.splice(idx, 1);
+          else if (current.length < prompt.count) current.push(skill);
+          else { current.shift(); current.push(skill); }
+          this.choices.expertisePick = current;
+          for (const c of Array.from(chips.children) as HTMLButtonElement[]) {
+            c.style.cssText = this.chipCss(current.includes(c.dataset.skillId!));
+          }
+          updateCounter();
+          this.refreshConfirmState();
+        });
+        chips.appendChild(chip);
+      }
+      wrap.appendChild(chips);
+      return wrap;
+    }
+
+    if (prompt.kind === "fighting-style-pick") {
+      if (prompt.options.length === 0) {
+        const note = document.createElement("div");
+        note.textContent = "No fighting styles available.";
+        note.style.cssText = "font-size: 10px; color: #aa7733; font-style: italic; margin-top: 4px;";
+        wrap.appendChild(note);
+        return wrap;
+      }
+      const cards = document.createElement("div");
+      cards.style.cssText = "display: flex; flex-direction: column; gap: 6px; margin-top: 4px;";
+      for (const ft of prompt.options) {
+        const card = document.createElement("button");
+        card.style.cssText = `
+          background: #1a1a2a; border: 2px solid #445566; color: #aabbcc;
+          font-family: monospace; padding: 8px 10px; cursor: pointer;
+          text-align: left; box-sizing: border-box;
+        `;
+        const name = document.createElement("div");
+        name.textContent = ft.name;
+        name.style.cssText = "font-size: 12px; color: #e2b96f; font-weight: bold;";
+        const desc = document.createElement("div");
+        desc.textContent = ft.description;
+        desc.style.cssText = "margin-top: 4px; font-size: 10px; color: #889aaa; line-height: 1.5;";
+        card.appendChild(name);
+        card.appendChild(desc);
+        card.dataset.featId = ft.id;
+        card.addEventListener("click", () => {
+          this.choices.fightingStylePick = ft.id;
+          for (const c of Array.from(cards.children) as HTMLButtonElement[]) {
+            const picked = c === card;
+            c.style.background = picked ? "#3a2a1a" : "#1a1a2a";
+            c.style.borderColor = picked ? "#e2b96f" : "#445566";
+          }
+          this.refreshConfirmState();
+        });
+        cards.appendChild(card);
+      }
+      wrap.appendChild(cards);
+      return wrap;
+    }
+
+    if (prompt.kind === "subclass-choice") {
+      if (prompt.options.length === 0) {
+        const note = document.createElement("div");
+        note.textContent = "No subclasses authored for this class yet.";
+        note.style.cssText = "font-size: 10px; color: #aa7733; font-style: italic; margin-top: 4px;";
+        wrap.appendChild(note);
+        return wrap;
+      }
+      const cards = document.createElement("div");
+      cards.style.cssText = "display: flex; flex-direction: column; gap: 6px; margin-top: 4px;";
+      for (const sc of prompt.options) {
+        const card = document.createElement("button");
+        card.style.cssText = `
+          background: #1a1a2a; border: 2px solid #445566; color: #aabbcc;
+          font-family: monospace; padding: 8px 10px; cursor: pointer;
+          text-align: left; box-sizing: border-box;
+        `;
+        const name = document.createElement("div");
+        name.textContent = sc.name;
+        name.style.cssText = "font-size: 12px; color: #e2b96f; font-weight: bold;";
+        const desc = document.createElement("div");
+        desc.textContent = sc.description;
+        desc.style.cssText = "margin-top: 4px; font-size: 10px; color: #889aaa; line-height: 1.5;";
+        card.appendChild(name);
+        card.appendChild(desc);
+        card.dataset.subclassId = sc.id;
+        card.addEventListener("click", () => {
+          this.choices.subclassChoice = sc.id;
+          for (const c of Array.from(cards.children) as HTMLButtonElement[]) {
+            const picked = c === card;
+            c.style.background = picked ? "#3a2a1a" : "#1a1a2a";
+            c.style.borderColor = picked ? "#e2b96f" : "#445566";
+          }
+          this.refreshConfirmState();
+        });
+        cards.appendChild(card);
+      }
+      wrap.appendChild(cards);
+      return wrap;
+    }
+
+    if (prompt.kind === "asi-or-feat") {
+      const modeRow = document.createElement("div");
+      modeRow.style.cssText = "display: flex; gap: 6px; margin-top: 4px;";
+      const modes: Array<["asi-plus-2" | "asi-plus-1" | "feat", string]> = [
+        ["asi-plus-2", "+2 ONE ABILITY"],
+        ["asi-plus-1", "+1 TWO ABILITIES"],
+        ["feat", "TAKE A FEAT"],
+      ];
+      const detailHost = document.createElement("div");
+      detailHost.style.cssText = "margin-top: 6px;";
+      const modeButtons: Record<string, HTMLButtonElement> = {};
+      let activeMode: "asi-plus-2" | "asi-plus-1" | "feat" = "asi-plus-2";
+
+      const renderDetail = () => {
+        detailHost.replaceChildren();
+        if (activeMode === "asi-plus-2") {
+          const chips = document.createElement("div");
+          chips.style.cssText = "display: flex; flex-wrap: wrap; gap: 6px;";
+          for (const ab of prompt.abilityScores) {
+            const chip = document.createElement("button");
+            chip.textContent = `${ab.key.toUpperCase()} ${ab.current}→${ab.current + 2}`;
+            chip.disabled = ab.current + 2 > 20;
+            chip.style.cssText = this.chipCss(false);
+            if (chip.disabled) chip.style.opacity = "0.4";
+            chip.addEventListener("click", () => {
+              this.choices.asiOrFeat = { kind: "asi-plus-2", ability: ab.key };
+              for (const c of Array.from(chips.children) as HTMLButtonElement[]) {
+                c.style.cssText = this.chipCss(c === chip);
+                if (c.disabled) c.style.opacity = "0.4";
+              }
+              this.refreshConfirmState();
+            });
+            chips.appendChild(chip);
+          }
+          detailHost.appendChild(chips);
+        } else if (activeMode === "asi-plus-1") {
+          const picked: string[] = [];
+          const chips = document.createElement("div");
+          chips.style.cssText = "display: flex; flex-wrap: wrap; gap: 6px;";
+          const sync = () => {
+            for (const c of Array.from(chips.children) as HTMLButtonElement[]) {
+              const k = c.dataset.k!;
+              c.style.cssText = this.chipCss(picked.includes(k));
+              if (c.disabled) c.style.opacity = "0.4";
+            }
+          };
+          for (const ab of prompt.abilityScores) {
+            const chip = document.createElement("button");
+            chip.textContent = `${ab.key.toUpperCase()} ${ab.current}→${ab.current + 1}`;
+            chip.disabled = ab.current + 1 > 20;
+            chip.dataset.k = ab.key;
+            chip.style.cssText = this.chipCss(false);
+            if (chip.disabled) chip.style.opacity = "0.4";
+            chip.addEventListener("click", () => {
+              const idx = picked.indexOf(ab.key);
+              if (idx >= 0) picked.splice(idx, 1);
+              else if (picked.length < 2) picked.push(ab.key);
+              else { picked.shift(); picked.push(ab.key); }
+              if (picked.length === 2) {
+                this.choices.asiOrFeat = { kind: "asi-plus-1", abilities: [picked[0] as "str", picked[1] as "str"] };
+              } else {
+                this.choices.asiOrFeat = undefined;
+              }
+              sync();
+              this.refreshConfirmState();
+            });
+            chips.appendChild(chip);
+          }
+          detailHost.appendChild(chips);
+        } else {
+          // feat
+          if (prompt.featOptions.length === 0) {
+            const note = document.createElement("div");
+            note.textContent = "No additional feats available.";
+            note.style.cssText = "font-size: 10px; color: #aa7733; font-style: italic;";
+            detailHost.appendChild(note);
+            return;
+          }
+          const list = document.createElement("div");
+          list.style.cssText = "display: flex; flex-direction: column; gap: 6px;";
+          for (const ft of prompt.featOptions) {
+            const card = document.createElement("button");
+            card.style.cssText = `
+              background: #1a1a2a; border: 2px solid #445566; color: #aabbcc;
+              font-family: monospace; padding: 6px 10px; cursor: pointer;
+              text-align: left; box-sizing: border-box;
+            `;
+            const name = document.createElement("div");
+            name.textContent = ft.name;
+            name.style.cssText = "font-size: 12px; color: #e2b96f;";
+            const desc = document.createElement("div");
+            desc.textContent = ft.description;
+            desc.style.cssText = "margin-top: 4px; font-size: 10px; color: #889aaa; line-height: 1.5;";
+            card.appendChild(name);
+            card.appendChild(desc);
+            card.dataset.featId = ft.id;
+            card.addEventListener("click", () => {
+              this.choices.asiOrFeat = { kind: "feat", featId: ft.id };
+              for (const c of Array.from(list.children) as HTMLButtonElement[]) {
+                const picked = c === card;
+                c.style.background = picked ? "#3a2a1a" : "#1a1a2a";
+                c.style.borderColor = picked ? "#e2b96f" : "#445566";
+              }
+              this.refreshConfirmState();
+            });
+            list.appendChild(card);
+          }
+          detailHost.appendChild(list);
+        }
+      };
+
+      for (const [k, label] of modes) {
+        const btn = document.createElement("button");
+        btn.textContent = label;
+        btn.style.cssText = this.chipCss(k === activeMode);
+        btn.addEventListener("click", () => {
+          activeMode = k;
+          this.choices.asiOrFeat = undefined;
+          for (const m of modes) {
+            modeButtons[m[0]].style.cssText = this.chipCss(m[0] === activeMode);
+          }
+          renderDetail();
+          this.refreshConfirmState();
+        });
+        modeButtons[k] = btn;
+        modeRow.appendChild(btn);
+      }
+      wrap.appendChild(modeRow);
+      wrap.appendChild(detailHost);
+      renderDetail();
+      return wrap;
+    }
+
     if (prompt.kind === "wizard-spellbook-add") {
       if (prompt.count === 0) {
         const note = document.createElement("div");
@@ -289,6 +547,20 @@ export class LevelUpOverlay extends BaseOverlay {
       if (prompt.kind === "wizard-spellbook-add") {
         const picked = (this.choices.wizardSpellbookAdd ?? []).length;
         if (picked < prompt.count) return false;
+      }
+      if (prompt.kind === "subclass-choice" && !this.choices.subclassChoice) {
+        // Only require an answer when subclasses are actually authored — a
+        // class with no shipped subclasses leaves the option list empty and
+        // the player can still proceed (the level-up just skips the grant).
+        if (prompt.options.length > 0) return false;
+      }
+      if (prompt.kind === "asi-or-feat" && !this.choices.asiOrFeat) return false;
+      if (prompt.kind === "expertise-pick") {
+        const picked = (this.choices.expertisePick ?? []).length;
+        if (prompt.options.length > 0 && picked < prompt.count) return false;
+      }
+      if (prompt.kind === "fighting-style-pick" && !this.choices.fightingStylePick) {
+        if (prompt.options.length > 0) return false;
       }
     }
     return true;

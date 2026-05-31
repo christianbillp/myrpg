@@ -1,0 +1,8 @@
+{
+  "id": "extra-attack",
+  "name": "Extra Attack",
+  "classId": "fighter",
+  "minLevel": 5,
+  "description": "You can attack twice, instead of once, whenever you take the Attack action on your turn. The number of attacks increases to three when you reach level 11 (Two Extra Attacks) and four at level 20 (Three Extra Attacks).",
+  "cost": { "kind": "passive" }
+}

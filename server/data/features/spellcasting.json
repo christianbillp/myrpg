@@ -1,0 +1,8 @@
+{
+  "id": "spellcasting",
+  "name": "Spellcasting",
+  "classId": "wizard",
+  "minLevel": 1,
+  "description": "As a student of arcane magic, you have learned to cast spells. You know three Wizard cantrips of your choice. Your spellbook starts with six level-1 Wizard spells. Whenever you finish a Long Rest, you can change your list of prepared spells. Intelligence is your spellcasting ability — Spell Save DC = 8 + your INT modifier + your Proficiency Bonus.",
+  "cost": { "kind": "passive" }
+}

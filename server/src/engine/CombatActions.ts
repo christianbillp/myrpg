@@ -18,6 +18,108 @@ import {
 } from './ActionGuards.js';
 import { publishNpcDamage } from './ThresholdPublisher.js';
 import { canSee as visCanSee } from './Vision.js';
+import type { PlayerDef } from '../../../shared/types.js';
+import { d20, mod } from './Dice.js';
+import { combatantDisplayName } from './CombatFlow.js';
+
+/** Number of weapon attacks the player makes per Attack action. Driven by
+ *  the class JSON's `extra-attacks` track (Fighter scales 1→4 at L1/5/11/20;
+ *  Barbarian/Paladin/Ranger/Monk scale 1→2 at L5). Used by the Attack action
+ *  resolver to decide how many times to loop the resolver. Defaults to 1
+ *  when the track is missing (non-extra-attack classes). */
+export function attacksPerAction(playerDef: PlayerDef): number {
+  const v = playerDef.tracks?.['extra-attacks'];
+  return typeof v === 'number' && v > 0 ? v : 1;
+}
+
+/**
+ * SRD Rogue Sneak Attack eligibility (L1 feature).
+ *
+ *   "Once per turn, you can deal an extra 1d6 damage to one creature you hit
+ *    with an attack roll if you have Advantage on the roll and the attack
+ *    uses a Finesse or a Ranged weapon. You don't need Advantage if at
+ *    least one of your allies is within 5 feet of the target, the ally
+ *    doesn't have the Incapacitated condition, and you don't have
+ *    Disadvantage on the attack roll."
+ *
+ * Returns true when this specific attack qualifies. Caller passes the flag
+ * down to `playerMeleeAttack` / `playerThrowAttack`; the resolver adds the
+ * Sneak dice when the attack actually hits and toggles
+ * `state.player.sneakAttackUsedThisTurn` via the `sneakAttackFired` return
+ * to enforce the once-per-turn rule.
+ */
+function sneakAttackEligible(
+  ctx: GameContext,
+  attack: PlayerAttack,
+  target: NpcState,
+  withAdvantage: boolean,
+  withDisadvantage: boolean,
+): boolean {
+  const s = ctx.state;
+  if (s.player.sneakAttackUsedThisTurn) return false;
+  if ((ctx.playerDef.sneakAttackDice ?? 0) <= 0) return false;
+  const isRanged = !!attack.rangeNormal && attack.rangeNormal > 0;
+  if (!isRanged && !attack.finesse) return false;
+  if (withAdvantage) return true;
+  if (withDisadvantage) return false;
+  // Alternative trigger: an unincapacitated ally within 5 ft of the target.
+  return s.npcs.some((n) =>
+    n.disposition === 'ally' && n.hp > 0
+    && !n.conditions.includes('incapacitated')
+    && !n.conditions.includes('unconscious')
+    && !n.conditions.includes('paralyzed')
+    && !n.conditions.includes('stunned')
+    && chebyshev(n.tileX, n.tileY, target.tileX, target.tileY) <= 1,
+  );
+}
+
+/**
+ * SRD Push mastery — a hit can shove the target 10 ft directly away from
+ * the attacker (Large or smaller). Stops at impassable terrain, other
+ * creatures, or the attacker's own tile.
+ */
+function applyPushMastery(ctx: GameContext, target: NpcState): void {
+  const s = ctx.state;
+  const tiles = 2;  // 10 ft = 2 tiles.
+  const dx = Math.sign(target.tileX - s.player.tileX);
+  const dy = Math.sign(target.tileY - s.player.tileY);
+  if (dx === 0 && dy === 0) return;
+  let moved = 0;
+  for (let step = 0; step < tiles; step++) {
+    const nx = target.tileX + dx;
+    const ny = target.tileY + dy;
+    if (ny < 0 || ny >= s.map.rows || nx < 0 || nx >= s.map.cols) break;
+    if (!s.map.passable[ny][nx]) break;
+    if (s.player.tileX === nx && s.player.tileY === ny) break;
+    if (s.npcs.some((o) => o.id !== target.id && o.hp > 0 && o.tileX === nx && o.tileY === ny)) break;
+    target.tileX = nx;
+    target.tileY = ny;
+    moved++;
+  }
+  if (moved > 0) {
+    ctx.addLog({ left: `↪ Push mastery — ${combatantDisplayName(target, s.npcs)} pushed ${moved * 5} ft`, style: 'status' });
+  }
+}
+
+/**
+ * SRD Topple mastery — on hit, target makes a Con save (DC = 8 + STR mod +
+ * PB) or falls Prone. Save uses the target's Con mod (with proficiency
+ * when listed in `savingThrows`).
+ */
+function applyToppleMastery(ctx: GameContext, target: NpcState, def: MonsterDef): void {
+  if (target.conditions.includes('prone')) return;
+  const dc = 8 + mod(ctx.playerDef.str) + ctx.playerDef.proficiencyBonus;
+  const saveMod = def.savingThrows?.['con'] ?? mod(def.con);
+  const roll = d20();
+  const total = roll + saveMod;
+  const success = total >= dc;
+  ctx.addLog({
+    left: `↪ Topple mastery — ${combatantDisplayName(target, ctx.state.npcs)} ${success ? 'stays standing' : 'falls Prone'}`,
+    right: `CON d20(${roll})+${saveMod}=${total} vs DC ${dc}`,
+    style: success ? 'normal' : 'status',
+  });
+  if (!success) target.conditions.push('prone');
+}
 
 /**
  * Push a `play_sound` GameEvent for a resolved physical attack. The client's
@@ -138,8 +240,9 @@ export function doAttack(ctx: GameContext, targetId: string | undefined, events:
     ctx.addLog({ left: `${ctx.playerDef.name} has no line of sight — ${target.name} is behind total cover`, style: 'miss' });
     return;
   }
+  const sneakAttackAllowed = sneakAttackEligible(ctx, atk, target, withAdvantage, withDisadvantage);
   const resolved = playerThrowAttack(
-    ctx.playerDef, atk, targetDef, withAdvantage, withDisadvantage, ctx.playerDef.proficiencyBonus, autoCrit, playerHidden, coverBonus,
+    ctx.playerDef, atk, targetDef, withAdvantage, withDisadvantage, ctx.playerDef.proficiencyBonus, autoCrit, playerHidden, coverBonus, sneakAttackAllowed,
   );
   clearHide(s.player);
 
@@ -148,9 +251,13 @@ export function doAttack(ctx: GameContext, targetId: string | undefined, events:
   // the resolver's hit log and emit a clean parry-miss line. Crits ignore
   // defensive AC (nat 20 always hits) — match the Shield convention.
   const parry = tryNpcParry(target, targetDef, dist, resolved);
-  const { damage, isHit, logs, vexApplied, slowApplied, bonusComponents } = parry.applied
-    ? parry.replaced
+  const { damage, isHit, logs, vexApplied, slowApplied, bonusComponents, sneakAttackFired } = parry.applied
+    ? { ...parry.replaced, sneakAttackFired: false }
     : resolved;
+  // SRD Sneak Attack: once per turn. Flip the flag only when sneak dice
+  // actually landed — a parried hit (turned into a miss by Noble's Parry)
+  // means the rider didn't fire, so the rogue can still trigger it later.
+  if (sneakAttackFired) s.player.sneakAttackUsedThisTurn = true;
   ctx.addLogs(logs);
   emitPhysicalAttackSound(ctx, isHit);
 
@@ -169,6 +276,10 @@ export function doAttack(ctx: GameContext, targetId: string | undefined, events:
     }
     publishNpcDamage(ctx, target, hpBeforeAtk, target.hp);
     ctx.applyMasteryConditions(target, vexApplied, slowApplied);
+    // Push / Topple masteries — fire after the damage settles so a hit
+    // that drops the target to 0 HP doesn't trigger the rider on a corpse.
+    if (target.hp > 0 && atk.push) applyPushMastery(ctx, target);
+    if (target.hp > 0 && atk.topple) applyToppleMastery(ctx, target, targetDef);
   }
 
   // SRD ammunition recovery: per-shot 50% chance the ammo lands recoverable on
@@ -239,7 +350,7 @@ export function throwItem(ctx: GameContext, itemId: string, targetId?: string): 
 
   const attack: PlayerAttack = isProperThrown
     ? makePlayerAttack(ctx.playerDef, itemDef as WeaponDef)
-    : { name: itemDef.name, statKey: 'str', damageDice: 1, damageSides: 4, damageType: 'bludgeoning', savageAttacker: false, graze: false, vex: false, sap: false, slow: false };
+    : { name: itemDef.name, statKey: 'str', damageDice: 1, damageSides: 4, damageType: 'bludgeoning', savageAttacker: false, finesse: false, graze: false, vex: false, sap: false, slow: false, push: false, topple: false };
   const profBonus = isProperThrown ? ctx.playerDef.proficiencyBonus : 0;
 
   if (fromMap) s.mapItems.splice(mapItemIdx, 1);
@@ -277,9 +388,14 @@ function executeThrowOnTarget(
     ctx.addLog({ left: `${target.name} is behind total cover — the ${itemDef.name} can't reach`, style: 'miss' });
     return;
   }
-  const { damage, isHit, logs, vexApplied, slowApplied, bonusComponents } = playerThrowAttack(
-    ctx.playerDef, attack, targetDef, withAdvantage, withDisadvantage, profBonus, autoCrit, playerHidden, coverBonus,
+  // SRD Sneak Attack also applies to thrown finesse / ranged weapons (a
+  // dagger thrown counts as Ranged for this purpose). Same eligibility
+  // gates as the melee path.
+  const sneakAttackAllowed = sneakAttackEligible(ctx, attack, target, withAdvantage, withDisadvantage);
+  const { damage, isHit, logs, vexApplied, slowApplied, bonusComponents, sneakAttackFired } = playerThrowAttack(
+    ctx.playerDef, attack, targetDef, withAdvantage, withDisadvantage, profBonus, autoCrit, playerHidden, coverBonus, sneakAttackAllowed,
   );
+  if (sneakAttackFired) s.player.sneakAttackUsedThisTurn = true;
   clearHide(s.player);
   ctx.addLogs(logs);
   emitPhysicalAttackSound(ctx, isHit);
@@ -302,6 +418,8 @@ function executeThrowOnTarget(
   }
   publishNpcDamage(ctx, target, hpBeforeThr, target.hp);
   ctx.applyMasteryConditions(target, vexApplied, slowApplied);
+  if (isHit && target.hp > 0 && attack.push)   applyPushMastery(ctx, target);
+  if (isHit && target.hp > 0 && attack.topple) applyToppleMastery(ctx, target, targetDef);
   if (target.hp <= 0) ctx.killWithReward(target, targetDef, `☠ ${target.name} is slain!`);
 }
 

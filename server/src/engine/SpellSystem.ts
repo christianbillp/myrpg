@@ -181,6 +181,22 @@ function resolveAttackRollSpell(
       right: `d20(${roll})+${bonus}=${total} vs AC ${effectiveAc}${coverNote}${advNote}`,
       style: 'miss',
     });
+    // SRD Evoker Potent Cantrip — on a miss with a damaging cantrip, the
+    // target still takes half the cantrip's damage. The rider applies to
+    // every damaging cantrip (no school restriction per SRD 5.2.1).
+    if (spell.level === 0 && spell.damage && ctx.playerDef.defaultFeatureIds?.includes('potent-cantrip')) {
+      const dieMult = cantripDiceMultiplier(ctx.playerDef.level);
+      const dice = spell.damage.dice * dieMult;
+      const { total: rawDmg } = rollDamage(dice, spell.damage.sides, spell.damage.bonus ?? 0);
+      const halfDmg = Math.floor(rawDmg / 2);
+      if (halfDmg > 0) {
+        ctx.addLog({
+          left: `↪ Potent Cantrip — ${combatantDisplayName(target, ctx.state.npcs)} still takes ${halfDmg} ${spell.damage.type}`,
+          style: 'status',
+        });
+        applyDamageToNpc(ctx, target, halfDmg, spell.damage.type);
+      }
+    }
     return { hit: false, damageRolls: [] };
   }
 
@@ -413,7 +429,7 @@ function resolveSecondaryAoe(
     const roll = d20();
     const total = roll + saveBonus;
     const success = total >= dc;
-    const dmg = success && spell.save.halfOnSuccess ? Math.floor(dmgRoll.total / 2) : success ? 0 : dmgRoll.total;
+    const dmg = damageAfterSave(ctx, spell, success, spell.save.halfOnSuccess, dmgRoll.total);
     ctx.addLog({
       left: `${combatantDisplayName(t, ctx.state.npcs)} ${success ? 'saves' : 'fails'} — ${dmg} ${spell.secondaryDamage.type}`,
       right: `d20(${roll})+${saveBonus}=${total} vs DC ${dc}`,
@@ -454,7 +470,7 @@ function rollPlayerSaveAndDamage(
   const roll = d20();
   const total = roll + saveBonus;
   const success = total >= dc;
-  const dmg = success && save.halfOnSuccess ? Math.floor(rawDamage / 2) : success ? 0 : rawDamage;
+  const dmg = damageAfterSave(ctx, spell, success, save.halfOnSuccess, rawDamage);
   ctx.addLog({
     left: `${ctx.playerDef.name} ${success ? 'saves' : 'fails'} — ${dmg} ${damageMeta.type}`,
     right: `${save.ability.toUpperCase()} d20(${roll})+${saveBonus}=${total} vs DC ${dc}`,
@@ -840,6 +856,29 @@ function resolveHpPoolSpell(
   return any;
 }
 
+/**
+ * SRD Evoker Potent Cantrip — a damaging cantrip deals half damage on a
+ * successful save instead of zero. Pure helper consumed by every save-
+ * branch resolver below. When the spell isn't a cantrip with damage, or
+ * the caster doesn't have Potent Cantrip, the rider doesn't kick in and
+ * the normal `success && halfOnSuccess ? half : success ? 0 : full`
+ * outcome wins.
+ */
+function damageAfterSave(
+  ctx: GameContext,
+  spell: SpellDef,
+  success: boolean,
+  halfOnSuccess: boolean,
+  fullDamage: number,
+): number {
+  if (!success) return fullDamage;
+  if (halfOnSuccess) return Math.floor(fullDamage / 2);
+  if (spell.level === 0 && spell.damage && ctx.playerDef.defaultFeatureIds?.includes('potent-cantrip')) {
+    return Math.floor(fullDamage / 2);
+  }
+  return 0;
+}
+
 function resolveSaveSpell(
   ctx: GameContext,
   spell: SpellDef,
@@ -899,7 +938,7 @@ function resolveSaveSpell(
     const success = total >= dc;
 
     if (dmgRoll && spell.damage) {
-      const dmg = success && spell.save.halfOnSuccess ? Math.floor(dmgRoll.total / 2) : success ? 0 : dmgRoll.total;
+      const dmg = damageAfterSave(ctx, spell, success, spell.save.halfOnSuccess, dmgRoll.total);
       ctx.addLog({
         left: `${combatantDisplayName(target, ctx.state.npcs)} ${success ? 'saves' : 'fails'} — ${dmg} ${spell.damage.type}`,
         right: `d20(${roll})+${saveBonus}=${total} vs DC ${dc}`,
@@ -975,7 +1014,7 @@ function resolveSingleTargetSaveSpell(
   });
 
   if (dmgRoll && spell.damage) {
-    const dmg = success && spell.save.halfOnSuccess ? Math.floor(dmgRoll.total / 2) : success ? 0 : dmgRoll.total;
+    const dmg = damageAfterSave(ctx, spell, success, spell.save.halfOnSuccess, dmgRoll.total);
     ctx.addLog({
       left: `${combatantDisplayName(target, ctx.state.npcs)} ${success ? 'saves' : 'fails'} — ${dmg} ${spell.damage.type}`,
       right: `d20(${roll})+${saveBonus}=${total} vs DC ${dc}`,

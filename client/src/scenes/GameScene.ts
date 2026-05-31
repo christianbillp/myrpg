@@ -32,7 +32,7 @@ import type { FactionDef } from "../../../shared/types";
 import { ItemDef } from "../data/equipment";
 import { gameClient } from "../net/GameClient";
 import { WorldPause } from "../net/WorldPause";
-import type { GameState, GameEvent, GameMap, SpellDef, FeatureDef } from "../net/types";
+import type { GameState, GameEvent, GameMap, SpellDef, FeatureDef, ClassDef, SubclassDef } from "../net/types";
 import type { ChatMessage } from "../ui/AIGMOverlay";
 import { DevMode } from "../devMode";
 import { decodeTileGid, TILE_VOID_GID } from "../../../shared/tileGid";
@@ -230,6 +230,9 @@ export class GameScene extends Phaser.Scene {
       onIntroClosed:     (intro) => this.hud.addGmAssistantMessage(intro),
       getItems:    () => this.registry.get("equipment") as ItemDef[],
       getSpells:   () => (this.registry.get("spells") ?? []) as SpellDef[],
+      getFeatures: () => (this.registry.get("features") ?? []) as FeatureDef[],
+      getClasses:  () => (this.registry.get("classes") ?? []) as ClassDef[],
+      getSubclasses: () => (this.registry.get("subclasses") ?? []) as SubclassDef[],
       // Conversation system wiring — the overlay ships choice / end actions
       // through the same `sendAction` path every other interactive surface
       // uses. The state-update tick refreshes the overlay against the

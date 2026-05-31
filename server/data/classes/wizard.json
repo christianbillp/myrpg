@@ -1,0 +1,77 @@
+{
+  "id": "wizard",
+  "name": "Wizard",
+  "description": "Arcane scholar who shapes the fabric of reality with rigorous study and a treasured spellbook. SRD 5.2.1 (2024) class data; covers levels 1–20 of the base class. Subclass features (Evoker / others) live in separate JSONs.",
+
+  "primaryAbility": ["int"],
+  "hitDie": 6,
+  "fixedHpPerLevel": 4,
+  "savingThrows": ["int", "wis"],
+  "skillChoices": {
+    "count": 2,
+    "options": ["arcana", "history", "insight", "investigation", "medicine", "nature", "religion"]
+  },
+  "weaponProficiencies": ["simple"],
+  "armorTraining": [],
+  "toolProficiencies": [],
+  "subclassLevels": [3, 6, 10, 14],
+
+  "spellcasting": {
+    "ability": "int",
+    "slotTableKind": "full",
+    "learnModel": "spellbook",
+    "recovery": "long-rest",
+    "ritual": "always-prepared",
+    "focus": ["arcane-focus", "spellbook"],
+    "cantripsKnownByLevel": [3, 3, 3, 4, 4, 4, 4, 4, 4, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5],
+    "preparedSpellsByLevel": [4, 5, 6, 7, 9, 10, 11, 12, 14, 15, 16, 16, 17, 18, 19, 21, 22, 23, 24, 25],
+    "spellSlotsByLevel": [
+      [2, 0, 0, 0, 0, 0, 0, 0, 0],
+      [3, 0, 0, 0, 0, 0, 0, 0, 0],
+      [4, 2, 0, 0, 0, 0, 0, 0, 0],
+      [4, 3, 0, 0, 0, 0, 0, 0, 0],
+      [4, 3, 2, 0, 0, 0, 0, 0, 0],
+      [4, 3, 3, 0, 0, 0, 0, 0, 0],
+      [4, 3, 3, 1, 0, 0, 0, 0, 0],
+      [4, 3, 3, 2, 0, 0, 0, 0, 0],
+      [4, 3, 3, 3, 1, 0, 0, 0, 0],
+      [4, 3, 3, 3, 2, 0, 0, 0, 0],
+      [4, 3, 3, 3, 2, 1, 0, 0, 0],
+      [4, 3, 3, 3, 2, 1, 0, 0, 0],
+      [4, 3, 3, 3, 2, 1, 1, 0, 0],
+      [4, 3, 3, 3, 2, 1, 1, 0, 0],
+      [4, 3, 3, 3, 2, 1, 1, 1, 0],
+      [4, 3, 3, 3, 2, 1, 1, 1, 0],
+      [4, 3, 3, 3, 2, 1, 1, 1, 1],
+      [4, 3, 3, 3, 3, 1, 1, 1, 1],
+      [4, 3, 3, 3, 3, 2, 1, 1, 1],
+      [4, 3, 3, 3, 3, 2, 2, 1, 1]
+    ],
+    "initialSpellbookSize": 6,
+    "spellbookGrowthPerLevel": 2,
+    "cantripSwapPerLevel": true
+  },
+
+  "progression": [
+    { "level":  1, "features": ["spellcasting", "ritual-adept", "arcane-recovery"] },
+    { "level":  2, "features": ["scholar"], "choices": [{ "kind": "scholar-expertise" }] },
+    { "level":  3, "choices": [{ "kind": "subclass-choice" }] },
+    { "level":  4, "choices": [{ "kind": "asi-or-feat" }] },
+    { "level":  5, "features": ["memorize-spell"] },
+    { "level":  6, "subclass": true },
+    { "level":  7 },
+    { "level":  8, "choices": [{ "kind": "asi-or-feat" }] },
+    { "level":  9 },
+    { "level": 10, "subclass": true },
+    { "level": 11 },
+    { "level": 12, "choices": [{ "kind": "asi-or-feat" }] },
+    { "level": 13 },
+    { "level": 14, "subclass": true },
+    { "level": 15 },
+    { "level": 16, "choices": [{ "kind": "asi-or-feat" }] },
+    { "level": 17 },
+    { "level": 18, "features": ["spell-mastery"] },
+    { "level": 19, "features": ["epic-boon"], "choices": [{ "kind": "epic-boon-choice" }] },
+    { "level": 20, "features": ["signature-spells"] }
+  ]
+}

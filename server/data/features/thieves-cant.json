@@ -1,0 +1,8 @@
+{
+  "id": "thieves-cant",
+  "name": "Thieves' Cant",
+  "classId": "rogue",
+  "minLevel": 1,
+  "description": "You picked up various languages in the communities where you plied your roguish talents. You know Thieves' Cant and one other language of your choice, which you choose from the language tables in Character Creation.",
+  "cost": { "kind": "passive" }
+}

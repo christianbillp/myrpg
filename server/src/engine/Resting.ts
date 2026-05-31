@@ -146,6 +146,20 @@ export function applyLongRest(
   const maxSlots = playerDef.defaultSpellSlots ?? [];
   player.spellSlots = maxSlots.map((m) => m);
 
+  // Warlock Pact Magic — also refills on a Long Rest (SRD: "all expended
+  // Pact Magic spell slots", same line as Short Rest). When absent
+  // (non-Warlock) the field stays undefined.
+  if (player.pactMagic) {
+    player.pactMagic.remaining = player.pactMagic.max;
+  }
+  // Warlock Mystic Arcanum — each spell becomes usable again on Long Rest.
+  if (player.mysticArcanum) {
+    for (const slot of Object.values(player.mysticArcanum)) slot.used = false;
+  }
+  // SRD Wizard Arcane Recovery — once per Long Rest. Clear the flag so the
+  // next Short Rest is eligible.
+  player.arcaneRecoveryUsed = false;
+
   for (const fid of playerDef.defaultFeatureIds ?? []) {
     const def = features.find((f) => f.id === fid);
     if (!def?.resource || def.resource.kind === 'unlimited') continue;

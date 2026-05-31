@@ -189,7 +189,33 @@ function buildStateMessage(engine: GameEngine): string {
       .map(([id, n]) => `${id} ×${n}`),
     slotsLine ? `Slots ${slotsLine}` : '',
     p.concentratingOn ? `Concentrating: ${p.concentratingOn}` : '',
+    // Once-per-turn / once-per-rest gates — surface so the GM doesn't
+    // narrate (or invite) a feature that the engine has already locked.
+    s.phase === 'player_turn' && p.sneakAttackUsedThisTurn ? 'SneakAttack: USED THIS TURN' : '',
+    p.arcaneRecoveryUsed ? 'ArcaneRecovery: USED' : '',
   ].filter(Boolean).join(' · ');
+
+  // Class / subclass / scaling tracks. `playerDef.className` and
+  // `subclassId` are always present; `tracks` is the resolved per-level
+  // scaling map (Sneak Attack dice, Extra Attacks, Weapon Mastery count,
+  // …) — surfaced as a one-line `id=value` list so the GM knows the
+  // character's mechanical posture without having to infer from level.
+  const playerDef = engine.getPlayerDef();
+  const trackEntries = Object.entries(playerDef.tracks ?? {})
+    .filter(([, v]) => (typeof v === 'number' ? v > 0 : !!v));
+  const classLine = [
+    `Class: ${playerDef.className} L${playerDef.level}`,
+    playerDef.subclassId ? `Subclass: ${playerDef.subclassId}` : '',
+    trackEntries.length > 0 ? `Tracks: ${trackEntries.map(([k, v]) => `${k}=${v}`).join(', ')}` : '',
+  ].filter(Boolean).join(' · ');
+
+  // Warlock Pact Magic + Mystic Arcanum (absent for non-Warlocks).
+  const pactLine = p.pactMagic
+    ? `Pact Magic: ${p.pactMagic.remaining}/${p.pactMagic.max} @ L${p.pactMagic.level}`
+    : '';
+  const arcanumLine = p.mysticArcanum && Object.keys(p.mysticArcanum).length > 0
+    ? `Mystic Arcanum: ${Object.entries(p.mysticArcanum).map(([lvl, slot]) => `L${lvl}=${slot.spellId}${slot.used ? ' [used]' : ''}`).join(', ')}`
+    : '';
 
   const partyView = { factionId: PLAYER_FACTION_ID } as const;
   const isHostileNpc = (n: NpcState) =>
@@ -313,6 +339,9 @@ function buildStateMessage(engine: GameEngine): string {
 CONTEXT: ${s.encounterContext}${adventureBlock}${scriptedEvents}${factionsBlock}${rumorsBlock}
 
 PLAYER: tile (${p.tileX},${p.tileY}) · HP ${p.hp} · ${formatCoins(p.balanceCp)} · ${flags || 'no flags'}
+  ${classLine}
+  ${pactLine}
+  ${arcanumLine}
   Inventory: ${p.inventoryIds.join(', ') || 'empty'}
   Equipped: armor=${p.equippedSlots.armorId ?? 'none'} weapon=${p.equippedSlots.weaponId ?? 'none'} shield=${p.equippedSlots.shieldId ?? 'none'}
   ${p.preparedSpellIds.length > 0 ? `Prepared spells: ${p.preparedSpellIds.join(', ')}` : ''}

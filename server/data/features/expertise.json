@@ -1,0 +1,8 @@
+{
+  "id": "expertise",
+  "name": "Expertise",
+  "classId": "rogue",
+  "minLevel": 1,
+  "description": "Choose two of your skill proficiencies — Sleight of Hand and Stealth are recommended. Your Proficiency Bonus counts twice when you make a check with either of the chosen skills. At Rogue level 6, you gain Expertise in two more of your skill proficiencies of your choice.",
+  "cost": { "kind": "passive" }
+}

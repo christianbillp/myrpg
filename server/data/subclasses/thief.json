@@ -1,0 +1,13 @@
+{
+  "id": "thief",
+  "classId": "rogue",
+  "name": "Thief",
+  "description": "Rogue subclass — burglar, treasure hunter, and explorer. SRD 5.2.1.",
+
+  "progression": [
+    { "level":  3, "features": ["fast-hands", "second-story-work"] },
+    { "level":  9, "features": ["supreme-sneak"] },
+    { "level": 13, "features": ["use-magic-device"] },
+    { "level": 17, "features": ["thiefs-reflexes"] }
+  ]
+}

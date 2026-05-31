@@ -1,0 +1,8 @@
+{
+  "id": "fighting-style",
+  "name": "Fighting Style",
+  "classId": "fighter",
+  "minLevel": 1,
+  "description": "You have honed your martial prowess and gain a Fighting Style feat of your choice (Defense is recommended). Whenever you gain a Fighter level, you can replace the feat you chose with a different Fighting Style feat.",
+  "cost": { "kind": "passive" }
+}

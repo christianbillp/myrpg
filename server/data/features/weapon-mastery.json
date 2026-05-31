@@ -1,0 +1,8 @@
+{
+  "id": "weapon-mastery",
+  "name": "Weapon Mastery",
+  "classId": "fighter",
+  "minLevel": 1,
+  "description": "Your training with weapons allows you to use the mastery properties of a number of Simple or Martial weapons of your choice with which you have proficiency. The count scales with your level (Fighter: 3 → 6; Rogue: 2). Whenever you finish a Long Rest, you can change one of those weapon choices.",
+  "cost": { "kind": "passive" }
+}

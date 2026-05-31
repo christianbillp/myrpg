@@ -258,6 +258,42 @@ export function doShortRest(ctx: GameContext): void {
       s.player.resources[fid] = def.resource.max;
     }
   }
+  // Warlock Pact Magic refills on Short Rest per SRD — this is the whole
+  // point of the pact-magic alternative slot pool. Absent for non-Warlocks.
+  if (s.player.pactMagic) {
+    s.player.pactMagic.remaining = s.player.pactMagic.max;
+  }
+
+  // SRD Wizard Arcane Recovery (L1). Once per Long Rest, on a Short Rest,
+  // recover expended spell slots whose combined level totals at most
+  // ⌈Wizard level / 2⌉ — none above L5 — by topping up the lowest-level
+  // empty slot first. Auto-resolves (no picker UI yet); the greedy pick of
+  // the lowest level is strictly optimal for slot count, and players
+  // rarely want a higher-level slot back over multiple lower-level ones.
+  const isWizard = (ctx.playerDef.className ?? '').toLowerCase() === 'wizard';
+  const hasArcaneRecovery = (ctx.playerDef.defaultFeatureIds ?? []).includes('arcane-recovery');
+  if (isWizard && hasArcaneRecovery && !s.player.arcaneRecoveryUsed) {
+    let budget = Math.ceil(ctx.playerDef.level / 2);
+    const maxSlots = ctx.playerDef.defaultSpellSlots ?? [];
+    const recovered: number[] = [];
+    // L6+ slots can't be recovered; iterate L1..L5 ascending so we top
+    // those up first per the "lowest level is strictly optimal" note above.
+    for (let i = 0; i < Math.min(5, maxSlots.length); i++) {
+      const slotLevel = i + 1;
+      while (budget >= slotLevel && (s.player.spellSlots[i] ?? 0) < (maxSlots[i] ?? 0)) {
+        s.player.spellSlots[i] = (s.player.spellSlots[i] ?? 0) + 1;
+        budget -= slotLevel;
+        recovered.push(slotLevel);
+      }
+      if (budget <= 0) break;
+    }
+    if (recovered.length > 0) {
+      s.player.arcaneRecoveryUsed = true;
+      const parts = recovered.reduce<Record<number, number>>((m, lvl) => { m[lvl] = (m[lvl] ?? 0) + 1; return m; }, {});
+      const summary = Object.entries(parts).sort(([a], [b]) => Number(a) - Number(b)).map(([lvl, n]) => `${n}× L${lvl}`).join(', ');
+      ctx.addLog({ left: `📖 Arcane Recovery — recovered ${summary}`, style: 'heal' });
+    }
+  }
 }
 
 export function doUsePotion(ctx: GameContext): void {

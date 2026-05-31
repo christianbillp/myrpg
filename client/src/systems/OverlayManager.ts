@@ -6,7 +6,7 @@ import { ReactionPromptOverlay } from "../ui/ReactionPromptOverlay";
 import { EncounterCompleteOverlay } from "../ui/EncounterCompleteOverlay";
 import { NextChapterButton } from "../ui/NextChapterButton";
 import { ConversationOverlay } from "../ui/ConversationOverlay";
-import type { GameState, SpellDef, PendingReaction, ConversationDef } from "../net/types";
+import type { GameState, SpellDef, PendingReaction, ConversationDef, FeatureDef, ClassDef, SubclassDef } from "../net/types";
 import { UIScale } from "../ui/UIScale";
 import { WorldPause } from "../net/WorldPause";
 import { DevMode } from "../devMode";
@@ -35,6 +35,9 @@ export interface OverlayCallbacks {
   onIntroClosed: (introduction: string) => void;
   getItems: () => ItemDef[];
   getSpells: () => SpellDef[];
+  getFeatures: () => FeatureDef[];
+  getClasses: () => ClassDef[];
+  getSubclasses: () => SubclassDef[];
   /** Conversation system — host scene wires these to PlayerAction sends.
    *  `onOpenAigm` is Phase 5: surfaces the GM chat dropup with the
    *  conversation transcript pre-loaded. For now it can be a no-op. */
@@ -328,6 +331,9 @@ export class OverlayManager {
       concentratingOnName: concSpell?.name ?? null,
       castableSpellIds: state.availableActions.castableSpellIds,
       isExploring: state.phase === "exploring",
+      features: this.callbacks.getFeatures(),
+      classes: this.callbacks.getClasses(),
+      subclasses: this.callbacks.getSubclasses(),
     };
   }
 }

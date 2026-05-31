@@ -2,7 +2,7 @@
 // New types should be added to shared/types.ts, not here.
 export * from '../../../shared/types.js';
 
-import type { PlayerDef, MonsterDef, NPCDef, ItemDef, FeatDef, BackgroundDef, SpeciesDef, SavedMapDef, TileLegend, SpellDef, FeatureDef, NarrationDef, FactionDef, SettingDef, ConversationDef } from '../../../shared/types.js';
+import type { PlayerDef, MonsterDef, NPCDef, ItemDef, FeatDef, BackgroundDef, SpeciesDef, SavedMapDef, TileLegend, SpellDef, FeatureDef, NarrationDef, FactionDef, SettingDef, ConversationDef, ClassDef, SubclassDef } from '../../../shared/types.js';
 
 // ── Server-only types ────────────────────────────────────────────────────────
 
@@ -40,4 +40,12 @@ export interface GameDefs {
    *  directory. Empty when no setting is active. The conversation system
    *  looks up an NPC's `conversationId` here at start time. */
   conversations: ConversationDef[];
+  /** Class definitions loaded from `server/data/classes/*.json`. Drive the
+   *  level-up resolver, character-build defaults, and per-class scaling
+   *  tables (Sneak Attack dice, Second Wind uses, etc.). */
+  classes: ClassDef[];
+  /** Subclass definitions loaded from `server/data/subclasses/*.json`. Each
+   *  carries a `classId` referencing its parent and a `progression[]` that
+   *  hangs off the parent's `subclassLevels`. */
+  subclasses: SubclassDef[];
 }
