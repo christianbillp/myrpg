@@ -1,0 +1,191 @@
+{
+  "id": "villager_chat",
+  "defaultParticipants": ["player", "npc_self"],
+  "startNode": "intro",
+  "nodes": [
+    {
+      "id": "intro",
+      "lines": [
+        "They half-rise, then think better of it and settle back. \"Cape.\" The greeting is wary, polite, and ends with a glance at the door.",
+        "They watch you over the rim of their mug. They do not invite conversation. They do not refuse it either."
+      ],
+      "onEnter": [
+        { "type": "npc_remember", "ref": "self", "fact": "met_the_player", "source": "authored" }
+      ],
+      "choices": [
+        { "label": "Have you been here long?", "next": "lived_here" },
+        { "label": "Have you heard anything strange in the woods lately?", "next": "ask_strange" },
+        { "label": "Did you know Senior Cape Vael?", "next": "ask_vael" },
+        {
+          "label": "[Insight DC 11] Read their mood.",
+          "check": { "skill": "insight", "dc": 11 },
+          "onPass": {
+            "actions": [
+              { "type": "show_log", "message": "Not unfriendly. Frightened of being seen talking to a Cape — not of you specifically. Whatever they know, they will give it up if you are patient and quiet about it." }
+            ],
+            "next": "intro_after_insight"
+          },
+          "onFail": {
+            "actions": [
+              { "type": "show_log", "message": "Their face gives you nothing. They have practised this." }
+            ],
+            "next": "intro"
+          }
+        },
+        { "label": "Mind if I sit?", "next": "may_sit" },
+        { "label": "(Speak with them freely.)", "openAigm": true }
+      ]
+    },
+    {
+      "id": "intro_after_insight",
+      "lines": [
+        "They draw their mug a little closer, but their shoulders lower a fraction. They are willing to talk if you don't lean on it."
+      ],
+      "choices": [
+        { "label": "Have you heard anything strange in the woods lately?", "next": "ask_strange" },
+        { "label": "Did you know Senior Cape Vael?", "next": "ask_vael" },
+        { "label": "Have you been here long?", "next": "lived_here" },
+        { "label": "(Speak with them freely.)", "openAigm": true }
+      ]
+    },
+    {
+      "id": "lived_here",
+      "lines": [
+        "\"All my life. My father's father built the second house from the well.\" A small, dry pride. \"I have heard the wardstone ring three times in my life. Once when I was a boy, once before the last hard winter, and four months back. It is meant to hum, Cape. It is not meant to ring.\""
+      ],
+      "choices": [
+        { "label": "What does it ring like?", "next": "ring_like" },
+        { "label": "Have you heard anything strange in the woods lately?", "next": "ask_strange" },
+        { "label": "Did you know Senior Cape Vael?", "next": "ask_vael" },
+        { "label": "Thank you.", "next": "intro" }
+      ]
+    },
+    {
+      "id": "ring_like",
+      "lines": [
+        "They tap a fingernail against the rim of their mug. The note is a poor imitation. \"Like that. But long. And cracked. Like a struck bell that didn't want to ring. Four months back, on a Friday — I remember because the smith was at market and my goat went lame the same week. The note stayed in the trees an hour.\""
+      ],
+      "onEnter": [
+        { "type": "set_flag", "name": "wardstone_lead_confirmed", "value": true },
+        { "type": "npc_remember", "ref": "self", "fact": "described_wardstone_ring_to_player", "source": "authored" }
+      ],
+      "choices": [
+        { "label": "Where exactly?", "next": "ring_where" },
+        { "label": "Did you tell anyone?", "next": "ring_told_anyone" },
+        { "label": "Thank you.", "next": "intro" }
+      ]
+    },
+    {
+      "id": "ring_where",
+      "lines": [
+        "\"North wood. The old path past the yew. I have not been up there since. Nobody has.\""
+      ],
+      "choices": [
+        { "label": "I'll go take a look.", "next": "intro" },
+        { "label": "Did you tell anyone?", "next": "ring_told_anyone" }
+      ]
+    },
+    {
+      "id": "ring_told_anyone",
+      "lines": [
+        "Their mouth twists. \"Who? The capital? They sent letters back. Bram heard them on the kitchen table.\" A long pause. \"Vael was the last one who came when we asked.\""
+      ],
+      "choices": [
+        { "label": "Tell me about Vael.", "next": "ask_vael" },
+        { "label": "I'll go take a look.", "next": "intro" }
+      ]
+    },
+    {
+      "id": "ask_strange",
+      "lines": [
+        "They look at you a long moment before answering. \"Cold spots in the north wood. The dogs won't go past the wardstone any more, and dogs have never been afraid of that stretch. Travellers say the gorge bridge has been claimed by men in cloaks. None of which is my business. None of which the capital is going to send anyone about.\""
+      ],
+      "choices": [
+        { "label": "The wardstone — tell me more.", "next": "lived_here" },
+        { "label": "Did you know Senior Cape Vael?", "next": "ask_vael" },
+        { "label": "Thank you.", "next": "intro" }
+      ]
+    },
+    {
+      "id": "ask_vael",
+      "lines": [
+        "Their face changes — not warmer, but quieter. \"I knew him to nod to. He stopped here three seasons ago. Bought a flask of ale and a loaf to carry, asked the way to the north trail. He looked worried, Cape. Not afraid. Worried — like a man holding a count in his head and not liking the sum.\""
+      ],
+      "onEnter": [
+        { "type": "npc_remember", "ref": "self", "fact": "told_player_vael_looked_worried", "source": "authored" }
+      ],
+      "choices": [
+        {
+          "label": "[Persuasion DC 11] Anything else you can share?",
+          "check": { "skill": "persuasion", "dc": 11 },
+          "onPass": { "next": "vael_more" },
+          "onFail": { "next": "vael_no_more" }
+        },
+        { "label": "Did he come back?", "next": "vael_came_back" },
+        { "label": "Thank you.", "next": "intro" }
+      ]
+    },
+    {
+      "id": "vael_more",
+      "lines": [
+        "They lower their voice. \"He left a note with Bram. I do not know what was in it. I know he did not come back to collect a reply. I know two riders came through two months later asking after him, and Bram told them nothing.\""
+      ],
+      "choices": [
+        { "label": "Two riders?", "next": "two_riders" },
+        { "label": "Thank you. I'll go.", "next": "intro" }
+      ]
+    },
+    {
+      "id": "vael_no_more",
+      "lines": [
+        "They shrug. \"He was a quiet Cape. I have nothing else. Ask Bram, if you want the long answer.\""
+      ],
+      "choices": [
+        { "label": "I will, thank you.", "next": "intro" }
+      ]
+    },
+    {
+      "id": "two_riders",
+      "lines": [
+        "\"Concordat colours, Bram said. He doesn't keep a register. They left coin and rode on. That is all I know, Cape.\""
+      ],
+      "choices": [
+        { "label": "Thank you.", "next": "intro" }
+      ]
+    },
+    {
+      "id": "vael_came_back",
+      "lines": [
+        "A short, hard look. \"No.\""
+      ],
+      "choices": [
+        { "label": "I'm sorry.", "next": "vael_no_apology" },
+        { "label": "I will look for him.", "next": "intro" }
+      ]
+    },
+    {
+      "id": "vael_no_apology",
+      "lines": [
+        "\"Not your fault, Cape. Don't apologise for the work the capital wouldn't send anyone to do.\""
+      ],
+      "onEnter": [
+        { "type": "npc_adjust_relationship", "ref": "self", "target": "party", "delta": 3 }
+      ],
+      "choices": [
+        { "label": "Understood.", "next": "intro" }
+      ]
+    },
+    {
+      "id": "may_sit",
+      "lines": [
+        "They do not move their satchel from the bench. \"It is a free room, Cape. Mind you don't sit on the spilled ale.\""
+      ],
+      "choices": [
+        { "label": "Have you been here long?", "next": "lived_here" },
+        { "label": "Have you heard anything strange?", "next": "ask_strange" },
+        { "label": "Did you know Senior Cape Vael?", "next": "ask_vael" },
+        { "label": "Thank you.", "next": "intro" }
+      ]
+    }
+  ]
+}

@@ -835,6 +835,33 @@ export interface SpellDef {
   darts?: number;                  // Magic Missile: guaranteed-hit projectile count
   rider?: string;                  // narrative one-line secondary effect on hit
   effect?: SpellEffect;            // condition outcomes (Sleep)
+  /** Independent AOE rider that fires after the primary attack roll
+   *  resolves, regardless of hit or miss. Used by spells that "explode"
+   *  around the target (Ice Knife). Combined with `save` + `area` to
+   *  resolve creatures within `area.sizeFeet` of the targeted tile. */
+  secondaryDamage?: SpellDamage;
+  /** SRD push effect applied on a failed save (Thunderwave). The creature
+   *  is shoved this many feet directly away from the caster (or, for
+   *  spells without a clear origin, from the AOE centre). */
+  push?: { feet: number };
+  /** Color Spray's HP-pool gating. The caster rolls this pool once at cast
+   *  time; targets are sorted by current HP ascending and consume from the
+   *  pool until exhausted. Targets whose HP exceeds the remaining total
+   *  are skipped. Affected targets receive `effect.onFail` conditions. */
+  hpPool?: { dice: number; sides: number };
+  /** Chromatic Orb chain: when two damage dice match, the orb leaps to a
+   *  second creature within this range. */
+  chainOnDoubles?: { rangeFeet: number };
+  /** False Life-style temporary HP grant. The roll happens at cast time and
+   *  is applied via `awardTempHp` (uses-higher-value semantics). */
+  tempHpRoll?: { dice: number; sides: number; bonus?: number };
+  /** SRD True Strike: the spell makes one attack with the caster's
+   *  currently-equipped weapon using their spellcasting ability mod for
+   *  both attack and damage rolls. On hit, the damage type defaults to the
+   *  weapon's, plus extra Radiant dice at character levels 5 (1d6), 11
+   *  (2d6), and 17 (3d6). Mutually exclusive with the standard
+   *  attack/damage path. */
+  weaponAttack?: boolean;
   /** Damage types the caster may choose from at cast time (Chromatic Orb,
    *  Dragon's Breath, …). When present, the engine ignores `damage.type` and
    *  uses the player's pick from this list instead. */
@@ -1707,6 +1734,22 @@ export interface PlayerState {
   concentratingOn: string | null;
   /** Flag set by Mage Armor — `applyEquipment`-equivalent uses base AC 13 + DEX while no armor is worn. */
   mageArmor: boolean;
+  /** True while the Shield reaction's +5 AC bonus is active — set when the
+   *  reaction resolves with "accept", cleared at the start of the player's
+   *  next turn. While set, `computeAC` adds 5 to the rolled AC so the
+   *  triggering attack AND any further attack that lands before the
+   *  start-of-turn reset both see the bonus per SRD wording. */
+  shieldActive: boolean;
+  /** Flat movement bonus in feet applied by self-buff spells (Longstrider).
+   *  Added to base `playerDef.speed` when computing tile movement at the
+   *  start of each player turn. Cleared on long rest. */
+  speedBonus: number;
+  /** Set true by Expeditious Retreat; while active, the player may take the
+   *  Dash action as a bonus action and receives the upfront Dash on the
+   *  casting turn. Cleared when concentration on the spell ends. */
+  expeditiousRetreat: boolean;
+  /** Multiplier on jump distance set by Jump (×3). Defaults to 1. */
+  jumpMultiplier: number;
   /** Currently active periodic effects (DoTs, attach bites, …). Each fires at the start of its `sourceNpcId`'s turn — see OngoingEffectsSystem. */
   ongoingEffects: OngoingEffect[];
 }
@@ -2135,6 +2178,11 @@ export interface PendingReactionShield {
   attackTotal: number;
   /** What the player's AC would become with Shield up. */
   shieldedAc: number;
+  /** Whether the triggering attack was a critical hit. Shield's +5 AC
+   *  cannot convert a crit into a miss (crits ignore AC), but the player
+   *  may still want to spend the reaction for the +5 / no-Magic-Missile
+   *  buff over the rest of the round — so the prompt fires either way. */
+  isCrit?: boolean;
 }
 
 export type PendingReaction = PendingReactionOA | PendingReactionShield;
@@ -2196,6 +2244,10 @@ export type PlayerAction =
   | { type: 'attack'; targetId?: string }
   | { type: 'throw'; itemId: string; targetId?: string }
   | { type: 'castSpell'; spellId: string; slotLevel: number; targetIds?: string[]; tile?: { x: number; y: number }; asRitual?: boolean; damageTypeChoice?: string }
+  /** Voluntarily drop the spell currently in `PlayerState.concentratingOn`.
+   *  No action cost per SRD. Strips any conditions the spell applied and
+   *  clears self-buff flags it set. No-op when not concentrating. */
+  | { type: 'releaseConcentration' }
   | { type: 'hide' }
   | { type: 'useFeature'; featureId: string; targetId?: string; tile?: { x: number; y: number } }
   /** Command a player-owned summon (Mage Hand, Unseen Servant) to move to `tile`.

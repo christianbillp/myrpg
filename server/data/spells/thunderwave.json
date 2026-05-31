@@ -13,6 +13,7 @@
   "ritual": false,
   "save": { "ability": "con", "halfOnSuccess": true },
   "damage": { "dice": 2, "sides": 8, "type": "thunder" },
+  "push": { "feet": 10 },
   "area": { "shape": "cube", "sizeFeet": 15 },
   "description": "A wave of thunderous force sweeps out from you. Each creature in a 15-foot Cube originating from you must make a Constitution save. On a failed save, the creature takes 2d8 Thunder damage and is pushed 10 feet away from you. On a successful save, it takes half as much damage and isn't pushed. In addition, unsecured objects in the area are also pushed 10 feet, and the spell emits a thunderous boom audible out to 300 feet.",
   "scaling": "The damage increases by 1d8 for each spell slot level above 1."

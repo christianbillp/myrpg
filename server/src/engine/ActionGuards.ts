@@ -232,11 +232,19 @@ export function canCastSpell(ctx: GameContext, spellId: string): boolean {
     case 'bonus-action':
       return canSpendBonusAction(ctx);
     case 'reaction':
-      // Reactions are interrupt-only — not directly castable from the player UI.
-      // They fire automatically through resolver paths (Shield on hit, Feather Fall on fall).
-      return false;
+      // Reactions normally fire as interrupts (Shield on hit, Feather Fall on
+      // fall). We additionally surface them as manually castable during the
+      // exploring phase so the player can pre-declare or test them — the
+      // engine's utility resolver narrates a no-op for spells without a
+      // matching mid-combat trigger. In combat, reaction-cast spells stay
+      // reaction-only and the player UI hides the CAST button.
+      return s.phase === 'exploring';
     default:
-      // Ritual or longer casting times: exploring-only out-of-combat utility.
+      // Longer cast times (1 minute, 1 hour, …) are out-of-combat only —
+      // there's not enough time in a 6-second round to finish them. The
+      // Character Sheet still renders the CAST button so the player can
+      // see the spell exists, just greyed out, with a tooltip explaining
+      // the gate.
       return s.phase === 'exploring';
   }
 }

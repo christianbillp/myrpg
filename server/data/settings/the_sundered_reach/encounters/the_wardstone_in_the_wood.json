@@ -739,7 +739,29 @@
       "then": [
         {
           "type": "send_aigm_message",
-          "message": "EXPLORATION PHASE. Reed arrives on the old forest trail. Describe the canopy closing in, the clearing opening, the cracked wardstone at its centre — the glyph dead, the air cold, the leaf-litter scuffed. Two or three sentences of atmosphere. Do NOT start combat yet. Invite her to look around."
+          "message": "EXPLORATION PHASE. Reed arrives on the old forest trail. Describe the canopy closing in, the clearing opening, the cracked wardstone at its centre — the glyph dead, the air cold, the leaf-litter scuffed. Two or three sentences of atmosphere. Do NOT start combat yet. The scavengers are hunkered in the north-east scrub and have not yet shown themselves — do NOT describe them or their positions until the combat trigger fires. Invite her to look around."
+        }
+      ],
+      "once": true
+    },
+    {
+      "id": "scavengers_hidden_at_start",
+      "when": {
+        "event": "encounter_started"
+      },
+      "if": [],
+      "then": [
+        {
+          "type": "set_npc_hidden",
+          "defId": "goblin_minion",
+          "hidden": true,
+          "revealedBy": "trigger"
+        },
+        {
+          "type": "set_npc_hidden",
+          "defId": "bandit",
+          "hidden": true,
+          "revealedBy": "trigger"
         }
       ],
       "once": true
@@ -766,7 +788,7 @@
       "then": [
         {
           "type": "player_ability_check",
-          "skill": "perception",
+          "skill": "arcana",
           "dc": 12,
           "onPass": [
             {
@@ -869,6 +891,22 @@
         }
       ],
       "then": [
+        {
+          "type": "show_announcement",
+          "text": "The undergrowth erupts — the scavengers break from cover!",
+          "durationMs": 2500,
+          "mode": "unfocused"
+        },
+        {
+          "type": "set_npc_hidden",
+          "defId": "goblin_minion",
+          "hidden": false
+        },
+        {
+          "type": "set_npc_hidden",
+          "defId": "bandit",
+          "hidden": false
+        },
         {
           "type": "set_disposition_by_def_id",
           "defId": "goblin_minion",

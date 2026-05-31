@@ -2,6 +2,7 @@ import {
   NpcState, MonsterDef, NPCDef, ItemDef, MapItemState, SecretState, SecretDef, GameMap,
   StartingZonesLayer,
 } from './types.js';
+import { totalSpawnCount, spawnOrdinalForSlot } from '../../../shared/spawnInstanceIds.js';
 import { shuffle } from './MapUtils.js';
 import { chebyshev } from './EnemyAI.js';
 import {
@@ -294,33 +295,25 @@ export function populateNpcs(
   const exactFor = (role: 'ally' | 'enemy' | 'neutral', index: number): [number, number] | undefined =>
     placementByRoleIndex[`${role}:${index}`];
 
-  // Count duplicates per defId across all three spawn arrays so a defId
-  // appearing once in allyIds and once in enemyIds is still treated as
-  // two distinct entities (each gets its own ` #N` suffix). The counter
-  // tracks how many of each defId have spawned so far, giving a stable
-  // 1-based ordinal per spawn.
-  const totalByDef = new Map<string, number>();
-  for (const id of allyIds ?? [])  totalByDef.set(id, (totalByDef.get(id) ?? 0) + 1);
-  for (const id of enemyIds ?? []) totalByDef.set(id, (totalByDef.get(id) ?? 0) + 1);
-  for (const id of npcIds ?? [])   totalByDef.set(id, (totalByDef.get(id) ?? 0) + 1);
-  const seenByDef = new Map<string, number>();
-  const nextOrdinal = (defId: string): number => {
-    const n = (seenByDef.get(defId) ?? 0) + 1;
-    seenByDef.set(defId, n);
-    return n;
-  };
+  // Per-defId dedup naming. The shared `spawnInstanceIds` module is the
+  // single source of truth for the (role, index) → ordinal/count mapping;
+  // `encounterRefiner` also consumes it when rewriting slot refs in
+  // `npc_speaks.entity`. Centralising the algorithm keeps both call sites
+  // in lockstep when the rules evolve.
+  const lists = { allyIds: allyIds ?? [], enemyIds: enemyIds ?? [], npcIds: npcIds ?? [] };
+  const dupCount = (defId: string): number => totalSpawnCount(defId, lists);
 
   (allyIds ?? []).forEach((defId, i) => {
     spawnNpc(out.npcs, map, defs.npcs, defs.monsters, defId, playerX, playerY, 'ally', allyZone,
-      exactFor('ally', i), nextOrdinal(defId), totalByDef.get(defId) ?? 1);
+      exactFor('ally', i), spawnOrdinalForSlot('ally', i, lists), dupCount(defId));
   });
   (enemyIds ?? []).forEach((defId, i) => {
     spawnNpc(out.npcs, map, defs.npcs, defs.monsters, defId, playerX, playerY, 'enemy', enemyZone,
-      exactFor('enemy', i), nextOrdinal(defId), totalByDef.get(defId) ?? 1);
+      exactFor('enemy', i), spawnOrdinalForSlot('enemy', i, lists), dupCount(defId));
   });
   (npcIds ?? []).forEach((defId, i) => {
     spawnNpc(out.npcs, map, defs.npcs, defs.monsters, defId, playerX, playerY, 'neutral', npcZone,
-      exactFor('neutral', i), nextOrdinal(defId), totalByDef.get(defId) ?? 1);
+      exactFor('neutral', i), spawnOrdinalForSlot('neutral', i, lists), dupCount(defId));
   });
   if ((enemyIds ?? []).length > 0) {
     spawnItems(out.mapItems, map, defs.equipment, playerX, playerY, out.npcs);

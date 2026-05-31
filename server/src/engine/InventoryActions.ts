@@ -101,7 +101,7 @@ export function doEquip(ctx: GameContext, slot: 'armor' | 'weapon' | 'shield', i
   const removeIdx = s.player.inventoryIds.indexOf(itemId);
   if (removeIdx !== -1) s.player.inventoryIds.splice(removeIdx, 1);
   s.player.equippedSlots[slotKey] = itemId;
-  applyEquipment(ctx.playerDef, s.player.equippedSlots, ctx.defs.equipment, s.player.mageArmor);
+  applyEquipment(ctx.playerDef, s.player.equippedSlots, ctx.defs.equipment, s.player.mageArmor, s.player.shieldActive);
   s.player.ac = ctx.playerDef.ac;
   s.player.equippedSlots = { ...s.player.equippedSlots };
   s.player.equippedSlotLabels = computeEquippedSlotLabels(ctx.playerDef, s.player.equippedSlots, ctx.defs.equipment);
@@ -123,7 +123,7 @@ export function doUnequip(ctx: GameContext, slot: 'armor' | 'weapon' | 'shield')
 
   s.player.inventoryIds.push(currentId);
   s.player.equippedSlots[slotKey] = null;
-  applyEquipment(ctx.playerDef, s.player.equippedSlots, ctx.defs.equipment, s.player.mageArmor);
+  applyEquipment(ctx.playerDef, s.player.equippedSlots, ctx.defs.equipment, s.player.mageArmor, s.player.shieldActive);
   s.player.ac = ctx.playerDef.ac;
   s.player.equippedSlots = { ...s.player.equippedSlots };
   s.player.equippedSlotLabels = computeEquippedSlotLabels(ctx.playerDef, s.player.equippedSlots, ctx.defs.equipment);

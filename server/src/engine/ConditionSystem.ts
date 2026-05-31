@@ -19,14 +19,20 @@ export function isDead<T extends { hp: number; conditions: string[] }>(target: T
 /** Conditions that give attackers Advantage against the creature (prone handled separately). */
 export const ADVANTAGE_AGAINST_CONDITIONS = ['blinded', 'paralyzed', 'restrained', 'stunned', 'unconscious'];
 
-/** Conditions that impose Disadvantage on the creature's own attack rolls. */
-export const ATTACK_DISADVANTAGE_CONDITIONS = ['blinded', 'frightened', 'grappled', 'poisoned', 'restrained', 'prone', 'vexed'];
+/** Conditions that impose Disadvantage on the creature's own attack rolls.
+ *  `heavily-obscured` is included because a creature standing in fog can't
+ *  see out, treated as Blinded for attack purposes. */
+export const ATTACK_DISADVANTAGE_CONDITIONS = ['blinded', 'frightened', 'grappled', 'poisoned', 'restrained', 'prone', 'vexed', 'heavily-obscured'];
 
 /** Conditions that reduce the creature's speed to 0. */
 export const SPEED_ZERO_CONDITIONS = ['grappled', 'paralyzed', 'restrained', 'unconscious'];
 
-/** Conditions on a target that give attackers Disadvantage (regardless of range). */
-export const GRANTS_ATTACKER_DISADVANTAGE_CONDITIONS = ['invisible'];
+/** Conditions on a target that give attackers Disadvantage (regardless of range).
+ *  SRD 5.2.1: a creature in a Heavily Obscured area is functionally Blinded
+ *  to anyone trying to see into it, so attackers targeting them effectively
+ *  attack a creature they can't see — Disadvantage. Listed alongside
+ *  Invisible since the engine treatment is identical. */
+export const GRANTS_ATTACKER_DISADVANTAGE_CONDITIONS = ['invisible', 'heavily-obscured'];
 
 /** Conditions where a hit from within 1 tile is an automatic Critical Hit. */
 export const AUTO_CRIT_CONDITIONS = ['paralyzed', 'unconscious'];

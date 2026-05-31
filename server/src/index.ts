@@ -1266,6 +1266,10 @@ async function loadWorldState(): Promise<{
     preparedSpellIds: charSave.preparedSpellIds ?? [],
     concentratingOn: null,
     mageArmor: false,
+    shieldActive: false,
+    speedBonus: 0,
+    expeditiousRetreat: false,
+    jumpMultiplier: 1,
     ongoingEffects: [],
   };
   const aigmHistory = worldSave.aigmHistory ?? [];

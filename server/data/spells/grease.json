@@ -13,6 +13,7 @@
   "concentration": false,
   "ritual": false,
   "save": { "ability": "dex", "halfOnSuccess": false },
+  "effect": { "onFail": "prone" },
   "area": { "shape": "cube", "sizeFeet": 10 },
   "description": "Slick grease covers the ground in a 10-foot square within range and turns it into difficult terrain for the duration. Each creature standing in the area when the spell is cast, and any creature that enters or ends its turn there, must succeed on a Dexterity save or fall Prone."
 }

@@ -2,6 +2,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import type { GameDefs } from "./engine/types.js";
 import { settingPromptBlock } from "./settings.js";
 import { stripTileFlipBits } from "../../shared/tileGid.js";
+import { instanceIdForSlot } from "../../shared/spawnInstanceIds.js";
 
 /**
  * Encounter Refiner — Claude takes a draft encounter (+ the map it sits on)
@@ -544,6 +545,41 @@ function validateRefinement(
         }
       } else if (t.kind === "speech") {
         if (!t.entityRef) throw new Error(`speech trigger "${t.id}" missing entityRef`);
+        // Slot-ref → instance-id rewrite. The model occasionally produces
+        // `neutral_1` / `enemy_2` / `ally_1` for npc_speaks.entity, looking
+        // at the placements array. The runtime entity-ref resolver doesn't
+        // understand those; map them to the matching `npc_<instanceId>`
+        // using the shared `spawnInstanceIds` helper so the algorithm stays
+        // in lockstep with SpawnHelpers.populateNpcs.
+        const slotMatch = t.entityRef.match(/^(enemy|neutral|ally)_(\d+)$/);
+        if (slotMatch) {
+          const role = slotMatch[1] as 'enemy' | 'neutral' | 'ally';
+          const n = parseInt(slotMatch[2], 10);
+          const list = role === 'enemy' ? effectiveEnemyIds
+                     : role === 'neutral' ? effectiveNeutralIds
+                     : effectiveAllyIds;
+          // Accept either 1-based (most natural for an LLM) or 0-based.
+          const idx = n - 1 >= 0 && n - 1 < list.length ? n - 1
+                    : n >= 0 && n < list.length ? n
+                    : -1;
+          if (idx < 0) {
+            throw new Error(`speech trigger "${t.id}" entityRef "${t.entityRef}" — slot index ${n} is out of range for role "${role}" (size ${list.length})`);
+          }
+          const instanceId = instanceIdForSlot(role, idx, {
+            allyIds: effectiveAllyIds,
+            enemyIds: effectiveEnemyIds,
+            npcIds: effectiveNeutralIds,
+          });
+          if (instanceId === null) {
+            throw new Error(`speech trigger "${t.id}" entityRef "${t.entityRef}" — could not resolve to an instance id`);
+          }
+          t.entityRef = `npc_${instanceId}`;
+        } else if (!/^(player|npc_[a-z0-9_]+|enemy_[A-Z]|ally_[A-Z])$/.test(t.entityRef)) {
+          // Anything that's not a recognised entity-ref shape is almost
+          // certainly an authoring mistake; surface it loudly rather than
+          // letting it no-op at runtime.
+          throw new Error(`speech trigger "${t.id}" entityRef "${t.entityRef}" is not a valid entity reference (expected "player", "npc_<id>", "enemy_<A-Z>", "ally_<A-Z>", or a slot ref like "neutral_1")`);
+        }
       } else if (t.kind === "xp") {
         if (!t.xpAmount || t.xpAmount <= 0) throw new Error(`xp trigger "${t.id}" needs positive xpAmount`);
       } else if (t.kind === "fade") {

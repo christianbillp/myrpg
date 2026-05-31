@@ -116,6 +116,13 @@ export class ZonePainter {
   private neutralIds: string[] = [];
   /** Per-tile placement markers (entity letter + index, e.g. "P", "E0", "A1"). */
   private readonly placementMarkers = new Map<string, { rect: Phaser.GameObjects.Rectangle; label: Phaser.GameObjects.Text }>();
+  /** Per-layer visibility flags. Authors toggle these via the layer toolbar
+   *  so the preview can be filtered down to just the layer they're currently
+   *  inspecting (zones / triggers / monsters). Newly-created cells +
+   *  markers honour the current flag at creation time so toggles persist
+   *  across paint / placement changes. */
+  private layerVisible = { zones: true, triggers: true, monsters: true };
+  private layerToggleBtns: Array<{ key: 'zones' | 'triggers' | 'monsters'; handle: HtmlButtonHandle }> = [];
   /** Callback so the scene can persist placement changes (mirrors onZonesChanged). */
   private onPlacementsChanged: () => void = () => {};
 
@@ -181,6 +188,7 @@ export class ZonePainter {
     // Graphics layer on top of the zone overlay cells for trigger-region
     // outlines. Empty until `setTriggerRegions` is called.
     this.triggerOverlay = scene.add.graphics();
+    this.triggerOverlay.setVisible(this.layerVisible.triggers);
     this.mapContainer.add(this.triggerOverlay);
     this.renderPlacementMarkers();
 
@@ -314,7 +322,9 @@ export class ZonePainter {
    *  in any container so we destroy it explicitly. */
   destroy(): void {
     for (const { handle } of this.paintBtns) handle.dispose();
+    for (const { handle } of this.layerToggleBtns) handle.dispose();
     this.paintBtns = [];
+    this.layerToggleBtns = [];
     const sceneInput = this.opts.scene.input;
     sceneInput.off("pointerdown", this.onPointerDown);
     sceneInput.off("pointermove", this.onPointerMove);
@@ -394,6 +404,72 @@ export class ZonePainter {
    */
   setVisible(visible: boolean): void {
     for (const { handle } of this.paintBtns) handle.setVisible(visible);
+    for (const { handle } of this.layerToggleBtns) handle.setVisible(visible);
+  }
+
+  /**
+   * Toggle visibility of each preview layer. Authors use this to filter the
+   * map down to a single concern (just zones, just triggers, just monster
+   * placements) so the view doesn't overclutter when all three are dense.
+   * Newly-painted cells / re-rendered placements honour the current flag.
+   */
+  setLayerVisibility(layers: { zones?: boolean; triggers?: boolean; monsters?: boolean }): void {
+    if (layers.zones !== undefined) {
+      this.layerVisible.zones = layers.zones;
+      for (const cell of this.zoneOverlayCells.values()) cell.setVisible(layers.zones);
+    }
+    if (layers.triggers !== undefined) {
+      this.layerVisible.triggers = layers.triggers;
+      this.triggerOverlay.setVisible(layers.triggers);
+    }
+    if (layers.monsters !== undefined) {
+      this.layerVisible.monsters = layers.monsters;
+      for (const { rect, label } of this.placementMarkers.values()) {
+        rect.setVisible(layers.monsters);
+        label.setVisible(layers.monsters);
+      }
+    }
+    this.refreshLayerToggleButtons();
+  }
+
+  getLayerVisibility(): { zones: boolean; triggers: boolean; monsters: boolean } {
+    return { ...this.layerVisible };
+  }
+
+  /**
+   * Build the three-button visibility toolbar — ZONES / TRIGGERS / MONSTERS.
+   * Each button toggles its layer's visibility on/off. Sits above the
+   * paint-mode toolbar; the host scene picks the y-coordinate so the chip
+   * row fits in whatever leftover space is available.
+   */
+  buildLayerToggleButtons(x: number, y: number, totalW: number): void {
+    const btnW = (totalW - 16) / 3;
+    const btnH = 22;
+    const make = (key: 'zones' | 'triggers' | 'monsters', label: string, slot: number): HtmlButtonHandle => {
+      const bx = x + slot * (btnW + 8);
+      return createHtmlButton({
+        scene: this.opts.scene,
+        sceneWidth: this.opts.sceneWidth,
+        x: bx, y, w: btnW, h: btnH,
+        label, variant: 'secondary', fontSize: 10,
+        onClick: () => this.setLayerVisibility({ [key]: !this.layerVisible[key] } as Record<typeof key, boolean>),
+      });
+    };
+    this.layerToggleBtns = [
+      { key: 'zones',    handle: make('zones',    'ZONES',    0) },
+      { key: 'triggers', handle: make('triggers', 'TRIGGERS', 1) },
+      { key: 'monsters', handle: make('monsters', 'MONSTERS', 2) },
+    ];
+    this.refreshLayerToggleButtons();
+  }
+
+  private refreshLayerToggleButtons(): void {
+    for (const { key, handle } of this.layerToggleBtns) {
+      const on = this.layerVisible[key];
+      handle.el.style.background   = on ? '#243250' : '#15151f';
+      handle.el.style.borderColor  = on ? '#4a6a9a' : '#445566';
+      handle.el.style.color        = on ? '#cce4ff' : '#556677';
+    }
   }
 
   /**
@@ -478,6 +554,7 @@ export class ZonePainter {
         const cell = scene.add.rectangle(px, py, tileSize, tileSize, 0x000000, 0)
           .setStrokeStyle(0)
           .setInteractive({ useHandCursor: true });
+        cell.setVisible(this.layerVisible.zones);
         this.zoneOverlayCells.set(key, cell);
         this.refreshZoneOverlay(key);
         cell.on("pointerdown", () => {
@@ -662,6 +739,8 @@ export class ZonePainter {
         fontFamily: "monospace",
         fontStyle: "bold",
       }).setOrigin(0.5);
+      rect.setVisible(this.layerVisible.monsters);
+      label.setVisible(this.layerVisible.monsters);
       this.mapContainer.add(rect);
       this.mapContainer.add(label);
       this.placementMarkers.set(`${p.role}:${p.x},${p.y}`, { rect, label });

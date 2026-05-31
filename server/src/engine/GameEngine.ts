@@ -40,7 +40,7 @@ import { doEquip as ivDoEquip, doUnequip as ivDoUnequip } from './InventoryActio
 import { doCastSpell as spDoCastSpell } from './SpellSystem.js';
 import { doCommandSummon, checkSummonTether, registerSummonHooks } from './SummonSystem.js';
 import { registerSoundHooks } from './Sound.js';
-import { maybeBreakConcentration } from './ConcentrationSystem.js';
+import { maybeBreakConcentration, endConcentration } from './ConcentrationSystem.js';
 import { doUseFeature } from './FeatureRegistry.js';
 import { buildSessionState, SavedMapRecord } from './SessionBuilder.js';
 import { registerTriggers, adjustFactionStanding, recordRumor, fireAction as triggerFireAction } from './TriggerSystem.js';
@@ -50,7 +50,7 @@ import {
   endConversation as cnEndConversation,
 } from './ConversationSystem.js';
 import { registerDirector } from './Director.js';
-import { registerAdventureProgress } from './AdventureProgress.js';
+import { registerEncounterProgress } from './EncounterProgress.js';
 import { registerEncounterLifecycle, publishEncounterStarted } from './EncounterLifecycle.js';
 import { EventBus } from './EventBus.js';
 import { publishHpThresholdCrossings } from './ThresholdPublisher.js';
@@ -91,19 +91,26 @@ export class GameEngine {
     if (levelUpHistory.length > 0) {
       applyLevelUpHistory(this.playerDef, levelUpHistory, defs.features, defs.spells);
     }
-    // Dev mode `unlockAllSpells` — widen the cloned playerDef's spellbook so
-    // the Wizard `castableSpellIds` resolver treats every spell as known
-    // (other classes don't consult `defaultSpellbookIds` so this is a no-op
-    // for them). The clone above guarantees this mutation stays scoped to
-    // the current session.
+    // Dev mode `unlockAllSpells` — widen the cloned playerDef's spellbook
+    // and cantrip list so `castableSpellIds` treats every spell of the
+    // character's class as known. Cantrips need explicit treatment because
+    // `canCastSpell` checks `defaultCantripIds` for level-0 spells (not
+    // `defaultSpellbookIds`). Other classes that don't consult either
+    // remain unaffected. The clone above guarantees this mutation stays
+    // scoped to the current session.
     if (state.devFlags?.unlockAllSpells) {
-      this.playerDef.defaultSpellbookIds = defs.spells.map((s) => s.id);
+      const className = this.playerDef.className?.toLowerCase();
+      const allSpellsForClass = className
+        ? defs.spells.filter((sp) => sp.classes.includes(className))
+        : defs.spells;
+      this.playerDef.defaultSpellbookIds = allSpellsForClass.filter((sp) => sp.level > 0).map((sp) => sp.id);
+      this.playerDef.defaultCantripIds   = allSpellsForClass.filter((sp) => sp.level === 0).map((sp) => sp.id);
     }
     this.defs = {
       ...defs,
       playerDefs: defs.playerDefs.map((p) => p.id === this.playerDef.id ? this.playerDef : p),
     };
-    applyEquipment(this.playerDef, state.player.equippedSlots, this.defs.equipment, state.player.mageArmor);
+    applyEquipment(this.playerDef, state.player.equippedSlots, this.defs.equipment, state.player.mageArmor, state.player.shieldActive);
     state.player.ac = this.playerDef.ac;
     state.player.equippedSlotLabels = computeEquippedSlotLabels(this.playerDef, state.player.equippedSlots, this.defs.equipment);
 
@@ -122,7 +129,7 @@ export class GameEngine {
     // priority than triggers (50 vs -10) so directorial decisions arrive
     // before authored reactions to the same event.
     registerDirector(this.ctx);
-    registerAdventureProgress(this.ctx);
+    registerEncounterProgress(this.ctx);
     registerEncounterLifecycle(this.ctx);
     registerTriggers(this.ctx);
     registerSummonHooks(this.ctx);
@@ -333,6 +340,9 @@ export class GameEngine {
         break;
       case 'castSpell':
         spDoCastSpell(this.ctx, action.spellId, action.slotLevel, action.targetIds, action.tile, !!action.asRitual, events, action.damageTypeChoice);
+        break;
+      case 'releaseConcentration':
+        endConcentration(this.ctx, 'released by caster');
         break;
       case 'hide':         caDoHide(this.ctx); break;
       case 'useFeature':   doUseFeature(this.ctx, action.featureId, { targetId: action.targetId, tile: action.tile }, events); break;
@@ -855,7 +865,7 @@ export class GameEngine {
    * completion paths so adventures, chapter wraps, and single encounters
    * all settle correctly:
    *   • If the encounter declares a `completionFlag`, set it. Publishes
-   *     `flag_set` → `AdventureProgress` maps it to `encounterComplete`.
+   *     `flag_set` → `EncounterProgress` maps it to `encounterComplete`.
    *   • If there are living enemies, kill each one — the engine's normal
    *     `killNpc` path publishes `npc_killed` and `autoEndCombatIfNoEnemies`
    *     fires `combat_ended` after the last drop.
@@ -910,16 +920,32 @@ export class GameEngine {
 
   private applyDamageToPlayer(damage: number, _events: GameEvent[]): void {
     const s = this.state;
+    // SRD: Temporary HP absorbs damage first; the pool drains before the
+    // real HP takes any hit. The CON save (and the unconscious check) only
+    // see the *leftover* damage that actually reached real HP.
+    let effective = damage;
+    if (effective > 0 && s.player.tempHp > 0) {
+      const absorbed = Math.min(s.player.tempHp, effective);
+      s.player.tempHp -= absorbed;
+      effective -= absorbed;
+      this.addLog({ left: `${absorbed} damage absorbed by Temporary HP (${s.player.tempHp} remaining)`, style: 'status' });
+    }
     const hpBefore = s.player.hp;
-    s.player.hp = Math.max(0, hpBefore - damage);
+    s.player.hp = Math.max(0, hpBefore - effective);
     this.addLog({ left: `${this.playerDef.name} HP: ${s.player.hp}/${this.playerDef.maxHp}`, style: 'status' });
-    this.bus.publish({ type: 'damage_dealt', target: 'player', amount: damage });
+    this.bus.publish({ type: 'damage_dealt', target: 'player', amount: effective });
     publishHpThresholdCrossings(this.ctx, 'player', hpBefore, s.player.hp, this.playerDef.maxHp);
-    // Concentration save: any damage while concentrating triggers a CON save.
-    if (s.player.concentratingOn) maybeBreakConcentration(this.ctx, damage);
+    // Concentration save: damage that actually reached real HP triggers a
+    // CON save. Pure temp-HP absorption does not break concentration —
+    // SRD: the save is based on damage *taken*, not damage *dealt*.
+    if (s.player.concentratingOn && effective > 0) maybeBreakConcentration(this.ctx, effective);
     if (s.player.hp > 0) return;
     clearHide(s.player);
-    const leftover = damage - hpBefore;
+    // SRD: Concentration ends if you have the Incapacitated condition or
+    // you die. Falling to 0 HP triggers Unconscious (which is Incapacitated),
+    // so drop any concentration the player was holding before the phase flip.
+    if (s.player.concentratingOn) endConcentration(this.ctx, 'caster fell unconscious');
+    const leftover = effective - hpBefore;
     if (leftover >= this.playerDef.maxHp) {
       this.addLog({ left: `Massive damage — ${this.playerDef.name} dies instantly`, style: 'kill' });
       s.phase = 'defeat';

@@ -896,7 +896,8 @@
     {
       "id": "way_down_aigm",
       "when": {
-        "event": "flag_set"
+        "event": "flag_set",
+        "name": "sage_way_down_given"
       },
       "if": [],
       "then": [

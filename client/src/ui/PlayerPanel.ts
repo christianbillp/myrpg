@@ -82,6 +82,14 @@ export interface PlayerPanelCallbacks {
    *  type a line for the currently-selected target. No-op when no target
    *  is selected — the button greys out in that state. */
   onTalk: () => void;
+  /** Open the Character Sheet directly on the Spells tab — wired to the
+   *  CAST button above TALK so the player can pick a spell without first
+   *  having to open CHARACTER and switch tabs. */
+  onOpenSpells: () => void;
+  /** Drop the spell currently in `PlayerState.concentratingOn`. Visible
+   *  only when concentrating — wired to a small RELEASE button beside the
+   *  CAST button. SRD: ending concentration is free, no action cost. */
+  onReleaseConcentration: () => void;
 }
 
 function waitMs(ms: number): Promise<void> {
@@ -406,6 +414,13 @@ export class PlayerPanel {
       talkExEl.disabled = !state.hasSelectedTarget;
       this.actionArea.appendChild(talkExEl);
 
+      // CAST — shortcut to the Spells tab of the Character Sheet so a caster
+      // can pick a spell without first opening CHARACTER and switching tabs.
+      // Sits directly above TALK; same teal as TALK. Caster-only.
+      if (this.playerDef.spellcastingAbility) {
+        this.actionArea.appendChild(this.makeBtn('CAST', '#1a3a4a', this.callbacks.onOpenSpells));
+      }
+
       // LEVEL UP and LONG REST sit above the MOVE button. The action area uses
       // `flex-direction: column-reverse`, so a later DOM child renders higher.
       if (aa.canLevelUp) {
@@ -490,6 +505,22 @@ export class PlayerPanel {
       const talkEl = this.makeBtn('TALK', '#1a3a4a', this.callbacks.onTalk);
       talkEl.disabled = !state.hasSelectedTarget;
       this.actionArea.appendChild(talkEl);
+
+      // CAST — opens the Spells tab directly. Same teal as TALK; placed
+      // above it. Caster-only. The Spells tab itself enforces action
+      // economy + slot availability, so we don't pre-disable the button.
+      if (this.playerDef.spellcastingAbility) {
+        this.actionArea.appendChild(this.makeBtn('CAST', '#1a3a4a', this.callbacks.onOpenSpells));
+      }
+      // RELEASE — drops the active concentration spell at will. SRD: ending
+      // concentration is free (no action), so this stays free of the
+      // action-economy gates. Visible only when concentrating.
+      if (state.concentratingOn) {
+        const label = state.concentratingOnName
+          ? `RELEASE ${state.concentratingOnName.toUpperCase()}`
+          : 'RELEASE CONCENTRATION';
+        this.actionArea.appendChild(this.makeBtn(label, '#3a2a4a', this.callbacks.onReleaseConcentration));
+      }
 
     } else if (mode === 'death_saves') {
       this.actionArea.prepend(btn('ROLL DEATH SAVE', '#5a1a1a', this.callbacks.onDeathSave));

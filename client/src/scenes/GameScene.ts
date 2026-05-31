@@ -48,6 +48,15 @@ export class GameScene extends Phaser.Scene {
   private eventQueue: GameEvent[] = [];
   private animating = false;
   private mapDrawn = false;
+  /** Display cap on `state.eventLog` while the animation queue is draining.
+   *  When the server pushes a state with new log lines, those lines are
+   *  semantically tied to the events still animating (enemy walk, then
+   *  attack). Letting them render immediately would surface "Enemy hits
+   *  Aelar for 5" before the enemy token finished walking up to the
+   *  player. We hold the log at its pre-update length until the event
+   *  queue drains, then `applyState` clears this cap and the full log
+   *  appears alongside the action's final visual + audio frame. */
+  private hudLogClip: number | null = null;
   /** While an `entity_move` event is animating, this holds the moving
    *  entity's id (`'player'` or `npc.id`). The HUD's turn-order chip data
    *  is overridden so that entity reads as active for the duration of the
@@ -315,6 +324,10 @@ export class GameScene extends Phaser.Scene {
   // ── State update pipeline ─────────────────────────────────────────────────
 
   private handleStateUpdate(state: GameState, events: GameEvent[]): void {
+    // Snapshot the previously-shown log length BEFORE swapping `gameState`
+    // so the clip below pins to "what the player currently sees" rather
+    // than to the incoming state's already-grown log.
+    const prevLogLen = this.gameState?.eventLog?.length ?? 0;
     this.gameState = state;
     const isFirst = this.awaitingFirstStateUpdate;
     this.awaitingFirstStateUpdate = false;
@@ -324,6 +337,16 @@ export class GameScene extends Phaser.Scene {
     // missing the speech behind the modal — they'll appear after dismissal
     // in the same order they arrived.
     const deferSpeech = this.overlays.isIntroBlocking || (isFirst && !!state.introduction && !DevMode.disableSupertitle);
+    // Pin the visible-log length to the previous state's log so new lines
+    // don't render until the animation queue drains. Skipped on the first
+    // state (the seeded intro lines + Objective should be visible
+    // immediately as the world reveals). If a clip is already set (a
+    // mid-animation state update arrived before the previous batch
+    // finished), keep the existing cap so log entries from BOTH updates
+    // stay hidden until the queue truly empties.
+    if (!isFirst && this.hudLogClip === null) {
+      this.hudLogClip = prevLogLen;
+    }
     for (const ev of events) {
       if (ev.type === "entity_move") this.eventQueue.push(ev);
       else if (ev.type === "npc_speech") {
@@ -336,8 +359,13 @@ export class GameScene extends Phaser.Scene {
           this.hud.addNpcSpeech(ev.speakerName, ev.text);
         }
       }
-      else if (ev.type === "sound_ring") this.visionMask?.pushSoundRing(ev.x, ev.y, ev.intensity);
-      else if (ev.type === "play_sound") playSound(ev.sound);
+      else if (ev.type === "sound_ring" || ev.type === "play_sound") {
+        // Audio cues are queued alongside entity_move so the swoosh / impact
+        // SFX (and the perception sound-ring overlay) fire when the
+        // matching animation reaches them, not on packet arrival. Otherwise
+        // the player hears the hit while the attacker is still walking.
+        this.eventQueue.push(ev);
+      }
       else if (ev.type === "screen_fade" || ev.type === "supertitle" || ev.type === "announcement") {
         this.eventQueue.push(ev);
       }
@@ -399,6 +427,11 @@ export class GameScene extends Phaser.Scene {
         return;
       }
       this.animatingEntityId = null;
+      // Release the event-log cap — the full log now matches the visible
+      // world state, so any deferred lines (attack rolls, damage, status
+      // changes accrued during the animations) appear in one batch synced
+      // with the final frame of the action.
+      this.hudLogClip = null;
       this.applyState(this.gameState);
       return;
     }
@@ -454,6 +487,10 @@ export class GameScene extends Phaser.Scene {
       // introduction overlay comes out via this path so it actually shows.
       this.speechBubbles.spawn(event.entityId, event.text);
       this.hud.addNpcSpeech(event.speakerName, event.text);
+    } else if (event.type === "play_sound") {
+      playSound(event.sound);
+    } else if (event.type === "sound_ring") {
+      this.visionMask?.pushSoundRing(event.x, event.y, event.intensity);
     }
     this.animating = false;
     this.processNextEvent();
@@ -646,7 +683,13 @@ export class GameScene extends Phaser.Scene {
         return;
       }
       if (this.spellTargetMode.kind === "creature") {
-        const validTarget = nState && nState.hp > 0 ? nState.id : null;
+        // Self-click during creature-target mode resolves as self-target so
+        // touch-range buff spells (Longstrider, Jump, …) work via the
+        // existing target picker. The Player Panel toggle is suppressed
+        // while in spell-target mode so clicking yourself never silently
+        // closes the panel.
+        const isSelfClick = tileX === ps.tileX && tileY === ps.tileY;
+        const validTarget = isSelfClick ? 'player' : (nState && nState.hp > 0 ? nState.id : null);
         this.finishSpellTargetClick(validTarget, tileX, tileY);
       } else {
         this.finishSpellTargetClick(null, tileX, tileY);
@@ -754,6 +797,8 @@ export class GameScene extends Phaser.Scene {
       onLongRest:       () => void this.openLongRestOverlay(),
       onCommandSummon:  (summonNpcId) => this.beginSummonDirect(summonNpcId),
       onTalk:           () => this.openSpeechInput(),
+      onOpenSpells:     () => { if (this.gameState) this.overlays.openCharacterSheet(this.gameState, 'spells'); },
+      onReleaseConcentration: () => gameClient.sendAction({ type: "releaseConcentration" }),
       onDevCompleteObjective: () => gameClient.sendAction({ type: "devCompleteEncounter" }),
       onLeaveEncounter: () => this.leaveEncounter(),
     });
@@ -858,12 +903,20 @@ export class GameScene extends Phaser.Scene {
         })
       : [];
 
+    // Clip the visible log while an animation queue is draining so log
+    // entries don't precede the matching visual / audio frame. The cap is
+    // set by `handleStateUpdate` to the previous-state log length and
+    // released by `processNextEvent` when the queue empties.
+    const eventLog = this.hudLogClip !== null && this.hudLogClip < state.eventLog.length
+      ? state.eventLog.slice(0, this.hudLogClip)
+      : state.eventLog;
+
     return {
       mode:      state.phase,
       playerDef: this.playerDef,
       playerHp:  state.player.hp,
       turnOrderChips,
-      eventLog: state.eventLog,
+      eventLog,
       selectedNpcName,
     };
   }
@@ -975,20 +1028,28 @@ export class GameScene extends Phaser.Scene {
     // Single-target save spells (Hideous Laughter, Charm Person) — no `area`,
     // no `attack` field, but `save` is set — also need the target-selector
     // to fire so the cast resolves against a specific creature.
+    // Touch-range buff spells (Longstrider, Jump, Mage Armor, …) also enter
+    // creature-target mode: SRD specifies "touch a creature", and even
+    // self-only buffs benefit from the explicit click so the player isn't
+    // surprised when a CAST press silently applies a buff.
     const needsCreatureTarget =
       spell.attack === 'ranged-spell' || spell.attack === 'melee-spell' || spell.attack === 'auto-hit'
+      || !!spell.weaponAttack
       || (!!spell.save && !spell.area);
+    const isTouchBuff = spell.range === 'touch' &&
+      !spell.attack && !spell.save && !spell.area && !spell.summon && !spell.darts;
     const isAoe = !!spell.area;
 
-    if (needsCreatureTarget) {
+    if (needsCreatureTarget || isTouchBuff) {
       this.spellTargetMode = { kind: "creature", spellId, spellName: spell.name, asRitual, damageTypeChoice };
     } else if (isAoe) {
-      // Mirror server: sphere → diameter / 5; cube → side / 5; cone → reach / 5.
+      // Mirror server `tilesInArea`: sphere uses a chebyshev-disc radius
+      // (`ceil(sizeFeet / 5)`), cube uses a tile-side length, cone uses a
+      // reach. The preview reads `shape`, `sideTiles`, and `selfAnchored`
+      // to paint the matching footprint as the cursor moves.
       const sizeFeet = spell.area?.sizeFeet ?? 5;
       const shape = (spell.area?.shape ?? "sphere") as "cone" | "sphere" | "cube" | "line";
-      const sideTiles = shape === 'sphere'
-        ? Math.max(1, Math.ceil(2 * sizeFeet / 5))
-        : Math.max(1, Math.ceil(sizeFeet / 5));
+      const sideTiles = Math.max(1, Math.ceil(sizeFeet / 5));
       const selfAnchored = spell.range === 'self' || spell.rangeFeet === 0;
       this.spellTargetMode = { kind: "aoe", spellId, spellName: spell.name, asRitual, sideTiles, selfAnchored, shape, damageTypeChoice };
     } else {
@@ -1018,6 +1079,19 @@ export class GameScene extends Phaser.Scene {
 
     if (stm.kind === "creature") {
       if (!targetNpcId) { this.exitSpellTargetMode(); return; }
+      // Self-target click: fire the cast with no targetIds. The engine
+      // routes the cast through `resolveUtilitySpell` (or its specific case)
+      // which applies the buff to the caster. Only valid for touch-range
+      // buff spells; clicking self for a Charm Person or Chill Touch
+      // cancels (it's not a legal self-target).
+      if (targetNpcId === 'player') {
+        const isTouchBuff = spell.range === 'touch' &&
+          !spell.attack && !spell.save && !spell.area && !spell.summon && !spell.darts;
+        if (!isTouchBuff) { this.exitSpellTargetMode(); return; }
+        gameClient.sendAction({ type: "castSpell", spellId: stm.spellId, slotLevel, asRitual: stm.asRitual, damageTypeChoice: stm.damageTypeChoice });
+        this.exitSpellTargetMode();
+        return;
+      }
       gameClient.sendAction({ type: "castSpell", spellId: stm.spellId, slotLevel, targetIds: [targetNpcId], asRitual: stm.asRitual, damageTypeChoice: stm.damageTypeChoice });
       this.exitSpellTargetMode();
       return;
@@ -1060,23 +1134,32 @@ export class GameScene extends Phaser.Scene {
   }
 
   /**
-   * Mirror server `rectAreaCells` to enumerate the creatures the AOE actually
+   * Mirror server `tilesInArea` to enumerate the creatures the AOE actually
    * covers, so the SpellTargetSelector can list them. Non-ally creatures are
    * tagged for the picker's default-checked state.
+   *
+   * Sphere placed at a click follows the SRD grid-intersection rule —
+   * 2*r tiles per side anchored at the click. Cube uses tile-side length,
+   * centred for odd sizes, extends right+down for even sizes. Sleep is the
+   * currently-shipped consumer.
    */
   private creaturesInPlacedArea(spell: SpellDef, tile: { x: number; y: number }): SpellTargetCandidate[] {
     if (!this.gameState) return [];
     const sizeFeet = spell.area?.sizeFeet ?? 5;
-    const sideTiles = spell.area?.shape === 'sphere'
-      ? Math.max(1, Math.ceil(2 * sizeFeet / 5))
-      : Math.max(1, Math.ceil(sizeFeet / 5));
+    const r = Math.max(1, Math.ceil(sizeFeet / 5));
     let xMin: number, xMax: number, yMin: number, yMax: number;
-    if (sideTiles % 2 === 1) {
-      const r = (sideTiles - 1) / 2;
-      xMin = tile.x - r; xMax = tile.x + r; yMin = tile.y - r; yMax = tile.y + r;
+    if (spell.area?.shape === 'sphere') {
+      const sideTiles = 2 * r;
+      xMin = tile.x; xMax = tile.x + sideTiles - 1; yMin = tile.y; yMax = tile.y + sideTiles - 1;
     } else {
-      const offset = sideTiles - 1;
-      xMin = tile.x; xMax = tile.x + offset; yMin = tile.y; yMax = tile.y + offset;
+      const side = r;
+      if (side % 2 === 1) {
+        const rr = (side - 1) / 2;
+        xMin = tile.x - rr; xMax = tile.x + rr; yMin = tile.y - rr; yMax = tile.y + rr;
+      } else {
+        const offset = side - 1;
+        xMin = tile.x; xMax = tile.x + offset; yMin = tile.y; yMax = tile.y + offset;
+      }
     }
     const out: SpellTargetCandidate[] = [];
     for (const npc of this.gameState.npcs) {
@@ -1594,23 +1677,57 @@ export class GameScene extends Phaser.Scene {
           paintTile(ox + rx, oy + ry);
         }
       }
-    } else {
-      const cx = stm.selfAnchored ? this.player.tileX : tileX;
-      const cy = stm.selfAnchored ? this.player.tileY : tileY;
-      // Mirror server `rectAreaCells`: odd side → centred chebyshev disc,
-      // even side → click is the top-left, area extends right + down. Fixed
-      // orientation avoids the 2-tile jump that "extend away from caster"
-      // produced when crossing the caster's axis.
-      let xMin: number, xMax: number, yMin: number, yMax: number;
-      if (side % 2 === 1) {
-        const r = (side - 1) / 2;
-        xMin = cx - r; xMax = cx + r; yMin = cy - r; yMax = cy + r;
+    } else if (stm.shape === "sphere") {
+      // Sphere preview:
+      //   self-anchored → chebyshev disc on the caster's tile centre.
+      //   placed       → SRD grid-intersection rule: 2*r tiles per side
+      //                   anchored at the clicked tile (top-left).
+      const r = side;
+      if (stm.selfAnchored) {
+        const cx = this.player.tileX, cy = this.player.tileY;
+        for (let dy = -r; dy <= r; dy++) {
+          for (let dx = -r; dx <= r; dx++) paintTile(cx + dx, cy + dy);
+        }
       } else {
-        const offset = side - 1;
-        xMin = cx; xMax = cx + offset; yMin = cy; yMax = cy + offset;
+        const sideTiles = 2 * r;
+        for (let dy = 0; dy < sideTiles; dy++) {
+          for (let dx = 0; dx < sideTiles; dx++) paintTile(tileX + dx, tileY + dy);
+        }
       }
-      for (let y = yMin; y <= yMax; y++) {
-        for (let x = xMin; x <= xMax; x++) paintTile(x, y);
+    } else {
+      // Cube preview. Self-anchored (Thunderwave) extends FROM the caster
+      // in the cursor direction — caster's tile is NOT in the cube.
+      // Click-anchored (Grease) extends from the clicked tile.
+      if (stm.selfAnchored) {
+        let ddx = Math.sign(tileX - this.player.tileX);
+        let ddy = Math.sign(tileY - this.player.tileY);
+        if (ddx === 0 && ddy === 0) ddx = 1;
+        const halfLow  = Math.floor((side - 1) / 2);
+        const halfHigh = Math.ceil((side - 1) / 2);
+        const cx0 = this.player.tileX, cy0 = this.player.tileY;
+        let xMin: number, xMax: number, yMin: number, yMax: number;
+        if (ddx === 0)      { xMin = cx0 - halfLow; xMax = cx0 + halfHigh; }
+        else if (ddx > 0)   { xMin = cx0 + 1;       xMax = cx0 + side; }
+        else                { xMin = cx0 - side;    xMax = cx0 - 1; }
+        if (ddy === 0)      { yMin = cy0 - halfLow; yMax = cy0 + halfHigh; }
+        else if (ddy > 0)   { yMin = cy0 + 1;       yMax = cy0 + side; }
+        else                { yMin = cy0 - side;    yMax = cy0 - 1; }
+        for (let y = yMin; y <= yMax; y++) {
+          for (let x = xMin; x <= xMax; x++) paintTile(x, y);
+        }
+      } else {
+        const cx = tileX, cy = tileY;
+        let xMin: number, xMax: number, yMin: number, yMax: number;
+        if (side % 2 === 1) {
+          const r = (side - 1) / 2;
+          xMin = cx - r; xMax = cx + r; yMin = cy - r; yMax = cy + r;
+        } else {
+          const offset = side - 1;
+          xMin = cx; xMax = cx + offset; yMin = cy; yMax = cy + offset;
+        }
+        for (let y = yMin; y <= yMax; y++) {
+          for (let x = xMin; x <= xMax; x++) paintTile(x, y);
+        }
       }
     }
   }

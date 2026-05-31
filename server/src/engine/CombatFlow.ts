@@ -3,6 +3,7 @@ import type { GameContext } from './GameContext.js';
 import { rollOneInitiative, rollDeathSave, type RolledBonusDamage } from './CombatSystem.js';
 import { chebyshev } from './EnemyAI.js';
 import { isIncapacitated, hasSpeedZero, proneStandCost, TURN_CONDITIONS, clearHide } from './ConditionSystem.js';
+import { applyEquipment } from './EquipmentSystem.js';
 import { runPerceptionSweep } from './Vision.js';
 import { mod, d20 as d20Local } from './Dice.js';
 import { runSingleEnemyTurn, runSingleAllyTurn } from './NpcTurnRunners.js';
@@ -238,13 +239,28 @@ export function enterPlayerTurn(ctx: GameContext): void {
   s.player.bonusActionUsed = false;
   s.player.reactionUsed = false;
   s.player.freeObjectInteractionUsed = false;
+  // SRD Shield: the +5 AC bonus ends at the start of the caster's next
+  // turn. Drop the flag and recompute AC so the bonus disappears before
+  // anything reads it this turn.
+  if (s.player.shieldActive) {
+    s.player.shieldActive = false;
+    applyEquipment(ctx.playerDef, s.player.equippedSlots, ctx.defs.equipment, s.player.mageArmor, false);
+    s.player.ac = ctx.playerDef.ac;
+  }
   s.player.conditions = s.player.conditions.filter((c) => !TURN_CONDITIONS.includes(c));
   if (hasSpeedZero(s.player.conditions) || s.player.hp <= 0) {
     s.player.movesLeft = 0;
   } else {
-    const tileSpeed = ctx.playerDef.speed / 5;
+    // Longstrider and other self-buffs add a flat ft bonus to the player's
+    // base speed. Expeditious Retreat additionally grants a free Dash each
+    // turn while active (added once movement is computed, mirroring
+    // CombatActions' Dash semantics).
+    const tileSpeed = (ctx.playerDef.speed + s.player.speedBonus) / 5;
     const standCost = proneStandCost(s.player.conditions, tileSpeed);
     s.player.movesLeft = Math.max(0, tileSpeed - standCost);
+    if (s.player.expeditiousRetreat) {
+      s.player.movesLeft += Math.floor((ctx.playerDef.speed + s.player.speedBonus) / 5);
+    }
     if (standCost > 0) s.player.conditions = s.player.conditions.filter((c) => c !== 'prone');
   }
   if (!wasPlayerTurn && s.phase === 'player_turn') {
@@ -410,6 +426,37 @@ export function finalizeNpcTurn(ctx: GameContext, npc: NpcState): void {
     runPerceptionSweep(ctx, 'player');
   }
 
+  // Hideous Laughter re-save: per SRD, an affected creature repeats the Wis
+  // save at the end of each of its turns. Success ends the spell on that
+  // target; failure leaves them Prone + Incapacitated until the next
+  // opportunity. Mirrors Sleep's structure below. Creatures with Int ≤ 4 or
+  // no understood language can't be affected at all and are filtered out by
+  // the caster-side resolver, so we don't re-check immunity here.
+  if (s.player.concentratingOn === 'hideous-laughter'
+    && npc.conditions.includes('incapacitated')
+    && npc.conditions.includes('prone')) {
+    const def = ctx.resolveMonsterDef(npc.defId);
+    if (def) {
+      const dc = 8 + ctx.playerDef.proficiencyBonus + (
+        ctx.playerDef.spellcastingAbility ? mod(ctx.playerDef[ctx.playerDef.spellcastingAbility]) : 0
+      );
+      const saveMod = (def.savingThrows && def.savingThrows['wis'] !== undefined)
+        ? def.savingThrows['wis']
+        : mod(def.wis);
+      const roll = d20Local();
+      const total = roll + saveMod;
+      const success = total >= dc;
+      ctx.addLog({
+        left: `${combatantDisplayName(npc, s.npcs)} ${success ? 'stops laughing' : 'continues to convulse with laughter'}`,
+        right: `WIS d20(${roll})+${saveMod}=${total} vs DC ${dc}`,
+        style: success ? 'status' : 'miss',
+      });
+      if (success) {
+        npc.conditions = npc.conditions.filter((c) => c !== 'incapacitated' && c !== 'prone');
+      }
+    }
+  }
+
   // Sleep re-save: per SRD, the Incapacitated condition from Sleep ends at
   // the end of the target's next turn, at which point they re-save vs the
   // original DC. Success ends the spell on this target; failure replaces
@@ -470,11 +517,46 @@ export function doResolveReaction(ctx: GameContext, accept: boolean, events: Gam
   } else if (pending.kind === 'shield') {
     const attacker = s.npcs.find((n) => n.id === pending.attackerId);
     if (accept) {
-      // Consume slot + reaction; the attack misses.
+      // Consume slot + reaction; flag the +5 AC so any further attack
+      // before the start of the player's next turn also faces it (SRD
+      // wording: "+5 bonus to AC, including against the triggering attack,
+      // until the start of your next turn").
       if ((s.player.spellSlots[0] ?? 0) > 0) s.player.spellSlots[0] -= 1;
       s.player.reactionUsed = true;
-      ctx.addLog({ left: `⚡ ${ctx.playerDef.name} casts Shield (reaction) — +5 AC until next turn`, style: 'status' });
-      ctx.addLog({ left: `The attack glances off the magical barrier — miss`, style: 'miss' });
+      s.player.shieldActive = true;
+      applyEquipment(ctx.playerDef, s.player.equippedSlots, ctx.defs.equipment, s.player.mageArmor, s.player.shieldActive);
+      s.player.ac = ctx.playerDef.ac;
+      ctx.addLog({ left: `⚡ ${ctx.playerDef.name} casts Shield (reaction) — AC ${s.player.ac} until next turn`, style: 'status' });
+      // SRD: crits bypass AC entirely, so Shield can't turn the triggering
+      // attack into a miss when it was a critical hit. The +5 AC still
+      // applies to subsequent attacks this round. Apply the saved damage.
+      if (pending.isCrit && attacker) {
+        ctx.addLog({ left: `The critical hit still lands — Shield can't block it`, style: 'miss' });
+        const synthResult = {
+          damage: pending.incomingDamage,
+          isCrit: true,
+          finalTileX: attacker.tileX,
+          finalTileY: attacker.tileY,
+          bonusComponents: pending.incomingBonusComponents,
+        };
+        applyEnemyHitToPlayer(ctx, attacker, synthResult, events);
+      } else if (pending.attackTotal < pending.shieldedAc) {
+        // The +5 AC would convert this hit to a miss — Shield prevented it.
+        ctx.addLog({ left: `The attack glances off the magical barrier — miss`, style: 'miss' });
+      } else if (attacker) {
+        // Shield's +5 AC isn't enough to negate this attack (attackTotal
+        // ≥ shielded AC). The hit still lands; the buff persists for
+        // future attacks this round.
+        ctx.addLog({ left: `Shield holds, but the blow lands anyway — AC ${s.player.ac} wasn't enough`, style: 'miss' });
+        const synthResult = {
+          damage: pending.incomingDamage,
+          isCrit: false,
+          finalTileX: attacker.tileX,
+          finalTileY: attacker.tileY,
+          bonusComponents: pending.incomingBonusComponents,
+        };
+        applyEnemyHitToPlayer(ctx, attacker, synthResult, events);
+      }
     } else if (attacker) {
       // Decline → apply the damage we saved when deferring.
       const synthResult = {

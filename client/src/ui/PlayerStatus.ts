@@ -56,6 +56,12 @@ const CONDITION_TABLE: Record<string, { label: string; tone: PlayerStatusTone; t
   dashing:        { label: "Dashing",      tone: "buff",      tooltip: "Your speed for the turn is doubled." },
   slowed:         { label: "Slowed",       tone: "debuff",    tooltip: "Speed reduced." },
   vexed:          { label: "Vexed",        tone: "debuff",    tooltip: "Next attack against you has Advantage (Vex weapon mastery)." },
+  // Effectively-Blinded states applied by spells like Fog Cloud — surfaced
+  // so the player understands they have Disadvantage on attacks out and
+  // attackers have Disadvantage on attacks against them.
+  "heavily-obscured": { label: "Heavily Obscured", tone: "debuff", tooltip: "Treated as Blinded for sight. Your attacks have Disadvantage; attackers against you have Disadvantage." },
+  "no-healing":   { label: "No Healing",   tone: "debuff",    tooltip: "Can't regain HP for the duration (Chill Touch rider)." },
+  "no-reactions": { label: "No Reactions", tone: "debuff",    tooltip: "Can't take Reactions until the start of your next turn (Shocking Grasp rider)." },
 };
 
 /**
@@ -105,6 +111,31 @@ export function buildPlayerStatusChips(
       label: "Mage Armor",
       tone: "buff",
       tooltip: "Base AC becomes 13 + Dex while unarmored. Lasts 8 hours.",
+    });
+  }
+
+  // Self-buff spell flags set via SpellSystem's utility branch — surfaced
+  // so the player can see the buff is active and tell the engine isn't
+  // silently ignoring the cast.
+  if (player.speedBonus > 0) {
+    chips.push({
+      label: `Speed +${player.speedBonus} ft`,
+      tone: "buff",
+      tooltip: "Speed bonus from Longstrider or similar buff. Applied at the start of each player turn.",
+    });
+  }
+  if (player.expeditiousRetreat) {
+    chips.push({
+      label: "Expeditious Retreat",
+      tone: "buff",
+      tooltip: "Dash this turn and on each subsequent turn as a Bonus Action. Concentration, 10 minutes.",
+    });
+  }
+  if (player.jumpMultiplier > 1) {
+    chips.push({
+      label: `Jump ×${player.jumpMultiplier}`,
+      tone: "buff",
+      tooltip: "Jump distance multiplier active for the spell's duration.",
     });
   }
 

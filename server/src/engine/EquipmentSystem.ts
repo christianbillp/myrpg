@@ -6,6 +6,7 @@ export function computeAC(
   armor: ArmorDef | null,
   shield: ShieldDef | null,
   mageArmor = false,
+  shieldSpellActive = false,
 ): number {
   const dexMod = mod(playerDef.dex);
   let ac: number;
@@ -20,6 +21,10 @@ export function computeAC(
     if (playerDef.fightingStyleDefense) ac += 1;
   }
   if (shield) ac += shield.acBonus;
+  // SRD Shield reaction: +5 AC until the start of the caster's next turn,
+  // including against the triggering attack roll. Stacks on top of armor /
+  // mundane shield / Mage Armor.
+  if (shieldSpellActive) ac += 5;
   return ac;
 }
 
@@ -124,13 +129,19 @@ export function applyFeats(playerDef: PlayerDef, allFeats: FeatDef[]): void {
   }
 }
 
-export function applyEquipment(playerDef: PlayerDef, slots: EquipmentSlots, allItems: ItemDef[], mageArmor = false): void {
+export function applyEquipment(
+  playerDef: PlayerDef,
+  slots: EquipmentSlots,
+  allItems: ItemDef[],
+  mageArmor = false,
+  shieldSpellActive = false,
+): void {
   const byId = Object.fromEntries(allItems.map((i) => [i.id, i]));
   const armor = slots.armorId ? (byId[slots.armorId] as ArmorDef | undefined) ?? null : null;
   const shield = slots.shieldId ? (byId[slots.shieldId] as ShieldDef | undefined) ?? null : null;
   const weapon = slots.weaponId ? (byId[slots.weaponId] as WeaponDef | undefined) ?? null : null;
 
-  playerDef.ac = computeAC(playerDef, armor, shield, mageArmor);
+  playerDef.ac = computeAC(playerDef, armor, shield, mageArmor, shieldSpellActive);
   playerDef.mainAttack = weapon
     ? makePlayerAttack(playerDef, weapon)
     : { name: 'Unarmed Strike', statKey: 'str', damageDice: 1, damageSides: 1, damageType: 'bludgeoning', savageAttacker: false, graze: false, vex: false, sap: false, slow: false };

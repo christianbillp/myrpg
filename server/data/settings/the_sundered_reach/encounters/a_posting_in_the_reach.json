@@ -10,7 +10,7 @@
   "allyIds": [],
   "enemyIds": [],
   "customIntroduction": "Rain has followed you the whole way from the coach road. The waystation is warm, low-ceilinged, and full of the smell of tallow and wet wool. Behind the long bar a broad man polishes a cup he has already polished twice; at a corner table a local nurses a mug and watches you over the rim. Your cape is still stiff with road-dust. You are the only Cape these people have seen in a long while, and they all know it before you have said a word. Somewhere in your satchel is a sealed writ: walk the Reach Circuit, recertify its wardstones — routine work — and \"ascertain the standing\" of Senior Cape Edran Vael, who has not filed a report in three seasons.",
-  "customContext": "INTRODUCTORY SOCIAL ENCOUNTER — no combat. First scene; teach the dialogue mode and ability checks. Player is Junior Cape Reed, a freshly licensed mage (treat as a Wizard): bookish, painfully polite, asks many questions, knows theory but has almost no field experience. Two neutral NPCs are present and must NOT be made hostile. Give campaign basics freely; gate richer detail behind Persuasion/Insight/History/Arcana DC 10–13. The player must leave with ONE concrete lead: the nearest wardstone, in the wood north of here, has cracked \"like a struck bell.\" Use the roll/check flow for social checks and reveal NPC names when given. Reward roleplay and good questions; let the player ask freely.\n\nTriggers:\n1. On encounter start (T0 aigm, encounter_open_aigm): the AI GM sets the scene — the warm, close waystation, both NPCs already clocking Reed's white cape — and invites the player to act.\n2. When the player moves into the bar area (T1 speech, bram_greeting): Bram Holdfast introduces himself unprompted, breaking the silence first.\n3. When the player moves into the bar area (T2 aigm, bram_conversation_aigm): the AI GM runs Bram as a cautious, practical innkeeper — shares Vael's absence freely, gates further detail behind DC 10 Persuasion / DC 12 Insight, and gives the cracked-wardstone lead when the player shows genuine curiosity (no roll required).\n4. When the player moves into the corner seating area (T3 aigm, villager_approach_aigm): the AI GM runs the villager as guarded and superstitious — they heard the wardstone \"ring\" like a cracked bell four months ago and have avoided the north wood since; detail about Vael looking worried is gated behind DC 10 Persuasion / DC 11 Insight.\n5. When the wardstone_lead_confirmed flag is set (T4 aigm, lead_gathered_wardstone): the AI GM narrates a quiet moment of consolidation as Reed notes the lead in their ledger, and invites the player to keep asking questions or move on.\n6. When the wardstone_lead_confirmed flag is set (T5 xp, wardstone_lead_flag): award 25 XP and log \"Lead confirmed: the wardstone in the north wood is cracked.\"\n7. When the wardstone_lead_confirmed flag is set (T6 set_flag, set_completion): sets the encounter completion flag waystation_leads_gathered.\n8. When the waystation_leads_gathered flag is set (T7 announcement, complete_and_depart): focused announcement — \"You step back out into the rain with a name in your notes and a cracked wardstone on your map. The Reach Circuit begins here.\"",
+  "customContext": "INTRODUCTORY SOCIAL ENCOUNTER — no combat. First scene; teach the dialogue mode and ability checks. Player is Junior Cape Reed, a freshly licensed mage (treat as a Wizard): bookish, painfully polite, asks many questions, knows theory but has almost no field experience. Two neutral NPCs are present and must NOT be made hostile. Give campaign basics freely; gate richer detail behind Persuasion/Insight/History/Arcana DC 10–13. The player must leave with ONE concrete lead: the nearest wardstone, in the wood north of here, has cracked \"like a struck bell.\" Use the roll/check flow for social checks and reveal NPC names when given. Reward roleplay and good questions; let the player ask freely.\n\nTriggers:\n1. On encounter start (T0 aigm, encounter_open_aigm): the AI GM sets the scene — the warm, close waystation, both NPCs already clocking Reed's white cape — and invites the player to act.\n2. When the player moves into the bar area (T1 start_conversation, bram_conversation_auto_open): the `tavern_keeper_chat` conversation tree auto-opens on `npc_tavern_keeper`. The tree owns Bram's dialogue — the AI GM does NOT roleplay him unless the player uses the conversation's `openAigm` free-talk choice.\n3. When the player moves into the corner seating area (T2 start_conversation, villager_conversation_auto_open): the `villager_chat` conversation tree auto-opens on `npc_villager`. The tree owns the villager's dialogue (wardstone ring, two riders, Vael looked worried). The AI GM does NOT roleplay them unless the player uses the conversation's `openAigm` choice.\n5. When the wardstone_lead_confirmed flag is set (T4 aigm, lead_gathered_wardstone): the AI GM narrates a quiet moment of consolidation as Reed notes the lead in their ledger, and invites the player to keep asking questions or move on.\n6. When the wardstone_lead_confirmed flag is set (T5 xp, wardstone_lead_flag): award 25 XP and log \"Lead confirmed: the wardstone in the north wood is cracked.\"\n7. When the wardstone_lead_confirmed flag is set (T6 set_flag, set_completion): sets the encounter completion flag waystation_leads_gathered.\n8. When the waystation_leads_gathered flag is set (T7 announcement, complete_and_depart): focused announcement — \"You step back out into the rain with a name in your notes and a cracked wardstone on your map. The Reach Circuit begins here.\"",
   "objective": "Speak with Bram Holdfast the innkeeper and the local villager to learn what you can about Senior Cape Edran Vael and the state of the wardstones on the Reach Circuit. Leave with at least one concrete lead.",
   "startingZones": {
     "width": 14,
@@ -194,8 +194,8 @@
       ],
       "once": true
     },
-    {
-      "id": "bram_greeting",
+{
+      "id": "bram_conversation_auto_open",
       "when": {
         "event": "player_moved",
         "in_area": {
@@ -215,42 +215,14 @@
       ],
       "then": [
         {
-          "type": "npc_speaks",
-          "entity": "npc_tavern_keeper",
-          "text": "We don't see many Capes on this stretch. Bar's open, if you need something warm. Name's Holdfast — Bram Holdfast."
+          "type": "start_conversation",
+          "npcRef": "npc_tavern_keeper"
         }
       ],
       "once": true
     },
     {
-      "id": "bram_conversation_aigm",
-      "when": {
-        "event": "player_moved",
-        "in_area": {
-          "x": 1,
-          "y": 1,
-          "w": 11,
-          "h": 2
-        }
-      },
-      "if": [
-        {
-          "type": "phase",
-          "in": [
-            "exploring"
-          ]
-        }
-      ],
-      "then": [
-        {
-          "type": "send_aigm_message",
-          "message": "The player has approached Bram Holdfast at the bar. Run him as a cautious, practical man — polite but measuring. He knows Cape Vael by name and reputation (a quiet, competent man who used to stop in every season). Vael has not been seen in three seasons. Bram will share this freely. Gate further detail — Vael's last known destination, his manner when he left, anything unusual — behind DC 10 Persuasion or DC 12 Insight. If the player asks about the wardstones, Bram mentions that travellers have been complaining about the north wood feeling 'wrong' lately, and that a tinker who came through last month said the stone up there was cracked 'like a struck bell.' That detail is the key lead — give it when the player shows genuine curiosity, no roll needed."
-        }
-      ],
-      "once": true
-    },
-    {
-      "id": "villager_approach_aigm",
+      "id": "villager_conversation_auto_open",
       "when": {
         "event": "player_moved",
         "in_area": {
@@ -270,8 +242,8 @@
       ],
       "then": [
         {
-          "type": "send_aigm_message",
-          "message": "The player has moved toward the villager in the corner. Run them as guarded and a little superstitious — they've lived near the wood all their life and they don't love talking to Capes. They know the north wood wardstone personally: they heard it 'ring' about four months ago, a deep sound like a cracked bell, and they've avoided that part of the wood since. They won't name Vael by name unless asked directly; if asked, they say he came through once asking about 'the old markers' and looked worried. Gate the detail about Vael looking worried behind DC 10 Persuasion or DC 11 Insight. Reward the player if they're respectful and don't lean on authority."
+          "type": "start_conversation",
+          "npcRef": "npc_villager"
         }
       ],
       "once": true
@@ -279,7 +251,8 @@
     {
       "id": "lead_gathered_wardstone",
       "when": {
-        "event": "flag_set"
+        "event": "flag_set",
+        "name": "wardstone_lead_confirmed"
       },
       "if": [],
       "then": [
@@ -293,7 +266,8 @@
     {
       "id": "wardstone_lead_flag",
       "when": {
-        "event": "flag_set"
+        "event": "flag_set",
+        "name": "wardstone_lead_confirmed"
       },
       "if": [],
       "then": [
@@ -307,7 +281,8 @@
     {
       "id": "complete_and_depart",
       "when": {
-        "event": "flag_set"
+        "event": "flag_set",
+        "name": "wardstone_lead_confirmed"
       },
       "if": [],
       "then": [
@@ -323,7 +298,8 @@
     {
       "id": "set_completion",
       "when": {
-        "event": "flag_set"
+        "event": "flag_set",
+        "name": "wardstone_lead_confirmed"
       },
       "if": [],
       "then": [

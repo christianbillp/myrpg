@@ -139,7 +139,7 @@ export class OverlayManager {
     );
   }
 
-  openCharacterSheet(state: GameState): void {
+  openCharacterSheet(state: GameState, initialTab?: 'stats' | 'story' | 'equipment' | 'spells'): void {
     if (this.characterSheet) return;
     const inputs = this.buildInputs(state);
     WorldPause.acquire('overlay:character-sheet');
@@ -150,7 +150,7 @@ export class OverlayManager {
       onCastSpell:  (spellId)   => { this.closeCharacterSheet(); this.callbacks.onBeginSpellCast(spellId); },
       onRitualCast: (spellId)   => { this.closeCharacterSheet(); this.callbacks.onBeginRitualCast(spellId); },
       onClose:   ()             => { this.characterSheet = null; WorldPause.release('overlay:character-sheet'); },
-    });
+    }, initialTab);
   }
 
   /** Imperatively close the sheet (used when a spell-cast button is clicked from inside it). */

@@ -34,8 +34,16 @@ export class ReactionPromptOverlay extends BaseOverlay {
     reaction: PendingReaction,
     callbacks: ReactionPromptCallbacks,
   ) {
+    // Shield prompts that include a "Shield won't block this damage"
+    // warning need extra vertical room for the warning panel. The base
+    // 220 px fits the standard body + buttons; bump to 330 px when the
+    // warning is rendered so it doesn't overflow the panel.
+    const needsWarningHeight =
+      reaction.kind === 'shield' &&
+      (reaction.isCrit || reaction.attackTotal >= reaction.shieldedAc);
+    const panelH = needsWarningHeight ? 330 : 220;
     // Closing via × or backdrop = decline.
-    super(scale, 480, 220, ACCENT, () => callbacks.onDecline());
+    super(scale, 480, panelH, ACCENT, () => callbacks.onDecline());
 
     const { title, body, acceptLabel } = describe(reaction);
 
@@ -79,9 +87,27 @@ function describe(reaction: PendingReaction): { title: string; body: string; acc
       acceptLabel: "ATTACK",
     };
   }
+  // SRD Shield: crits bypass AC, and a non-crit attack that beats AC + 5
+  // still lands even with the buff up — in both cases the +5 AC bonus
+  // still protects against subsequent attacks until the start of the
+  // player's next turn, but the player should know the damage *won't* be
+  // blocked before deciding to spend the slot.
+  const damageBlocked = !reaction.isCrit && reaction.attackTotal < reaction.shieldedAc;
+  const warning = reaction.isCrit
+    ? `<div style="margin-top:10px;padding:8px;border:1px solid #6a4040;background:#2a1414;color:#e89090;font-size:10px;line-height:1.5;">
+         <strong>Critical hit — Shield cannot block it.</strong> The <strong>${reaction.incomingDamage}</strong> damage will still land. The +5 AC bonus persists until the start of your next turn.
+       </div>`
+    : !damageBlocked
+      ? `<div style="margin-top:10px;padding:8px;border:1px solid #6a4040;background:#2a1414;color:#e89090;font-size:10px;line-height:1.5;">
+           <strong>Shield isn't enough to block this attack.</strong> The attack roll of <strong>${reaction.attackTotal}</strong> still meets the shielded AC of <strong>${reaction.shieldedAc}</strong>, so the <strong>${reaction.incomingDamage}</strong> damage will land. The +5 AC bonus still protects you against subsequent attacks until your next turn.
+         </div>`
+      : "";
+  const intro = damageBlocked
+    ? `Spend a 1st-level slot to cast Shield (AC → ${reaction.shieldedAc}) and negate the hit?`
+    : `Spend a 1st-level slot to cast Shield (AC → ${reaction.shieldedAc}) for the buff window?`;
   return {
     title: "REACTIVE SHIELD",
-    body: `<strong style="color:#e8e8f8;">${escHtml(reaction.attackerName)}</strong> hits with an attack roll of <strong>${reaction.attackTotal}</strong> for <strong>${reaction.incomingDamage}</strong> damage.<br/><br/>Spend a 1st-level slot to cast Shield (AC → ${reaction.shieldedAc}) and negate the hit?`,
+    body: `<strong style="color:#e8e8f8;">${escHtml(reaction.attackerName)}</strong> hits with an attack roll of <strong>${reaction.attackTotal}</strong> for <strong>${reaction.incomingDamage}</strong> damage.<br/><br/>${intro}${warning}`,
     acceptLabel: "CAST SHIELD",
   };
 }

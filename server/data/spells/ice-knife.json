@@ -14,6 +14,7 @@
   "attack": "ranged-spell",
   "damage": { "dice": 1, "sides": 10, "type": "piercing" },
   "save": { "ability": "dex", "halfOnSuccess": false },
+  "secondaryDamage": { "dice": 2, "sides": 6, "type": "cold" },
   "area": { "shape": "sphere", "sizeFeet": 5 },
   "description": "You create a shard of ice and fling it at a creature within range. Make a ranged spell attack against the target. On a hit, the target takes 1d10 Piercing damage. Hit or miss, the shard then explodes — each creature within 5 feet of the target must succeed on a Dexterity save or take 2d6 Cold damage.",
   "scaling": "Both damage rolls increase by 1d6 for each spell slot level above 1."

@@ -57,6 +57,21 @@ function validateTrigger(trigger: EncounterTrigger, ctx: GameContext): void {
   const monsterIds = new Set(ctx.defs.monsters.map((m) => m.id));
   const narrationIds = new Set(ctx.defs.narration.map((n) => n.id));
   const itemIds = new Set(ctx.defs.equipment.map((i) => i.id));
+  // Set of defIds actually spawned in the encounter — used to detect typos
+  // in disposition / hide / dead actions that target a defId nothing in the
+  // encounter shares. The runtime list captures both `npcIds` and the
+  // ally/enemy slots after SpawnHelpers.populateNpcs runs, so authors don't
+  // have to maintain a separate manifest.
+  const spawnedDefIds = new Set(ctx.state.npcs.map((n) => n.defId));
+
+  // SRD-style "any flag" wildcard listeners are almost always authoring slips —
+  // every other flag write in the same encounter pings them. The wildcard
+  // pattern is rare enough that emitting it intentionally should require an
+  // explicit `flag_set` when with `name: ""` (empty string), which we treat
+  // as opt-in. Anything else (no `name` field at all) gets a warning.
+  if (trigger.when.event === 'flag_set' && trigger.when.name === undefined) {
+    warn(`flag_set trigger has no \`name\` filter — it will fire on EVERY flag write. Add \`when.name\` to scope it.`);
+  }
 
   for (const a of trigger.then) {
     if ((a.type === 'spawn_enemy_near_player' || a.type === 'spawn_enemy_at') && !monsterIds.has(a.monsterId)) {
@@ -65,11 +80,25 @@ function validateTrigger(trigger: EncounterTrigger, ctx: GameContext): void {
     if (a.type === 'narrate' && !narrationIds.has(a.narrationId)) {
       warn(`narrate references unknown narrationId "${a.narrationId}"`);
     }
-    if (a.type === 'set_npc_hidden' && !monsterIds.has(a.defId) && !ctx.defs.npcs.some((n) => n.id === a.defId)) {
-      warn(`set_npc_hidden references unknown defId "${a.defId}" (not in monster or NPC roster)`);
+    if (a.type === 'set_npc_hidden') {
+      if (!monsterIds.has(a.defId) && !ctx.defs.npcs.some((n) => n.id === a.defId)) {
+        warn(`set_npc_hidden references unknown defId "${a.defId}" (not in monster or NPC roster)`);
+      } else if (!spawnedDefIds.has(a.defId)) {
+        warn(`set_npc_hidden defId "${a.defId}" is not spawned in this encounter — action will no-op`);
+      }
     }
-    if (a.type === 'set_npc_dead' && !monsterIds.has(a.defId) && !ctx.defs.npcs.some((n) => n.id === a.defId)) {
-      warn(`set_npc_dead references unknown defId "${a.defId}" (not in monster or NPC roster)`);
+    if (a.type === 'set_npc_dead') {
+      if (!monsterIds.has(a.defId) && !ctx.defs.npcs.some((n) => n.id === a.defId)) {
+        warn(`set_npc_dead references unknown defId "${a.defId}" (not in monster or NPC roster)`);
+      } else if (!spawnedDefIds.has(a.defId)) {
+        warn(`set_npc_dead defId "${a.defId}" is not spawned in this encounter — action will no-op`);
+      }
+    }
+    if (a.type === 'set_disposition_by_def_id' && !spawnedDefIds.has(a.defId)) {
+      warn(`set_disposition_by_def_id defId "${a.defId}" is not spawned in this encounter — action will no-op`);
+    }
+    if (a.type === 'npc_speaks' && /^(enemy|neutral|ally)_(\d+)$/.test(a.entity)) {
+      warn(`npc_speaks entity "${a.entity}" is a slot ref, not an entity ref — use the NPC instance id (e.g. "npc_bandit_1") instead`);
     }
   }
   if (trigger.when.event === 'item_picked_up' && trigger.when.defId && !itemIds.has(trigger.when.defId)) {

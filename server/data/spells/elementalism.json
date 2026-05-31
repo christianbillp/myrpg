@@ -1,0 +1,16 @@
+{
+  "id": "elementalism",
+  "name": "Elementalism",
+  "level": 0,
+  "school": "transmutation",
+  "classes": ["druid", "sorcerer", "wizard"],
+  "castingTime": "action",
+  "range": "30 feet",
+  "rangeFeet": 30,
+  "components": { "verbal": true, "somatic": true, "material": null },
+  "duration": "up to 1 hour",
+  "durationRounds": 600,
+  "concentration": false,
+  "ritual": false,
+  "description": "You exert control over the elements, channelling one of the following effects within range: Beckon Air (gust that moves an object weighing up to 10 lb, snuffs a flame, or briefly stirs the air for 1 hour); Beckon Earth (a 5-foot-square patch of ground becomes difficult terrain for 1 hour); Beckon Fire (instantaneously light or snuff out a candle, torch, or small campfire); Beckon Water (condense moisture to fill a 1-foot Cube with mist for 1 hour). Whichever effect you choose, the spell creates only a minor elemental change with no combat-relevant force."
+}

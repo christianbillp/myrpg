@@ -41,6 +41,19 @@ export function endConcentration(ctx: GameContext, reason: string): void {
       }
     }
   }
+  // Self-buff concentration spells set per-spell runtime flags that the
+  // generic effect-cleanup above can't reach. Reset them here so the buff
+  // doesn't linger past the spell's lifetime.
+  if (spellId === 'expeditious-retreat') s.player.expeditiousRetreat = false;
+  // Area-zone concentration spells (Fog Cloud) tagged their occupants with
+  // a status condition at cast time. Strip it from every creature + the
+  // caster so chips and the AIGM both reflect the cloud is gone.
+  if (spellId === 'fog-cloud') {
+    for (const npc of s.npcs) {
+      npc.conditions = npc.conditions.filter((c) => c !== 'heavily-obscured');
+    }
+    s.player.conditions = s.player.conditions.filter((c) => c !== 'heavily-obscured');
+  }
   s.player.concentratingOn = null;
 }
 

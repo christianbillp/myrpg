@@ -35,12 +35,44 @@ export interface SpawnTile {
   y: number;
 }
 
+export type TriggerActionKindWire =
+  | 'perception' | 'log' | 'aigm' | 'combat' | 'xp'
+  | 'announcement' | 'speech' | 'fade' | 'set_flag'
+  | 'enable_long_rest' | 'disable_long_rest'
+  | 'hide_npc' | 'kill_npc' | 'open_conversation';
+
+/** One author-facing action — used both for a trigger's primary action and
+ *  for entries in `extraActions`. Every per-kind field is optional. */
+export interface ComposedActionWire {
+  kind: TriggerActionKindWire;
+  dc?: number;
+  passMessage?: string;
+  message?: string;
+  defId?: string;
+  defIds?: string[];
+  xpAmount?: number;
+  durationMs?: number;
+  entityRef?: string;
+  fadeMode?: 'in' | 'out' | 'dim';
+  announcementMode?: 'focused' | 'unfocused';
+  setFlagName?: string;
+  hidden?: boolean;
+  hideDC?: number;
+  revealedBy?: 'perception' | 'trigger';
+  dropInventory?: boolean;
+  corpseSearchDc?: number;
+  corpseSearchSuccess?: string;
+  corpseSearchFail?: string;
+  npcRef?: string;
+  conversationId?: string;
+}
+
 /** Subset of the editor's `ComposedTrigger` carried over the wire. */
 export interface RefinerTrigger {
   id: string;
   whenEvent?: 'player_moved' | 'encounter_started' | 'encounter_completed' | 'flag_set';
   region: { x: number; y: number; w: number; h: number };
-  kind: 'perception' | 'log' | 'aigm' | 'combat' | 'xp' | 'announcement' | 'speech' | 'fade' | 'set_flag' | 'enable_long_rest' | 'disable_long_rest';
+  kind: TriggerActionKindWire;
   dc?: number;
   passMessage?: string;
   message: string;
@@ -53,6 +85,19 @@ export interface RefinerTrigger {
   announcementMode?: 'focused' | 'unfocused';
   whenFlagName?: string;
   setFlagName?: string;
+  hidden?: boolean;
+  hideDC?: number;
+  revealedBy?: 'perception' | 'trigger';
+  dropInventory?: boolean;
+  corpseSearchDc?: number;
+  corpseSearchSuccess?: string;
+  corpseSearchFail?: string;
+  npcRef?: string;
+  conversationId?: string;
+  /** Additional consequences appended to this trigger's `then` array
+   *  after the primary action. Each entry is the same shape as the
+   *  primary action; the server expansion walks them in order. */
+  extraActions?: ComposedActionWire[];
 }
 
 /** Shape of the encounter draft sent to `/generate/encounter/refine`. Mirrors
@@ -622,29 +667,10 @@ export class GameClient {
     customIntroduction?: string;
     customObjective?: string;
     completionFlag?: string;
-    /** Author-painted triggers: rectangular region + one of four action templates. The server expands each into a full `EncounterTrigger`. */
-    triggers?: Array<{
-      id: string;
-      region: { x: number; y: number; w: number; h: number };
-      whenEvent?: "player_moved" | "encounter_started" | "encounter_completed" | "flag_set";
-      kind:
-        | "perception" | "log" | "aigm" | "combat" | "xp"
-        | "announcement" | "speech" | "fade" | "set_flag"
-        | "enable_long_rest" | "disable_long_rest";
-      dc: number;
-      passMessage: string;
-      message: string;
-      defId: string;
-      /** Optional bulk-flip list for `combat` kind — RANDOMIZE flow fills this with every rolled enemy type. */
-      defIds?: string[];
-      xpAmount?: number;
-      durationMs?: number;
-      entityRef?: string;
-      fadeMode?: "in" | "out" | "dim";
-      announcementMode?: "focused" | "unfocused";
-      whenFlagName?: string;
-      setFlagName?: string;
-    }>;
+    /** Author-painted triggers: rectangular region + one of the action
+     *  templates. Each entry may also carry `extraActions[]` so the
+     *  server emits a single EncounterTrigger with multiple consequences. */
+    triggers?: RefinerTrigger[];
   }): Promise<{
     mapId: string;
     encounterId: string;
@@ -841,27 +867,7 @@ export class GameClient {
     customIntroduction?: string;
     customObjective?: string;
     completionFlag?: string;
-    triggers?: Array<{
-      id: string;
-      region: { x: number; y: number; w: number; h: number };
-      whenEvent?: "player_moved" | "encounter_started" | "encounter_completed" | "flag_set";
-      kind:
-        | "perception" | "log" | "aigm" | "combat" | "xp"
-        | "announcement" | "speech" | "fade" | "set_flag"
-        | "enable_long_rest" | "disable_long_rest";
-      dc: number;
-      passMessage: string;
-      message: string;
-      defId: string;
-      defIds?: string[];
-      xpAmount?: number;
-      durationMs?: number;
-      entityRef?: string;
-      fadeMode?: "in" | "out" | "dim";
-      announcementMode?: "focused" | "unfocused";
-      whenFlagName?: string;
-      setFlagName?: string;
-    }>;
+    triggers?: RefinerTrigger[];
   }): Promise<{ encounterId: string; mapId: string }> {
     const res = await fetch(`${API_URL}/generate/encounter/update`, {
       method: 'POST',

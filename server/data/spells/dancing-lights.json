@@ -1,0 +1,16 @@
+{
+  "id": "dancing-lights",
+  "name": "Dancing Lights",
+  "level": 0,
+  "school": "illusion",
+  "classes": ["bard", "sorcerer", "wizard"],
+  "castingTime": "action",
+  "range": "120 feet",
+  "rangeFeet": 120,
+  "components": { "verbal": true, "somatic": true, "material": "phosphorus or wychwood, or a glowworm" },
+  "duration": "concentration, up to 1 minute",
+  "durationRounds": 10,
+  "concentration": true,
+  "ritual": false,
+  "description": "You create up to four torch-sized lights within range, making them appear as torches, lanterns, or glowing orbs that hover in the air for the duration. You can also combine the four lights into one glowing, vaguely humanoid form of Medium size. Whichever form you choose, each light sheds Dim Light in a 10-foot radius. As a Magic action on your later turns, you can move the lights up to 60 feet to a new spot within range."
+}

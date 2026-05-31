@@ -1,0 +1,135 @@
+{
+  "id": "bandit_toll_chat",
+  "defaultParticipants": ["player", "npc_self"],
+  "startNode": "intro",
+  "nodes": [
+    {
+      "id": "intro",
+      "lines": [
+        "The larger of the two settles his weight on his back foot, hand resting — not gripping — the hilt at his belt. \"Ten gold touches the near rail before your boots touch the far end. We're reasonable men. We won't be reasonable twice.\""
+      ],
+      "choices": [
+        {
+          "label": "(Pay 10 gp — drop the toll on the rail.)",
+          "visibleIf": [{ "type": "balance_cp", "op": "ge", "value": 1000 }],
+          "actions": [
+            { "type": "adjust_player_balance_cp", "deltaCp": -1000, "reason": "the Blackgorge toll" }
+          ],
+          "next": "paid_toll"
+        },
+        {
+          "label": "[Persuasion DC 13] This stretch isn't worth a Cape's notice. Walk us through.",
+          "check": { "skill": "persuasion", "dc": 13 },
+          "onPass": { "next": "talked_through_persuasion" },
+          "onFail": { "next": "social_fail_first" }
+        },
+        {
+          "label": "[Intimidation DC 13] You're picking the wrong cape, friend.",
+          "check": { "skill": "intimidation", "dc": 13 },
+          "onPass": { "next": "talked_through_intimidation" },
+          "onFail": { "next": "social_fail_first" }
+        },
+        {
+          "label": "[Arcana DC 13] (Kindle a cantrip in your palm — light without heat.)",
+          "check": { "skill": "arcana", "dc": 13 },
+          "onPass": { "next": "talked_through_arcana" },
+          "onFail": { "next": "arcana_fail" }
+        },
+        { "label": "Refuse. Step back from the rail.", "next": "refused_walk_away" },
+        { "label": "(Speak with them freely.)", "openAigm": true }
+      ]
+    },
+    {
+      "id": "paid_toll",
+      "lines": [
+        "He counts it with one eye, the other still on you. The coins disappear into a pouch at his belt. \"Wise. Bridge is yours, Cape. Mind the rotten plank near the middle — third from the south end.\""
+      ],
+      "onEnter": [
+        { "type": "set_flag", "name": "blackgorge_toll_settled", "value": true },
+        { "type": "award_xp", "amount": 25 }
+      ],
+      "ends": true,
+      "choices": []
+    },
+    {
+      "id": "talked_through_persuasion",
+      "lines": [
+        "He looks past you, at the road behind, then back. Calculation runs across his face for one beat. \"Tch. Move along. We'll find easier coin before sundown.\" He steps aside without ever taking his hand off the hilt."
+      ],
+      "onEnter": [
+        { "type": "set_flag", "name": "blackgorge_toll_settled", "value": true },
+        { "type": "award_xp", "amount": 50 }
+      ],
+      "ends": true,
+      "choices": []
+    },
+    {
+      "id": "talked_through_intimidation",
+      "lines": [
+        "His mouth tightens. The hand on the hilt opens, deliberately, and falls to his side. \"Don't make us regret this, Cape.\" He nods his partner aside. The bridge is yours."
+      ],
+      "onEnter": [
+        { "type": "set_flag", "name": "blackgorge_toll_settled", "value": true },
+        { "type": "award_xp", "amount": 50 }
+      ],
+      "ends": true,
+      "choices": []
+    },
+    {
+      "id": "talked_through_arcana",
+      "lines": [
+        "A small flame curls in your palm, blue at the heart, throwing no heat. His eyes change. \"...all right. Licence and all. We're not paid to fight a wizard tonight.\" He steps back from the rail and waves his partner over. \"Mind the third plank.\""
+      ],
+      "onEnter": [
+        { "type": "set_flag", "name": "blackgorge_toll_settled", "value": true },
+        { "type": "award_xp", "amount": 75 }
+      ],
+      "ends": true,
+      "choices": []
+    },
+    {
+      "id": "social_fail_first",
+      "lines": [
+        "He smiles, slow and unhurried. \"Words. Words don't stop steel. Ten gold, or you turn around. We're not in the mood to keep being reasonable.\""
+      ],
+      "choices": [
+        {
+          "label": "(Pay 10 gp — drop the toll on the rail.)",
+          "visibleIf": [{ "type": "balance_cp", "op": "ge", "value": 1000 }],
+          "actions": [
+            { "type": "adjust_player_balance_cp", "deltaCp": -1000, "reason": "the Blackgorge toll" }
+          ],
+          "next": "paid_toll"
+        },
+        { "label": "Refuse. Step back from the rail.", "next": "refused_walk_away" },
+        { "label": "(Speak with them freely.)", "openAigm": true }
+      ]
+    },
+    {
+      "id": "arcana_fail",
+      "lines": [
+        "Your hand goes through the motions, but the focus slides. The light flickers and dies before it catches. He sees it. His mouth twitches. \"Pretty trick. Try it sober. Ten gold, Cape.\""
+      ],
+      "choices": [
+        {
+          "label": "(Pay 10 gp — drop the toll on the rail.)",
+          "visibleIf": [{ "type": "balance_cp", "op": "ge", "value": 1000 }],
+          "actions": [
+            { "type": "adjust_player_balance_cp", "deltaCp": -1000, "reason": "the Blackgorge toll" }
+          ],
+          "next": "paid_toll"
+        },
+        { "label": "Refuse. Step back from the rail.", "next": "refused_walk_away" },
+        { "label": "(Speak with them freely.)", "openAigm": true }
+      ]
+    },
+    {
+      "id": "refused_walk_away",
+      "lines": [
+        "He doesn't move. \"Suit yourself, Cape. Bridge will be here when you've thought it through. So will we.\""
+      ],
+      "ends": true,
+      "choices": []
+    }
+  ]
+}

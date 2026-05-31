@@ -1,8 +1,0 @@
-{
-  "id": "concordat_overseer",
-  "name": "Concordat Overseer",
-  "monsterClass": "noble",
-  "factionId": "concordat",
-  "color": 11578320,
-  "tokenAsset": "/tokens/monster_noble.svg"
-}

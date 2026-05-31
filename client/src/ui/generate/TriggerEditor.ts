@@ -22,10 +22,45 @@ const HEADER_H = 16;
 export type TriggerActionKind =
   | "perception" | "log" | "aigm" | "combat" | "xp"
   | "announcement" | "speech" | "fade" | "set_flag"
-  | "enable_long_rest" | "disable_long_rest";
+  | "enable_long_rest" | "disable_long_rest"
+  | "hide_npc" | "kill_npc" | "open_conversation";
 
 export type TriggerWhenEvent =
   | "player_moved" | "encounter_started" | "encounter_completed" | "flag_set";
+
+/**
+ * One author-facing action inside a trigger. The shape is intentionally
+ * union-wide — every per-kind field is optional and only the fields
+ * relevant to the action's `kind` are read. Used for both the primary
+ * action carried directly on `ComposedTrigger` (kind/dc/message/... at the
+ * top level) and the additional actions in `extraActions[]`.
+ */
+export interface ComposedAction {
+  kind: TriggerActionKind;
+  dc?: number;
+  passMessage?: string;
+  message?: string;
+  defId?: string;
+  defIds?: string[];
+  xpAmount?: number;
+  durationMs?: number;
+  entityRef?: string;
+  fadeMode?: "in" | "out" | "dim";
+  announcementMode?: "focused" | "unfocused";
+  setFlagName?: string;
+  // hide_npc — set_npc_hidden authoring slot.
+  hidden?: boolean;
+  hideDC?: number;
+  revealedBy?: "perception" | "trigger";
+  // kill_npc — set_npc_dead authoring slot.
+  dropInventory?: boolean;
+  corpseSearchDc?: number;
+  corpseSearchSuccess?: string;
+  corpseSearchFail?: string;
+  // open_conversation — start_conversation authoring slot.
+  npcRef?: string;
+  conversationId?: string;
+}
 
 export interface ComposedTrigger {
   id: string;
@@ -53,6 +88,24 @@ export interface ComposedTrigger {
   whenFlagName?: string;
   /** Flag name the `set_flag` THEN action writes (always to `true`). Required by the THEN action; ignored otherwise. */
   setFlagName?: string;
+  // hide_npc fields (set_npc_hidden) — used when `kind === "hide_npc"`.
+  hidden?: boolean;
+  hideDC?: number;
+  revealedBy?: "perception" | "trigger";
+  // kill_npc fields (set_npc_dead) — used when `kind === "kill_npc"`.
+  dropInventory?: boolean;
+  corpseSearchDc?: number;
+  corpseSearchSuccess?: string;
+  corpseSearchFail?: string;
+  // open_conversation fields (start_conversation) — used when `kind === "open_conversation"`.
+  npcRef?: string;
+  conversationId?: string;
+  /** Extra consequences appended to the trigger's `then` array after the
+   *  primary action. Lets a single WHEN condition fan out into multiple
+   *  effects without authoring N parallel triggers. Each entry rides the
+   *  same wire shape as the primary action; the server expansion walks
+   *  them in order and concatenates their TriggerAction outputs. */
+  extraActions?: ComposedAction[];
 }
 
 export interface TriggerEditorOptions {
@@ -86,6 +139,9 @@ const KIND_LABEL: Record<TriggerActionKind, string> = {
   set_flag: "SET FLAG",
   enable_long_rest: "ENABLE LONG REST",
   disable_long_rest: "DISABLE LONG REST",
+  hide_npc: "HIDE NPC",
+  kill_npc: "KILL NPC",
+  open_conversation: "OPEN CONVERSATION",
 };
 
 /** Per-kind swatch colour shown next to each trigger's summary so authors
@@ -103,6 +159,9 @@ export const KIND_SWATCH: Record<TriggerActionKind, string> = {
   set_flag:     "#aa88ff",
   enable_long_rest:  "#66cc99",
   disable_long_rest: "#996644",
+  hide_npc:          "#8888aa",
+  kill_npc:          "#664422",
+  open_conversation: "#5588cc",
 };
 
 const KIND_TOOLTIP: Record<TriggerActionKind, string> = {
@@ -117,6 +176,9 @@ const KIND_TOOLTIP: Record<TriggerActionKind, string> = {
   set_flag: "Set a world flag to true. Pair with the encounter's completionFlag to end a non-combat encounter.",
   enable_long_rest:  "Surface the LONG REST button on the Player Panel — turns this encounter into a safe rest stop.",
   disable_long_rest: "Hide the LONG REST button — useful when an authored beat turns a previously safe encounter hostile.",
+  hide_npc:          "Hide every NPC matching defId (set_npc_hidden). Toggle whether the reveal uses passive Perception (default) or only fires when an explicit reveal action runs.",
+  kill_npc:          "Mark every NPC matching defId as a corpse (set_npc_dead). Optionally attach a one-shot SEARCH payload picked up when the player clicks SEARCH adjacent to the body.",
+  open_conversation: "Open the named conversation tree on an NPC (start_conversation). Useful for auto-opening dialogue when the player approaches.",
 };
 
 export class TriggerEditor {
@@ -323,20 +385,18 @@ export class TriggerEditor {
 
     // Build every per-kind block first so the chip-row's click handlers can
     // flip block visibility by reference.
-    const blocks = new Map<TriggerActionKind, HTMLElement>([
-      ["perception",   this.buildPerceptionBlock(trig, onChange)],
-      ["log",          this.buildLogBlock(trig, onChange)],
-      ["aigm",         this.buildAigmBlock(trig, onChange)],
-      ["combat",       this.buildCombatBlock(trig, onChange)],
-      ["xp",           this.buildXpBlock(trig, onChange)],
-      ["announcement", this.buildAnnouncementBlock(trig, onChange)],
-      ["speech",       this.buildSpeechBlock(trig, onChange)],
-      ["fade",         this.buildFadeBlock(trig, onChange)],
-      ["set_flag",     this.buildSetFlagBlock(trig, onChange)],
-    ]);
+    const blocks = this.buildKindBlocks(trig, onChange);
 
     const whenRow = this.buildWhenSelector(trig, regionRow, whenFlagRow, onChange);
     const chipRow = this.buildChipRow(trig, blocks, onChange);
+
+    // Extra-actions section — empty when the author hasn't added any. The
+    // helper rebuilds itself in place when actions are added/removed; the
+    // parent row only holds the container.
+    const extrasContainer = document.createElement("div");
+    extrasContainer.style.cssText = "margin-top: 6px;";
+    const rebuildExtras = (): void => this.renderExtraActions(trig, extrasContainer, onChange);
+    rebuildExtras();
 
     row.appendChild(head);
     row.appendChild(whenRow);
@@ -344,9 +404,151 @@ export class TriggerEditor {
     row.appendChild(regionRow);
     row.appendChild(whenFlagRow);
     for (const block of blocks.values()) row.appendChild(block);
+    row.appendChild(extrasContainer);
 
     this.refreshKindVisibility(blocks, trig.kind);
     return row;
+  }
+
+  /** Build the chip-keyed per-kind block map for a single action (the
+   *  trigger's primary action OR an entry in extraActions). Centralises
+   *  the wiring so both the primary chip row and each extra action's
+   *  chip row use the same set of per-kind block builders. */
+  private buildKindBlocks(
+    action: ComposedTrigger | ComposedAction,
+    onChange: () => void,
+  ): Map<TriggerActionKind, HTMLElement> {
+    return new Map<TriggerActionKind, HTMLElement>([
+      ["perception",        this.buildPerceptionBlock(action, onChange)],
+      ["log",               this.buildLogBlock(action, onChange)],
+      ["aigm",              this.buildAigmBlock(action, onChange)],
+      ["combat",            this.buildCombatBlock(action, onChange)],
+      ["xp",                this.buildXpBlock(action, onChange)],
+      ["announcement",      this.buildAnnouncementBlock(action, onChange)],
+      ["speech",            this.buildSpeechBlock(action, onChange)],
+      ["fade",              this.buildFadeBlock(action, onChange)],
+      ["set_flag",          this.buildSetFlagBlock(action, onChange)],
+      ["hide_npc",          this.buildHideNpcBlock(action, onChange)],
+      ["kill_npc",          this.buildKillNpcBlock(action, onChange)],
+      ["open_conversation", this.buildOpenConversationBlock(action, onChange)],
+    ]);
+  }
+
+  /**
+   * Render the "ADDITIONAL ACTIONS" section under a trigger row. Each
+   * extra action gets its own chip strip + per-kind block + REMOVE
+   * button, and a `+ ADD ACTION` button appends a new entry. Re-renders
+   * itself in place on every mutation so chip selections and per-kind
+   * visibility stay in sync without rebuilding the whole trigger row.
+   */
+  private renderExtraActions(
+    trig: ComposedTrigger,
+    container: HTMLElement,
+    onTriggerChange: () => void,
+  ): void {
+    container.innerHTML = "";
+    const extras = (trig.extraActions = trig.extraActions ?? []);
+
+    // Header strip — collapsed when there are no extras, just the
+    // `+ ADD ACTION` button. When extras exist, the header reads
+    // "ADDITIONAL ACTIONS" so the author understands the section.
+    const header = document.createElement("div");
+    header.style.cssText = "display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; gap: 6px;";
+    const label = document.createElement("div");
+    label.style.cssText = "color: #778899; font-size: 9px; letter-spacing: 1px;";
+    label.textContent = extras.length === 0 ? "" : `ADDITIONAL ACTIONS (${extras.length})`;
+    header.appendChild(label);
+    const addBtn = document.createElement("button");
+    addBtn.type = "button";
+    addBtn.textContent = "+ ADD ACTION";
+    addBtn.style.cssText = `
+      background: #1a3a2a; color: #bbeeaa; border: 1px solid #2a6655;
+      padding: 2px 8px; font-family: monospace; font-size: 9px;
+      cursor: pointer; letter-spacing: 1px;
+    `;
+    addBtn.addEventListener("click", () => {
+      extras.push({ kind: "log", message: "" });
+      onTriggerChange();
+      this.renderExtraActions(trig, container, onTriggerChange);
+    });
+    header.appendChild(addBtn);
+    container.appendChild(header);
+
+    extras.forEach((action, idx) => {
+      const wrap = document.createElement("div");
+      wrap.style.cssText = `
+        background: #0d0d1a;
+        border: 1px dashed #334455;
+        padding: 6px 8px;
+        margin-top: 4px;
+        box-sizing: border-box;
+      `;
+      const titleBar = document.createElement("div");
+      titleBar.style.cssText = "display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; gap: 6px;";
+      const idxLabel = document.createElement("div");
+      idxLabel.style.cssText = "color: #778899; font-size: 9px; letter-spacing: 1px;";
+      idxLabel.textContent = `+${idx + 1}`;
+      titleBar.appendChild(idxLabel);
+      const removeBtn = document.createElement("button");
+      removeBtn.type = "button";
+      removeBtn.textContent = "REMOVE";
+      removeBtn.style.cssText = `
+        background: #551a1a; color: #ffcccc; border: 1px solid #aa4444;
+        padding: 1px 8px; font-family: monospace; font-size: 9px;
+        cursor: pointer; letter-spacing: 1px;
+      `;
+      removeBtn.addEventListener("click", () => {
+        extras.splice(idx, 1);
+        onTriggerChange();
+        this.renderExtraActions(trig, container, onTriggerChange);
+      });
+      titleBar.appendChild(removeBtn);
+      wrap.appendChild(titleBar);
+
+      const blocks = this.buildKindBlocks(action, onTriggerChange);
+      // Chip row choosing the action's kind.
+      const chipRow = document.createElement("div");
+      chipRow.style.cssText = "display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 6px;";
+      const allKinds: TriggerActionKind[] = [
+        "perception", "log", "aigm", "combat", "xp",
+        "announcement", "speech", "fade", "set_flag",
+        "enable_long_rest", "disable_long_rest",
+        "hide_npc", "kill_npc", "open_conversation",
+      ];
+      const chips = new Map<TriggerActionKind, HTMLButtonElement>();
+      const refreshChips = (active: TriggerActionKind): void => {
+        for (const [k, b] of chips) {
+          const on = k === active;
+          b.style.background = on ? "#2a3a55" : "#1a1a2a";
+          b.style.color = on ? "#cce4ff" : "#aabbcc";
+        }
+      };
+      for (const k of allKinds) {
+        const chip = document.createElement("button");
+        chip.type = "button";
+        chip.textContent = KIND_LABEL[k];
+        chip.title = KIND_TOOLTIP[k];
+        chip.style.cssText = `
+          background: #1a1a2a; color: #aabbcc;
+          border: 1px solid #445566; padding: 2px 6px;
+          font-family: monospace; font-size: 9px; letter-spacing: 1px;
+          cursor: pointer; white-space: nowrap;
+        `;
+        chip.addEventListener("click", () => {
+          action.kind = k;
+          refreshChips(k);
+          this.refreshKindVisibility(blocks, k);
+          onTriggerChange();
+        });
+        chips.set(k, chip);
+        chipRow.appendChild(chip);
+      }
+      refreshChips(action.kind);
+      wrap.appendChild(chipRow);
+      for (const block of blocks.values()) wrap.appendChild(block);
+      this.refreshKindVisibility(blocks, action.kind);
+      container.appendChild(wrap);
+    });
   }
 
   /** Head row — colour swatch + summary + REMOVE button. Returns the live
@@ -452,6 +654,7 @@ export class TriggerEditor {
       "perception", "log", "aigm", "combat", "xp",
       "announcement", "speech", "fade", "set_flag",
       "enable_long_rest", "disable_long_rest",
+      "hide_npc", "kill_npc", "open_conversation",
     ];
     const chipBtns = new Map<TriggerActionKind, HTMLButtonElement>();
     for (const k of kinds) {
@@ -514,44 +717,44 @@ export class TriggerEditor {
 
   // ── Per-kind THEN blocks ────────────────────────────────────────────────
 
-  private buildPerceptionBlock(trig: ComposedTrigger, onChange: () => void): HTMLElement {
+  private buildPerceptionBlock(trig: ComposedTrigger | ComposedAction, onChange: () => void): HTMLElement {
     const block = document.createElement("div");
     block.style.cssText = "display: flex; flex-direction: column; gap: 4px;";
     const dcRow = document.createElement("div");
     dcRow.style.cssText = "display: flex; gap: 6px; align-items: center;";
     dcRow.appendChild(this.makeLabel("DC"));
-    dcRow.appendChild(this.makeNumberInput(String(trig.dc), (val) => {
+    dcRow.appendChild(this.makeNumberInput(String(trig.dc ?? 10), (val) => {
       trig.dc = Math.max(1, Math.min(30, Math.floor(Number(val) || 10)));
       onChange();
     }));
     block.appendChild(dcRow);
     block.appendChild(this.makeLabel("PASS MESSAGE"));
-    block.appendChild(this.makeTextarea(trig.passMessage, (val) => { trig.passMessage = val; onChange(); }));
+    block.appendChild(this.makeTextarea(trig.passMessage ?? "", (val) => { trig.passMessage = val; onChange(); }));
     return block;
   }
 
-  private buildLogBlock(trig: ComposedTrigger, onChange: () => void): HTMLElement {
+  private buildLogBlock(trig: ComposedTrigger | ComposedAction, onChange: () => void): HTMLElement {
     const block = document.createElement("div");
     block.appendChild(this.makeLabel("LOG MESSAGE"));
-    block.appendChild(this.makeTextarea(trig.message, (val) => { trig.message = val; onChange(); }));
+    block.appendChild(this.makeTextarea(trig.message ?? "", (val) => { trig.message = val; onChange(); }));
     return block;
   }
 
-  private buildAigmBlock(trig: ComposedTrigger, onChange: () => void): HTMLElement {
+  private buildAigmBlock(trig: ComposedTrigger | ComposedAction, onChange: () => void): HTMLElement {
     const block = document.createElement("div");
     block.appendChild(this.makeLabel("AIGM CUE"));
-    block.appendChild(this.makeTextarea(trig.message, (val) => { trig.message = val; onChange(); }));
+    block.appendChild(this.makeTextarea(trig.message ?? "", (val) => { trig.message = val; onChange(); }));
     return block;
   }
 
-  private buildCombatBlock(trig: ComposedTrigger, onChange: () => void): HTMLElement {
+  private buildCombatBlock(trig: ComposedTrigger | ComposedAction, onChange: () => void): HTMLElement {
     const block = document.createElement("div");
     block.appendChild(this.makeLabel("DEF ID (optional — flips this id to enemy)"));
-    block.appendChild(this.makeTextInput(trig.defId, "e.g. cultist", (val) => { trig.defId = val.trim(); onChange(); }));
+    block.appendChild(this.makeTextInput(trig.defId ?? "", "e.g. cultist", (val) => { trig.defId = val.trim(); onChange(); }));
     return block;
   }
 
-  private buildXpBlock(trig: ComposedTrigger, onChange: () => void): HTMLElement {
+  private buildXpBlock(trig: ComposedTrigger | ComposedAction, onChange: () => void): HTMLElement {
     const block = document.createElement("div");
     const row = document.createElement("div");
     row.style.cssText = "display: flex; gap: 6px; align-items: center;";
@@ -564,9 +767,9 @@ export class TriggerEditor {
     return block;
   }
 
-  private buildAnnouncementBlock(trig: ComposedTrigger, onChange: () => void): HTMLElement {
+  private buildAnnouncementBlock(trig: ComposedTrigger | ComposedAction, onChange: () => void): HTMLElement {
     const block = this.buildTextDurationBlock(
-      "ANNOUNCEMENT TEXT", trig.message, "DURATION (ms, default 3500)", trig.durationMs,
+      "ANNOUNCEMENT TEXT", trig.message ?? "", "DURATION (ms, default 3500)", trig.durationMs,
       (text) => { trig.message = text; onChange(); },
       (ms)   => { trig.durationMs = ms; onChange(); },
     );
@@ -581,7 +784,7 @@ export class TriggerEditor {
     return block;
   }
 
-  private buildSpeechBlock(trig: ComposedTrigger, onChange: () => void): HTMLElement {
+  private buildSpeechBlock(trig: ComposedTrigger | ComposedAction, onChange: () => void): HTMLElement {
     const block = document.createElement("div");
     block.style.cssText = "display: flex; flex-direction: column; gap: 4px;";
     block.appendChild(this.makeLabel("ENTITY (player, npc_<id>, enemy_A, ally_A)"));
@@ -590,11 +793,11 @@ export class TriggerEditor {
       onChange();
     }));
     block.appendChild(this.makeLabel("SPOKEN LINE"));
-    block.appendChild(this.makeTextarea(trig.message, (val) => { trig.message = val; onChange(); }));
+    block.appendChild(this.makeTextarea(trig.message ?? "", (val) => { trig.message = val; onChange(); }));
     return block;
   }
 
-  private buildFadeBlock(trig: ComposedTrigger, onChange: () => void): HTMLElement {
+  private buildFadeBlock(trig: ComposedTrigger | ComposedAction, onChange: () => void): HTMLElement {
     const block = document.createElement("div");
     block.style.cssText = "display: flex; flex-direction: column; gap: 4px;";
     block.appendChild(this.buildModeToggleRow<"in" | "out" | "dim">(
@@ -617,7 +820,7 @@ export class TriggerEditor {
   /** SET FLAG block — writes the named flag to `true` when the trigger
    *  fires. Pair with the encounter's COMPLETION FLAG to end non-combat
    *  encounters from a trigger (e.g. parley success, region reached). */
-  private buildSetFlagBlock(trig: ComposedTrigger, onChange: () => void): HTMLElement {
+  private buildSetFlagBlock(trig: ComposedTrigger | ComposedAction, onChange: () => void): HTMLElement {
     const block = document.createElement("div");
     block.style.cssText = "display: flex; flex-direction: column; gap: 4px;";
     block.appendChild(this.makeLabel("FLAG NAME (snake_case, set to true)"));
@@ -625,6 +828,75 @@ export class TriggerEditor {
       trig.setFlagName = val.trim();
       onChange();
     }));
+    return block;
+  }
+
+  /** HIDE NPC block — `set_npc_hidden`. */
+  private buildHideNpcBlock(trig: ComposedTrigger | ComposedAction, onChange: () => void): HTMLElement {
+    const block = document.createElement("div");
+    block.style.cssText = "display: flex; flex-direction: column; gap: 4px;";
+    block.appendChild(this.makeLabel("DEF ID (the npc/monster id to hide or reveal)"));
+    block.appendChild(this.makeTextInput(trig.defId ?? "", "e.g. skeleton", (val) => { trig.defId = val.trim(); onChange(); }));
+    block.appendChild(this.buildModeToggleRow<"true" | "false">(
+      "HIDDEN",
+      [["true", "HIDE"], ["false", "REVEAL"]],
+      trig.hidden === false ? "false" : "true",
+      (mode) => { trig.hidden = mode === "true"; onChange(); },
+    ));
+    block.appendChild(this.buildModeToggleRow<"perception" | "trigger">(
+      "REVEALED BY",
+      [["perception", "PASSIVE PERCEPTION"], ["trigger", "TRIGGER ONLY"]],
+      trig.revealedBy ?? "perception",
+      (mode) => { trig.revealedBy = mode; onChange(); },
+    ));
+    const dcRow = document.createElement("div");
+    dcRow.style.cssText = "display: flex; gap: 6px; align-items: center;";
+    dcRow.appendChild(this.makeLabel("HIDE DC (blank → 10 + stealthBonus)"));
+    dcRow.appendChild(this.makeNumberInput(trig.hideDC === undefined ? "" : String(trig.hideDC), (val) => {
+      const t = val.trim();
+      trig.hideDC = t === "" ? undefined : Math.max(0, Math.min(40, Math.floor(Number(t) || 0)));
+      onChange();
+    }));
+    block.appendChild(dcRow);
+    return block;
+  }
+
+  /** KILL NPC block — `set_npc_dead`. */
+  private buildKillNpcBlock(trig: ComposedTrigger | ComposedAction, onChange: () => void): HTMLElement {
+    const block = document.createElement("div");
+    block.style.cssText = "display: flex; flex-direction: column; gap: 4px;";
+    block.appendChild(this.makeLabel("DEF ID (the npc/monster id to mark dead)"));
+    block.appendChild(this.makeTextInput(trig.defId ?? "", "e.g. edran_vael", (val) => { trig.defId = val.trim(); onChange(); }));
+    block.appendChild(this.buildModeToggleRow<"true" | "false">(
+      "DROP INVENTORY",
+      [["true", "DROP (default)"], ["false", "KEEP ON CORPSE"]],
+      trig.dropInventory === false ? "false" : "true",
+      (mode) => { trig.dropInventory = mode === "true"; onChange(); },
+    ));
+    const dcRow = document.createElement("div");
+    dcRow.style.cssText = "display: flex; gap: 6px; align-items: center;";
+    dcRow.appendChild(this.makeLabel("CORPSE SEARCH DC (blank → no search payload)"));
+    dcRow.appendChild(this.makeNumberInput(trig.corpseSearchDc === undefined ? "" : String(trig.corpseSearchDc), (val) => {
+      const t = val.trim();
+      trig.corpseSearchDc = t === "" ? undefined : Math.max(0, Math.min(40, Math.floor(Number(t) || 0)));
+      onChange();
+    }));
+    block.appendChild(dcRow);
+    block.appendChild(this.makeLabel("CORPSE SEARCH — SUCCESS TEXT"));
+    block.appendChild(this.makeTextarea(trig.corpseSearchSuccess ?? "", (val) => { trig.corpseSearchSuccess = val; onChange(); }));
+    block.appendChild(this.makeLabel("CORPSE SEARCH — FAILURE TEXT"));
+    block.appendChild(this.makeTextarea(trig.corpseSearchFail ?? "", (val) => { trig.corpseSearchFail = val; onChange(); }));
+    return block;
+  }
+
+  /** OPEN CONVERSATION block — `start_conversation`. */
+  private buildOpenConversationBlock(trig: ComposedTrigger | ComposedAction, onChange: () => void): HTMLElement {
+    const block = document.createElement("div");
+    block.style.cssText = "display: flex; flex-direction: column; gap: 4px;";
+    block.appendChild(this.makeLabel("NPC REF (e.g. npc_tavern_keeper, npc_bandit_1)"));
+    block.appendChild(this.makeTextInput(trig.npcRef ?? "", "e.g. npc_tavern_keeper", (val) => { trig.npcRef = val.trim(); onChange(); }));
+    block.appendChild(this.makeLabel("CONVERSATION ID (blank → use the NPCDef's conversationId)"));
+    block.appendChild(this.makeTextInput(trig.conversationId ?? "", "e.g. tavern_keeper_chat", (val) => { trig.conversationId = val.trim(); onChange(); }));
     return block;
   }
 

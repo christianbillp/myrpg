@@ -539,25 +539,66 @@ export class CharacterSheetOverlay extends BaseOverlay {
       const sp = byId[id];
       if (!sp) return `<div style="font-size:10px;color:#445566;padding:2px 0;">${escHtml(id)} (unknown)</div>`;
       const bits: string[] = [];
-      if (sp.damage) bits.push(`${sp.damage.dice}d${sp.damage.sides}${sp.damage.bonus ? "+" + sp.damage.bonus : ""} ${sp.damage.type}`);
+      if (sp.damage) {
+        const perHit = `${sp.damage.dice}d${sp.damage.sides}${sp.damage.bonus ? "+" + sp.damage.bonus : ""}`;
+        // Magic Missile-style spells fire N guaranteed darts; surface the
+        // per-cast total so the tip reads "3×(1d4+1) force" rather than
+        // hiding the dart count.
+        bits.push(sp.darts && sp.darts > 1
+          ? `${sp.darts}×(${perHit}) ${sp.damage.type}`
+          : `${perHit} ${sp.damage.type}`);
+      }
       if (sp.save) bits.push(`${sp.save.ability.toUpperCase()} save DC ${saveDC}`);
-      if (sp.area) bits.push(`${sp.area.sizeFeet}-ft ${sp.area.shape}`);
+      // Always surface range so AOE spells (Minor Illusion, Fog Cloud, …)
+      // don't drop their range chip just because they also have an area
+      // shape — the area says HOW BIG, the range says HOW FAR.
+      if (sp.range === 'self') bits.push("self");
+      else if (sp.range === 'touch') bits.push("touch");
       else if (sp.rangeFeet > 0) bits.push(`${sp.rangeFeet} ft`);
+      if (sp.area) bits.push(`${sp.area.sizeFeet}-ft ${sp.area.shape}`);
       if (sp.concentration) bits.push("Concentration");
       if (sp.ritual) bits.push("Ritual");
+      // Reaction-cast spells (Shield, Feather Fall) are easy to miss in the
+      // spellbook — surface the keyword so the player knows the slot is
+      // spent as a reaction, not on their turn.
+      if (sp.castingTime === 'reaction') bits.push("Reaction");
+      else if (sp.castingTime === 'bonus-action') bits.push("Bonus Action");
       const tag = opts.tag ?? (sp.level === 0 ? "cantrip" : `L${sp.level}`);
       const tagColor = opts.prepared ? ACCENT : "#778899";
 
       // Buttons:
-      //   CAST         — visible iff the engine considers the spell castable now
-      //                  (i.e. it's in `castableSpellIds`).
+      //   CAST         — enabled iff the engine considers the spell castable now
+      //                  (i.e. it's in `castableSpellIds`). Known spells that
+      //                  aren't currently castable render the same button
+      //                  greyed out with a tooltip explaining the gate, so
+      //                  the player doesn't have to guess why the spell
+      //                  vanished from the row.
       //   RITUAL CAST  — visible iff the spell has the Ritual tag AND the
       //                  character knows it (cantrip / spellbook); only enabled
       //                  out of combat (exploring phase).
       const castable = castableSet.has(id);
+      const enabledCastStyle  = `margin-left:8px;width:54px;height:20px;background:#0a1520;border:1px solid ${ACCENT};color:${ACCENT};font-size:9px;`;
+      const disabledCastStyle = `margin-left:8px;width:54px;height:20px;background:#0a0a14;border:1px solid #2a3540;color:#445566;font-size:9px;cursor:not-allowed;`;
+      // Resolve the disable reason for the tooltip. Order matters — the
+      // first matching gate wins, mirroring the server's `canCastSpell`
+      // short-circuits.
+      const disableReason = (() => {
+        const longCast = sp.castingTime !== 'action' && sp.castingTime !== 'bonus-action' && sp.castingTime !== 'reaction';
+        if (longCast && !isExploring) return `Casting time exceeds a combat round (${sp.castingTime}). Castable only out of combat.`;
+        if (sp.level > 0 && (state.spellSlots[sp.level - 1] ?? 0) <= 0) return `No L${sp.level} slot remaining.`;
+        if (sp.castingTime === 'action' && state.actionUsed && !isExploring) return `Action already spent this turn.`;
+        if (sp.castingTime === 'bonus-action' && state.bonusActionUsed) return `Bonus Action already spent this turn.`;
+        if (sp.castingTime === 'reaction' && !isExploring) return `Reactions auto-fire on their trigger in combat.`;
+        return `Not castable right now.`;
+      });
+      // Only show the disabled-CAST placeholder for cantrips and prepared
+      // L1+ spells. Unprepared spellbook entries (bookOnly) intentionally
+      // omit CAST altogether — those need to be prepared first.
       const castBtn = castable
-        ? `<button data-cast="${escHtml(id)}" class="gui-btn-overlay" style="margin-left:8px;width:54px;height:20px;background:#0a1520;border:1px solid ${ACCENT};color:${ACCENT};font-size:9px;">CAST</button>`
-        : "";
+        ? `<button data-cast="${escHtml(id)}" class="gui-btn-overlay" style="${enabledCastStyle}">CAST</button>`
+        : opts.prepared
+          ? `<button disabled title="${escHtml(disableReason())}" class="gui-btn-overlay" style="${disabledCastStyle}">CAST</button>`
+          : "";
       const ritualBtn = sp.ritual && isExploring
         ? `<button data-ritual="${escHtml(id)}" class="gui-btn-overlay" style="margin-left:6px;width:78px;height:20px;background:#1a1a2e;border:1px solid #6a5a8e;color:#a89dcc;font-size:9px;">RITUAL CAST</button>`
         : "";

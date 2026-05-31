@@ -97,7 +97,14 @@ function pickEnemyAttackTarget(ctx: GameContext, attacker: NpcState): EnemyAttac
   const playerView = { factionId: PLAYER_FACTION_ID };
   const candidates: Array<{ target: EnemyAttackTarget; dist: number; isPlayer: boolean }> = [];
 
-  if (isHostileTo(s, attackerView, playerView)) {
+  // SRD Charmed condition: a Charmed creature can't attack the charmer or
+  // target the charmer with harmful abilities. In this engine the player is
+  // always the charmer (only the player casts Charm Person), so a Charmed
+  // attacker simply omits the player from its target list — it may still
+  // attack other hostiles in the encounter, or fall through to the "no
+  // hostile target" synthesised snapshot below if none remain.
+  const charmedByPlayer = attacker.conditions.includes('charmed');
+  if (isHostileTo(s, attackerView, playerView) && !charmedByPlayer) {
     candidates.push({
       target: {
         id: 'player',
@@ -301,9 +308,12 @@ export function runSingleEnemyTurn(ctx: GameContext, npc: NpcState, events: Game
 
   // ── Shield reaction ────────────────────────────────────────────────────
   // Only triggers when the attack targets the player — NPC-vs-NPC attacks
-  // bypass the Shield prompt.
+  // bypass the Shield prompt. SRD: Shield's +5 AC can't convert a crit
+  // into a miss (crits bypass AC entirely), but the player may still want
+  // to spend the reaction for the +5 / no-Magic-Missile buff that lasts
+  // until the start of their next turn, so the prompt fires on crits too.
   const targetedPlayer = result.attackedTargetId === 'player';
-  if (targetedPlayer && result.attacked && result.isHit && !result.isCrit && shieldAvailable(ctx)) {
+  if (targetedPlayer && result.attacked && result.isHit && shieldAvailable(ctx)) {
     s.pendingReaction = {
       kind: 'shield',
       attackerId: npc.id,
@@ -312,8 +322,10 @@ export function runSingleEnemyTurn(ctx: GameContext, npc: NpcState, events: Game
       incomingBonusComponents: result.bonusComponents,
       attackTotal: result.attackTotal,
       shieldedAc: ctx.state.player.ac + 5,
+      isCrit: result.isCrit,
     };
-    ctx.addLog({ left: `⚡ Shield: ${combatantDisplayName(npc, s.npcs)} hits for ${result.damage} — react with Shield?`, style: 'header' });
+    const critNote = result.isCrit ? ' (CRIT — Shield won\'t block, but the +5 AC lasts)' : '';
+    ctx.addLog({ left: `⚡ Shield: ${combatantDisplayName(npc, s.npcs)} hits for ${result.damage}${critNote} — react with Shield?`, style: 'header' });
     return;
   }
 

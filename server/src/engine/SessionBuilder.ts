@@ -200,16 +200,24 @@ export function buildSessionState(
     equippedSlotLabels: { armor: null, weapon: null, shield: null },
     ac: playerDef.ac,
     spellSlots: req.resumeSpellSlots ?? [...(playerDef.defaultSpellSlots ?? [])],
-    // Dev mode `unlockAllSpells`: seed every spell in the game as known +
-    // prepared so the tester can invoke any spell without a level-up
-    // rebuild. Wizards also get every spell pushed into their spellbook
-    // (mutating the per-session playerDef clone) so `castableSpellIds`
-    // includes the lot.
+    // Dev mode `unlockAllSpells`: seed every L1+ spell from the caster's
+    // class as prepared so the tester can invoke any spell without a
+    // level-up rebuild. Cantrips are intentionally excluded — they are
+    // surfaced via `defaultCantripIds` (also widened by dev mode in
+    // GameEngine) and don't belong in the prepared list per SRD. Filtering
+    // by class keeps the picker from drowning in cleric/druid spells the
+    // wizard can't actually use.
     preparedSpellIds: req.devFlags?.unlockAllSpells
-      ? defs.spells.map((s) => s.id)
+      ? defs.spells.filter((sp) => sp.level > 0 && (
+          !playerDef.className || sp.classes.includes(playerDef.className.toLowerCase())
+        )).map((sp) => sp.id)
       : (req.resumePreparedSpellIds ?? [...(playerDef.defaultPreparedSpellIds ?? [])]),
     concentratingOn: req.resumeConcentratingOn ?? null,
     mageArmor: req.resumeMageArmor ?? false,
+    shieldActive: false,
+    speedBonus: 0,
+    expeditiousRetreat: false,
+    jumpMultiplier: 1,
     ongoingEffects: [],
   };
 

@@ -8,7 +8,7 @@ import type { SavedMapDef, EncounterDef, EncounterTrigger, NPCDef } from "../net
 import { STARTING_ZONE_PLAYER, STARTING_ZONE_ALLY, STARTING_ZONE_ENEMY, STARTING_ZONE_NEUTRAL } from "../../../shared/startingZones";
 import { MonsterPicker } from "../ui/generate/MonsterPicker";
 import { ZonePainter } from "../ui/generate/ZonePainter";
-import { TriggerEditor, type ComposedTrigger } from "../ui/generate/TriggerEditor";
+import { TriggerEditor, type ComposedTrigger, type ComposedAction } from "../ui/generate/TriggerEditor";
 import { EncounterPickerOverlay } from "../ui/generate/EncounterPickerOverlay";
 import { MapSelectorOverlay } from "../ui/generate/MapSelectorOverlay";
 import { createHtmlButton, createHtmlText, type HtmlButtonHandle, type HtmlTextHandle } from "../ui/htmlButtons";
@@ -609,7 +609,10 @@ export class EncounterCreatorScene extends Phaser.Scene {
 
     // ZonePainter owns its paint buttons (PLAYER / ALLY / ENEMY / NEUTRAL /
     // CLEAR). They're disposed via the ZonePainter handle already in
-    // formChrome — no separate tracking.
+    // formChrome — no separate tracking. The layer-visibility toolbar sits
+    // 26 px above them so authors can filter the preview down to the
+    // single layer they're currently working on.
+    this.zonePainter.buildLayerToggleButtons(geo.leftX, paintBtnY - 26, geo.leftColW);
     this.zonePainter.buildPaintModeButtons(geo.leftX, paintBtnY, geo.leftColW);
 
     const modeLabelOf = (m: 'zones' | 'exact'): string => m === 'zones' ? "MODE: ZONES" : "MODE: EXACT";
@@ -1796,71 +1799,104 @@ function reverseMapTriggers(triggers: EncounterTrigger[]): ComposedTrigger[] {
       ? t.when.in_area
       : { x: 0, y: 0, w: 1, h: 1 };
     const whenFlagName = whenEvent === "flag_set" && "name" in t.when ? t.when.name : undefined;
-    const first = t.then[0];
-    if (!first) continue;
 
-    // Shared seed for every reversed trigger: the WHEN flag-name matcher
-    // (if any) survives the round-trip via `whenFlagName`. Annotated as
-    // Partial so the per-branch spread can override `kind` without re-listing
-    // every field.
-    const base: Omit<ComposedTrigger, "kind"> = {
-      id: t.id, whenEvent, region,
-      dc: 10, passMessage: "", message: "", defId: "",
-      whenFlagName,
-    };
-
-    if (first.type === "player_ability_check" && first.skill === "perception") {
-      const pass = first.onPass[0];
-      const passMessage = pass && pass.type === "show_log" ? pass.message : "";
-      out.push({ ...base, kind: "perception", dc: first.dc, passMessage });
-      continue;
-    }
-    if (first.type === "show_log") {
-      out.push({ ...base, kind: "log", message: first.message });
-      continue;
-    }
-    if (first.type === "send_aigm_message") {
-      out.push({ ...base, kind: "aigm", message: first.message });
-      continue;
-    }
-    if (first.type === "award_xp") {
-      out.push({ ...base, kind: "xp", xpAmount: first.amount });
-      continue;
-    }
-    if (first.type === "show_announcement") {
-      out.push({ ...base, kind: "announcement", message: first.text, durationMs: first.durationMs, announcementMode: first.mode });
-      continue;
-    }
-    if (first.type === "npc_speaks") {
-      out.push({ ...base, kind: "speech", message: first.text, entityRef: first.entity });
-      continue;
-    }
-    if (first.type === "fade_screen") {
-      out.push({ ...base, kind: "fade", fadeMode: first.mode, durationMs: first.durationMs });
-      continue;
-    }
-    if (first.type === "set_flag") {
-      out.push({ ...base, kind: "set_flag", setFlagName: first.name });
-      continue;
-    }
-    if (first.type === "set_long_rest") {
-      out.push({ ...base, kind: first.allowed ? "enable_long_rest" : "disable_long_rest" });
-      continue;
-    }
-    if (t.then.some((a) => a.type === "trigger_combat")) {
-      const flipIds: string[] = [];
-      for (const a of t.then) {
-        if (a.type === "set_disposition_by_def_id" && a.disposition === "enemy") flipIds.push(a.defId);
+    // Walk the trigger's `then` array, recognising the multi-action
+    // combat template (N × set_disposition_by_def_id(enemy) + trigger_combat)
+    // and turning each other recognised action into a single ComposedAction.
+    // Unknown actions are silently skipped — the server's preservation
+    // patch in /generate/encounter/update keeps them in the on-disk JSON.
+    const composedActions: ComposedAction[] = [];
+    let i = 0;
+    while (i < t.then.length) {
+      const a = t.then[i];
+      // Combat template: consecutive set_disposition_by_def_id (enemy)
+      // followed by a trigger_combat.
+      if (a.type === "set_disposition_by_def_id" && a.disposition === "enemy") {
+        const flipIds: string[] = [a.defId];
+        let j = i + 1;
+        while (j < t.then.length) {
+          const b = t.then[j];
+          if (b.type === "set_disposition_by_def_id" && b.disposition === "enemy") {
+            flipIds.push(b.defId);
+            j++;
+          } else {
+            break;
+          }
+        }
+        const trailer = t.then[j];
+        if (trailer && trailer.type === "trigger_combat") {
+          composedActions.push({
+            kind: "combat",
+            defId: flipIds[0],
+            defIds: flipIds.length > 1 ? flipIds : undefined,
+          });
+          i = j + 1;
+          continue;
+        }
+        // Stray set_disposition without a trigger_combat trailer — skip and
+        // let it round-trip via the server preservation patch.
       }
-      out.push({
-        ...base, kind: "combat",
-        defId: flipIds[0] ?? "",
-        defIds: flipIds.length > 1 ? flipIds : undefined,
-      });
-      continue;
+      const composed = singleActionToComposed(a);
+      if (composed) composedActions.push(composed);
+      i++;
     }
+    if (composedActions.length === 0) continue;
+
+    // First recognised action drives the trigger's primary `kind` and per-
+    // kind fields. Subsequent actions land in `extraActions` so the editor
+    // can render them as additional consequences of the same condition.
+    const primary = composedActions[0];
+    const extras = composedActions.slice(1);
+    out.push({
+      id: t.id,
+      whenEvent,
+      region,
+      whenFlagName,
+      // Defaults for required-on-trigger fields the primary action may omit.
+      dc: 10, passMessage: "", message: "", defId: "",
+      // Spread the primary action's fields over the defaults.
+      ...primary,
+      extraActions: extras.length > 0 ? extras : undefined,
+    });
   }
   return out;
+}
+
+function singleActionToComposed(a: EncounterTrigger["then"][number]): ComposedAction | null {
+  switch (a.type) {
+    case "player_ability_check": {
+      if (a.skill !== "perception") return null;
+      const pass = a.onPass[0];
+      return {
+        kind: "perception",
+        dc: a.dc,
+        passMessage: pass && pass.type === "show_log" ? pass.message : "",
+      };
+    }
+    case "show_log":         return { kind: "log", message: a.message };
+    case "send_aigm_message":return { kind: "aigm", message: a.message };
+    case "award_xp":         return { kind: "xp", xpAmount: a.amount };
+    case "show_announcement":return { kind: "announcement", message: a.text, durationMs: a.durationMs, announcementMode: a.mode };
+    case "npc_speaks":       return { kind: "speech", message: a.text, entityRef: a.entity };
+    case "fade_screen":      return { kind: "fade", fadeMode: a.mode, durationMs: a.durationMs };
+    case "set_flag":         return { kind: "set_flag", setFlagName: a.name };
+    case "set_long_rest":    return { kind: a.allowed ? "enable_long_rest" : "disable_long_rest" };
+    case "set_npc_hidden":   return { kind: "hide_npc", defId: a.defId, hidden: a.hidden, hideDC: a.hideDC, revealedBy: a.revealedBy };
+    case "set_npc_dead": {
+      const out: ComposedAction = { kind: "kill_npc", defId: a.defId };
+      if (a.dropInventory === false) out.dropInventory = false;
+      if (a.corpseSearch) {
+        out.corpseSearchDc = a.corpseSearch.dc;
+        out.corpseSearchSuccess = a.corpseSearch.successText;
+        out.corpseSearchFail = a.corpseSearch.failureText;
+      }
+      return out;
+    }
+    case "start_conversation":
+      return { kind: "open_conversation", npcRef: a.npcRef, conversationId: a.conversationId };
+    default:
+      return null;
+  }
 }
 
 function savedMapToPreview(saved: SavedMapDef): MapPreviewData {

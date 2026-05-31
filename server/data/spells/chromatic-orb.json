@@ -14,6 +14,7 @@
   "attack": "ranged-spell",
   "damage": { "dice": 3, "sides": 8, "type": "acid" },
   "damageTypeChoices": ["acid", "cold", "fire", "lightning", "poison", "thunder"],
+  "chainOnDoubles": { "rangeFeet": 30 },
   "description": "You hurl a 4-inch-diameter sphere of energy at a creature within range. Choose Acid, Cold, Fire, Lightning, Poison, or Thunder for the damage type, then make a ranged spell attack. On a hit, the target takes 3d8 damage of the chosen type. If you roll the same number on two of the dice, the orb leaps to a creature of your choice within 30 feet that you can see (you make a new attack roll against the new target).",
   "scaling": "The damage increases by 1d8 for each spell slot level above 1."
 }

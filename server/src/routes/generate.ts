@@ -27,6 +27,191 @@ import { refineNpc, type NpcDraftForRefine } from "../npcRefiner.js";
 import type { GameDefs } from "../engine/types.js";
 import { STARTING_ZONE_PLAYER } from "../../../shared/startingZones.js";
 
+type EditorActionKind =
+  | "perception" | "log" | "aigm" | "combat" | "xp"
+  | "announcement" | "speech" | "fade" | "set_flag"
+  | "enable_long_rest" | "disable_long_rest"
+  | "hide_npc" | "kill_npc" | "open_conversation";
+
+/** One author-facing action. Same shape used for the trigger's primary
+ *  action AND for each entry in `extraActions[]`. Every per-kind field is
+ *  optional — the server consults only the fields relevant to `kind`. */
+interface EditorComposedAction {
+  kind: EditorActionKind;
+  dc?: number;
+  passMessage?: string;
+  message?: string;
+  defId?: string;
+  defIds?: string[];
+  xpAmount?: number;
+  durationMs?: number;
+  entityRef?: string;
+  fadeMode?: "in" | "out" | "dim";
+  announcementMode?: "focused" | "unfocused";
+  setFlagName?: string;
+  hidden?: boolean;
+  hideDC?: number;
+  revealedBy?: "perception" | "trigger";
+  dropInventory?: boolean;
+  corpseSearchDc?: number;
+  corpseSearchSuccess?: string;
+  corpseSearchFail?: string;
+  npcRef?: string;
+  conversationId?: string;
+}
+
+interface EditorComposedTrigger extends EditorComposedAction {
+  id: string;
+  region: { x: number; y: number; w: number; h: number };
+  whenEvent?: "player_moved" | "encounter_started" | "encounter_completed" | "flag_set";
+  whenFlagName?: string;
+  // Required-on-trigger versions of the fields that are optional on
+  // ComposedAction — keeps the original schemas accepting payloads from
+  // existing clients without breaking.
+  dc: number;
+  passMessage: string;
+  message: string;
+  defId: string;
+  /** Additional consequences appended to the trigger's `then` array
+   *  after the primary action's expansion. */
+  extraActions?: EditorComposedAction[];
+}
+
+const sanitiseFlagName = (s: string): string => s.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 48);
+
+/**
+ * Expand a single author-facing action into one or more TriggerAction
+ * entries. Called once for the trigger's primary action AND for each
+ * entry in `extraActions[]`; the caller flat-concats the results into the
+ * trigger's `then` array.
+ *
+ * Empty / unrecognised inputs return an empty array so the caller can
+ * skip them without re-checking shape. This matches the legacy behaviour
+ * of the per-trigger expansion (an `aigm` cue with empty message
+ * silently produces no action).
+ */
+function expandComposedAction(a: EditorComposedAction): Record<string, unknown>[] {
+  switch (a.kind) {
+    case "perception": {
+      const dc = a.dc ?? 10;
+      const pass = (a.passMessage ?? "").trim();
+      return [{
+        type: "player_ability_check",
+        skill: "perception",
+        dc,
+        onPass: pass ? [{ type: "show_log", message: pass }] : [],
+        onFail: [],
+      }];
+    }
+    case "log": {
+      const msg = (a.message ?? "").trim();
+      return msg ? [{ type: "show_log", message: msg }] : [];
+    }
+    case "aigm": {
+      const msg = (a.message ?? "").trim();
+      return msg ? [{ type: "send_aigm_message", message: msg }] : [];
+    }
+    case "combat": {
+      const out: Record<string, unknown>[] = [];
+      const flipIds = new Set<string>();
+      const single = (a.defId ?? "").trim();
+      if (single) flipIds.add(single);
+      for (const id of a.defIds ?? []) if (id.trim()) flipIds.add(id.trim());
+      for (const id of flipIds) out.push({ type: "set_disposition_by_def_id", defId: id, disposition: "enemy" });
+      out.push({ type: "trigger_combat" });
+      return out;
+    }
+    case "xp": {
+      const amount = Math.max(0, Math.floor(a.xpAmount ?? 0));
+      return amount > 0 ? [{ type: "award_xp", amount }] : [];
+    }
+    case "announcement": {
+      const text = (a.message ?? "").trim();
+      return text ? [{
+        type: "show_announcement",
+        text,
+        ...(a.durationMs && a.durationMs > 0 ? { durationMs: a.durationMs } : {}),
+        ...(a.announcementMode ? { mode: a.announcementMode } : {}),
+      }] : [];
+    }
+    case "speech": {
+      const text = (a.message ?? "").trim();
+      const entity = (a.entityRef ?? "").trim();
+      return (text && entity) ? [{ type: "npc_speaks", entity, text }] : [];
+    }
+    case "fade": {
+      const mode = a.fadeMode ?? "out";
+      return [{
+        type: "fade_screen",
+        mode,
+        ...(a.durationMs && a.durationMs > 0 ? { durationMs: a.durationMs } : {}),
+      }];
+    }
+    case "set_flag": {
+      const flag = (a.setFlagName ?? "").trim();
+      return flag ? [{ type: "set_flag", name: sanitiseFlagName(flag), value: true }] : [];
+    }
+    case "enable_long_rest":
+      return [{ type: "set_long_rest", allowed: true }];
+    case "disable_long_rest":
+      return [{ type: "set_long_rest", allowed: false }];
+    case "hide_npc": {
+      const defId = (a.defId ?? "").trim();
+      if (!defId) return [];
+      return [{
+        type: "set_npc_hidden",
+        defId,
+        hidden: a.hidden !== false,
+        ...(typeof a.hideDC === "number" ? { hideDC: a.hideDC } : {}),
+        ...(a.revealedBy ? { revealedBy: a.revealedBy } : {}),
+      }];
+    }
+    case "kill_npc": {
+      const defId = (a.defId ?? "").trim();
+      if (!defId) return [];
+      const obj: Record<string, unknown> = { type: "set_npc_dead", defId };
+      if (a.dropInventory === false) obj.dropInventory = false;
+      if (typeof a.corpseSearchDc === "number") {
+        obj.corpseSearch = {
+          dc: a.corpseSearchDc,
+          successText: (a.corpseSearchSuccess ?? "").trim(),
+          failureText: (a.corpseSearchFail ?? "").trim(),
+        };
+      }
+      return [obj];
+    }
+    case "open_conversation": {
+      const npcRef = (a.npcRef ?? "").trim();
+      if (!npcRef) return [];
+      const obj: Record<string, unknown> = { type: "start_conversation", npcRef };
+      const conv = (a.conversationId ?? "").trim();
+      if (conv) obj.conversationId = conv;
+      return [obj];
+    }
+  }
+}
+
+/** Expand a composed trigger into a full EncounterTrigger shape. Walks the
+ *  primary action's expansion first, then concatenates each `extraActions`
+ *  entry's expansion in order. */
+function expandComposedTrigger(t: EditorComposedTrigger, fallbackId: string): Record<string, unknown> {
+  const baseId = t.id || fallbackId;
+  const whenEvent = t.whenEvent ?? "player_moved";
+  const when: Record<string, unknown> = whenEvent === "player_moved"
+    ? { event: "player_moved", in_area: t.region }
+    : whenEvent === "flag_set"
+      ? { event: "flag_set", ...(t.whenFlagName && t.whenFlagName.trim() ? { name: sanitiseFlagName(t.whenFlagName) } : {}) }
+      : { event: whenEvent };
+  const guards = whenEvent === "player_moved"
+    ? [{ type: "phase" as const, in: ["exploring"] as const }]
+    : [];
+  const then = [
+    ...expandComposedAction(t),
+    ...(t.extraActions ?? []).flatMap((a) => expandComposedAction(a)),
+  ];
+  return { id: baseId, when, if: guards, then, once: true };
+}
+
 export interface GenerateRoutesCtx {
   anthropic: Anthropic;
   /** Live reference — read on every request so freshly-loaded defs are visible. */
@@ -234,40 +419,7 @@ export function registerGenerateRoutes(server: FastifyInstance, ctx: GenerateRou
       /** Optional author-supplied completion-flag slug. Overrides the default `<slug>_resolved`. */
       completionFlag?: string;
       /** Author-painted triggers: rectangular region + one of the action templates. Each is expanded to a full `EncounterTrigger`. */
-      triggers?: Array<{
-        id: string;
-        region: { x: number; y: number; w: number; h: number };
-        whenEvent?: "player_moved" | "encounter_started" | "encounter_completed" | "flag_set";
-        kind:
-          | "perception" | "log" | "aigm" | "combat" | "xp"
-          | "announcement" | "speech" | "fade" | "set_flag"
-          | "enable_long_rest" | "disable_long_rest";
-        dc: number;
-        passMessage: string;
-        message: string;
-        defId: string;
-        /** Flag name the `flag_set` WHEN matcher listens for; blank = any. */
-        whenFlagName?: string;
-        /** Flag name the `set_flag` THEN action writes (always to `true`). */
-        setFlagName?: string;
-        /**
-         * Optional list of def ids to flip to enemy alongside `defId` when a
-         * `combat`-kind trigger fires. Used by the RANDOMIZE flow, which
-         * spawns rolled monsters as neutral and needs the combat trigger to
-         * flip every rolled type at once. Empty / undefined → only `defId`
-         * is flipped (existing single-defId behavior).
-         */
-        defIds?: string[];
-        /** Amount granted by an `xp` trigger. Defaults to 0 (no-op). */
-        xpAmount?: number;
-        /** Hold time (ms) for `supertitle` / `announcement`; fade time for `fade`. */
-        durationMs?: number;
-        /** Entity ref for `speech` (e.g. `player`, `npc_<id>`, `enemy_A`). */
-        entityRef?: string;
-        /** Direction for `fade`. */
-        fadeMode?: "in" | "out" | "dim";
-        announcementMode?: "focused" | "unfocused";
-      }>;
+      triggers?: EditorComposedTrigger[];
     };
   }>("/generate/encounter/composed", async (req, reply) => {
     const { existingMapId, terrain, features, width = 30, height = 22, seed, description, aigmContext, startingZonesData, placementMode, placements, allyIds, enemyIds, neutralIds, customTitle, customIntroduction, customObjective, completionFlag, triggers: composedTriggers } = req.body;
@@ -365,102 +517,14 @@ export function registerGenerateRoutes(server: FastifyInstance, ctx: GenerateRou
 
       const stamp = Date.now();
       const encounterId = `gen_${stamp}_${slug}`;
-      const sanitiseFlag = (s: string): string => s.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 48);
+      const sanitiseFlag = sanitiseFlagName;
 
-      // Expand each author-painted trigger to a proper EncounterTrigger. All
-      // composed triggers fire on player_moved inside their region, gated on
-      // the exploring phase, and use `once: true` so they're spent on first
-      // entry. The body depends on the chosen action template.
-      const triggers = (composedTriggers ?? []).map((t, i) => {
-        const baseId = `${t.id || `gen_trigger_${i + 1}`}`;
-        const whenEvent = t.whenEvent ?? 'player_moved';
-        // `flag_set` listens on flag writes; optionally narrowed by name.
-        // Region triggers use the painted rectangle; everything else fires on
-        // a lifecycle event with no body shape.
-        const when: Record<string, unknown> = whenEvent === 'player_moved'
-          ? { event: 'player_moved', in_area: t.region }
-          : whenEvent === 'flag_set'
-            ? { event: 'flag_set', ...(t.whenFlagName && t.whenFlagName.trim() ? { name: sanitiseFlag(t.whenFlagName) } : {}) }
-            : { event: whenEvent };
-        // `phase: exploring` guard only applies to region-walk triggers —
-        // lifecycle triggers fire on engine events, not phase transitions.
-        const guards = whenEvent === 'player_moved'
-          ? [{ type: 'phase' as const, in: ['exploring'] as const }]
-          : [];
-        let then: Record<string, unknown>[];
-        switch (t.kind) {
-          case 'perception':
-            then = [{
-              type: 'player_ability_check',
-              skill: 'perception',
-              dc: t.dc,
-              onPass: t.passMessage.trim() ? [{ type: 'show_log', message: t.passMessage.trim() }] : [],
-              onFail: [],
-            }];
-            break;
-          case 'log':
-            then = t.message.trim() ? [{ type: 'show_log', message: t.message.trim() }] : [];
-            break;
-          case 'aigm':
-            then = t.message.trim() ? [{ type: 'send_aigm_message', message: t.message.trim() }] : [];
-            break;
-          case 'combat': {
-            then = [];
-            // Collect every defId to flip: the single legacy `defId` plus the
-            // bulk `defIds` list the RANDOMIZE flow uses. De-dup so we don't
-            // emit two flips for the same id when a hand-author types one
-            // that also happens to be in the rolled bulk list.
-            const flipIds = new Set<string>();
-            if (t.defId.trim()) flipIds.add(t.defId.trim());
-            for (const id of t.defIds ?? []) if (id.trim()) flipIds.add(id.trim());
-            for (const id of flipIds) then.push({ type: 'set_disposition_by_def_id', defId: id, disposition: 'enemy' });
-            then.push({ type: 'trigger_combat' });
-            break;
-          }
-          case 'xp': {
-            const amount = Math.max(0, Math.floor(t.xpAmount ?? 0));
-            then = amount > 0 ? [{ type: 'award_xp', amount }] : [];
-            break;
-          }
-          case 'announcement': {
-            const text = t.message.trim();
-            then = text ? [{
-              type: 'show_announcement',
-              text,
-              ...(t.durationMs && t.durationMs > 0 ? { durationMs: t.durationMs } : {}),
-              ...(t.announcementMode ? { mode: t.announcementMode } : {}),
-            }] : [];
-            break;
-          }
-          case 'speech': {
-            const text = t.message.trim();
-            const entity = (t.entityRef ?? '').trim();
-            then = (text && entity) ? [{ type: 'npc_speaks', entity, text }] : [];
-            break;
-          }
-          case 'fade': {
-            const mode = t.fadeMode ?? 'out';
-            then = [{
-              type: 'fade_screen',
-              mode,
-              ...(t.durationMs && t.durationMs > 0 ? { durationMs: t.durationMs } : {}),
-            }];
-            break;
-          }
-          case 'set_flag': {
-            const flag = (t.setFlagName ?? '').trim();
-            then = flag ? [{ type: 'set_flag', name: sanitiseFlag(flag), value: true }] : [];
-            break;
-          }
-          case 'enable_long_rest':
-            then = [{ type: 'set_long_rest', allowed: true }];
-            break;
-          case 'disable_long_rest':
-            then = [{ type: 'set_long_rest', allowed: false }];
-            break;
-        }
-        return { id: baseId, when, if: guards, then, once: true };
-      });
+      // Expand each author-painted trigger to a proper EncounterTrigger via
+      // the shared `expandComposedTrigger` helper. The helper walks the
+      // primary action AND each entry in `extraActions[]` so multi-action
+      // triggers round-trip with all consequences.
+      const triggers = (composedTriggers ?? []).map((t, i) =>
+        expandComposedTrigger(t, `gen_trigger_${i + 1}`));
 
       const encounterJson = {
         id: encounterId,
@@ -534,29 +598,7 @@ export function registerGenerateRoutes(server: FastifyInstance, ctx: GenerateRou
       customIntroduction?: string;
       customObjective?: string;
       completionFlag?: string;
-      triggers?: Array<{
-        id: string;
-        region: { x: number; y: number; w: number; h: number };
-        whenEvent?: "player_moved" | "encounter_started" | "encounter_completed" | "flag_set";
-        kind:
-          | "perception" | "log" | "aigm" | "combat" | "xp"
-          | "announcement" | "speech" | "fade" | "set_flag"
-          | "enable_long_rest" | "disable_long_rest";
-        dc: number;
-        passMessage: string;
-        message: string;
-        defId: string;
-        /** Flag name the `flag_set` WHEN matcher listens for; blank = any. */
-        whenFlagName?: string;
-        /** Flag name the `set_flag` THEN action writes (always to `true`). */
-        setFlagName?: string;
-        defIds?: string[];
-        xpAmount?: number;
-        durationMs?: number;
-        entityRef?: string;
-        fadeMode?: "in" | "out" | "dim";
-        announcementMode?: "focused" | "unfocused";
-      }>;
+      triggers?: EditorComposedTrigger[];
     };
   }>("/generate/encounter/update", async (req, reply) => {
     const { encounterId, mapId: requestedMapId, description, aigmContext, startingZonesData, placementMode, placements, allyIds, enemyIds, neutralIds, customTitle, customIntroduction, customObjective, completionFlag, triggers: composedTriggers } = req.body;
@@ -615,86 +657,10 @@ export function registerGenerateRoutes(server: FastifyInstance, ctx: GenerateRou
       }
 
       // Expand the editor's per-trigger blobs into full EncounterTriggers
-      // using the same logic as `/generate/encounter/composed`.
-      const triggers = (composedTriggers ?? []).map((t, i) => {
-        const baseId = `${t.id || `edit_trigger_${i + 1}`}`;
-        const whenEvent = t.whenEvent ?? 'player_moved';
-        const when: Record<string, unknown> = whenEvent === 'player_moved'
-          ? { event: 'player_moved', in_area: t.region }
-          : { event: whenEvent };
-        const guards = whenEvent === 'player_moved'
-          ? [{ type: 'phase' as const, in: ['exploring'] as const }]
-          : [];
-        let then: Record<string, unknown>[];
-        switch (t.kind) {
-          case 'perception':
-            then = [{
-              type: 'player_ability_check',
-              skill: 'perception',
-              dc: t.dc,
-              onPass: t.passMessage.trim() ? [{ type: 'show_log', message: t.passMessage.trim() }] : [],
-              onFail: [],
-            }];
-            break;
-          case 'log':
-            then = t.message.trim() ? [{ type: 'show_log', message: t.message.trim() }] : [];
-            break;
-          case 'aigm':
-            then = t.message.trim() ? [{ type: 'send_aigm_message', message: t.message.trim() }] : [];
-            break;
-          case 'combat': {
-            then = [];
-            const flipIds = new Set<string>();
-            if (t.defId.trim()) flipIds.add(t.defId.trim());
-            for (const id of t.defIds ?? []) if (id.trim()) flipIds.add(id.trim());
-            for (const id of flipIds) then.push({ type: 'set_disposition_by_def_id', defId: id, disposition: 'enemy' });
-            then.push({ type: 'trigger_combat' });
-            break;
-          }
-          case 'xp': {
-            const amount = Math.max(0, Math.floor(t.xpAmount ?? 0));
-            then = amount > 0 ? [{ type: 'award_xp', amount }] : [];
-            break;
-          }
-          case 'announcement': {
-            const text = t.message.trim();
-            then = text ? [{
-              type: 'show_announcement',
-              text,
-              ...(t.durationMs && t.durationMs > 0 ? { durationMs: t.durationMs } : {}),
-              ...(t.announcementMode ? { mode: t.announcementMode } : {}),
-            }] : [];
-            break;
-          }
-          case 'speech': {
-            const text = t.message.trim();
-            const entity = (t.entityRef ?? '').trim();
-            then = (text && entity) ? [{ type: 'npc_speaks', entity, text }] : [];
-            break;
-          }
-          case 'fade': {
-            const mode = t.fadeMode ?? 'out';
-            then = [{
-              type: 'fade_screen',
-              mode,
-              ...(t.durationMs && t.durationMs > 0 ? { durationMs: t.durationMs } : {}),
-            }];
-            break;
-          }
-          case 'set_flag': {
-            const flag = (t.setFlagName ?? '').trim();
-            then = flag ? [{ type: 'set_flag', name: sanitiseFlag(flag), value: true }] : [];
-            break;
-          }
-          case 'enable_long_rest':
-            then = [{ type: 'set_long_rest', allowed: true }];
-            break;
-          case 'disable_long_rest':
-            then = [{ type: 'set_long_rest', allowed: false }];
-            break;
-        }
-        return { id: baseId, when, if: guards, then, once: true };
-      });
+      // via the shared helper (multi-action triggers round-trip via
+      // `expandComposedTrigger` walking `extraActions[]`).
+      const triggers = (composedTriggers ?? []).map((t, i) =>
+        expandComposedTrigger(t, `edit_trigger_${i + 1}`));
 
       // Build the updated JSON — preserve all unrecognised top-level fields
       // (environment, tileProperties, generated, customContext from a prior
@@ -730,7 +696,38 @@ export function registerGenerateRoutes(server: FastifyInstance, ctx: GenerateRou
         else delete updated.placements;
       }
       if (composedTriggers !== undefined) {
-        if (triggers.length > 0) updated.triggers = triggers;
+        // Editor-expressible action types — every action kind the
+        // `TriggerEditor` can author through a chip (primary action OR
+        // extraActions entry). Triggers whose `then` mixes ONLY these
+        // types round-trip cleanly; anything else has at least one
+        // action the editor would silently drop, and we preserve those
+        // triggers verbatim so opening + saving doesn't nuke them.
+        const editorExpressibleTypes = new Set([
+          'player_ability_check', 'show_log', 'send_aigm_message',
+          'award_xp', 'show_announcement', 'npc_speaks', 'fade_screen',
+          'set_flag', 'set_long_rest',
+          'set_npc_hidden', 'set_npc_dead', 'start_conversation',
+          // Combat editor kind expands to these two:
+          'set_disposition_by_def_id', 'trigger_combat',
+        ]);
+        const isEditorExpressible = (t: import('../../../shared/types.js').EncounterTrigger): boolean => {
+          if (t.then.length === 0) return false;
+          // Every action must be one the editor knows how to author. The
+          // `combat` template's two actions are covered by the same set,
+          // so the "all members in set" check handles them automatically.
+          if (!t.then.every((a) => editorExpressibleTypes.has(a.type))) return false;
+          // `player_ability_check` only round-trips through the
+          // `perception` editor chip — non-perception checks (history,
+          // arcana, etc.) need to survive via the preservation path.
+          for (const a of t.then) {
+            if (a.type === 'player_ability_check' && a.skill !== 'perception') return false;
+          }
+          return true;
+        };
+        const existingTriggers = Array.isArray(existing.triggers) ? existing.triggers as import('../../../shared/types.js').EncounterTrigger[] : [];
+        const preserved = existingTriggers.filter((t) => !isEditorExpressible(t));
+        const finalTriggers = [...preserved, ...triggers];
+        if (finalTriggers.length > 0) updated.triggers = finalTriggers;
         else delete updated.triggers;
       }
 
