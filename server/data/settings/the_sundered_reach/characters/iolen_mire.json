@@ -1,15 +1,13 @@
 {
   "id": "iolen_mire",
   "name": "Iolen Mire",
-  "tokenAsset": "/tokens/player_elf_wizard.svg",
-  "speciesName": "High Elf",
-  "speciesId": "elf",
-  "speciesLineage": "high-elf",
+  "tokenAsset": "/tokens/player_human_wizard.svg",
+  "speciesName": "Human",
+  "speciesId": "human",
+  "speciesLineage": null,
   "className": "Wizard",
   "backgroundId": "criminal",
-  "featIds": [
-    "alert"
-  ],
+  "featIds": ["alert"],
   "level": 1,
   "maxHp": 8,
   "str": 8,
@@ -19,10 +17,7 @@
   "wis": 12,
   "cha": 10,
   "proficiencyBonus": 2,
-  "savingThrowProficiencies": [
-    "int",
-    "wis"
-  ],
+  "savingThrowProficiencies": ["int", "wis"],
   "skills": {
     "acrobatics": 2,
     "animalHandling": 1,
@@ -52,11 +47,7 @@
     "weaponId": "quarterstaff",
     "shieldId": null
   },
-  "defaultInventoryIds": [
-    "dagger",
-    "dagger",
-    "spellbook"
-  ],
+  "defaultInventoryIds": ["dagger", "dagger", "spellbook"],
   "defaultCp": 1600,
   "spellcastingAbility": "int",
   "defaultCantripIds": [
@@ -73,15 +64,8 @@
     "feather-fall",
     "detect-magic"
   ],
-  "defaultPreparedSpellIds": [
-    "magic-missile",
-    "shield",
-    "mage-armor",
-    "sleep"
-  ],
-  "defaultSpellSlots": [
-    2
-  ],
-  "shortDescription": "Unlicensed elf wizard hunted by the White Capes, quiet and never in one place long.",
-  "description": "An elf who taught herself the work from books she was not supposed to have. Her first spellbook came out of a half-flooded chamber in an Old Empire ruin; her second she wrote herself from memory; the third, which is the one she carries, she stole from a White Cape supply convoy three years ago and has been a hunted woman ever since. She has no licence and will never have one — for an elf, the licence does not exist as a category. She has stayed alive by being mobile, by never casting where anyone official might see, and by treating every stranger as the one who will eventually turn her in. Quiet, patient, watchful. Speaks little and remembers everything. The Capes do not know her name. She intends to keep it that way."
+  "defaultPreparedSpellIds": ["magic-missile", "shield", "mage-armor", "sleep"],
+  "defaultSpellSlots": [2],
+  "shortDescription": "Unlicensed human wizard, surviving by never casting where the White Capes can see.",
+  "description": "A small-town woman who taught herself the work from books she was not supposed to have. Her first spellbook came out of a half-flooded chamber in an Old Empire ruin; her second she wrote herself from memory; the third, which is the one she carries, she stole from a White Cape supply convoy three years ago and has been a hunted woman ever since. She never applied for a licence — she knew the questions a licence demands and would not answer them, and she had no patron willing to vouch for her. The Capes have a thin file under a wrong name and a partial sketch that is not quite her face. She has stayed alive by being mobile, by never casting where anyone official might see, and by treating every stranger as the one who will eventually turn her in. Quiet, patient, watchful. Speaks little and remembers everything. They do not have her real name. She intends to keep it that way."
 }

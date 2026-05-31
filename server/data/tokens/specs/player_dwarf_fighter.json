@@ -1,0 +1,18 @@
+{
+  "id": "player_dwarf_fighter",
+  "slots": {
+    "body": "bordered",
+    "ears": "earring_hoops",
+    "face": "square",
+    "beard": "long",
+    "eyes": "sad",
+    "mouth": "small_smile",
+    "hair": "short",
+    "accessory": "nose_ring"
+  },
+  "palette": {
+    "body": "#553a22",
+    "skin": "#d8a070",
+    "hair": "#1a1614"
+  }
+}

@@ -157,6 +157,16 @@ export class AdventureSetupScene extends Phaser.Scene {
           this.refreshBeginButton();
         },
         onStorylog: (def) => this.openStorylogOverlay(def),
+        // Dev-only: wipe just the adventure save so chapter transitions can
+        // be replayed against the same character (XP, level-ups, equipment
+        // all stay). Useful for debugging the chapter-advance + rest-stop
+        // flows without having to re-build a character every iteration.
+        onResetAdventure: (def) => {
+          this.adventureSaves.delete(def.id);
+          gameClient.deleteAdventureSave(def.id).catch(() => {});
+          this.refreshAdventureCards();
+          this.refreshBeginButton();
+        },
       },
     });
     this.characterCarousel = new CharacterCarousel({

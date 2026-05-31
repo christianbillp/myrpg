@@ -5,6 +5,11 @@ import { createHtmlButton, createHtmlText, type HtmlButtonHandle, type HtmlTextH
 import { EncounterPickerOverlay } from "../ui/generate/EncounterPickerOverlay";
 import { AdventurePickerOverlay } from "../ui/generate/AdventurePickerOverlay";
 import {
+  buildLineInput as sharedBuildLineInput,
+  buildTextarea as sharedBuildTextarea,
+  attachPlacement as sharedAttachPlacement,
+} from "../ui/sceneInputs";
+import {
   TILE_SIZE,
   GRID_COLS,
   GRID_ROWS,
@@ -352,8 +357,10 @@ export class AdventureCreatorScene extends Phaser.Scene {
     this.pendingEncounterTarget = target;
     this.encounterPicker = new EncounterPickerOverlay(this, encounters, maps, {
       onSelect: (enc) => {
-        this.closeEncounterPicker();
+        // Apply BEFORE closing — closeEncounterPicker resets pendingEncounterTarget,
+        // which applyEncounterPick needs to read to know which slot to fill.
         this.applyEncounterPick(enc);
+        this.closeEncounterPicker();
       },
       onClose: () => this.closeEncounterPicker(),
     });
@@ -558,55 +565,21 @@ export class AdventureCreatorScene extends Phaser.Scene {
   }
 
   private buildLineInput(x: number, y: number, w: number, h: number, placeholder: string, onInput: (val: string) => void): HTMLInputElement {
-    const el = document.createElement("input");
-    el.type = "text";
-    el.placeholder = placeholder;
-    el.style.cssText = `
-      position: absolute;
-      background: #141426; color: #e0e8f0;
-      border: 1px solid #445566;
-      padding: 0 10px;
-      font-family: monospace; font-size: 12px;
-      z-index: 10; box-sizing: border-box;
-    `;
-    document.body.appendChild(el);
-    this.attachPlacement(el, x, y, w, h);
-    el.oninput = () => onInput(el.value);
-    this.chrome.push(htmlChromeHandle(el));
-    return el;
+    const handle = sharedBuildLineInput({ scene: this, sceneWidth: W, x, y, w, h, placeholder, onInput });
+    this.chrome.push(handle);
+    return handle.el;
   }
 
   private buildTextarea(x: number, y: number, w: number, h: number, placeholder: string, onInput: (val: string) => void): HTMLTextAreaElement {
-    const el = document.createElement("textarea");
-    el.placeholder = placeholder;
-    el.style.cssText = `
-      position: absolute;
-      background: #141426; color: #e0e8f0;
-      border: 1px solid #445566;
-      padding: 8px 10px;
-      font-family: monospace; font-size: 12px; line-height: 1.45;
-      resize: none; z-index: 10; box-sizing: border-box;
-    `;
-    document.body.appendChild(el);
-    this.attachPlacement(el, x, y, w, h);
-    el.oninput = () => onInput(el.value);
-    this.chrome.push(htmlChromeHandle(el));
-    return el;
+    const handle = sharedBuildTextarea({ scene: this, sceneWidth: W, x, y, w, h, placeholder, onInput });
+    this.chrome.push(handle);
+    return handle.el;
   }
 
   /** Place an HTML element at the given scene-space rect with canvas-scale
    *  tracking, so DOM stays aligned with the Phaser canvas at any zoom. */
   private attachPlacement(el: HTMLElement, x: number, y: number, w: number, h: number): void {
-    const place = () => {
-      const rect = this.sys.game.canvas.getBoundingClientRect();
-      const s = rect.width / W;
-      el.style.left = `${rect.left + x * s}px`;
-      el.style.top  = `${rect.top + y * s}px`;
-      el.style.width  = `${w * s}px`;
-      el.style.height = `${h * s}px`;
-    };
-    place();
-    this.scale.on("resize", place);
+    sharedAttachPlacement(el, { scene: this, sceneWidth: W, x, y, w, h });
   }
 
   private teardown(): void {

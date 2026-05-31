@@ -235,7 +235,8 @@ export function registerGenerateRoutes(server: FastifyInstance, ctx: GenerateRou
         whenEvent?: "player_moved" | "encounter_started" | "encounter_completed" | "flag_set";
         kind:
           | "perception" | "log" | "aigm" | "combat" | "xp"
-          | "announcement" | "speech" | "fade" | "set_flag";
+          | "announcement" | "speech" | "fade" | "set_flag"
+          | "enable_long_rest" | "disable_long_rest";
         dc: number;
         passMessage: string;
         message: string;
@@ -446,6 +447,12 @@ export function registerGenerateRoutes(server: FastifyInstance, ctx: GenerateRou
             then = flag ? [{ type: 'set_flag', name: sanitiseFlag(flag), value: true }] : [];
             break;
           }
+          case 'enable_long_rest':
+            then = [{ type: 'set_long_rest', allowed: true }];
+            break;
+          case 'disable_long_rest':
+            then = [{ type: 'set_long_rest', allowed: false }];
+            break;
         }
         return { id: baseId, when, if: guards, then, once: true };
       });
@@ -522,7 +529,8 @@ export function registerGenerateRoutes(server: FastifyInstance, ctx: GenerateRou
         whenEvent?: "player_moved" | "encounter_started" | "encounter_completed" | "flag_set";
         kind:
           | "perception" | "log" | "aigm" | "combat" | "xp"
-          | "announcement" | "speech" | "fade" | "set_flag";
+          | "announcement" | "speech" | "fade" | "set_flag"
+          | "enable_long_rest" | "disable_long_rest";
         dc: number;
         passMessage: string;
         message: string;
@@ -660,6 +668,12 @@ export function registerGenerateRoutes(server: FastifyInstance, ctx: GenerateRou
             then = flag ? [{ type: 'set_flag', name: sanitiseFlag(flag), value: true }] : [];
             break;
           }
+          case 'enable_long_rest':
+            then = [{ type: 'set_long_rest', allowed: true }];
+            break;
+          case 'disable_long_rest':
+            then = [{ type: 'set_long_rest', allowed: false }];
+            break;
         }
         return { id: baseId, when, if: guards, then, once: true };
       });

@@ -1,45 +1,8 @@
 {
   "id": "concordat_overseer",
   "name": "Concordat Overseer",
+  "monsterClass": "noble",
   "factionId": "concordat",
-  "type": "Medium Humanoid, Lawful Evil",
-  "maxHp": 14,
-  "hpFormula": "3d8+1",
-  "ac": 13,
-  "str": 10,
-  "dex": 13,
-  "con": 11,
-  "int": 14,
-  "wis": 13,
-  "cha": 15,
-  "proficiencyBonus": 2,
-  "savingThrows": {
-    "str": 0,
-    "dex": 1,
-    "con": 0,
-    "int": 4,
-    "wis": 3,
-    "cha": 4
-  },
-  "initiativeBonus": 1,
-  "stealthBonus": 1,
-  "passivePerception": 13,
-  "speed": 30,
-  "attacks": [
-    {
-      "name": "Rapier",
-      "attackType": "melee",
-      "bonus": 3,
-      "reach": 5,
-      "damageDice": 1,
-      "damageSides": 8,
-      "damageBonus": 1,
-      "damageType": "piercing"
-    }
-  ],
-  "xp": 50,
-  "cr": "1/4",
-  "combatSpawn": false,
   "color": 11578320,
   "tokenAsset": "/tokens/monster_noble.svg"
 }

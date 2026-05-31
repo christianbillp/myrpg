@@ -10,11 +10,13 @@ import { TargetPanel } from "../ui/TargetPanel";
 import { HUD, HUDState } from "../ui/HUD";
 import { LevelUpOverlay } from "../ui/LevelUpOverlay";
 import { LongRestOverlay } from "../ui/LongRestOverlay";
+import { RestPromptOverlay } from "../ui/RestPromptOverlay";
 import { SpellOptionPicker } from "../ui/SpellOptionPicker";
 import { SpellTargetSelector, type SpellTargetCandidate } from "../ui/SpellTargetSelector";
 import { SpeechBubbles } from "../ui/SpeechBubbles";
 import { SpeechInputBubble } from "../ui/SpeechInputBubble";
 import { ScreenEffects } from "../ui/ScreenEffects";
+import { Cinematic } from "../ui/Cinematic";
 import { playSound } from "../ui/SoundLibrary";
 import { UIScale } from "../ui/UIScale";
 import { GridView } from "../systems/GridView";
@@ -71,6 +73,7 @@ export class GameScene extends Phaser.Scene {
   private hud!: HUD;
   private speechBubbles!: SpeechBubbles;
   private screenEffects!: ScreenEffects;
+  private cinematic!: Cinematic;
   private uiDestroyed = false;
   private gridView!: GridView;
   private overlays!: OverlayManager;
@@ -116,9 +119,23 @@ export class GameScene extends Phaser.Scene {
    *  in flight. `create()` parks the screen at black then fades back in. */
   private pendingFadeInOnStart = false;
   private pendingFadeInDurationMs = 1200;
-  /** True while a `focused` announcement is on screen — Player/Target/HUD
-   *  panels are hidden, world tick is paused, and input is locked. */
-  private focusedAnnouncementActive = false;
+  /** Set by `advanceChapter` just before `scene.restart`. Tells `shutdown` to
+   *  close the WS without DELETE-ing the server-side session — otherwise the
+   *  freshly-created next-chapter session (whose id is already on `gameClient`)
+   *  gets deleted before `create()` can connect to it, and the next chapter
+   *  hangs on a black screen waiting for a state_update that will never
+   *  arrive. Reset in `init()` so a subsequent shutdown for a non-advance
+   *  reason (LEAVE ENCOUNTER, scene swap to the main menu) still deletes
+   *  cleanly. */
+  private preserveSessionOnShutdown = false;
+  /** Set on the very first state_update when `state.introduction` exists.
+   *  We can't mount the IntroductionOverlay immediately — `ScreenEffects`
+   *  parks the screen at full-black z-index 9000 in `create()`, and the
+   *  overlay's backdrop sits at z-index 100, so an eager mount would hide
+   *  the modal behind the parked black. Instead we drain the startup queue
+   *  (supertitle + screen_fade in) first, then mount the overlay against
+   *  the revealed world. */
+  private pendingIntroState: GameState | null = null;
   /** Open inline TALK input bubble pinned to the player token. Null when no
    *  bubble is in flight. Replaced (not stacked) by subsequent TALK clicks. */
   private speechInputBubble: SpeechInputBubble | null = null;
@@ -164,8 +181,8 @@ export class GameScene extends Phaser.Scene {
     // visibly `awaitingFirstStateUpdate`, which gates the boot fade-in and
     // would leave the screen stuck at the pre-blacked overlay.
     this.awaitingFirstStateUpdate = true;
-    this.focusedAnnouncementActive = false;
     this.animatingEntityId = null;
+    this.preserveSessionOnShutdown = false;
     this.speechInputBubble = null;
     this.gmTypingIndicatorClear = null;
     this.moveMode = false;
@@ -209,6 +226,24 @@ export class GameScene extends Phaser.Scene {
     this.speechBubbles = new SpeechBubbles();
     this.speechBubbles.setEntityResolver((entityId) => this.resolveEntityScreenPos(entityId));
     this.screenEffects = new ScreenEffects();
+    this.cinematic = new Cinematic({
+      screenEffects: this.screenEffects,
+      playerPanelFadeOut: (ms) => this.playerPanel.fadeOut(ms),
+      playerPanelFadeIn:  (ms) => this.playerPanel.fadeIn(ms),
+      targetPanelFadeOut: (ms) => this.targetPanel.fadeOut(ms),
+      targetPanelFadeIn:  (ms) => this.targetPanel.fadeIn(ms),
+      hudFadeOut: (ms) => this.hud.fadeOut(ms),
+      hudFadeIn:  (ms) => this.hud.fadeIn(ms),
+      hasTargetSelected: () => !!this.selectedEntityId,
+      restoreTargetPanel: () => {
+        if (!this.gameState || !this.selectedEntityId) return;
+        const nState = this.gameState.npcs.find((n) => n.id === this.selectedEntityId);
+        if (!nState) return;
+        const def = this.resolveMonsterDef(nState.defId);
+        this.targetPanel.show(def, nState, this.getFactions(), this.gameState.discoveredFactions ?? [], nState.conditions);
+      },
+      refreshHud: () => { if (this.gameState) this.updateHUD(this.gameState); },
+    });
     // Park the screen at full black until the first `state_update` arrives.
     // Without this, the bare HUD/Player Panel/Target Panel flash for a few
     // hundred ms before any encounter-start cinematic events get to run.
@@ -231,10 +266,27 @@ export class GameScene extends Phaser.Scene {
     WorldPause.setSession(gameClient.getSessionId());
     this.events.once('shutdown', () => WorldPause.setSession(null));
     this.events.once('destroy',  () => WorldPause.setSession(null));
+
+    // CRITICAL — Phaser does NOT auto-call a `Scene.shutdown()` method. It
+    // only emits the SHUTDOWN event; the user-defined method has to be
+    // explicitly registered as a listener every time the scene is started.
+    // Without this, the old chapter's PlayerPanel/HUD/TargetPanel/ScreenEffects
+    // divs stay in the DOM after a chapter-advance restart — including the
+    // old black ScreenEffects overlay parked at opacity 1, which sits at
+    // z-index 9000 over the new chapter and makes the world appear black
+    // even after the new cinematic finishes.
+    this.events.once('shutdown', () => this.shutdown());
   }
 
   shutdown(): void {
-    gameClient.disconnect();
+    // Chapter-advance restart: keep the server-side session alive so the
+    // re-entering scene can connect to its WS. Regular shutdowns (LEAVE
+    // ENCOUNTER, going back to main menu) still tear it down.
+    if (this.preserveSessionOnShutdown) {
+      gameClient.closeWebSocket();
+    } else {
+      gameClient.disconnect();
+    }
     if (this.speechInputBubble) { this.speechInputBubble.destroy(); this.speechInputBubble = null; }
     if (this.gmTypingIndicatorClear) { this.gmTypingIndicatorClear(); this.gmTypingIndicatorClear = null; }
     if (!this.uiDestroyed) {
@@ -305,9 +357,10 @@ export class GameScene extends Phaser.Scene {
     // resumes the queue. `processNextEvent` is also gated on
     // `isIntroBlocking` to handle state_updates that arrive mid-overlay.
     if (isFirst && state.introduction) {
-      this.overlays.showIntroIfNeeded(state, () => {
-        if (!this.animating) this.processNextEvent();
-      });
+      // Defer the IntroductionOverlay mount — see `pendingIntroState` doc.
+      // The overlay would be hidden behind the parked black z-9000 fade and
+      // the user would stare at a black screen with no way to dismiss it.
+      this.pendingIntroState = state;
     }
     // Run applyState eagerly on the very first state so the map is drawn
     // and every player / NPC token exists BEFORE any `entity_move` events
@@ -329,6 +382,16 @@ export class GameScene extends Phaser.Scene {
       return;
     }
     if (this.eventQueue.length === 0) {
+      // Cinematic queue drained — mount any deferred IntroductionOverlay
+      // now, against the (presumably) revealed world.
+      if (this.pendingIntroState) {
+        const introState = this.pendingIntroState;
+        this.pendingIntroState = null;
+        this.overlays.showIntroIfNeeded(introState, () => {
+          if (!this.animating) this.processNextEvent();
+        });
+        return;
+      }
       this.animatingEntityId = null;
       this.applyState(this.gameState);
       return;
@@ -357,19 +420,12 @@ export class GameScene extends Phaser.Scene {
         return;
       }
     } else if (event.type === "screen_fade") {
-      this.screenEffects.applyFadeMode(event.mode, event.durationMs)
+      this.cinematic.runFade(event.mode, event.durationMs)
         .then(() => { this.animating = false; this.processNextEvent(); });
       return;
     } else if (event.type === "supertitle") {
-      // Hold the server-side world pause for the duration of the title card
-      // so off-camera ticks and trigger evaluation don't advance behind it.
-      WorldPause.acquire('overlay:supertitle');
-      this.screenEffects.showSupertitle(event.text, event.durationMs)
-        .then(() => {
-          WorldPause.release('overlay:supertitle');
-          this.animating = false;
-          this.processNextEvent();
-        });
+      this.cinematic.runSupertitle(event.text, event.durationMs)
+        .then(() => { this.animating = false; this.processNextEvent(); });
       return;
     } else if (event.type === "announcement") {
       const mode = event.mode ?? 'focused';
@@ -378,13 +434,13 @@ export class GameScene extends Phaser.Scene {
         // away, panels are the first to leave); only once the UI is gone do
         // we render the announcement card. On the way back: hide the card,
         // then fade the UI back in.
-        void this.runFocusedAnnouncement(event.text, event.durationMs)
+        void this.cinematic.runFocusedAnnouncement(event.text, event.durationMs)
           .then(() => { this.animating = false; this.processNextEvent(); });
         return;
       }
       // Unfocused: fire-and-forget so the player keeps moving and the event
       // queue continues processing while the card floats in the world.
-      void this.screenEffects.showAnnouncement(event.text, event.durationMs, mode);
+      void this.cinematic.runUnfocusedAnnouncement(event.text, event.durationMs);
       // Fall through to default (animating = false, processNextEvent).
     } else if (event.type === "npc_speech") {
       // Deferred-speech handler — the bubble + chat line normally fire from
@@ -423,7 +479,10 @@ export class GameScene extends Phaser.Scene {
     this.reconcileItems(state);
     this.reconcileSelection(state);
 
-    this.overlays.showIntroIfNeeded(state);
+    // Skip the eager intro mount when one is queued for after-cinematic
+    // mount in processNextEvent — otherwise it would land behind the parked
+    // black fade and the user couldn't see or dismiss it.
+    if (!this.pendingIntroState) this.overlays.showIntroIfNeeded(state);
     this.overlays.refreshCharacterSheetIfOpen(state);
     this.overlays.syncReactionPrompt(state);
     this.overlays.syncChapterComplete(state);
@@ -548,7 +607,7 @@ export class GameScene extends Phaser.Scene {
 
   private handleMapClick(pointer: Phaser.Input.Pointer): void {
     if (!this.gameState) return;
-    if (this.focusedAnnouncementActive) return;
+    if (this.cinematic.isFocusedAnnouncementActive()) return;
     const { tileX, tileY } = this.gridView.toTile(pointer);
     const { cols, rows } = this.gameState.map;
     if (tileX < 0 || tileX >= cols || tileY < 0 || tileY >= rows) return;
@@ -623,7 +682,7 @@ export class GameScene extends Phaser.Scene {
     if (this.gameState) this.visionMask?.refresh(this.gameState, this.playerDef);
     this.visionMask?.refreshSoundRings();
     if (this.overlays.isAnyOpen) return;
-    if (this.focusedAnnouncementActive) return;
+    if (this.cinematic.isFocusedAnnouncementActive()) return;
     if (!this.gameState || !this.player) return;
     const active = document.activeElement;
     if (active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement) return;
@@ -683,6 +742,15 @@ export class GameScene extends Phaser.Scene {
       onCommandSummon:  (summonNpcId) => this.beginSummonDirect(summonNpcId),
       onTalk:           () => this.openSpeechInput(),
       onLeaveEncounter: () => {
+        // Rest-stop interlude: LEAVE here means "I'm done resting, take me
+        // to the next chapter". Route through the existing chapter-advance
+        // flow — the server's /advance route detects `inRest` and routes to
+        // the next chapter without re-summarising. The advanceChapter helper
+        // also preserves the server session through `scene.restart`.
+        if (this.gameState?.adventureContext?.isRestSession) {
+          void this.advanceChapter();
+          return;
+        }
         this.uiDestroyed = true;
         this.playerPanel.destroy();
         this.targetPanel.destroy();
@@ -1153,6 +1221,81 @@ export class GameScene extends Phaser.Scene {
    * menu.
    */
   private async advanceChapter(): Promise<void> {
+    // First-time chapter advance (NOT leaving a rest session): if the adventure
+    // has a rest-stop encounter configured AND we're not on the final chapter,
+    // surface the prompt and let the player choose between resting first or
+    // skipping straight to the next chapter. Leaving rest re-enters
+    // advanceChapter via LEAVE ENCOUNTER → by then `isRestSession` is true and
+    // the prompt is bypassed.
+    const advCtx = this.gameState?.adventureContext;
+    const hasNextChapter = !!advCtx && advCtx.chapterIndex < advCtx.totalChapters - 1;
+    if (advCtx?.restEncounterId && !advCtx.isRestSession && hasNextChapter) {
+      this.showRestPrompt(advCtx.restEncounterId);
+      return;
+    }
+    return this.runChapterAdvance();
+  }
+
+  /** Pop the "Rest first?" modal and dispatch the player's choice. The modal
+   *  renders at z-index 9100 so it floats above the parked black fade that
+   *  `ScreenEffects` puts up during the cinematic transition. */
+  private showRestPrompt(restEncounterId: string): void {
+    const title = this.resolveEncounterTitle(restEncounterId) ?? 'the rest encounter';
+    const prompt = new RestPromptOverlay(title, {
+      onRest: () => void this.runRest(),
+      onSkip: () => void this.runChapterAdvance(),
+    });
+    // `prompt` retains a self-reference to its DOM root; it destroys itself
+    // when the user clicks a button. We don't keep a field for it — the modal
+    // is fire-and-forget per advance call.
+    void prompt;
+  }
+
+  /** Resolve a rest encounter id to a human-readable title via the cached
+   *  encounters registry. Returns null when the encounter isn't in the
+   *  registry (e.g. the user navigated past the boot stage offline). */
+  private resolveEncounterTitle(encounterId: string): string | null {
+    const encs = this.registry.get('encounters') as Array<{ id: string; encounterTitle?: string }> | undefined;
+    return encs?.find((e) => e.id === encounterId)?.encounterTitle ?? null;
+  }
+
+  /** Boot the rest-stop interlude session — mirrors the chapter-advance scene
+   *  restart but hits `/adventure/.../rest` instead. */
+  private async runRest(): Promise<void> {
+    const CHAPTER_FADE_MS = 1200;
+    await this.screenEffects.fadeOut(CHAPTER_FADE_MS);
+    gameClient.closeWebSocket();
+    try {
+      const result = await gameClient.startRest(this.playerDef.id);
+      this.uiScale.destroy();
+      this.preserveSessionOnShutdown = true;
+      this.scene.restart({
+        sessionId: result.sessionId,
+        playerDef: result.playerDef,
+        isResume: false,
+        fadeInOnStart: true,
+        fadeInDurationMs: CHAPTER_FADE_MS,
+      });
+    } catch (err) {
+      console.error('startRest failed', err);
+      await this.screenEffects.fadeIn(CHAPTER_FADE_MS);
+    }
+  }
+
+  /**
+   * The actual chapter-advance fetch + scene restart. Split out from
+   * `advanceChapter` so the rest-stop "skip" button and the LEAVE ENCOUNTER
+   * call from inside a rest session can both jump straight here without
+   * re-evaluating the prompt.
+   *
+   * IMPORTANT — close the WS BEFORE the advance request fires. The server
+   * deletes the just-finished session as part of advancing (which closes
+   * the WS from its end), and if `intentionalClose` is still false when
+   * that cascade reaches us, `ConnectionMonitor` treats it as a server-died
+   * disconnect and reloads the page — bouncing the player back to the main
+   * menu.
+   */
+  private async runChapterAdvance(): Promise<void> {
     const CHAPTER_FADE_MS = 1200;
     // Fade to black BEFORE the WS closes so the player sees a clean cinematic
     // transition rather than the old map flashing to a fresh one. The fade is
@@ -1171,6 +1314,11 @@ export class GameScene extends Phaser.Scene {
       // server-returned PlayerDef so cross-chapter level-up history is
       // preserved. `fadeInOnStart` parks the new scene at black and fades
       // it in once the map + tokens are laid out.
+      // `preserveSessionOnShutdown` keeps `shutdown()` from DELETE-ing the
+      // newly-created session — `gameClient.sessionId` already points at
+      // the next chapter, and disconnect would kill it before `create()`
+      // could open a WS.
+      this.preserveSessionOnShutdown = true;
       this.scene.restart({
         sessionId: result.sessionId,
         playerDef: result.playerDef,
@@ -1557,58 +1705,6 @@ export class GameScene extends Phaser.Scene {
         this.input.keyboard?.enableGlobalCapture();
       },
     });
-  }
-
-  /**
-   * Run a focused announcement end-to-end. Sequence:
-   *   1. lock input + pause world (player control is gone)
-   *   2. fade Player Panel + Target Panel + HUD out (UI leaves first)
-   *   3. show announcement card and wait for it to finish
-   *   4. fade UI panels back in (UI returns last)
-   *   5. unlock + unpause
-   * This is the general principle for any player-control-loss visual.
-   */
-  private async runFocusedAnnouncement(text: string, durationMs?: number): Promise<void> {
-    if (this.focusedAnnouncementActive) {
-      // Defensive — should never re-enter while a focused announcement is
-      // already running, but if it does, fall back to a non-fading flow.
-      await this.screenEffects.showAnnouncement(text, durationMs, 'focused');
-      return;
-    }
-    this.focusedAnnouncementActive = true;
-    WorldPause.acquire('announcement:focused');
-
-    // Capture which panels were visible before we hide them so the post-roll
-    // fade-in only restores what the player actually had on screen.
-    const hadTargetSelected = !!this.selectedEntityId;
-
-    const UI_FADE_MS = 220;
-    await Promise.all([
-      this.playerPanel.fadeOut(UI_FADE_MS),
-      hadTargetSelected ? this.targetPanel.fadeOut(UI_FADE_MS) : Promise.resolve(),
-      this.hud.fadeOut(UI_FADE_MS),
-    ]);
-
-    await this.screenEffects.showAnnouncement(text, durationMs, 'focused');
-
-    // Re-render the Target Panel before fading it back in — selection state
-    // survived behind the curtain, but the DOM was display:none'd.
-    if (hadTargetSelected && this.gameState && this.selectedEntityId) {
-      const nState = this.gameState.npcs.find((n) => n.id === this.selectedEntityId);
-      if (nState) {
-        const def = this.resolveMonsterDef(nState.defId);
-        this.targetPanel.show(def, nState, this.getFactions(), this.gameState.discoveredFactions ?? [], nState.conditions);
-      }
-    }
-    await Promise.all([
-      this.playerPanel.fadeIn(UI_FADE_MS),
-      hadTargetSelected ? this.targetPanel.fadeIn(UI_FADE_MS) : Promise.resolve(),
-      this.hud.fadeIn(UI_FADE_MS),
-    ]);
-    if (this.gameState) this.updateHUD(this.gameState);
-
-    this.focusedAnnouncementActive = false;
-    WorldPause.release('announcement:focused');
   }
 
   /**

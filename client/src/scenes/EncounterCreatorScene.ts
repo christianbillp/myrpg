@@ -4,7 +4,7 @@ import type { EncounterRefineDraft, EncounterRefineResponse } from "../net/GameC
 import type { MonsterDef } from "../data/monsters";
 import type { MapPreviewData } from "../ui/EmbeddedMapPreview";
 import { tilesetTextureKey } from "./BootScene";
-import type { SavedMapDef, EncounterDef, EncounterTrigger } from "../net/types";
+import type { SavedMapDef, EncounterDef, EncounterTrigger, NPCDef } from "../net/types";
 import { STARTING_ZONE_PLAYER, STARTING_ZONE_ALLY, STARTING_ZONE_ENEMY, STARTING_ZONE_NEUTRAL } from "../../../shared/startingZones";
 import { MonsterPicker } from "../ui/generate/MonsterPicker";
 import { ZonePainter } from "../ui/generate/ZonePainter";
@@ -12,6 +12,7 @@ import { TriggerEditor, type ComposedTrigger } from "../ui/generate/TriggerEdito
 import { EncounterPickerOverlay } from "../ui/generate/EncounterPickerOverlay";
 import { MapSelectorOverlay } from "../ui/generate/MapSelectorOverlay";
 import { createHtmlButton, createHtmlText, type HtmlButtonHandle, type HtmlTextHandle } from "../ui/htmlButtons";
+import { buildLineInput as sharedBuildLineInput, buildTextarea as sharedBuildTextarea } from "../ui/sceneInputs";
 import { ScreenEffects } from "../ui/ScreenEffects";
 import {
   TILE_SIZE,
@@ -213,6 +214,7 @@ export class EncounterCreatorScene extends Phaser.Scene {
   private busy = false;
   private encounterPicker: EncounterPickerOverlay | null = null;
   private monsters: MonsterDef[] = [];
+  private npcs: NPCDef[] = [];
 
   /** Chrome that lives the whole scene — registered once in `create()`. */
   private sceneChrome: ChromeHandle[] = [];
@@ -250,6 +252,7 @@ export class EncounterCreatorScene extends Phaser.Scene {
     this.input.keyboard?.clearCaptures();
 
     this.monsters = (this.registry.get("monsters") as MonsterDef[] | undefined) ?? [];
+    this.npcs     = (this.registry.get("npcs")     as NPCDef[]     | undefined) ?? [];
 
     this.add.rectangle(W / 2, H / 2, W, H, 0x0d0d1e);
     this.titleText = createHtmlText({
@@ -621,7 +624,7 @@ export class EncounterCreatorScene extends Phaser.Scene {
     this.monstersTabBtn = createHtmlButton({
       scene: this, sceneWidth: W,
       x: geo.rightX + geo.tabW + geo.tabGap, y: geo.tabsY, w: geo.tabW, h: geo.tabsH,
-      label: "MONSTERS", variant: "secondary", fontSize: 11,
+      label: "NPCS AND MONSTERS", variant: "secondary", fontSize: 11,
       onClick: () => this.activatePickerTab("monsters"),
     });
     this.triggersTabBtn = createHtmlButton({
@@ -642,6 +645,7 @@ export class EncounterCreatorScene extends Phaser.Scene {
       scene: this,
       parent: this.monsterSubContainer,
       monsters: this.monsters,
+      npcs: this.npcs,
       x: geo.rightX, y: geo.pickerY, width: geo.rightColW, height: geo.pickerH,
       sceneWidth: W,
       initialAllyIds:    this.formSeed.allyIds,
@@ -1394,7 +1398,27 @@ export class EncounterCreatorScene extends Phaser.Scene {
   private syncTriggerRegionsToPreview(): void {
     if (!this.zonePainter || !this.triggerEditor) return;
     const triggers = this.triggerEditor.getTriggers();
-    this.zonePainter.setTriggerRegions(triggers.map((t) => ({ id: t.id, kind: t.kind, region: t.region })));
+    // Only REGION-style triggers (whenEvent === 'player_moved') actually
+    // attach to a map area. ON START / ON COMPLETE / ON FLAG fire on
+    // engine events and shouldn't paint a rectangle on the map; passing
+    // them through would draw a stray region at whatever stale x/y/w/h the
+    // trigger still carries. The long-rest kinds (enable_long_rest /
+    // disable_long_rest) are also event-only — even if the user happens to
+    // set their WHEN to REGION, the painter doesn't have a colour swatch
+    // for them, so filter them out here too.
+    type RegionKind = Parameters<NonNullable<typeof this.zonePainter>['setTriggerRegions']>[0][number]['kind'];
+    const regionKinds = new Set<string>([
+      "perception", "log", "aigm", "combat", "xp",
+      "announcement", "speech", "fade", "set_flag",
+    ]);
+    const regionTriggers = triggers
+      .filter((t) => (t.whenEvent ?? "player_moved") === "player_moved")
+      .filter((t) => regionKinds.has(t.kind));
+    this.zonePainter.setTriggerRegions(regionTriggers.map((t) => ({
+      id: t.id,
+      kind: t.kind as RegionKind,
+      region: t.region,
+    })));
   }
 
   // ── Bottom bar + button state ───────────────────────────────────────────
@@ -1568,29 +1592,13 @@ export class EncounterCreatorScene extends Phaser.Scene {
     onInput: (value: string) => void,
     initialValue = "",
   ): HTMLInputElement {
-    const el = document.createElement("input");
-    el.type = "text";
-    el.placeholder = placeholder;
-    if (initialValue) el.value = initialValue;
-    el.style.cssText = `
-      position: absolute; background: #141426; color: #e0e8f0;
-      border: 1px solid #445566; padding: 0 12px;
-      font-family: monospace; font-size: 13px; z-index: 10; box-sizing: border-box;
-    `;
-    document.body.appendChild(el);
-    const place = (): void => {
-      const rect = this.sys.game.canvas.getBoundingClientRect();
-      const s = rect.width / W;
-      el.style.left = `${rect.left + x * s}px`;
-      el.style.top  = `${rect.top  + y * s}px`;
-      el.style.width  = `${w * s}px`;
-      el.style.height = `${h * s}px`;
-      el.style.fontSize = `${13 * s}px`;
-    };
-    place();
-    this.scale.on("resize", place);
-    el.oninput = (): void => onInput(el.value);
-    return el;
+    return sharedBuildLineInput({
+      scene: this, sceneWidth: W,
+      x, y, w, h,
+      placeholder, initialValue,
+      fontSize: 13, scaleFont: true,
+      onInput,
+    }).el;
   }
 
   private buildTextarea(
@@ -1599,29 +1607,14 @@ export class EncounterCreatorScene extends Phaser.Scene {
     onInput: (value: string) => void,
     initialValue = "",
   ): HTMLTextAreaElement {
-    const el = document.createElement("textarea");
-    el.placeholder = placeholder;
-    if (initialValue) el.value = initialValue;
-    el.style.cssText = `
-      position: absolute; background: #141426; color: #e0e8f0;
-      border: 1px solid #445566; padding: 10px 12px;
-      font-family: monospace; font-size: 13px; line-height: 1.4;
-      resize: none; z-index: 10; box-sizing: border-box;
-    `;
-    document.body.appendChild(el);
-    const place = (): void => {
-      const rect = this.sys.game.canvas.getBoundingClientRect();
-      const s = rect.width / W;
-      el.style.left = `${rect.left + x * s}px`;
-      el.style.top  = `${rect.top  + y * s}px`;
-      el.style.width  = `${w * s}px`;
-      el.style.height = `${h * s}px`;
-      el.style.fontSize = `${13 * s}px`;
-    };
-    place();
-    this.scale.on("resize", place);
-    el.oninput = (): void => onInput(el.value);
-    return el;
+    return sharedBuildTextarea({
+      scene: this, sceneWidth: W,
+      x, y, w, h,
+      placeholder, initialValue,
+      fontSize: 13, lineHeight: 1.4,
+      scaleFont: true,
+      onInput,
+    }).el;
   }
 
   /** Place a free-standing HTML element at the given scene-space rect using
@@ -1809,6 +1802,10 @@ function reverseMapTriggers(triggers: EncounterTrigger[]): ComposedTrigger[] {
     }
     if (first.type === "set_flag") {
       out.push({ ...base, kind: "set_flag", setFlagName: first.name });
+      continue;
+    }
+    if (first.type === "set_long_rest") {
+      out.push({ ...base, kind: first.allowed ? "enable_long_rest" : "disable_long_rest" });
       continue;
     }
     if (t.then.some((a) => a.type === "trigger_combat")) {

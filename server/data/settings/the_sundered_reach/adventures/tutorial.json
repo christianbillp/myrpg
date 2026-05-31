@@ -1,0 +1,20 @@
+{
+  "id": "tutorial",
+  "title": "tutorial",
+  "description": "Just a tutorial",
+  "introduction": "You are learning the game!",
+  "chapters": [
+    {
+      "id": "ch1_the_open_road",
+      "title": "The Open Road",
+      "encounterId": "the_open_road"
+    },
+    {
+      "id": "ch2_gen_1780164078752_the_open_road",
+      "title": "Combttetf",
+      "encounterId": "gen_1780164078752_the_open_road"
+    }
+  ],
+  "aiContext": "tutorial for the player",
+  "restEncounterId": "tavern_small_quiet_night"
+}

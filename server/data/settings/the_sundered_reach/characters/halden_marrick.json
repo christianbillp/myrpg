@@ -1,18 +1,15 @@
 {
   "id": "halden_marrick",
   "name": "Halden Marrick",
-  "tokenAsset": "/tokens/player_fighter_human.svg",
-  "speciesName": "Human",
-  "speciesId": "human",
+  "tokenAsset": "/tokens/player_dwarf_fighter.svg",
+  "speciesName": "Dwarf",
+  "speciesId": "dwarf",
   "speciesLineage": null,
   "className": "Fighter",
   "backgroundId": "soldier",
-  "featIds": [
-    "savage-attacker",
-    "defense"
-  ],
+  "featIds": ["savage-attacker", "defense"],
   "level": 1,
-  "maxHp": 12,
+  "maxHp": 13,
   "str": 16,
   "dex": 12,
   "con": 15,
@@ -20,10 +17,7 @@
   "wis": 13,
   "cha": 9,
   "proficiencyBonus": 2,
-  "savingThrowProficiencies": [
-    "str",
-    "con"
-  ],
+  "savingThrowProficiencies": ["str", "con"],
   "skills": {
     "acrobatics": 1,
     "animalHandling": 1,
@@ -44,9 +38,7 @@
     "stealth": 1,
     "survival": 3
   },
-  "defaultFeatureIds": [
-    "second-wind"
-  ],
+  "defaultFeatureIds": ["second-wind"],
   "hitDieType": 10,
   "sneakAttackDice": 0,
   "color": 8425632,

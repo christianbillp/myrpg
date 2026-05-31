@@ -1,45 +1,8 @@
 {
   "id": "woodcutter",
   "name": "Woodcutter",
+  "monsterClass": "commoner",
   "factionId": "commoners",
-  "type": "Medium Humanoid",
-  "maxHp": 8,
-  "hpFormula": "2d8",
-  "ac": 11,
-  "str": 13,
-  "dex": 10,
-  "con": 12,
-  "int": 9,
-  "wis": 11,
-  "cha": 9,
-  "proficiencyBonus": 2,
-  "savingThrows": {
-    "str": 1,
-    "dex": 0,
-    "con": 1,
-    "int": -1,
-    "wis": 0,
-    "cha": -1
-  },
-  "initiativeBonus": 0,
-  "stealthBonus": 0,
-  "passivePerception": 10,
-  "speed": 30,
-  "attacks": [
-    {
-      "name": "Hand Axe",
-      "attackType": "melee",
-      "bonus": 3,
-      "reach": 5,
-      "damageDice": 1,
-      "damageSides": 6,
-      "damageBonus": 1,
-      "damageType": "slashing"
-    }
-  ],
-  "xp": 25,
-  "cr": "1/8",
-  "combatSpawn": false,
   "color": 9476402,
   "tokenAsset": "/tokens/monster_commoner.svg"
 }

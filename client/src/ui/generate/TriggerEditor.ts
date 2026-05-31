@@ -21,7 +21,8 @@ const HEADER_H = 16;
 
 export type TriggerActionKind =
   | "perception" | "log" | "aigm" | "combat" | "xp"
-  | "announcement" | "speech" | "fade" | "set_flag";
+  | "announcement" | "speech" | "fade" | "set_flag"
+  | "enable_long_rest" | "disable_long_rest";
 
 export type TriggerWhenEvent =
   | "player_moved" | "encounter_started" | "encounter_completed" | "flag_set";
@@ -83,6 +84,8 @@ const KIND_LABEL: Record<TriggerActionKind, string> = {
   speech: "SPEECH",
   fade: "FADE",
   set_flag: "SET FLAG",
+  enable_long_rest: "ENABLE LONG REST",
+  disable_long_rest: "DISABLE LONG REST",
 };
 
 /** Per-kind swatch colour shown next to each trigger's summary so authors
@@ -98,6 +101,8 @@ export const KIND_SWATCH: Record<TriggerActionKind, string> = {
   speech:       "#5588aa",
   fade:         "#222222",
   set_flag:     "#aa88ff",
+  enable_long_rest:  "#66cc99",
+  disable_long_rest: "#996644",
 };
 
 const KIND_TOOLTIP: Record<TriggerActionKind, string> = {
@@ -110,6 +115,8 @@ const KIND_TOOLTIP: Record<TriggerActionKind, string> = {
   speech: "Show a speech bubble above the named entity's token.",
   fade: "Fade the screen to or from black. Pair an OUT with an IN.",
   set_flag: "Set a world flag to true. Pair with the encounter's completionFlag to end a non-combat encounter.",
+  enable_long_rest:  "Surface the LONG REST button on the Player Panel — turns this encounter into a safe rest stop.",
+  disable_long_rest: "Hide the LONG REST button — useful when an authored beat turns a previously safe encounter hostile.",
 };
 
 export class TriggerEditor {
@@ -444,6 +451,7 @@ export class TriggerEditor {
     const kinds: TriggerActionKind[] = [
       "perception", "log", "aigm", "combat", "xp",
       "announcement", "speech", "fade", "set_flag",
+      "enable_long_rest", "disable_long_rest",
     ];
     const chipBtns = new Map<TriggerActionKind, HTMLButtonElement>();
     for (const k of kinds) {

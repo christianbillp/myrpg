@@ -40,7 +40,7 @@ export interface RefinerTrigger {
   id: string;
   whenEvent?: 'player_moved' | 'encounter_started' | 'encounter_completed' | 'flag_set';
   region: { x: number; y: number; w: number; h: number };
-  kind: 'perception' | 'log' | 'aigm' | 'combat' | 'xp' | 'announcement' | 'speech' | 'fade' | 'set_flag';
+  kind: 'perception' | 'log' | 'aigm' | 'combat' | 'xp' | 'announcement' | 'speech' | 'fade' | 'set_flag' | 'enable_long_rest' | 'disable_long_rest';
   dc?: number;
   passMessage?: string;
   message: string;
@@ -128,6 +128,16 @@ export interface AIGMStreamHandlers {
   onDone?: (reply: string, rollResults: string[]) => void;
 }
 
+/** Thrown by `saveToken` when a token with the same id already exists on the
+ *  server. The Token Creator catches this and prompts the user to confirm
+ *  overwrite; on confirmation it retries `saveToken(spec, { overwrite: true })`. */
+export class TokenExistsError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "TokenExistsError";
+  }
+}
+
 
 export class GameClient {
   private sessionId: string | null = null;
@@ -204,7 +214,7 @@ export class GameClient {
 
   async disconnect(): Promise<void> {
     this.intentionalClose = true;
-    this.ws?.close();
+    this.detachAndClose(this.ws);
     this.ws = null;
     if (this.sessionId) {
       await fetch(`${API_URL}/game/session/${this.sessionId}`, { method: 'DELETE' }).catch(() => {});
@@ -215,8 +225,28 @@ export class GameClient {
   /** Close the local WebSocket without deleting the server-side session. Used when transitioning between chapter sessions in adventure mode. */
   closeWebSocket(): void {
     this.intentionalClose = true;
-    this.ws?.close();
+    this.detachAndClose(this.ws);
     this.ws = null;
+  }
+
+  /**
+   * Strip all listeners off an outgoing WebSocket BEFORE calling `close()`,
+   * then close it. Critical for the chapter-advance flow: `ws.onclose` reads
+   * `this.intentionalClose` *when it fires*, not when it was attached. If we
+   * close the old WS, immediately wire up a new one (which sets
+   * `intentionalClose = false`), and only then the old WS's pending close
+   * event fires, the old handler sees `intentionalClose: false`, calls
+   * `onDisconnect`, and ConnectionMonitor reloads the browser — silently
+   * killing the chapter transition. Nulling the handlers first detaches
+   * the old ws from the gameClient's state entirely.
+   */
+  private detachAndClose(ws: WebSocket | null): void {
+    if (!ws) return;
+    ws.onopen = null;
+    ws.onmessage = null;
+    ws.onerror = null;
+    ws.onclose = null;
+    try { ws.close(); } catch { /* already closing */ }
   }
 
   async sendAction(action: PlayerAction): Promise<void> {
@@ -479,7 +509,8 @@ export class GameClient {
       whenEvent?: "player_moved" | "encounter_started" | "encounter_completed" | "flag_set";
       kind:
         | "perception" | "log" | "aigm" | "combat" | "xp"
-        | "announcement" | "speech" | "fade" | "set_flag";
+        | "announcement" | "speech" | "fade" | "set_flag"
+        | "enable_long_rest" | "disable_long_rest";
       dc: number;
       passMessage: string;
       message: string;
@@ -556,6 +587,97 @@ export class GameClient {
     return res.json() as Promise<{ adventureId: string }>;
   }
 
+  /** Fetch every NPC the active setting carries. Refresh path for the NPC
+   *  Creator's LOAD overlay and for clients that want a fresh registry
+   *  without a page reload after a SAVE. */
+  async listNpcs(): Promise<unknown[]> {
+    const res = await fetch(`${API_URL}/npcs`);
+    if (!res.ok) throw new Error(`List NPCs failed: ${res.status}`);
+    return res.json() as Promise<unknown[]>;
+  }
+
+  /** Fetch the full Token Creator parts library in a single payload — every
+   *  slot's full part fragments + a flat catalog of slot → ids. Cached by
+   *  the Token Creator scene at boot; subsequent slot picks don't hit the
+   *  server again. The fragments still carry `{{COLOR}}` placeholders. */
+  async listTokenParts(): Promise<{
+    slots: Record<string, Record<string, string>>;
+    catalog: Record<string, string[]>;
+  }> {
+    const res = await fetch(`${API_URL}/tokens/parts`);
+    if (!res.ok) throw new Error(`List token parts failed: ${res.status}`);
+    return res.json() as Promise<{ slots: Record<string, Record<string, string>>; catalog: Record<string, string[]> }>;
+  }
+
+  /** List every token SVG filename in `data/tokens/`. Used by the Token
+   *  Creator's LOAD overlay to build its card grid. */
+  async listTokens(): Promise<string[]> {
+    const res = await fetch(`${API_URL}/tokens`);
+    if (!res.ok) throw new Error(`List tokens failed: ${res.status}`);
+    return res.json() as Promise<string[]>;
+  }
+
+  /** List every author-editable token spec id (filename stem). The LOAD
+   *  overlay uses this to distinguish "editable via the Token Creator" from
+   *  "legacy hand-authored" tokens. */
+  async listTokenSpecs(): Promise<string[]> {
+    const res = await fetch(`${API_URL}/token-specs`);
+    if (!res.ok) throw new Error(`List token specs failed: ${res.status}`);
+    return res.json() as Promise<string[]>;
+  }
+
+  /** Fetch a saved spec by id for re-editing in the Token Creator. Returns
+   *  null when no spec exists for that id (the SVG may still exist as a
+   *  legacy hand-authored token). */
+  async loadTokenSpec(id: string): Promise<import("./types").TokenSpec | null> {
+    const res = await fetch(`${API_URL}/token-specs/${encodeURIComponent(id)}`);
+    if (res.status === 404) return null;
+    if (!res.ok) throw new Error(`Load token spec failed: ${res.status}`);
+    return res.json() as Promise<import("./types").TokenSpec>;
+  }
+
+  /** Save a token. Server composes the SVG + writes both `data/tokens/<id>.svg`
+   *  and the editable spec. Returns the asset path the NPC Creator should
+   *  drop into `NPCDef.tokenAsset`. The server rejects with HTTP 409 when a
+   *  token with the same id already exists; the caller catches `TokenExistsError`
+   *  to prompt the user, then retries with `overwrite: true`. */
+  async saveToken(
+    spec: import("./types").TokenSpec,
+    opts: { overwrite?: boolean } = {},
+  ): Promise<{ id: string; tokenAsset: string }> {
+    const query = opts.overwrite ? "?overwrite=true" : "";
+    const res = await fetch(`${API_URL}/token${query}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(spec),
+    });
+    if (res.status === 409) {
+      const body = await res.json().catch(() => ({ error: `HTTP ${res.status}` })) as { error?: string };
+      throw new TokenExistsError(body.error ?? "Token already exists");
+    }
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({ error: `HTTP ${res.status}` })) as { error?: string };
+      throw new Error(body.error ?? `Token save failed: ${res.status}`);
+    }
+    return res.json() as Promise<{ id: string; tokenAsset: string }>;
+  }
+
+  /** Upsert an authored NPC. Server validates the `monsterClass` against the
+   *  monster roster (the engine resolves an NPC's stats by looking up its
+   *  monsterClass) and writes `<active-setting>/npcs/<id>.json`. */
+  async saveNpc(npc: import("./types").NPCDef): Promise<{ npcId: string }> {
+    const res = await fetch(`${API_URL}/npc`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(npc),
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({ error: `HTTP ${res.status}` })) as { error?: string };
+      throw new Error(body.error ?? `NPC save failed: ${res.status}`);
+    }
+    return res.json() as Promise<{ npcId: string }>;
+  }
+
   /**
    * Update an existing encounter in place — used by `EncounterCreatorScene`.
    * Mirrors `composeEncounter`'s body shape but requires an `encounterId`
@@ -584,7 +706,8 @@ export class GameClient {
       whenEvent?: "player_moved" | "encounter_started" | "encounter_completed" | "flag_set";
       kind:
         | "perception" | "log" | "aigm" | "combat" | "xp"
-        | "announcement" | "speech" | "fade" | "set_flag";
+        | "announcement" | "speech" | "fade" | "set_flag"
+        | "enable_long_rest" | "disable_long_rest";
       dc: number;
       passMessage: string;
       message: string;
@@ -773,6 +896,27 @@ export class GameClient {
     this.sessionId = body.sessionId!;
     body.state!.sessionId = body.sessionId!;
     return { complete: false, sessionId: body.sessionId!, state: body.state!, playerDef: body.playerDef! };
+  }
+
+  /** Boot the adventure's rest-stop interlude session. Used by the
+   *  "Visit the rest encounter first?" prompt between chapters. The returned
+   *  session's `adventureContext.isRestSession === true`; LEAVE ENCOUNTER from
+   *  that session calls `advanceChapter` (which the server detects as
+   *  rest-handoff) rather than going back to the setup screen. */
+  async startRest(characterId: string): Promise<{ sessionId: string; state: GameState; playerDef: PlayerDef }> {
+    const res = await fetch(`${API_URL}/adventure/${characterId}/rest`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ devFlags: DevMode.snapshotDevFlags() }),
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({ error: `HTTP ${res.status}` })) as { error?: string };
+      throw new Error(body.error ?? `Adventure rest failed: ${res.status}`);
+    }
+    const body = await res.json() as { sessionId: string; state: GameState; playerDef: PlayerDef };
+    this.sessionId = body.sessionId;
+    body.state.sessionId = body.sessionId;
+    return body;
   }
 
   async checkHealth(): Promise<boolean> {

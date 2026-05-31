@@ -454,13 +454,17 @@ export class ZonePainter {
         const py = y + ty * tileSize + tileSize / 2;
         const i = ty * map.width + tx;
         const groundGid = map.terrainData[i];
-        if (hasTexture && groundGid > 0) {
+        // `!== 0` instead of `> 0`: rotated tiles set the high flip bit
+        // (Tiled's H/V/D flags), which makes their signed int32 GID negative.
+        // The renderer's decodeTileGid handles the flag bits; the test only
+        // needs to know whether a tile was painted at all.
+        if (hasTexture && groundGid !== 0) {
           this.drawTile(px, py, tileSize, groundGid, FIRSTGID, tilesetKey);
         } else {
           this.mapContainer.add(scene.add.rectangle(px, py, tileSize, tileSize, 0x556677));
         }
         const objectGid = map.objectData[i];
-        if (hasTexture && objectGid > 0) this.drawTile(px, py, tileSize, objectGid, FIRSTGID, tilesetKey);
+        if (hasTexture && objectGid !== 0) this.drawTile(px, py, tileSize, objectGid, FIRSTGID, tilesetKey);
       }
     }
 

@@ -1,0 +1,18 @@
+{
+  "id": "player_human_wizard",
+  "slots": {
+    "body": "crescent",
+    "ears": "round_small",
+    "face": "oblong",
+    "beard": "stubble_light",
+    "eyes": "normal",
+    "mouth": "neutral",
+    "hair": "long_curly",
+    "accessory": "circlet"
+  },
+  "palette": {
+    "body": "#ffffff",
+    "skin": "#d8a070",
+    "hair": "#1a1605"
+  }
+}

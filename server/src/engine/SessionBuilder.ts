@@ -333,6 +333,8 @@ export function buildSessionState(
       chapterIndex: req.adventureSeed.chapterIndex,
       totalChapters: req.adventureSeed.totalChapters,
       priorChapterSummaries: req.adventureSeed.priorChapterSummaries,
+      isRestSession: req.adventureSeed.isRestSession,
+      restEncounterId: req.adventureSeed.restEncounterId,
     } : null,
     chapterComplete: false,
     encounterCompletionFlag: req.completionFlag ?? req.adventureSeed?.completionFlag,

@@ -7,7 +7,7 @@ import Fastify from "fastify";
 import cors from "@fastify/cors";
 import websocket from "@fastify/websocket";
 import Anthropic from "@anthropic-ai/sdk";
-import { readFile, readdir } from "fs/promises";
+import { readFile, readdir, writeFile, mkdir, unlink, access } from "fs/promises";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
 import { randomUUID } from "crypto";
@@ -32,7 +32,11 @@ import {
   applySpecies,
 } from "./engine/EquipmentSystem.js";
 import { CreateSessionRequest } from "./engine/types.js";
-import type { MapTilesetInfo } from "../../shared/types.js";
+import type { MapTilesetInfo, TokenSpec } from "../../shared/types.js";
+import {
+  loadPartsLibrary, composeToken, listPartCatalog,
+  type PartsLibrary, type TokenSlot, TOKEN_SLOTS,
+} from "./tokenCompose.js";
 import {
   createSession,
   getEngine,
@@ -195,7 +199,13 @@ async function loadDefs(): Promise<void> {
   }
   defs.maps = await Promise.all(rawMaps.map(loadTiledMap));
   defs.tileLegend = await loadTileLegends();
+  // Token Creator parts library. Loaded once at boot — fragments don't
+  // change without a server restart, so caching them in memory is fine and
+  // makes each compose request a pure CPU op.
+  tokenPartsLibrary = await loadPartsLibrary(TOKEN_PARTS_DIR);
 }
+
+let tokenPartsLibrary: PartsLibrary = { parts: {} as Record<TokenSlot, Record<string, string>> };
 
 /**
  * Load and merge every `*_legend.json` file under server/data/tilesets/ into a
@@ -281,6 +291,8 @@ function extractTilePassability(tiles: TiledTileDef[] | undefined): Record<numbe
 
 const TILESETS_DIR = join(DATA_DIR, "tilesets");
 const TOKENS_DIR = join(DATA_DIR, "tokens");
+const TOKEN_PARTS_DIR = join(TOKENS_DIR, "parts");
+const TOKEN_SPECS_DIR = join(TOKENS_DIR, "specs");
 const SOUNDS_DIR = join(DATA_DIR, "sounds");
 
 /**
@@ -439,6 +451,64 @@ server.post<{
     return reply.code(500).send({ error: msg });
   }
 });
+
+/**
+ * Upsert an authored NPC. Writes `<active-setting>/npcs/<id>.json` and
+ * reloads defs so subsequent `/npcs` reads (and the next session's spawn
+ * pass) pick up the new entry. Used by the NPC Creator's SAVE button.
+ *
+ * `monsterClass` must point at an existing monster id — the engine resolves
+ * an NPC's stats by looking up its monsterClass in the monster roster
+ * (`SpawnHelpers.spawnNpc` + `GameEngine.resolveMonsterDef`), so an NPC with
+ * no monsterClass would spawn with default fallback HP and no attack.
+ */
+server.post<{
+  Body: import("../../shared/types.js").NPCDef;
+}>("/npc", async (req, reply) => {
+  const dir = settingSubDir("npcs");
+  if (!dir) return reply.code(400).send({ error: "No active setting" });
+  const body = req.body;
+  if (!body || typeof body !== "object") return reply.code(400).send({ error: "Body must be an NPCDef object" });
+  if (!body.id || !/^[a-z0-9_]+$/.test(body.id)) {
+    return reply.code(400).send({ error: "npc.id must be a snake_case slug (lowercase letters, digits, underscores)" });
+  }
+  if (!body.name || typeof body.name !== "string") return reply.code(400).send({ error: "npc.name is required" });
+  if (!body.monsterClass || typeof body.monsterClass !== "string") {
+    return reply.code(400).send({ error: "npc.monsterClass is required (id of a monster the NPC inherits stats from)" });
+  }
+  const validMonsterIds = new Set(defs.monsters.map((m) => m.id));
+  if (!validMonsterIds.has(body.monsterClass)) {
+    return reply.code(400).send({ error: `npc.monsterClass "${body.monsterClass}" is not a known monster id` });
+  }
+  if (body.factionId) {
+    const validFactionIds = new Set(defs.factions.map((f) => f.id));
+    if (validFactionIds.size > 0 && !validFactionIds.has(body.factionId)) {
+      return reply.code(400).send({ error: `npc.factionId "${body.factionId}" is not a known faction id` });
+    }
+  }
+  // Coerce optional fields to a clean serialisable shape — strip blank strings
+  // so the written JSON doesn't carry empty placeholders the engine has to
+  // treat specially.
+  const clean: import("../../shared/types.js").NPCDef = {
+    id: body.id,
+    name: body.name.trim(),
+    monsterClass: body.monsterClass,
+    color: typeof body.color === "number" ? body.color : 0xAABBCC,
+    ...(body.persona && body.persona.trim() ? { persona: body.persona.trim() } : {}),
+    ...(body.tokenAsset && body.tokenAsset.trim() ? { tokenAsset: body.tokenAsset.trim() } : {}),
+    ...(body.factionId ? { factionId: body.factionId } : {}),
+  };
+  try {
+    await mkdir(dir, { recursive: true });
+    await writeFile(join(dir, `${clean.id}.json`), JSON.stringify(clean, null, 2));
+    await loadDefs();
+    return reply.send({ npcId: clean.id });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error("[POST /npc] failed", msg);
+    return reply.code(500).send({ error: msg });
+  }
+});
 /**
  * GET /server-config — single endpoint backing the Configuration page. Returns
  * the full persisted `ServerConfig` (active setting id + Development Mode
@@ -559,6 +629,29 @@ server.post<{ Params: { characterId: string }; Body: { devFlags?: import("../../
     if (!save) return reply.code(404).send({ error: "No active adventure for this character" });
     const adv = await loadAdventureDef(save.adventureId);
     if (!adv) return reply.code(404).send({ error: "Adventure definition missing" });
+
+    // Rest-stop handoff: if the player was in the rest interlude, "advance"
+    // means "finish resting and go to the queued next chapter". Drop the
+    // rest session and the flag, then fall through to the normal chapter
+    // boot below. We do NOT summarize the rest, do NOT bump
+    // `currentChapterIndex` (already bumped when rest started), and do NOT
+    // append to `completedChapterIds`.
+    if (save.inRest) {
+      const found = findSessionByCharacter(characterId);
+      if (found) deleteSession(found.sessionId);
+      save.inRest = false;
+      await deleteWorldSave();
+      await writeAdventureSave(save);
+      if (save.currentChapterIndex >= adv.chapters.length) {
+        // Defensive — shouldn't happen because rest fires between chapters,
+        // never after the last one.
+        return reply.send({ complete: true, save });
+      }
+      const result = await startAdventureChapter(characterId, adv, save, advanceDevFlags);
+      if ("error" in result) return reply.code(400).send(result);
+      return reply.send({ complete: false, ...result });
+    }
+
     const chapter = adv.chapters[save.currentChapterIndex];
     if (!chapter) return reply.code(400).send({ error: "No current chapter" });
 
@@ -599,6 +692,65 @@ server.post<{ Params: { characterId: string }; Body: { devFlags?: import("../../
     return reply.send({ complete: false, ...result });
   },
 );
+
+/**
+ * Start the rest-stop interlude session. Called when the player accepts the
+ * "rest first?" prompt between chapters. Tears down the just-finished chapter
+ * session, bumps `currentChapterIndex` (the rest sits in the gap before the
+ * next chapter), records `inRest=true` on the adventure save, and boots the
+ * adventure's `restEncounterId` encounter as a session marked
+ * `isRestSession=true` on its adventureContext.
+ *
+ * When the player leaves the rest session, the client calls
+ * `/adventure/:characterId/advance`, which detects `inRest` and routes to the
+ * next chapter without re-summarising the rest.
+ */
+server.post<{ Params: { characterId: string }; Body: { devFlags?: import("../../shared/types.js").DevFlags } }>(
+  "/adventure/:characterId/rest",
+  async (req, reply) => {
+    const { characterId } = req.params;
+    const restDevFlags = req.body?.devFlags;
+    const save = await readAdventureSave(characterId);
+    if (!save) return reply.code(404).send({ error: "No active adventure for this character" });
+    const adv = await loadAdventureDef(save.adventureId);
+    if (!adv) return reply.code(404).send({ error: "Adventure definition missing" });
+    if (!adv.restEncounterId) return reply.code(400).send({ error: "Adventure has no restEncounterId" });
+    const chapter = adv.chapters[save.currentChapterIndex];
+    if (!chapter) return reply.code(400).send({ error: "No current chapter to rest after" });
+
+    // Capture cross-chapter state from the just-completed chapter so it
+    // survives the rest interlude. Mirrors the equivalent block in the
+    // advance route.
+    const found = findSessionByCharacter(characterId);
+    const aigmHistory = found?.session.aigmHistory ?? [];
+    if (found) {
+      const finishedState = found.session.engine.getState();
+      save.worldFlags = { ...finishedState.worldFlags };
+      save.factionStandings = { ...finishedState.factionStandings };
+      save.factionRelations = structuredClone(finishedState.factionRelations);
+      save.discoveredFactions = [...finishedState.discoveredFactions];
+      save.rumors = [...finishedState.rumors];
+      deleteSession(found.sessionId);
+    }
+
+    // Summarise + mark the just-completed chapter complete BEFORE entering
+    // rest. That way the chapter index is already at "the chapter after rest"
+    // and the subsequent `/advance` (from LEAVE on the rest screen) only has
+    // to start the next chapter session — no double-summarisation.
+    const summary = await summarizeChapter(chapter.title, aigmHistory);
+    save.priorChapterSummaries.push({ chapterId: chapter.id, chapterTitle: chapter.title, summary });
+    if (!save.completedChapterIds.includes(chapter.id)) save.completedChapterIds.push(chapter.id);
+    save.currentChapterIndex += 1;
+    save.inRest = true;
+    await deleteWorldSave();
+    await writeAdventureSave(save);
+
+    const result = await startAdventureRest(characterId, adv, save, restDevFlags);
+    if ("error" in result) return reply.code(400).send(result);
+    return reply.send(result);
+  },
+);
+
 server.get("/maps", async () => defs.maps);
 server.get("/health", async () => ({ ok: true }));
 
@@ -606,6 +758,47 @@ server.get("/health", async () => ({ ok: true }));
 // dir so the client can preload every spritesheet at boot (including ones
 // not yet referenced by any saved map, e.g. a fresh tileset that's only
 // going to be used by the next composed preview).
+/**
+ * Per-tileset legend payload for the Map Editor's EDIT tab. Each entry keeps
+ * its own LOCAL gid keys (always 1-based within the tileset) so the client
+ * can render thumbnails against the matching spritesheet without worrying
+ * about firstgid offsets — those live on each saved map's `tilesets` array.
+ *
+ * Returns one entry per `*_legend.json` file in the tilesets dir, with
+ * `tileset` derived from the filename. The legacy `/tilesets/legends-merged`
+ * shape (a single flat map of GID → entry) collapsed scribble's "1" and
+ * water's "1" into the same slot, which made it impossible to tell which
+ * tileset a thumbnail should come from.
+ */
+server.get("/tilesets/legends", async (_req, reply) => {
+  const files = await readdir(TILESETS_DIR);
+  const legendFiles = files.filter((f) => f.endsWith("_legend.json"));
+  const tilesets: Array<{
+    tileset: string;
+    image: string;
+    notes: string;
+    tiles: import("../../shared/types.js").TileLegend["tiles"];
+  }> = [];
+  for (const file of legendFiles) {
+    const raw = JSON.parse(await readFile(join(TILESETS_DIR, file), "utf-8")) as {
+      tileset?: string;
+      image?: string;
+      notes?: string;
+      tiles: import("../../shared/types.js").TileLegend["tiles"];
+    };
+    // Filename is `<name>_legend.json`; derive the tileset name from it when
+    // the JSON didn't bother to set it explicitly (scribble_legend.json).
+    const name = raw.tileset ?? file.replace(/_legend\.json$/i, "");
+    tilesets.push({
+      tileset: name,
+      image: `/tilesets/${raw.image ?? `${name}.png`}`,
+      notes: raw.notes ?? "",
+      tiles: raw.tiles,
+    });
+  }
+  return reply.send({ tilesets });
+});
+
 server.get("/tilesets", async (_req, reply) => {
   try {
     const files = await readdir(TILESETS_DIR);
@@ -675,9 +868,67 @@ server.get<{ Params: { filename: string } }>(
   },
 );
 
+/** Token Creator — list every authored token SVG filename. The LOAD overlay
+ *  uses this to populate its card grid. Excludes the `parts/` and `specs/`
+ *  subdirectories; only top-level `*.svg` files in `data/tokens/`. */
+server.get("/tokens", async (_req, reply) => {
+  try {
+    const files = await readdir(TOKENS_DIR);
+    return reply.send(files.filter((f) => f.endsWith(".svg")));
+  } catch {
+    return reply.send([]);
+  }
+});
+
+/** Token Creator — return the full parts library in a single payload so the
+ *  scene can compose previews locally without round-tripping per slot
+ *  change. Shape: `{ slots: { body: { plain: "<circle.../>", … }, … } }`.
+ *  Fragments still carry the `{{COLOR}}` placeholders — the client stamps
+ *  them at preview time. */
+server.get("/tokens/parts", async (_req, reply) => {
+  return reply.send({
+    slots: tokenPartsLibrary.parts,
+    catalog: listPartCatalog(tokenPartsLibrary),
+  });
+});
+
+/** Token Creator — list every saved spec id (filename without `.json`). The
+ *  LOAD overlay calls this BEFORE rendering its card grid so the cards know
+ *  which SVG filenames are also editable specs (vs. legacy hand-authored
+ *  tokens that don't have one). */
+server.get("/token-specs", async (_req, reply) => {
+  try {
+    const files = await readdir(TOKEN_SPECS_DIR);
+    return reply.send(files.filter((f) => f.endsWith(".json")).map((f) => f.replace(/\.json$/i, "")));
+  } catch {
+    return reply.send([]);
+  }
+});
+
+/** Token Creator — read back an authored spec for re-editing. Returns 404
+ *  when the spec isn't on disk (e.g. the user just typed an id that doesn't
+ *  exist yet). */
+server.get<{ Params: { id: string } }>(
+  "/token-specs/:id",
+  async (req, reply) => {
+    const { id } = req.params;
+    if (!/^[A-Za-z0-9_-]+$/.test(id)) {
+      return reply.code(400).send({ error: "invalid token id" });
+    }
+    try {
+      const raw = await readFile(join(TOKEN_SPECS_DIR, `${id}.json`), "utf-8");
+      return reply.type("application/json").send(raw);
+    } catch {
+      return reply.code(404).send({ error: "token spec not found" });
+    }
+  },
+);
+
 // Static token SVGs — referenced from `PlayerDef.tokenAsset`,
 // `MonsterDef.tokenAsset`, and optionally `NPCDef.tokenAsset`. Loaded by the
-// client's `BootScene.preload` and rendered by Player + NpcToken.
+// client's `BootScene.preload` and rendered by Player + NpcToken. Registered
+// AFTER `/tokens` and `/tokens/parts` so the static-segment routes are
+// matched first and the parametric `:filename` only catches the rest.
 server.get<{ Params: { filename: string } }>(
   "/tokens/:filename",
   async (req, reply) => {
@@ -694,9 +945,79 @@ server.get<{ Params: { filename: string } }>(
   },
 );
 
-// ── Save routes (unchanged) ────────────────────────────────────────────────────
+/**
+ * Token Creator — save (upsert) a token. Composes the SVG from the spec +
+ * the in-memory parts library and writes BOTH:
+ *   • `data/tokens/<id>.svg`        — the flattened SVG referenced via
+ *     `NPCDef.tokenAsset` (no special engine handling needed).
+ *   • `data/tokens/specs/<id>.json` — the editable spec, so re-opening the
+ *     Token Creator restores every slot pick + palette choice.
+ *
+ * Returns the token's full asset path so the client can drop it straight
+ * into the NPC Creator's `TOKEN ASSET PATH` field.
+ */
+server.post<{ Body: TokenSpec; Querystring: { overwrite?: string } }>("/token", async (req, reply) => {
+  const spec = req.body;
+  if (!spec || typeof spec !== "object") {
+    return reply.code(400).send({ error: "Body must be a TokenSpec object" });
+  }
+  if (!spec.id || !/^[a-z0-9_]+$/.test(spec.id)) {
+    return reply.code(400).send({ error: "token.id must be a snake_case slug (lowercase letters, digits, underscores)" });
+  }
+  if (!spec.slots || typeof spec.slots !== "object") {
+    return reply.code(400).send({ error: "token.slots is required (slot → part id map)" });
+  }
+  // Reject unknown slot keys to avoid quietly losing data. The TOKEN_SLOTS
+  // array is the canonical z-order — anything outside it would render at the
+  // wrong layer and confuse a later edit pass.
+  for (const k of Object.keys(spec.slots)) {
+    if (!(TOKEN_SLOTS as readonly string[]).includes(k)) {
+      return reply.code(400).send({ error: `unknown slot "${k}" — must be one of: ${TOKEN_SLOTS.join(", ")}` });
+    }
+  }
+  // Validate each part id is in the loaded library so a typo doesn't silently
+  // produce a missing-layer token. Empty slots are allowed (skipped at
+  // compose time).
+  for (const slot of TOKEN_SLOTS) {
+    const partId = spec.slots[slot];
+    if (!partId) continue;
+    if (!tokenPartsLibrary.parts[slot]?.[partId]) {
+      return reply.code(400).send({ error: `slot "${slot}" references unknown part "${partId}"` });
+    }
+  }
+  // Pre-flight overwrite check. The Token Creator should warn before
+  // clobbering an existing token; the client retries with `?overwrite=true`
+  // once the user has confirmed. We check both files so a stale-pair (only
+  // SVG or only spec on disk) still surfaces the conflict.
+  const overwrite = req.query.overwrite === "true";
+  if (!overwrite) {
+    const svgPath = join(TOKENS_DIR, `${spec.id}.svg`);
+    const specPath = join(TOKEN_SPECS_DIR, `${spec.id}.json`);
+    let svgExists = false;
+    let specExists = false;
+    try { await access(svgPath); svgExists = true; } catch { /* not there */ }
+    try { await access(specPath); specExists = true; } catch { /* not there */ }
+    if (svgExists || specExists) {
+      return reply.code(409).send({
+        error: `token "${spec.id}" already exists — retry with ?overwrite=true to replace it`,
+        existing: { svg: svgExists, spec: specExists },
+      });
+    }
+  }
+  try {
+    const svg = composeToken(spec, tokenPartsLibrary);
+    await mkdir(TOKEN_SPECS_DIR, { recursive: true });
+    await writeFile(join(TOKENS_DIR, `${spec.id}.svg`), svg);
+    await writeFile(join(TOKEN_SPECS_DIR, `${spec.id}.json`), JSON.stringify(spec, null, 2));
+    return reply.send({ id: spec.id, tokenAsset: `/tokens/${spec.id}.svg` });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error("[POST /token] failed", msg);
+    return reply.code(500).send({ error: msg });
+  }
+});
 
-import { writeFile, mkdir, unlink, access } from "fs/promises";
+// ── Save routes (unchanged) ────────────────────────────────────────────────────
 
 /**
  * Saves live inside the active setting (`settings/<id>/saves/`). A character
@@ -957,6 +1278,11 @@ function buildAdventureSeed(adv: AdventureDef, chapterIndex: number, save: Adven
   seedRumors?: Rumor[];
 } {
   const chapter = adv.chapters[chapterIndex];
+  // Mirror the rest-stop fields so the client can decide whether to surface
+  // the "rest first?" prompt at chapter-advance time without a separate
+  // adventure-registry fetch. We only forward the id here; the title is
+  // resolved client-side from the cached encounters registry so we don't
+  // have to make `buildAdventureSeed` async just to read an encounter file.
   return {
     adventureId: adv.id,
     adventureTitle: adv.title,
@@ -966,6 +1292,7 @@ function buildAdventureSeed(adv: AdventureDef, chapterIndex: number, save: Adven
     totalChapters: adv.chapters.length,
     completionFlag: chapter.completionFlag,
     priorChapterSummaries: save.priorChapterSummaries,
+    restEncounterId: adv.restEncounterId,
     seedWorldFlags: { ...save.worldFlags },
     seedFactionStandings: { ...save.factionStandings },
     // Carry the full pair-wise faction matrix across chapters when present.
@@ -1123,23 +1450,112 @@ async function startAdventureChapter(
   createSession(sessionId, engine);
   installWorldTick(sessionId, engine);
   await ensureSaveExists(playerDef.id);
-  // Auto-start combat — see comment on the main session-create route above.
-  if (anyHostileToParty(engine.getState())) {
-    engine.triggerCombat();
-  }
+  // Combat auto-start now lives inside `GameEngine.createSession` — see the
+  // matching comment on the main `/game/session` route. Keeps the chapter-
+  // advance path consistent with single-encounter session creation.
   return { sessionId, state: engine.getState(), playerDef: engine.getPlayerDef() };
 }
 
 /**
- * True when any living NPC in the state is hostile to the player party. Used
- * by the auto-start-combat guards on session creation — reads through the
- * faction matrix (with legacy `disposition` fallback) so encounter content
- * authored with either source-of-truth lands the player in combat correctly.
+ * Boot the rest-stop interlude session — the adventure's `restEncounterId`
+ * dressed up as a chapter so the existing GameScene plumbing (intro modal,
+ * cinematic fade, world-tick, GM chat) just works. The session's
+ * adventureContext carries `isRestSession=true` so the client can label the
+ * HUD and route LEAVE ENCOUNTER through `/advance` rather than back to the
+ * setup screen. `save.currentChapterIndex` should already point at the NEXT
+ * chapter when this is called — the rest sits between the just-completed
+ * chapter and that one.
  */
-function anyHostileToParty(state: GameState): boolean {
-  const partyView = { factionId: PLAYER_FACTION_ID } as const;
-  return state.npcs.some((n) => n.hp > 0
-    && isHostileTo(state, partyView, { factionId: n.factionId, disposition: n.disposition }));
+async function startAdventureRest(
+  characterId: string,
+  adv: AdventureDef,
+  save: AdventureSave,
+  devFlags?: import("../../shared/types.js").DevFlags,
+): Promise<{ sessionId: string; state: GameState; playerDef: PlayerDef } | { error: string }> {
+  if (!adv.restEncounterId) return { error: "Adventure has no rest encounter" };
+  const playerDef = defs.playerDefs.find((p) => p.id === characterId);
+  if (!playerDef) return { error: "Unknown character" };
+  const encDef = await loadEncounterDef(adv.restEncounterId);
+  if (!encDef) return { error: `Unknown rest encounterId "${adv.restEncounterId}"` };
+  const savedMap = defs.maps.find((m) => m.id === encDef.mapId);
+
+  const charSave = await readSaveIfExists(characterId);
+
+  const encounterContext = buildEncounter({
+    mapType: "saved",
+    playerDefId: playerDef.id,
+    playerName: playerDef.name,
+    playerSpeciesName: playerDef.speciesName,
+    playerClassName: playerDef.className,
+    playerLevel: playerDef.level,
+    playerMaxHp: charSave?.hp ?? playerDef.maxHp,
+    playerAc: playerDef.ac,
+    savedMapName: savedMap?.name,
+    savedMapDescription: savedMap?.mapdescription,
+    npcIds: encDef.npcIds,
+    allyIds: encDef.allyIds,
+    enemyIds: encDef.enemyIds,
+    customIntroduction: encDef.customIntroduction,
+    customContext: encDef.customContext,
+    customObjective: encDef.objective,
+    startingZones: encDef.startingZones,
+    placementMode: encDef.placementMode,
+    placements: encDef.placements,
+    environment: encDef.environment,
+    factionRelations: encDef.factionRelations,
+    allowsLongRest: encDef.allowsLongRest,
+  });
+
+  // Use a synthetic AdventureSessionContext that points at the NEXT chapter
+  // (the one the rest precedes) but with `isRestSession=true`. The chapter
+  // labels feed the GM's "ADVENTURE: …" header so it stays oriented.
+  const nextIdx = Math.min(save.currentChapterIndex, adv.chapters.length - 1);
+  const nextChapter = adv.chapters[nextIdx];
+  const adventureSeed = {
+    ...buildAdventureSeed(adv, nextIdx, save),
+    chapterId: `rest_before_${nextChapter.id}`,
+    chapterTitle: encDef.encounterTitle,
+    isRestSession: true,
+  };
+
+  const sessionId = randomUUID();
+  const req: CreateSessionRequest = {
+    mapType: "saved",
+    playerDefId: playerDef.id,
+    savedMapId: savedMap?.id,
+    encounterTitle: encDef.encounterTitle,
+    savedMapName: savedMap?.name,
+    savedMapDescription: savedMap?.mapdescription,
+    npcIds: encDef.npcIds,
+    allyIds: encDef.allyIds,
+    enemyIds: encDef.enemyIds,
+    customIntroduction: encDef.customIntroduction,
+    customContext: encDef.customContext,
+    customObjective: encDef.objective,
+    completionFlag: encDef.completionFlag,
+    tileProperties: encDef.tileProperties,
+    startingZones: encDef.startingZones,
+    placementMode: encDef.placementMode,
+    placements: encDef.placements,
+    triggers: encDef.triggers,
+    adventureSeed,
+    resumeHp: charSave?.hp,
+    resumeXp: charSave?.xp,
+    resumeCp: charSave?.balanceCp,
+    resumeInventoryIds: charSave?.inventoryIds,
+    resumeEquippedSlots: charSave?.equippedSlots,
+    resumeResources: charSave?.resources,
+    resumeSpellSlots: charSave?.spellSlots,
+    resumePreparedSpellIds: charSave?.preparedSpellIds,
+    resumeLevelUps: charSave?.levelUps,
+    devFlags: await resolveDevFlags(devFlags),
+  };
+
+  const engine = GameEngine.createSession(sessionId, { ...req, encounterContext }, defs, savedMap);
+  createSession(sessionId, engine);
+  installWorldTick(sessionId, engine);
+  await ensureSaveExists(playerDef.id);
+  return { sessionId, state: engine.getState(), playerDef: engine.getPlayerDef() };
 }
 
 /**
@@ -1321,17 +1737,12 @@ server.post("/game/session", async (req, reply) => {
   installWorldTick(sessionId, engine);
   await ensureSaveExists(playerDef.id);
 
-  // Auto-start combat when the encounter spawned any hostile creatures, so the
-  // player lands directly in the turn-order UI as soon as the introduction
-  // overlay is dismissed. Deferred to *after* the engine is registered in the
-  // sessions map so any bus events published during the transition have
-  // somewhere to land (today the events are unsubscribed-to; this guards the
-  // ordering for future bus consumers). Encounters that want a delayed
-  // hostile reveal should keep all NPCs neutral at spawn and use triggers to
-  // flip dispositions later.
-  if (anyHostileToParty(engine.getState())) {
-    engine.triggerCombat();
-  }
+  // Combat auto-start (when the encounter spawned with hostile NPCs) now
+  // happens inside `GameEngine.createSession` so it runs under the
+  // `isConstructing` flag and defers the first NPC turn until the cinematic
+  // queue has played. Otherwise the bandits would take their turn here, on
+  // the server, before the client even connects — and the initial state
+  // would show every enemy already at its post-turn tile with no animation.
 
   // Include the engine's per-session PlayerDef (with any level-up history
   // already replayed) so the client renders the HUD against the character's

@@ -11,6 +11,11 @@ import {
   type HtmlTextHandle,
 } from "../ui/htmlButtons";
 import {
+  buildLineInput as sharedBuildLineInput,
+  buildTextarea as sharedBuildTextarea,
+} from "../ui/sceneInputs";
+import { MapPalette } from "../ui/edit/MapPalette";
+import {
   TILE_SIZE,
   GRID_COLS,
   GRID_ROWS,
@@ -45,9 +50,15 @@ const PANEL_PAD = 32;
 const COL_GAP = 24;
 const LEFT_FRACTION = 2 / 3;
 
-type Tab = "deterministic" | "generative";
-type BucketName = "always" | "det" | "gen";
-type Disposable = HtmlButtonHandle | HtmlTextHandle;
+type Tab = "deterministic" | "generative" | "edit";
+type BucketName = "always" | "det" | "gen" | "edit";
+type Disposable = HtmlButtonHandle | HtmlTextHandle | EditTabHandle;
+/** Generic disposable used by the EDIT-tab bucket — MapPalette and the
+ *  palette's scrollable thumbnail div both expose this shape. */
+interface EditTabHandle {
+  setVisible(visible: boolean): void;
+  dispose(): void;
+}
 
 type Terrain = "grassland" | "forest" | "dungeon";
 type Feature =
@@ -98,7 +109,13 @@ export class MapEditorScene extends Phaser.Scene {
   private tab: Tab = "deterministic";
   private tabDetBtn: HtmlButtonHandle | null = null;
   private tabGenBtn: HtmlButtonHandle | null = null;
-  private buckets: Record<BucketName, Disposable[]> = { always: [], det: [], gen: [] };
+  private tabEditBtn: HtmlButtonHandle | null = null;
+  private buckets: Record<BucketName, Disposable[]> = { always: [], det: [], gen: [], edit: [] };
+
+  // EDIT tab — the entire palette / paint controller lives in MapPalette.
+  // Constructed lazily by `buildEditPanel` so the registry-backed legend
+  // payloads are guaranteed to be loaded at first use.
+  private mapPalette: MapPalette | null = null;
 
   // Deterministic tab state.
   private selectedTerrain: Terrain | null = "grassland";
@@ -140,11 +157,12 @@ export class MapEditorScene extends Phaser.Scene {
     this.selectedFeatures.clear();
     this.terrainChips.clear();
     this.featureChips.clear();
-    this.buckets = { always: [], det: [], gen: [] };
+    this.buckets = { always: [], det: [], gen: [], edit: [] };
     this.previewedMap = null;
     this.savedMapId = null;
     this.editingMapId = null;
     this.busy = false;
+    this.mapPalette = null;
   }
 
   create(): void {
@@ -244,34 +262,13 @@ export class MapEditorScene extends Phaser.Scene {
     onInput: (value: string) => void,
     initialValue = "",
   ): HTMLInputElement {
-    const el = document.createElement("input");
-    el.type = "text";
-    el.placeholder = placeholder;
-    if (initialValue) el.value = initialValue;
-    el.style.cssText = `
-      position: absolute;
-      background: #141426;
-      color: #e0e8f0;
-      border: 1px solid #445566;
-      padding: 0 12px;
-      font-family: monospace;
-      font-size: 13px;
-      z-index: 10;
-      box-sizing: border-box;
-    `;
-    document.body.appendChild(el);
-    const place = () => {
-      const rect = this.sys.game.canvas.getBoundingClientRect();
-      const s = rect.width / W;
-      el.style.left = `${rect.left + x * s}px`;
-      el.style.top  = `${rect.top + y * s}px`;
-      el.style.width  = `${w * s}px`;
-      el.style.height = `${h * s}px`;
-    };
-    place();
-    this.scale.on("resize", place);
-    el.oninput = () => onInput(el.value);
-    return el;
+    return sharedBuildLineInput({
+      scene: this, sceneWidth: W,
+      x, y, w, h,
+      placeholder, initialValue,
+      fontSize: 13,
+      onInput,
+    }).el;
   }
 
   // ── Right column: chip-style tabs + per-tab controls ──────────────────
@@ -292,26 +289,35 @@ export class MapEditorScene extends Phaser.Scene {
 
     this.buildDeterministicPanel(colX, innerTop, colW, innerH);
     this.buildGenerativePanel(colX, innerTop, colW, innerH);
+    this.buildEditPanel(colX, innerTop, colW, innerH);
   }
 
   private buildOuterTabBar(x: number, y: number, w: number, h: number): void {
-    const halfW = Math.floor(w / 2);
+    const thirdW = Math.floor(w / 3);
     this.tabDetBtn = createHtmlButton({
       scene: this, sceneWidth: W,
-      x, y, w: halfW, h,
+      x, y, w: thirdW, h,
       label: "DETERMINISTIC", variant: "secondary", fontSize: 11,
       onClick: () => this.activateTab("deterministic"),
     });
     this.tabGenBtn = createHtmlButton({
       scene: this, sceneWidth: W,
-      x: x + halfW, y, w: w - halfW, h,
+      x: x + thirdW, y, w: thirdW, h,
       label: "GENERATIVE AI", variant: "secondary", fontSize: 11,
       onClick: () => this.activateTab("generative"),
     });
+    this.tabEditBtn = createHtmlButton({
+      scene: this, sceneWidth: W,
+      x: x + 2 * thirdW, y, w: w - 2 * thirdW, h,
+      label: "EDIT", variant: "secondary", fontSize: 11,
+      onClick: () => this.activateTab("edit"),
+    });
     this.styleChipTab(this.tabDetBtn, this.tab === "deterministic");
     this.styleChipTab(this.tabGenBtn, this.tab === "generative");
+    this.styleChipTab(this.tabEditBtn, this.tab === "edit");
     this.addToBucket("always", this.tabDetBtn);
     this.addToBucket("always", this.tabGenBtn);
+    this.addToBucket("always", this.tabEditBtn);
   }
 
   /** Style the tab button as a transparent chip with an accent underline
@@ -326,12 +332,19 @@ export class MapEditorScene extends Phaser.Scene {
 
   private activateTab(tab: Tab): void {
     this.tab = tab;
-    const det = tab === "deterministic";
-    if (this.tabDetBtn) this.styleChipTab(this.tabDetBtn, det);
-    if (this.tabGenBtn) this.styleChipTab(this.tabGenBtn, !det);
-    this.setBucketVisible("det", det);
-    this.setBucketVisible("gen", !det);
-    if (this.genPromptInput) this.genPromptInput.style.display = det ? "none" : "";
+    if (this.tabDetBtn)  this.styleChipTab(this.tabDetBtn,  tab === "deterministic");
+    if (this.tabGenBtn)  this.styleChipTab(this.tabGenBtn,  tab === "generative");
+    if (this.tabEditBtn) this.styleChipTab(this.tabEditBtn, tab === "edit");
+    this.setBucketVisible("det",  tab === "deterministic");
+    this.setBucketVisible("gen",  tab === "generative");
+    this.setBucketVisible("edit", tab === "edit");
+    if (this.genPromptInput) this.genPromptInput.style.display = tab === "generative" ? "" : "none";
+    // EDIT tab wires click-to-paint on the preview. Other tabs strip it so a
+    // stray click doesn't mutate the map (the GenAI/Deterministic tabs are
+    // pure view-state on the preview).
+    if (this.preview) {
+      this.preview.setOnCellClick(tab === "edit" ? (col, row) => this.paintCell(col, row) : null);
+    }
     this.refreshButtons();
   }
 
@@ -460,6 +473,29 @@ export class MapEditorScene extends Phaser.Scene {
     });
   }
 
+  // ── EDIT tab — tile palette + paint controls ───────────────────────────
+
+  private buildEditPanel(x: number, y: number, w: number, h: number): void {
+    if (this.mapPalette) this.mapPalette.dispose();
+    this.mapPalette = new MapPalette({
+      scene: this,
+      sceneWidth: W,
+      getMap: () => this.previewedMap,
+      repaintPreview: () => { this.preview?.repaintInPlace(); },
+      setStatus: (text) => { if (this.statusEl) this.statusEl.textContent = text; },
+      markMapDirty: () => { this.savedMapId = null; },
+      refreshButtons: () => this.refreshButtons(),
+    });
+    for (const handle of this.mapPalette.build(x, y, w, h)) {
+      this.addToBucket("edit", handle);
+    }
+  }
+
+  /** Forward an EDIT-tab cell click to the palette. Wired in `activateTab`. */
+  private paintCell(col: number, row: number): void {
+    this.mapPalette?.paintCell(col, row);
+  }
+
   // ── Bucket / chip helpers ───────────────────────────────────────────────
 
   private addToBucket(bucket: BucketName, handle: Disposable): void {
@@ -561,36 +597,14 @@ export class MapEditorScene extends Phaser.Scene {
     onInput: (value: string) => void,
     initialValue = "",
   ): HTMLTextAreaElement {
-    const el = document.createElement("textarea");
-    el.placeholder = placeholder;
-    if (initialValue) el.value = initialValue;
-    el.style.cssText = `
-      position: absolute;
-      background: #141426;
-      color: #e0e8f0;
-      border: 1px solid #445566;
-      padding: 10px 12px;
-      font-family: monospace;
-      font-size: 12px;
-      line-height: 1.4;
-      resize: none;
-      z-index: 10;
-      box-sizing: border-box;
-    `;
-    document.body.appendChild(el);
-    const place = () => {
-      const rect = this.sys.game.canvas.getBoundingClientRect();
-      const s = rect.width / W;
-      el.style.left = `${rect.left + x * s}px`;
-      el.style.top  = `${rect.top + y * s}px`;
-      el.style.width  = `${w * s}px`;
-      el.style.height = `${h * s}px`;
-      el.style.fontSize = `${12 * s}px`;
-    };
-    place();
-    this.scale.on("resize", place);
-    el.oninput = () => onInput(el.value);
-    return el;
+    return sharedBuildTextarea({
+      scene: this, sceneWidth: W,
+      x, y, w, h,
+      placeholder, initialValue,
+      fontSize: 12, lineHeight: 1.4,
+      scaleFont: true,
+      onInput,
+    }).el;
   }
 
   private buildStatusLine(): void {
@@ -882,3 +896,4 @@ export class MapEditorScene extends Phaser.Scene {
     this.featureChips.clear();
   }
 }
+

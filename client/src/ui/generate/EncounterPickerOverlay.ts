@@ -297,9 +297,9 @@ export class EncounterPickerOverlay {
         const x = c * tileSize;
         const y = r * tileSize;
         const groundGid = map.gidGrid[r]?.[c] ?? 0;
-        if (groundGid > 0) this.drawTileToCanvas(ctx, x, y, tileSize, groundGid, owners);
+        if (groundGid !== 0) this.drawTileToCanvas(ctx, x, y, tileSize, groundGid, owners);
         const objectGid = map.objectGidGrid?.[r]?.[c] ?? 0;
-        if (objectGid > 0) this.drawTileToCanvas(ctx, x, y, tileSize, objectGid, owners);
+        if (objectGid !== 0) this.drawTileToCanvas(ctx, x, y, tileSize, objectGid, owners);
       }
     }
   }

@@ -16,6 +16,7 @@
  */
 import Phaser from "phaser";
 import type { MonsterDef } from "../../data/monsters";
+import type { NPCDef } from "../../net/types";
 
 export type RosterRole = "ally" | "neutral" | "enemy";
 
@@ -23,6 +24,12 @@ export interface MonsterPickerOptions {
   scene: Phaser.Scene;
   parent: Phaser.GameObjects.Container;
   monsters: MonsterDef[];
+  /** Optional NPC roster. When supplied, the catalog mixes NPCs (rendered
+   *  with their authored display name + persona-source stat block) alongside
+   *  the raw monsters. The engine's `SpawnHelpers.spawnNpc` resolves an id
+   *  against the NPC roster first, then the monster roster — so any id added
+   *  here works seamlessly in `allyIds` / `enemyIds` / `npcIds`. */
+  npcs?: NPCDef[];
   x: number;
   y: number;
   width: number;
@@ -56,10 +63,30 @@ const ROLE_COLOR: Record<RosterRole, string> = {
   enemy:   "#ffcccc",
 };
 
+/** Internal catalog entry — a unified surface over NPCs + monsters so the
+ *  list can render and look up by id without branching everywhere. NPC
+ *  entries carry the resolved monster class for the stat-block hint shown
+ *  next to the name. */
+interface CatalogEntry {
+  /** Id used in `allyIds` / `enemyIds` / `npcIds`. NPC ids are resolved by
+   *  the engine's spawn helper before falling back to the monster roster. */
+  id: string;
+  /** Display name on the catalog row. */
+  name: string;
+  /** `'npc'` shows a small NPC badge before the name; `'monster'` doesn't. */
+  kind: 'npc' | 'monster';
+  /** Statblock string fragment (`"Humanoid, 14 HP"`) — pulled from the NPC's
+   *  inherited monster def for NPC entries, or the monster's own type/HP for
+   *  monster entries. */
+  hint: string;
+}
+
 export class MonsterPicker {
   private readonly scene: Phaser.Scene;
   private readonly opts: MonsterPickerOptions;
   private readonly monsters: MonsterDef[];
+  private readonly npcs: NPCDef[];
+  private readonly catalog: CatalogEntry[];
   /** Ordered slot arrays — index in each array is the encounter id (A0/E0/N0). */
   private allySlots:    string[];
   private enemySlots:   string[];
@@ -76,6 +103,8 @@ export class MonsterPicker {
     this.scene = opts.scene;
     this.opts = opts;
     this.monsters = opts.monsters;
+    this.npcs = opts.npcs ?? [];
+    this.catalog = buildCatalog(this.npcs, this.monsters);
 
     this.allySlots    = [...(opts.initialAllyIds    ?? [])];
     this.enemySlots   = [...(opts.initialEnemyIds   ?? [])];
@@ -225,7 +254,7 @@ export class MonsterPicker {
 
   private renderCatalog(): void {
     this.catalogEl.innerHTML = "";
-    this.monsters.forEach((mon, i) => {
+    this.catalog.forEach((entry, i) => {
       const row = document.createElement("div");
       row.style.cssText = `
         display: flex; align-items: center;
@@ -233,23 +262,48 @@ export class MonsterPicker {
         padding: 3px 6px; box-sizing: border-box;
         font-family: monospace; font-size: 11px; color: #aabbcc;
       `;
+      // NPC entries get a small "NPC" badge so the author can tell at a
+      // glance whether they're picking an authored character (with persona /
+      // name / faction) or a bare monster stat-block.
+      if (entry.kind === 'npc') {
+        const badge = document.createElement("span");
+        badge.textContent = "NPC";
+        badge.style.cssText = `
+          color: #e2b96f; background: #1f1a0e;
+          border: 1px solid #4a3a1a;
+          font-size: 9px; letter-spacing: 1px;
+          padding: 1px 4px; margin-right: 6px; flex-shrink: 0;
+        `;
+        row.appendChild(badge);
+      }
       const label = document.createElement("span");
       label.style.cssText = "flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-right: 8px;";
-      label.textContent = `${mon.name}  (${mon.type ?? "—"}, ${mon.maxHp} HP)`;
+      label.textContent = `${entry.name}  (${entry.hint})`;
       row.appendChild(label);
 
       const allyBtn = this.makeAddButton("+ ALLY",    "#1a3a55", "#4477aa", "#cce4ff");
       const neutBtn = this.makeAddButton("+ NEUTRAL", "#3a3a1a", "#9a8a44", "#ffe9a8");
       const enemBtn = this.makeAddButton("+ ENEMY",   "#551a1a", "#aa4444", "#ffcccc");
-      allyBtn.addEventListener("click", () => this.addMonster(mon.id, "ally"));
-      neutBtn.addEventListener("click", () => this.addMonster(mon.id, "neutral"));
-      enemBtn.addEventListener("click", () => this.addMonster(mon.id, "enemy"));
+      allyBtn.addEventListener("click", () => this.addMonster(entry.id, "ally"));
+      neutBtn.addEventListener("click", () => this.addMonster(entry.id, "neutral"));
+      enemBtn.addEventListener("click", () => this.addMonster(entry.id, "enemy"));
       row.appendChild(allyBtn);
       row.appendChild(neutBtn);
       row.appendChild(enemBtn);
 
       this.catalogEl.appendChild(row);
     });
+  }
+
+  /** Find an id's display name across both rosters — NPCs first (their
+   *  display name wins), then monsters. Used by the in-encounter roster
+   *  rendering so an NPC slot shows the authored name instead of the inherited
+   *  monster's name. Returns the id itself if no entry matches. */
+  private resolveDisplayName(id: string): string {
+    const npc = this.npcs.find((n) => n.id === id);
+    if (npc) return npc.name;
+    const mon = this.monsters.find((m) => m.id === id);
+    return mon?.name ?? id;
   }
 
   /** Render the in-encounter per-slot list. One row per slot, with the
@@ -282,7 +336,6 @@ export class MonsterPicker {
     `;
     this.rosterEl.appendChild(header);
     slots.forEach((id, idx) => {
-      const mon = this.monsters.find((m) => m.id === id);
       const row = document.createElement("div");
       row.style.cssText = `
         display: flex; align-items: center;
@@ -300,7 +353,9 @@ export class MonsterPicker {
       row.appendChild(tag);
       const name = document.createElement("span");
       name.style.cssText = "flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-right: 8px;";
-      name.textContent = mon?.name ?? id;
+      // Names resolve through both rosters so an NPC slot reads the authored
+      // display name instead of the inherited monster's name.
+      name.textContent = this.resolveDisplayName(id);
       row.appendChild(name);
       const removeBtn = document.createElement("button");
       removeBtn.type = "button";
@@ -369,4 +424,34 @@ export class MonsterPicker {
     this.scene.scale.on("resize", place);
     this.placeHandlers.push(place);
   }
+}
+
+/** Build the catalog rows the picker renders. NPCs come first (so authored
+ *  characters are easy to spot at the top), then monsters. For an NPC, the
+ *  "(type, HP)" hint is pulled from the monster it inherits from — that's the
+ *  stat block the engine actually uses at spawn time. Within each group
+ *  entries are sorted alphabetically by name so larger rosters stay easy to
+ *  scan. */
+function buildCatalog(npcs: NPCDef[], monsters: MonsterDef[]): CatalogEntry[] {
+  const monsterById = new Map(monsters.map((m) => [m.id, m]));
+  const npcEntries = npcs
+    .slice()
+    .sort((a, b) => a.name.localeCompare(b.name))
+    .map<CatalogEntry>((npc) => {
+      const base = monsterById.get(npc.monsterClass);
+      const hint = base
+        ? `${base.type ?? "—"}, ${base.maxHp} HP`
+        : `${npc.monsterClass} (unknown stat block)`;
+      return { id: npc.id, name: npc.name, kind: 'npc', hint };
+    });
+  const monsterEntries = monsters
+    .slice()
+    .sort((a, b) => a.name.localeCompare(b.name))
+    .map<CatalogEntry>((mon) => ({
+      id: mon.id,
+      name: mon.name,
+      kind: 'monster',
+      hint: `${mon.type ?? "—"}, ${mon.maxHp} HP`,
+    }));
+  return [...npcEntries, ...monsterEntries];
 }

@@ -175,85 +175,82 @@ Defined in `client/src/ui/StorylogOverlay.ts`. Standalone HTML overlay (no `Base
 
 ---
 
-### Generator Setup Scene
+### Main Menu Scene
 
-`client/src/scenes/GenerateSetupScene.ts` — third top-level setup scene reached via `MainMenuScene → GENERATE ENCOUNTER`. **No character selector** on this screen; after authoring an encounter the player is handed off to Encounter Setup Scene with the new encounter pre-selected (via `init({ presetEncounterId })`) so the character pick happens there. The scene is structured as two tabs. **All chrome is HTML** — tab buttons, terrain / feature chips, sub-labels, bottom-bar action buttons, picker tabs, example cards, BACK / dev buttons via `createHtmlButton` / `createHtmlText`. The only Phaser-rendered things are the canvas backdrop and the two divider rules; the map thumbnail + zone-overlay cells + trigger overlay live in `detRightContainer` as Phaser primitives because they share the same tileset spritesheet rendering path as the in-game map. HTML elements are tracked in per-tab buckets (`always` / `det` / `gen` / `detRight`) so visibility toggles in lockstep with `detContainer` / `genContainer` instead of leaving stray DOM nodes floating after a tab switch.
+`client/src/scenes/MainMenuScene.ts` — top-level entry point shown after Boot when there is no active world save. Renders the game title, a tagline, and a vertical stack of HTML buttons routing to every top-level scene. Each button is a serif-label tile with a small hint sub-line below.
 
-**Tab bar.** A pair of buttons at the top center of the scene: **DETERMINISTIC** and **GENERATIVE AI**. The active tab is highlighted with the accent colour; clicking switches which content container is visible and which bottom-bar buttons are wired up. The Deterministic tab is selected by default.
+| Button | Routes to | Hint |
+| --- | --- | --- |
+| **ADVENTURE** | Adventure Setup Scene | A string of encounters with overarching narrative |
+| **SINGLE ENCOUNTER** | Encounter Setup Scene | Play a one-off scenario |
+| **MAP EDITOR** | [Map Editor Scene](#map-editor-scene) | Generate and save maps; the Encounter Creator picks them up |
+| **ENCOUNTER CREATOR** | [Encounter Creator Scene](#encounter-creator-scene) | Build an encounter manually or with AI assistance — title, monsters, zones, triggers |
+| **ADVENTURE CREATOR** | [Adventure Creator Scene](#adventure-creator-scene) | String encounters into an adventure with overarching story, AI context, and a rest stop |
+| **NPC CREATOR** | [NPC Creator Scene](#npc-creator-scene) | Author an NPC on top of an existing monster — name, faction, persona, token |
+| **TOKEN CREATOR** | [Token Creator Scene](#token-creator-scene) | Mix and match parts (hair, eyes, beard, …) to build an NPC token |
+| **CONFIGURATION** | Configuration Scene | Choose the active setting; future game-wide options live here |
+
+---
+
+### Map Editor Scene
+
+`client/src/scenes/MapEditorScene.ts` — top-level page focused exclusively on producing and saving maps. The Encounter Creator picks up the saved maps later. **No character selector** and no encounter authoring on this scene; every encounter-builder concern moved to the Encounter Creator Scene.
+
+**Layout:** LEFT column (2/3 width) hosts an editable name + description + the [EmbeddedMapPreview](#embedded-map-preview) at the largest size that fits. RIGHT column (1/3 width) is driven by a three-chip tab bar (**DETERMINISTIC** / **GENERATIVE AI** / **EDIT**). BOTTOM bar carries BACK, GENERATE MAP, LOAD MAP, SAVE MAP. All chrome is HTML (`createHtmlButton` / `createHtmlText` + textarea / input) so it stays crisp at any zoom.
 
 #### Deterministic tab
 
-The deterministic tab is gated on an **accepted map**. The left panel always shows the map controls; the right panel changes shape depending on whether a map has been accepted.
-
 | Component | Description |
 | --------- | ----------- |
-| **MAP CONTROLS** (left) | Header label over the left panel. |
-| **TERRAIN chips** | `GRASSLAND` / `FOREST` radio chips. Exactly one must be selected for the COMPOSE MAP button to enable; Grassland is selected by default. |
-| **FEATURES chips** | `RUINS` / `BUILDINGS` / `CAMPSITES` / `PATH` multi-select chips. Features layer additional content on top of the chosen terrain in `MapComposer.composeMap`. The `PATH` feature lays a meandering dirt path across the map before other features stamp over it. |
-| **ENCOUNTER SETTINGS** (right) | Header label over the right panel. **Empty state** (no map accepted): the panel only renders the label `No map available` plus a hint reading "Compose a map on the left, then press ACCEPT in the preview." No other controls appear. **Filled state** (map accepted): the panel renders the thumbnail, zone painter, encounter-type chips, monster picker, and description textarea described below. |
-| **Thumbnail + zone painter** *(filled state)* | Small map preview pinned to the top-right of the right panel. Renders the accepted map at up to ~12 px per tile using the actual scribble spritesheet (tile size auto-shrinks to fit the panel). Cells are interactive: when `PAINT: PLAYER` is active, clicking a cell toggles it as a player-start zone (blue 50%-alpha overlay); when `PAINT: ENEMY` is active, clicking toggles an enemy-start zone (red 50%-alpha overlay). Click-and-drag paints / unpaints continuously. A cell can be either player or enemy, not both — repainting in the opposite mode swaps the assignment. **Trigger regions** authored in the TriggerEditor (right column) are drawn on top of the thumbnail as colour-coded outlined rectangles — perception = teal, log = pale blue, AIGM cue = amber, combat = red — so the author sees exactly which tiles fire each trigger. The outlines refresh on every TriggerEditor edit (kind, region x/y/w/h) via an `onChange` callback. **When no paint mode is active**, clicking any cell instead opens the [Map Preview Overlay](#map-preview-overlay) in view-only mode with the painted zones AND trigger regions drawn on top — useful for inspecting a busy map at higher zoom. A small caption below the thumbnail reads `Map Name · click to enlarge`. |
-| **PAINT: PLAYER / PAINT: ENEMY / CLEAR ZONES** *(filled state)* | Mode toggles below the thumbnail caption. PAINT: PLAYER and PAINT: ENEMY are mutually exclusive radios that activate the painter; click again to deactivate. CLEAR ZONES wipes all painted cells. While both modes are off, clicking the thumbnail opens the enlarged view-only preview instead of painting. |
-| **Encounter type chips** *(filled state)* | COMBAT / SOCIAL / EXPLORATION toggles (multi-select), positioned to the left of the thumbnail. At least one is required for non-combat `completionFlag` generation; defaults route to `exploration`. |
-| **DESCRIPTION textarea** *(filled state)* | Multi-line input under the encounter-type chips. Width auto-fits the space remaining beside the thumbnail. Optional. Its value is written to the new encounter's `customContext` so the in-game GM has scene context to work with. |
-| **MONSTERS picker** *(filled state)* | Full-width scrollable list below the thumbnail / description columns (positioned below whichever ends lower). Lists every entry in the `monsters` registry. Each row shows the monster name, type, and max HP plus two side buttons: `+ ALLY` (adds the monster to the encounter's `allyIds`, spawned with friendly disposition near the player zone) and `+ ENEMY` (adds to the encounter's `enemyIds`, spawned at painted enemy zones with hostile disposition and an auto-assigned combat label). Both fields accept raw monster ids — the engine's `spawnNpc` falls back to the monster roster when an id isn't found in the NPC roster, so authoring a named NPC wrapper is not required. The same monster can be added multiple times — the picker tracks counts. A summary line beneath the picker shows `ALLIES: …` and `ENEMIES: …` with counts; a `CLEAR MONSTERS` button at the right of the summary wipes both selections. The list scrolls with the mouse wheel when the cursor is over it (the wheel listener is bounded by pointer position — no hit-target rectangle is layered over the row buttons, so `+ ALLY` / `+ ENEMY` remain clickable). |
-| **★ RANDOMIZE** button | Bottom row (leftmost action). Rolls a weighted pick from `client/src/data/encounterArchetypes.ts`, composes the map **in memory only**, then **populates** every Adjudicator-tab field so the user can inspect or edit before committing — terrain + features chips flip to the rolled values, the title / introduction / description / objective / completion-flag inputs are filled in, the zone painter is pre-painted with PLAYER (blue) + NEUTRAL (amber) cells anchored to story-relevant features (dungeon entrance, campfire, ruin), the monsters picker is pre-loaded with rolled `+ ALLY` / `+ NEUTRAL` selections, and the trigger editor is pre-loaded with 2-3 rolled triggers anchored to the same map features (perception checks at the path, AIGM cues at the vault, combat starts inside the bandit camp / ruined nave / dungeon vault, etc.). **Rolled hostile-intent monsters spawn neutral, not enemy** — encounters start in exploration phase. Combat starts when the player attacks one (faction aggro wakes the rest) or when a `combat`-kind trigger fires (flipping every rolled type to enemy in one action). Neither the map nor the encounter is persisted — the user must press SAVE ENCOUNTER (which saves both) to commit. The status line confirms which archetype was rolled. |
-| **PICK MAP** button | Bottom row. Opens the [Map Selector Overlay](#map-selector-overlay) — a grid of every saved map. Clicking a card sets it as the accepted map (bypassing COMPOSE MAP), clears any pending rolled state, and rebuilds the right panel. |
-| **COMPOSE MAP** button | Bottom row. Composes the map deterministically via `POST /generate/map/composed`, then opens the Map Preview Overlay with REGENERATE / **SAVE** / CLOSE buttons. Iterating without saving does not modify the right panel. |
-| **SAVE ENCOUNTER** button | Bottom row (rightmost). Persists the encounter from the current form state (title / intro / description / objective / completion-flag + painted starting zones + monster picker selections + triggers). When the preconditions aren't met it stays clickable but greyed; clicking surfaces a hint in the status line ("Compose or pick a map first.", "Paint at least one player-start cell on the thumbnail (PAINT: PLAYER).") instead of going silent. Once enabled (a map has been composed or picked + ≥1 player cell painted), this is the **single commit step**: if the map hasn't been persisted yet (e.g. a RANDOMIZE roll), the button calls `saveMap` itself before posting `POST /generate/encounter/composed` with `existingMapId` (the just-saved map), the painted starting zones, the description, the ally / enemy / neutral id lists, and the painted triggers. On success, navigates to Encounter Setup Scene with the new encounter pre-selected. The RANDOMIZE button populates the same fields this button reads, so a randomized scenario can be reviewed and tweaked before being saved. |
-
-All disabled buttons across both tabs follow the same "stay clickable, surface a hint" pattern (e.g. on the Generative AI tab, clicking a disabled GENERATE button while the prompt is empty surfaces "Type a scene description (at least 8 characters), or click an example card on the right.").
+| **TERRAIN chips** | `GRASSLAND` / `FOREST` / `DUNGEON` radio chips. Exactly one is active; Grassland is selected by default. Picks which `MapComposer` terrain primitive runs. |
+| **FEATURES chips** | Outside features (`RUINS` / `BUILDINGS` / `CAMPSITES` / `PATH` / `COASTLINE`) and inside features (`3 ROOMS` / `5 ROOMS`) multi-select. Feature set auto-filters to the chosen terrain's column (outside vs inside). |
 
 #### Generative AI tab
 
 | Component | Description |
 | --------- | ----------- |
-| **DESCRIBE THE SCENE** (left) | Header label over the left panel. |
-| **Prompt textarea** | Multi-line HTML textarea sized to the left panel. The player describes the scene in 2-3 sentences. Required (≥ 8 chars) to enable either bottom button. |
-| **Encounter type chips** | COMBAT / SOCIAL / EXPLORATION toggles below the textarea. Optional; leave all off to let the AI pick. |
-| **EXAMPLE PROMPTS** (right) | Header label over the right panel. |
-| **Example cards** | Six vertical cards (Moonlit Graveyard, Goblin Warren, Riverside Ambush, Abandoned Watchtower, Crossroads Market, Wolf Den). Each card shows a title and a one-paragraph body. Clicking a card **copies the body into the prompt textarea** so the player can edit or extend it. Cards do not auto-submit. |
-| **GENERATE MAP ONLY** button | Bottom row (left). Asks Claude for just a map via `POST /generate/map`, then opens the Map Preview Overlay for iteration. |
-| **GENERATE ENCOUNTER** button | Bottom row (right). Asks Claude for a full scenario via `POST /generate/encounter`, then navigates to Encounter Setup Scene with the new encounter pre-selected. While the call is in flight, the status line below reads "The Game Master is building your encounter…". On error the status line shows the rejection message and the button re-enables. |
+| **DESCRIBE THE SCENE** textarea | Multi-line prompt textarea. Required (≥ 8 chars) to enable GENERATE MAP. Scene-only — must focus on terrain, architecture, layout, atmosphere; encounter content (NPCs, conflicts) belongs in the Encounter Creator. |
+| **Example cards** | Six vertical cards (Walled Courtyard, Forest Clearing, Three-Room Catacomb, Riverside Camp, Ruined Watchtower, Tavern Common Room). Clicking a card copies its body into the prompt textarea so the user can edit or extend it. |
 
-#### Shared
+#### Edit tab
+
+Loaded after a map exists in the preview. Lets the user replace individual tiles for fine adjustment without re-rolling the map.
 
 | Component | Description |
 | --------- | ----------- |
-| **BACK** button | Bottom-left. Returns to MainMenuScene. |
-| **Status line** | DOM div above the bottom button row showing in-flight messages ("Composing map…", "Generating encounter…") and any error returned by the server. |
-| **[DEV] DELETE ALL GEN MAPS** | Corner button at the bottom-right, gated behind `DevMode.enabled`. Calls `DELETE /generate/maps/all` to unlink every `gen_*.json` from `server/data/maps/` and `server/data/encounters/`, then refreshes `loadDefs()`. Slotted into leftover space so it doesn't shift any non-dev layout. |
+| **Layer chips** | `TERRAIN` / `OBJECT` toggle picking which layer the next paint affects. Auto-switches to match the selected tile's native layer when the legend has one. |
+| **Rotation + mirror chips** | `↻ 0° / 90° / 180° / 270°`, `MIRROR H`, `MIRROR V` — applied to the tile at paint time. Stored as Tiled GID flip bits (H = 0x80000000, V = 0x40000000, D = 0x20000000) so the encoded transform survives save → load. |
+| **Tile palette** | Scrollable thumbnail grid of every tile in the active tilesets (scribble + water + dungeon), grouped by tileset and ordered by `tileProperties` legend. Clicking a thumbnail selects it as the active brush; clicking the **ERASER** chip clears the tile under the next paint. |
+| **Paint** | Clicking any cell in the embedded preview stamps the selected tile + transform into the chosen layer; the preview refreshes in place. |
 
-Generated encounters are saved to `server/data/encounters/gen_<timestamp>_<slug>.json` and `server/data/maps/gen_<timestamp>_<slug>.json`. On the Encounter Setup Scene, generated encounter cards display a `✦ GENERATED` badge in their top-right corner so they're visually distinct from hand-authored ones.
+#### Bottom bar
+
+| Component | Description |
+| --------- | ----------- |
+| **GENERATE MAP** button | Runs deterministic composition (DETERMINISTIC tab) or AI generation (GENERATIVE AI tab); the EDIT tab disables it. |
+| **LOAD MAP** button | Opens the [Map Selector Overlay](#map-selector-overlay) — pick a saved map to load it into the preview for editing. |
+| **SAVE MAP** button | Persists the current preview to `server/data/maps/`. AI-generated maps still get a `gen_*` id; user-named maps use the typed slug. |
+| **BACK** button | Bottom-left. Returns to MainMenuScene. |
+| **Status line** | Above the bottom row — surfaces in-flight messages ("Composing map…", "Generating map…") and disabled-button hints. |
+| **[DEV] DELETE ALL GEN MAPS** | Bottom-right, gated behind `DevMode.enabled`. Calls `DELETE /generate/maps/all` to unlink every `gen_*.json`, then refreshes `loadDefs()`. Slotted into leftover space so it doesn't shift any non-dev layout. |
 
 ---
 
-### Map Preview Overlay
+### Embedded Map Preview
 
-`client/src/ui/MapPreviewOverlay.ts`. In-scene Phaser overlay (not a `BaseOverlay` HTML modal — it needs to render the tileset spritesheet) opened from the COMPOSE MAP and GENERATE MAP ONLY buttons on Generator Setup Scene, **and** by clicking the accepted-map thumbnail on the deterministic tab. Renders the freshly generated tile grid using the actual preloaded `scribble.png` spritesheet at 14 px per tile.
-
-The overlay supports three button-row modes depending on which callbacks the caller supplied:
-- **Editor** (`onRegenerate` + `onAccept`) — REGENERATE / ACCEPT / CLOSE spread across the bottom (used by COMPOSE MAP).
-- **Iteration** (`onRegenerate` only) — REGENERATE / CLOSE (used by GENERATE MAP ONLY on the AI tab).
-- **View-only** (neither) — a single centred CLOSE button (used by the click-to-enlarge from the thumbnail).
-
-When the caller passes a `zones` option (`{ playerCells: Set<string>; enemyCells: Set<string>; neutralCells?: Set<string>; triggerRegions?: Array<{ kind, region }> }`), the overlay draws blue (player) / red (enemy) / amber (neutral) 50%-alpha overlays on top of the matching grid cells. `triggerRegions` are drawn as colour-coded outlined rectangles on top of the zone overlays — perception = teal, log = pale blue, AIGM cue = amber, combat = red — so the author can see which tiles fire each trigger at full zoom. All overlays live inside `gridContainer` so they zoom and pan with the map.
+`client/src/ui/EmbeddedMapPreview.ts`. Inline pan + zoom map preview used by Map Editor Scene. Replaces the modal `MapPreviewOverlay` for use cases where the map should be edited in place rather than in a separate overlay.
 
 | Component | Description |
 | --------- | ----------- |
-| **Backdrop** | Semi-transparent black covering the whole canvas, swallows pointer events so the underlying scene can't be interacted with while the preview is open. |
-| **Title** | A small accent-coloured "MAP PREVIEW" tag above the authored map name. |
-| **Description** | Authored 1-2 sentence flavour line from the model. |
-| **Tile grid (zoom + pan + optional zones)** | The generated map rendered at 14 px / tile using the actual tileset textures, clipped to a 1020 × 440 viewport via a geometry mask. **Mouse wheel** zooms around the cursor (clamped to 0.5×–4×); **click-and-drag** inside the viewport pans the grid. Zoom + pan reset to defaults whenever the grid is replaced by a regeneration. Both terrain and object layers are drawn (object tiles overlay terrain). When the caller passed a `zones` option, player-start cells render with a blue 50%-alpha overlay and enemy-start cells with a red one — these are children of `gridContainer` so they transform with zoom + pan. Falls back to plain grey squares if the texture isn't loaded for some reason. |
-| **Saved-as footnote** | `Saved as gen_<id>` line beneath the grid — reminds the player the map persists on disk regardless of whether they keep iterating. |
-| **↻ REGENERATE** button | Re-runs the same compose / generate call. The preview shows a "Regenerating…" mask while the call is in flight, then swaps the rendered grid in place and resets zoom + pan. |
-| **✓ ACCEPT** button | *(shown only when an `onAccept` callback is supplied — currently from the deterministic COMPOSE MAP flow)* Commits the currently-shown map as the accepted map on `GenerateSetupScene`, closes the overlay, and unlocks the right-panel encounter-builder (thumbnail + zone painter + monster picker + description). Re-opening the preview and accepting a different map replaces the previous acceptance and resets all painted zones + monster selections. |
-| **CLOSE** button | Dismisses the overlay. The current map file stays on disk and is available to future custom encounters. |
+| **Viewport** | Fixed rect inside its host scene. Renders the supplied `MapPreviewData` at the largest tile size that fits both dimensions. Mouse-wheel zooms around the cursor (clamped 0.3×–6×); click-and-drag with no paint brush pans. A geometry mask clips the content to the viewport. |
+| **Empty state** | When no map is loaded the viewport shows a faint "No map yet — generate or load one" hint. |
+| **Busy mask** | Translucent overlay with a configurable busy label ("Generating map…") shown during in-flight calls. |
 
 ---
 
 ### Map Selector Overlay
 
-`client/src/ui/generate/MapSelectorOverlay.ts`. Modal Phaser overlay opened by the **PICK MAP** button on Generator Setup Scene's Deterministic tab. Lists every saved map (`registry.get("maps")`) as a scrollable grid of cards; selecting a card sets it as the accepted map on the scene, bypassing the COMPOSE MAP iteration loop.
+`client/src/ui/generate/MapSelectorOverlay.ts`. Modal Phaser overlay opened by the **LOAD MAP** button on Map Editor Scene (and by the map-pick flow on the Encounter Creator Scene). Lists every saved map (`registry.get("maps")`) as a scrollable grid of cards; selecting a card loads it into the calling scene's preview / accepted-map slot.
 
 | Component | Description |
 | --------- | ----------- |
@@ -265,24 +262,25 @@ When the caller passes a `zones` option (`{ playerCells: Set<string>; enemyCells
 
 ---
 
-### Encounter Editor Scene
+### Encounter Creator Scene
 
-`client/src/scenes/EncounterEditorScene.ts` — top-level scene reached via `MainMenuScene → ENCOUNTER EDITOR`. Full-screen editor for an existing encounter. **No character selector** and no "generate" path; the user opens an encounter, edits its fields, and writes the changes back. **Every visible element on the scene is HTML** — buttons via `createHtmlButton`, inputs via `<input>` / `<textarea>`, titles + labels + captions + status line via `createHtmlText` — so all text stays crisp at any zoom level instead of going blurry through Phaser's canvas text rendering. The Phaser canvas hosts only the page backdrop, the divider rules, and the map viewport (tile sprites + paint overlay cells + trigger outlines + placement markers, all inside the ZonePainter's transformable sub-container).
+`client/src/scenes/EncounterCreatorScene.ts` — top-level scene reached via `MainMenuScene → ENCOUNTER CREATOR`. Full-screen editor for an existing encounter (and the home of the AI-assisted authoring path, on a sibling tab). **No character selector** — after saving an encounter the user returns to Main Menu. **Every visible element on the scene is HTML** — buttons via `createHtmlButton`, inputs via `<input>` / `<textarea>`, titles + labels + captions + status line via `createHtmlText` — so all text stays crisp at any zoom level instead of going blurry through Phaser's canvas text rendering. The Phaser canvas hosts only the page backdrop, the divider rules, and the map viewport (tile sprites + paint overlay cells + trigger outlines + placement markers, all inside the ZonePainter's transformable sub-container).
 
-**Layout:** the page is split into LEFT, RIGHT, and BOTTOM regions. The LEFT column is filled by a single pan/zoomable **map viewport** — every other map-related control has moved elsewhere so the viewport is as big as possible. The RIGHT column carries a **three-tab toggle** (BASIC INFO / MONSTERS / TRIGGERS) and the active picker, occupying the full page height. The BOTTOM bar carries the STARTING ZONES paint buttons (PLAYER / ALLY / ENEMY / NEUTRAL / CLEAR) aligned under the map column and the PLACEMENT MODE toggle (ZONES / EXACT) aligned under the right column. BACK and SAVE ENCOUNTER sit beneath that, separated by a horizontal divider.
+**Layout:** the page is split into LEFT, RIGHT, and BOTTOM regions. The LEFT column is filled by a single pan/zoomable **map viewport** — every other map-related control has moved elsewhere so the viewport is as big as possible. The RIGHT column carries a **three-tab toggle** (BASIC INFO / NPCS AND MONSTERS / TRIGGERS) and the active picker, occupying the full page height. The BOTTOM bar carries the STARTING ZONES paint buttons (PLAYER / ALLY / ENEMY / NEUTRAL / CLEAR) aligned under the map column and the PLACEMENT MODE toggle (ZONES / EXACT) aligned under the right column. BACK and SAVE ENCOUNTER sit beneath that, separated by a horizontal divider.
 
 | Component | Description |
 | --------- | ----------- |
-| **Title row** | Centered "ENCOUNTER EDITOR" header (HTML). Subtitle directly below (HTML, centered) shows the loaded encounter's id + title, or `No encounter loaded — press OPEN ENCOUNTER` when nothing is loaded. |
+| **Outer tab bar** | Two chip-row tabs at the top: **ADJUDICATOR** (default — the deterministic editor described below) and **GENERATIVE AI** (free-text prompt + refine flow). Switching tabs swaps which HTML bucket is visible. |
+| **Title row** | Centered "ENCOUNTER CREATOR" header (HTML). Subtitle directly below (HTML, centered) shows the loaded encounter's id + title, or `No encounter loaded — press OPEN ENCOUNTER` when nothing is loaded. |
 | **Status line** | HTML text pinned to the bottom of the canvas and **center-aligned** across the full width. Shows the most recent feedback — e.g. `Loaded gen_1748394920_dungeon_sweep.` after OPEN ENCOUNTER, `Saving encounter…` while a save is in flight, `Saved gen_*.` on success, or the disabled-button hint when SAVE ENCOUNTER's preconditions aren't met. |
 | **📂 OPEN ENCOUNTER** button | Top-right corner (HTML). Opens the [Encounter Picker Overlay](#encounter-picker-overlay) — a modal grid of cards listing every saved encounter. Selecting a card loads its state into the form. |
-| **Map viewport** *(LEFT column, fills the column)* | Pan/zoomable viewport hosted by the shared `ZonePainter`. Tiles render at the largest size that fits both viewport dimensions (no upper cap) and are **centered** inside the viewport rect; scroll-wheel zooms around the cursor (clamped 0.3×–6×) and dragging with no paint brush active pans. A 1-px frame surrounds the viewport; a geometry mask clips content to the frame so panned tiles never spill onto the right column. Player / ally / enemy / neutral painted cells decode from the encounter's `startingZones.data` on load. Trigger regions render as colour-coded outlined rectangles; in EXACT placement mode, per-entity tile bindings render as labelled markers (`P` for player, `E0` / `A1` / `N2` for indexed enemy/ally/neutral slots). A small footnote beneath the viewport reads `<map name>  ·  scroll to zoom · drag to pan`. There is **no click-to-enlarge** — inspection happens inline. |
+| **Map viewport** *(LEFT column, fills the column)* | Pan/zoomable viewport hosted by the shared `ZonePainter`. Tiles render at the largest size that fits both viewport dimensions (no upper cap) and are **centered** inside the viewport rect; scroll-wheel zooms around the cursor (clamped 0.3×–6×) and dragging with no paint brush active pans. A 1-px frame surrounds the viewport; a geometry mask clips content to the frame so panned tiles never spill onto the right column. Player / ally / enemy / neutral painted cells decode from the encounter's `startingZones.data` on load. **Rotated tiles render with the same flip-bit decoding as the in-game map**, so the preview matches what the player sees once the encounter starts. Trigger regions render as colour-coded outlined rectangles only when the active trigger row's WHEN is REGION (otherwise the rectangle is suppressed); in EXACT placement mode, per-entity tile bindings render as labelled markers (`P` for player, `E0` / `A1` / `N2` for indexed enemy/ally/neutral slots). A small footnote beneath the viewport reads `<map name>  ·  scroll to zoom · drag to pan`. There is **no click-to-enlarge** — inspection happens inline. |
 | **STARTING ZONES paint buttons** *(BOTTOM bar, left half — aligned under the map column)* | Five HTML buttons: PLAYER / ALLY / ENEMY / NEUTRAL / CLEAR. Click toggles the active brush; the active mode renders with a brighter background. In EXACT mode the brush labels include placement progress (`ENEMY 1/3` after binding one of three rolled enemy slots). |
 | **PLACEMENT MODE toggle** *(BOTTOM bar, right half — aligned under the right column)* | Single HTML button labelled `MODE: ZONES` or `MODE: EXACT`. Toggles between zones mode (random spawn in painted cells) and exact mode (per-entity tile bindings written into the encounter's `placements[]`). Switching modes deactivates the active brush. |
-| **BASIC INFO / MONSTERS / TRIGGERS tab toggle** *(RIGHT column, top)* | Three HTML buttons spanning the right column. Active tab renders with the brighter "active" colour. |
-| **BASIC INFO tab** *(RIGHT column, basic-info tab — default)* | HTML `<input>` + `<textarea>` stack: TITLE input + PREVIEW button (plays the title as a full-screen supertitle so the author can see how it'll appear in-game), INTRODUCTION textarea, DESCRIPTION textarea (the AIGM sees this silently), OBJECTIVE input, COMPLETION FLAG input (snake_case slug). Loaded from the encounter's `encounterTitle`, `customIntroduction`, `customContext`, `objective`, `completionFlag` fields. Intro + description textareas grow to fill the remaining panel height. |
-| **MonsterPicker** *(RIGHT column, monsters tab)* | Fully HTML scrollable list of every monster def, with `+ ALLY` / `+ NEUTRAL` / `+ ENEMY` HTML buttons per row. Pre-populated from the loaded encounter's `allyIds` / `npcIds` / `enemyIds`. A summary box + CLEAR MONSTERS button sit beneath the list. Roster changes are pushed into the ZonePainter so EXACT-mode progress labels refresh and any placements bound to a now-removed slot are pruned. |
-| **TriggerEditor** *(RIGHT column, triggers tab)* | Fully HTML scrollable list of trigger rows. Each row has a WHEN selector (REGION / ON START / ON COMPLETE / ON FLAG), kind chips (PERCEPTION / LOG / AIGM CUE / START COMBAT / AWARD XP / ANNOUNCE / SPEECH / FADE / SET FLAG), region xywh inputs (visible only for REGION WHEN), a flag-name matcher input (visible only for ON FLAG WHEN), per-kind config inputs, and a REMOVE button — all HTML. Beneath the list sits the "+ ADD TRIGGER" button. There's no fixed cap on the number of triggers — the list scrolls. On load, triggers are reverse-mapped from the encounter's `triggers` array; triggers that can't be represented as a single ComposedTrigger are skipped, and the status line surfaces the skipped count. |
+| **BASIC INFO / NPCS AND MONSTERS / TRIGGERS tab toggle** *(RIGHT column, top)* | Three HTML buttons spanning the right column. Active tab renders with the brighter "active" colour. |
+| **BASIC INFO tab** *(RIGHT column, basic-info tab — default)* | HTML `<input>` + `<textarea>` stack: TITLE input + PREVIEW button (plays the title as a full-screen supertitle so the author can see how it'll appear in-game), INTRODUCTION textarea, DESCRIPTION textarea (the AIGM sees this silently), OBJECTIVE input, COMPLETION FLAG input (snake_case slug), and an **ALLOWS LONG REST** toggle (`EncounterDef.allowsLongRest` — taverns / safehouses / camps tick this; wilderness exploration does not). Loaded from the encounter's `encounterTitle`, `customIntroduction`, `customContext`, `objective`, `completionFlag`, `allowsLongRest` fields. Intro + description textareas grow to fill the remaining panel height. |
+| **MonsterPicker** *(RIGHT column, npcs-and-monsters tab)* | Fully HTML scrollable list of every monster **and NPC** def, with `+ ALLY` / `+ NEUTRAL` / `+ ENEMY` HTML buttons per row. Authored NPCs (`NPCDef`) appear above raw monsters and are tagged with their faction badge. Pre-populated from the loaded encounter's `allyIds` / `npcIds` / `enemyIds`. A summary box + CLEAR MONSTERS button sit beneath the list. Roster changes are pushed into the ZonePainter so EXACT-mode progress labels refresh and any placements bound to a now-removed slot are pruned. |
+| **TriggerEditor** *(RIGHT column, triggers tab)* | Fully HTML scrollable list of trigger rows. Each row has a WHEN selector (REGION / ON START / ON COMPLETE / ON FLAG), kind chips (PERCEPTION / LOG / AIGM CUE / START COMBAT / AWARD XP / ANNOUNCE / SPEECH / FADE / SET FLAG / SET LONG REST), region xywh inputs (visible only for REGION WHEN), a flag-name matcher input (visible only for ON FLAG WHEN), per-kind config inputs, and a REMOVE button — all HTML. The SET LONG REST kind has no extra config — when the trigger fires it sets `EncounterDef.allowsLongRest = true` so the ☾ LONG REST button appears for the rest of the encounter. Beneath the list sits the "+ ADD TRIGGER" button. There's no fixed cap on the number of triggers — the list scrolls. On load, triggers are reverse-mapped from the encounter's `triggers` array; triggers that can't be represented as a single ComposedTrigger are skipped, and the status line surfaces the skipped count. |
 | **BACK** button | Bottom-left (HTML, `ghost` variant). Returns to Main Menu Scene. |
 | **✓ SAVE ENCOUNTER** button | Bottom-right (HTML, `primary` variant). POSTs `/generate/encounter/update` with the current form state, including `placementMode` + `placements`. The handler merges the editable fields into the existing encounter JSON and rewrites it, **preserving every field the editor doesn't expose** (environment flags, tileProperties, generated badge, etc.). After save, the local encounters + maps registries are refreshed so a subsequent OPEN ENCOUNTER sees the latest version. The button stays clickable when its preconditions aren't met and surfaces a status-line hint ("Open an encounter first.", "Paint at least one player-start cell (PAINT: PLAYER).", "Place the player tile (click PLAYER, then click a tile)." in exact mode) instead of going silent. |
 
@@ -290,7 +288,7 @@ When the caller passes a `zones` option (`{ playerCells: Set<string>; enemyCells
 
 ### Encounter Picker Overlay
 
-`client/src/ui/generate/EncounterPickerOverlay.ts`. Modal Phaser overlay opened by the **OPEN ENCOUNTER** button on Encounter Editor Scene. Lists every encounter in the `encounters` registry as a scrollable grid of cards.
+`client/src/ui/generate/EncounterPickerOverlay.ts`. Modal Phaser overlay opened by the **OPEN ENCOUNTER** button on Encounter Creator Scene (and by the encounter-pick flow on Adventure Creator Scene). Lists every encounter in the `encounters` registry as a scrollable grid of cards.
 
 | Component | Description |
 | --------- | ----------- |
@@ -400,3 +398,82 @@ Defined in `client/src/ui/NextChapterButton.ts`. Persistent floating button posi
 | --------- | ----------- |
 | **Label** | `Next Chapter →` for non-final chapters; `Finish Adventure` for the final chapter. |
 | **Click** | Calls `OverlayCallbacks.onAdvanceChapter` — GameScene closes the WS, calls `POST /adventure/:characterId/advance`, and either restarts the scene with the new chapter session or returns to the Main Menu when the adventure is complete. |
+
+---
+
+### Adventure Creator Scene
+
+`client/src/scenes/AdventureCreatorScene.ts` — top-level scene reached via `MainMenuScene → ADVENTURE CREATOR`. Author-side counterpart to the player-facing Adventure Setup Scene. Lets the user assemble an adventure from existing encounter cards: title, description, AI context, an ordered chapter list, and a single rest encounter the player can return to between chapters.
+
+**Layout:** the page is split into LEFT and RIGHT columns plus a BOTTOM bar. The LEFT column carries the **identity form** (id + title + description + introduction + AI context + REST ENCOUNTER picker + LOAD / SAVE controls). The RIGHT column carries the **ordered chapter list**. The BOTTOM bar carries BACK, LOAD ADVENTURE, SAVE ADVENTURE. All chrome is HTML.
+
+| Component | Description |
+| --------- | ----------- |
+| **Title row** | Centered "ADVENTURE CREATOR" header (HTML). Subtitle below shows the loaded adventure's id, or `No adventure loaded — press LOAD ADVENTURE` when nothing is loaded. |
+| **Identity form** *(LEFT column)* | HTML `<input>` + `<textarea>` stack: ID (snake_case), TITLE, DESCRIPTION (player-facing card text), INTRODUCTION (opening narration for chapter 1), AI CONTEXT (backstory, factions, themes, plot hooks — feeds the AIGM prompt for every encounter played as part of this adventure). |
+| **REST ENCOUNTER picker** *(LEFT column)* | Single-encounter selector mirroring the chapter picker. Opens the [Encounter Picker Overlay](#encounter-picker-overlay) for the user to pick a single encounter card the player can return to between chapters. Optional — leave blank to disable the rest stop. Saved as `AdventureDef.restEncounterId`. |
+| **Chapter list** *(RIGHT column)* | Scrollable HTML list of chapter rows. Each row shows the chapter id, title, the bound encounter id, and ↑ / ↓ / REMOVE controls. Click any row to edit its title / encounter binding inline. Empty state shows "No chapters yet — press + ADD CHAPTER below." |
+| **+ ADD CHAPTER** button | Footer of the chapter list. Opens the Encounter Picker Overlay; the picked encounter is appended as a new chapter row with an auto-generated id. |
+| **LOAD ADVENTURE** button | Opens the Adventure Picker Overlay — a modal grid of cards listing every saved adventure. Selecting a card loads its state into the form. |
+| **BACK** button | Bottom-left (HTML, `ghost` variant). Returns to Main Menu Scene. |
+| **✓ SAVE ADVENTURE** button | Bottom-right (HTML, `primary` variant). Persists the adventure to `server/data/settings/<setting>/adventures/<id>.json` via `POST /adventures/save`. After save, the local adventures registry is refreshed so a subsequent LOAD ADVENTURE sees the latest version. The button stays clickable when its preconditions aren't met and surfaces a status-line hint ("Type an ID first.", "Add at least one chapter.") instead of going silent. |
+| **Status line** | HTML text above the bottom row — surfaces in-flight messages ("Saving…") and disabled-button hints. |
+
+---
+
+### NPC Creator Scene
+
+`client/src/scenes/NpcCreatorScene.ts` — top-level scene reached via `MainMenuScene → NPC CREATOR`. Author-side page for building NPCDefs.
+
+An NPC is a thin identity wrapper around a monster: the `monsterClass` field picks which monster's stat block (HP / AC / attacks / saves) the NPC inherits at spawn time; the NPC layer adds a display name, optional faction tag, optional persona blurb the AIGM reads when roleplaying the character, and an optional per-NPC token asset.
+
+**Layout:** LEFT column hosts the form inputs (ID, NAME, MONSTER CLASS dropdown, FACTION dropdown, COLOR, TOKEN ASSET, PERSONA textarea). RIGHT column hosts a live preview of the chosen monster's stat block so the author can confirm what the NPC will actually fight with. BOTTOM bar carries BACK, LOAD NPC, SAVE NPC.
+
+| Component | Description |
+| --------- | ----------- |
+| **ID input** *(LEFT)* | snake_case slug; becomes the JSON filename. |
+| **NAME input** *(LEFT)* | Display name shown above the token and in the Target Panel. |
+| **MONSTER CLASS dropdown** *(LEFT)* | Picks the `MonsterDef` whose stat block the NPC inherits. Required — the engine's `SpawnHelpers.spawnNpc` resolves stats via this id, not from any embedded NPC fields. |
+| **FACTION dropdown** *(LEFT)* | Optional `FactionDef` id. Drives combat-side AI alignment and the Target Panel faction chip. |
+| **COLOR input** *(LEFT)* | Hex colour for the token outline (e.g. `#aabbcc`). |
+| **TOKEN ASSET input** *(LEFT)* | Path to the NPC's SVG (e.g. `/tokens/npc_<id>.svg`). Optional — when blank the engine falls back to the monster's token. |
+| **PERSONA textarea** *(LEFT)* | Free-text blurb the AIGM reads when roleplaying the NPC. "How they speak, what they know, who they fear" — short and specific beats long and generic. |
+| **INHERITED STAT BLOCK preview** *(RIGHT)* | Live preview of the chosen monster's stat block — HP, AC, Speed, CR, XP, init bonus, ability scores with modifiers, and the attacks list. Refreshes on every monster-class change so the author always sees an up-to-date preview. |
+| **LOAD NPC** button | Opens the NPC Picker Overlay — a modal grid of cards listing every saved NPC. Selecting a card loads its state into the form. |
+| **BACK** button | Bottom-left (HTML, `ghost` variant). Returns to Main Menu Scene. |
+| **✓ SAVE NPC** button | Bottom-right (HTML, `primary` variant). Persists the NPC to `server/data/settings/<setting>/npcs/<id>.json` via `POST /npcs/save`. After save, the local NPCs registry is refreshed so a subsequent LOAD NPC sees the latest version. |
+| **Status line** | HTML text above the bottom row — surfaces in-flight messages ("Saving…") and disabled-button hints. |
+
+---
+
+### Token Creator Scene
+
+`client/src/scenes/TokenCreatorScene.ts` — top-level scene reached via `MainMenuScene → TOKEN CREATOR`. Standalone page for assembling NPC tokens by mixing SVG fragments (body / ears / face / beard / eyes / mouth / hair / accessory) and three palette colours.
+
+The composed SVG is saved through `POST /token`, which writes both the flattened `data/tokens/<id>.svg` (referenced via `NPCDef.tokenAsset`) and the editable `data/tokens/specs/<id>.json` so a re-open restores every slot pick + palette choice. The `tokenAsset` path returned to the client can be dropped straight into the NPC Creator's TOKEN ASSET PATH field.
+
+**Layout:** LEFT column hosts the large live preview (256 × 256), the palette pickers (body / skin / hair), the ID input, and a RANDOMIZE button. RIGHT column hosts a scrollable slot picker — one section per slot showing every option as a small thumbnail; clicking selects. BOTTOM bar carries BACK, LOAD TOKEN, SAVE TOKEN.
+
+| Component | Description |
+| --------- | ----------- |
+| **Live preview** *(LEFT, top)* | 256 × 256 composed token. Updates on every slot or palette change. |
+| **Palette pickers** *(LEFT, mid)* | Three hex inputs + colour swatches: BODY, SKIN, HAIR. Stored as `TokenSpec.palette`. |
+| **ID input** *(LEFT, bottom)* | snake_case slug; becomes the SVG filename + the spec filename. |
+| **★ RANDOMIZE** button | LEFT, bottom. Rolls a random pick per slot + a random palette. |
+| **Slot picker** *(RIGHT, fills the column)* | Scrollable list with one section per slot in z-order (BODY → EARS → FACE → BEARD → EYES → MOUTH → HAIR → ACCESSORY). Each section shows every part as a small thumbnail; clicking selects. Selected thumbnails highlight with the accent border. A "none" thumbnail at the start of each optional slot clears the pick. |
+| **LOAD TOKEN** button | Opens the [Token Picker Overlay](#token-picker-overlay) — a modal grid of cards listing every saved token spec. Selecting a card loads its state into the form. |
+| **BACK** button | Bottom-left (HTML, `ghost` variant). Returns to Main Menu Scene. |
+| **✓ SAVE TOKEN** button | Bottom-right (HTML, `primary` variant). Composes the SVG from the spec + the in-memory parts library and writes BOTH `data/tokens/<id>.svg` (flattened) and `data/tokens/specs/<id>.json` (editable). Returns the token's asset path so the caller can drop it straight into the NPC Creator's TOKEN ASSET PATH field. |
+| **Status line** | HTML text above the bottom row — surfaces in-flight messages ("Saving…") and disabled-button hints. |
+
+### Token Picker Overlay
+
+`client/src/ui/generate/TokenPickerOverlay.ts`. Modal Phaser overlay opened by the **LOAD TOKEN** button on Token Creator Scene. Lists every saved token SVG (`GET /tokens`) as a scrollable grid of cards; cards whose id matches an entry in `GET /token-specs` are flagged as "editable" so the user knows clicking them will re-open the spec rather than just preview a flat SVG.
+
+| Component | Description |
+| --------- | ----------- |
+| **Backdrop** | Semi-transparent black covering the whole canvas; swallows pointer events. |
+| **Header** | "LOAD TOKEN" accent tag with a `<N> saved tokens` subtitle. |
+| **Token card grid** | Cards laid out in rows of ~6 (auto-fits to panel width). Each card renders the SVG at ~96 px and shows the id below. Cards with an editable spec are highlighted; legacy SVGs without a spec are dimmed and tagged `flat`. Wheel-scrolls vertically when the cursor is over the grid. |
+| **Card click** | Resolves the token id back to the parent scene, which fetches `/token-specs/:id` and loads it into the form (or surfaces a hint when the SVG is flat). |
+| **CLOSE** button | Bottom-right. Dismisses the overlay without loading anything. |

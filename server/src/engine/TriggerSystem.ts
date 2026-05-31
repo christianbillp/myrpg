@@ -369,6 +369,19 @@ export function fireAction(ctx: GameContext, action: TriggerAction): void {
       sink.push({ type: 'screen_fade', mode: action.mode, durationMs });
       return;
     }
+    case 'set_long_rest': {
+      // No-op if the flag is already in the requested state — avoids spurious
+      // log entries on idempotent re-fires.
+      if (ctx.state.allowsLongRest === action.allowed) return;
+      ctx.state.allowsLongRest = action.allowed;
+      ctx.addLog({
+        left: action.allowed
+          ? "You can take a Long Rest here."
+          : "Long Rest is no longer available.",
+        style: 'status',
+      });
+      return;
+    }
   }
 }
 

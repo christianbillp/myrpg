@@ -46,27 +46,35 @@ export class MainMenuScene extends Phaser.Scene {
       align: "center",
     }));
 
-    this.makeMenuButton(w / 2, h * 0.34, "ADVENTURE", "A string of encounters with overarching narrative", () => {
+    this.makeMenuButton(w / 2, h * 0.32, "ADVENTURE", "A string of encounters with overarching narrative", () => {
       this.scene.start("AdventureSetupScene");
     });
 
-    this.makeMenuButton(w / 2, h * 0.43, "SINGLE ENCOUNTER", "Play a one-off scenario", () => {
+    this.makeMenuButton(w / 2, h * 0.40, "SINGLE ENCOUNTER", "Play a one-off scenario", () => {
       this.scene.start("EncounterSetupScene");
     });
 
-    this.makeMenuButton(w / 2, h * 0.52, "MAP EDITOR", "Generate and save maps; the Encounter Creator picks them up", () => {
+    this.makeMenuButton(w / 2, h * 0.48, "MAP EDITOR", "Generate and save maps; the Encounter Creator picks them up", () => {
       this.scene.start("MapEditorScene");
     });
 
-    this.makeMenuButton(w / 2, h * 0.61, "ENCOUNTER CREATOR", "Build an encounter manually or with AI assistance — title, monsters, zones, triggers", () => {
+    this.makeMenuButton(w / 2, h * 0.56, "ENCOUNTER CREATOR", "Build an encounter manually or with AI assistance — title, monsters, zones, triggers", () => {
       this.scene.start("EncounterCreatorScene");
     });
 
-    this.makeMenuButton(w / 2, h * 0.70, "ADVENTURE CREATOR", "String encounters into an adventure with overarching story, AI context, and a rest stop", () => {
+    this.makeMenuButton(w / 2, h * 0.64, "ADVENTURE CREATOR", "String encounters into an adventure with overarching story, AI context, and a rest stop", () => {
       this.scene.start("AdventureCreatorScene");
     });
 
-    this.makeMenuButton(w / 2, h * 0.79, "CONFIGURATION", "Choose the active setting; future game-wide options live here", () => {
+    this.makeMenuButton(w / 2, h * 0.72, "NPC CREATOR", "Author an NPC on top of an existing monster — name, faction, persona, token", () => {
+      this.scene.start("NpcCreatorScene");
+    });
+
+    this.makeMenuButton(w / 2, h * 0.80, "TOKEN CREATOR", "Mix and match parts (hair, eyes, beard, …) to build an NPC token", () => {
+      this.scene.start("TokenCreatorScene");
+    });
+
+    this.makeMenuButton(w / 2, h * 0.88, "CONFIGURATION", "Choose the active setting; future game-wide options live here", () => {
       this.scene.start("ConfigurationScene");
     });
 

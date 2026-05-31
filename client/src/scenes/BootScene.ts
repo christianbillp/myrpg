@@ -46,6 +46,7 @@ export class BootScene extends Phaser.Scene {
     this.load.json("encounters",          `${API_URL}/encounters`);
     this.load.json("adventures",          `${API_URL}/adventures`);
     this.load.json("tilesets",            `${API_URL}/tilesets`);
+    this.load.json("tileLegend",          `${API_URL}/tilesets/legends`);
     this.load.json("factions",            `${API_URL}/factions`);
   }
 
@@ -75,6 +76,13 @@ export class BootScene extends Phaser.Scene {
       this.registry.set("encounters",          this.cache.json.get("encounters"));
       this.registry.set("adventures",          this.cache.json.get("adventures"));
       this.registry.set("factions",            this.cache.json.get("factions"));
+      // `tileLegend` is the per-tileset payload from /tilesets/legends — each
+      // entry has its own LOCAL gid keys, so the client can keep scribble's
+      // tile "1" distinct from water's tile "1". Used by the Map Editor's
+      // EDIT tab. `tilesetMeta` is the simpler /tilesets summary (image url +
+      // tile dimensions) used to render thumbnails.
+      this.registry.set("tileLegend",         this.cache.json.get("tileLegend") ?? { tilesets: [] });
+      this.registry.set("tilesetMeta",        this.cache.json.get("tilesets") ?? []);
 
       // Preload every spritesheet on the server (from /tilesets) so the map
       // preview overlay can render any composed map immediately — including

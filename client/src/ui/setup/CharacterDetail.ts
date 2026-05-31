@@ -33,6 +33,12 @@ export interface CharacterDetailSave {
 export interface CharacterDetailCallbacks {
   onDeleteSave: (def: PlayerDef) => void;
   onStorylog: (def: PlayerDef) => void;
+  /** Optional — only wired by AdventureSetupScene. Wipes the character's
+   *  adventure save (current chapter index, world flags, prior summaries)
+   *  but leaves the character's main save (HP, XP, equipment, level-ups)
+   *  intact. Renders as a separate dev button next to DELETE SAVE so the
+   *  author can debug chapter transitions without having to re-level. */
+  onResetAdventure?: (def: PlayerDef) => void;
 }
 
 export interface CharacterDetailOptions {
@@ -218,7 +224,10 @@ export class CharacterDetail {
     }
     this.root.appendChild(content);
 
-    // Bottom action row — only DELETE SAVE, and only when the dev flag is on.
+    // Bottom action row — only when the dev flag is on. DELETE SAVE wipes
+    // everything for the character; RESET ADVENTURE (Adventure Setup only)
+    // wipes just the adventure save so chapter transitions can be replayed
+    // without re-leveling.
     if (DevMode.showDeleteSaveButton) {
       const actionRow = document.createElement("div");
       actionRow.style.cssText = "display:flex;gap:8px;padding-top:8px;flex-shrink:0;";
@@ -237,6 +246,22 @@ export class CharacterDetail {
       deleteBtn.disabled = !save;
       deleteBtn.addEventListener("click", () => save && this.opts.callbacks.onDeleteSave(def));
       actionRow.appendChild(deleteBtn);
+      if (this.opts.callbacks.onResetAdventure) {
+        const resetBtn = document.createElement("button");
+        resetBtn.type = "button";
+        resetBtn.textContent = "RESET ADVENTURE [DEV]";
+        resetBtn.style.cssText = `
+          flex: 1;
+          background: #2a1a3a;
+          color: #d6c6ff;
+          border: 1px solid #6644aa;
+          font-family: monospace; font-size: 10px;
+          letter-spacing: 1px; padding: 6px 8px;
+          cursor: pointer;
+        `;
+        resetBtn.addEventListener("click", () => this.opts.callbacks.onResetAdventure!(def));
+        actionRow.appendChild(resetBtn);
+      }
       this.root.appendChild(actionRow);
     }
   }

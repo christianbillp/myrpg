@@ -332,6 +332,38 @@ export type MonsterTrait = 'pack_tactics' | 'sunlight_sensitivity';
 export type MonsterReaction =
   | { kind: 'parry'; acBonus: number };
 
+/**
+ * Token Creator spec — the editable JSON record that backs every author-built
+ * token. The scene composes a flat SVG at save time and writes both files
+ * to disk: the SVG goes to `data/tokens/<id>.svg` (so any `tokenAsset` field
+ * pointing there resolves through the existing static-file route) and the
+ * spec goes to `data/tokens/specs/<id>.json` so the user can re-open the
+ * Token Creator and tweak instead of starting over.
+ */
+export interface TokenSpec {
+  /** Filename stem — produces `token_<id>.svg` + `token_<id>.json` on disk. */
+  id: string;
+  slots: {
+    body?:       string;
+    ears?:       string;
+    face?:       string;
+    beard?:      string;
+    eyes?:       string;
+    mouth?:      string;
+    hair?:       string;
+    accessory?: string;
+  };
+  /** Palette colours stamped into the part fragments at compose time. */
+  palette: {
+    /** Coin background fill — typically matches the NPC's `color` field. */
+    body?: string;
+    /** Face + ears fill. */
+    skin?: string;
+    /** Hair + beard fill. */
+    hair?: string;
+  };
+}
+
 export interface NPCDef {
   id: string;
   name: string;
@@ -1036,7 +1068,13 @@ export type TriggerAction =
   /** Speech bubble above the named entity's token (same renderer the `npc_speaks` AIGM tool drives). `entity` accepts `player` or an NPC entity ref (`enemy_A`, `npc_<id>`). No-op when the entity can't be resolved. */
   | { type: 'npc_speaks'; entity: string; text: string }
   /** Black-out fade overlay. `mode: 'out'` fades to full black; `mode: 'in'` fades back to clear; `mode: 'dim'` fades to a 50% black overlay (atmospheric dim, world still visible). The overlay is sticky — pair every darkening fade ('out' or 'dim') with a matching `in`. Mirrors the `fade_screen` AIGM tool. */
-  | { type: 'fade_screen'; mode: 'in' | 'out' | 'dim'; durationMs?: number };
+  | { type: 'fade_screen'; mode: 'in' | 'out' | 'dim'; durationMs?: number }
+  /** Toggle the encounter's `allowsLongRest` flag at runtime. Maps the
+   *  `LONG REST` Player Panel action to either available or hidden — useful
+   *  for "you've reached the inn" beats where the room becomes restable
+   *  partway through the encounter, or for revoking a rest privilege when
+   *  the situation turns hostile. Idempotent. */
+  | { type: 'set_long_rest'; allowed: boolean };
 
 export interface EncounterTrigger {
   /** Unique within the encounter; used as the dedupe key in `firedTriggerIds`. */
@@ -1236,6 +1274,12 @@ export interface AdventureSave {
   rumors: Rumor[];
   /** Short GM-authored summaries of completed chapters, surfaced to the AIGM in later chapters under PRIOR CHAPTERS. */
   priorChapterSummaries: Array<{ chapterId: string; chapterTitle: string; summary: string }>;
+  /** Rest-stop interlude state. When set, the player is mid-rest at the
+   *  adventure's `restEncounterId`, sitting between `currentChapterIndex - 1`
+   *  (just completed) and `currentChapterIndex` (queued). The next `/advance`
+   *  call clears this and proceeds with the normal chapter-advance routing
+   *  rather than offering rest again. Absent/null = not in rest. */
+  inRest?: boolean;
 }
 
 // ── Combat log ───────────────────────────────────────────────────────────────
@@ -1639,6 +1683,21 @@ export interface AdventureSessionContext {
   priorChapterSummaries: Array<{ chapterId: string; chapterTitle: string; summary: string }>;
   /** Optional named flag that, when set, marks the chapter complete in addition to the default combat-ended detection. Mirrors `AdventureChapter.completionFlag`. */
   completionFlag?: string;
+  /** True when this session is the adventure's rest-stop interlude rather
+   *  than an actual chapter. The client uses it to label the HUD and to
+   *  route LEAVE ENCOUNTER through `/adventure/.../advance` rather than back
+   *  to the setup screen — leaving rest means "I'm done, take me to the
+   *  next chapter". */
+  isRestSession?: boolean;
+  /** Id of the adventure's optional rest-stop encounter. Mirrored from
+   *  `AdventureDef.restEncounterId` so the client can decide whether to
+   *  surface the "rest first?" prompt between chapters without having to
+   *  fetch the full adventure registry. */
+  restEncounterId?: string;
+  /** Display title of the rest encounter (when `restEncounterId` is set).
+   *  Used as the prompt's body so the player knows what they're walking
+   *  into ("Drop in at the Sparrow's Nest before the next chapter?"). */
+  restEncounterTitle?: string;
 }
 
 // ── Reaction prompts ─────────────────────────────────────────────────────────

@@ -1,0 +1,9 @@
+{
+  "id": "frightened_traveller",
+  "name": "Mira Feros",
+  "monsterClass": "commoner",
+  "color": 11189196,
+  "persona": "Mira is a traveller who is taking a break in the inn. She is paranoid and affraid.",
+  "tokenAsset": "/tokens/npc_frightened_traveller.svg",
+  "factionId": "commoners"
+}

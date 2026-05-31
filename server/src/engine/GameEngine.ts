@@ -13,7 +13,7 @@ import {
 import { applyEquipment, computeEquippedSlotLabels } from './EquipmentSystem.js';
 import { chebyshev } from './EnemyAI.js';
 import { buildAIGMTools } from './AIGMTools.js';
-import { setRelation, getRelation } from './FactionRelations.js';
+import { setRelation, getRelation, isHostileTo } from './FactionRelations.js';
 import { runOffCameraTick as runOffCameraTickImpl } from './WorldTick.js';
 import { PLAYER_FACTION_ID } from '../../../shared/types.js';
 import * as Guard from './ActionGuards.js';
@@ -149,10 +149,31 @@ export class GameEngine {
         this.startupEvents.unshift({ type: 'supertitle', text: title, durationMs: 2500 });
         this.startupEvents.push({ type: 'screen_fade', mode: 'in', durationMs: 800 });
       }
+      // Auto-start combat for encounters that spawned with hostile NPCs.
+      // MUST happen inside the isConstructing window so `doStartCombat`
+      // sets `pendingTurnAdvance` instead of running the first NPC turn
+      // immediately — otherwise the bandits move on the server before the
+      // client even connects, and the initial state_update arrives with
+      // every enemy already at its post-turn position. The deferred turn
+      // is flushed by `runPendingTurnAdvance` once the cinematic queue
+      // releases the world pause.
+      if (this.anyHostileToParty()) {
+        cfTriggerCombat(this.ctx);
+      }
     } finally {
       this.ctx.eventSink = null;
       this.ctx.isConstructing = false;
     }
+  }
+
+  /** Internal — true when any living NPC is currently hostile to the party.
+   *  Mirrors the helper of the same name in `server/src/index.ts`; kept inline
+   *  here so `createSession` can decide to auto-start combat while still
+   *  holding the `isConstructing` flag. */
+  private anyHostileToParty(): boolean {
+    const partyView = { factionId: PLAYER_FACTION_ID } as const;
+    return this.state.npcs.some((n) => n.hp > 0
+      && isHostileTo(this.state, partyView, { factionId: n.factionId, disposition: n.disposition }));
   }
 
   /** Run the first-turn `advanceTurn` that `doStartCombat` deferred during

@@ -72,6 +72,11 @@ export interface EmbeddedMapPreviewOptions {
   zones?: MapPreviewZones;
   /** Loading message shown on the busy overlay. Defaults to "Generating…". */
   busyText?: string;
+  /** Optional click-on-cell callback. Used by the Map Editor's EDIT tab to
+   *  paint tiles. Fires only on a click (pointerdown+pointerup with no drag
+   *  in between), not on a drag-to-pan. Coordinates are (col, row) in the
+   *  source data — convertible into a `data[y*width+x]` index. */
+  onCellClick?: (col: number, row: number) => void;
 }
 
 export class EmbeddedMapPreview {
@@ -103,13 +108,19 @@ export class EmbeddedMapPreview {
     deltaY: number,
   ) => void;
   private moveHandler: (pointer: Phaser.Input.Pointer) => void;
-  private upHandler: () => void;
+  private upHandler: (pointer?: Phaser.Input.Pointer) => void;
   private placeHandler: () => void;
+  /** Distance (in scene px) the pointer can move between down + up and still
+   *  count as a click rather than a drag. Anything beyond this threshold is
+   *  treated as a drag-to-pan only. */
+  private static readonly CLICK_PIXEL_THRESHOLD = 4;
+  private onCellClick: ((col: number, row: number) => void) | null;
 
   constructor(scene: Phaser.Scene, viewport: PreviewViewport, options: EmbeddedMapPreviewOptions = {}) {
     this.scene = scene;
     this.viewport = viewport;
     this.zones = options.zones ?? null;
+    this.onCellClick = options.onCellClick ?? null;
     this.fallbackTilesetKey = pickTilesetKey(scene);
     this.viewportCenterX = viewport.x + viewport.width / 2;
     this.viewportCenterY = viewport.y + viewport.height / 2;
@@ -202,10 +213,48 @@ export class EmbeddedMapPreview {
       this.panY = this.dragStartPanY + (pointer.y - this.dragStartPointerY);
       this.applyTransform();
     };
-    this.upHandler = () => { this.dragging = false; };
+    this.upHandler = (pointer?: Phaser.Input.Pointer) => {
+      if (!this.dragging) return;
+      this.dragging = false;
+      // If the pointer barely moved between down + up, treat as a click and
+      // route through onCellClick (used by the Map Editor EDIT tab). A real
+      // drag-to-pan will have moved more than the threshold and skips the
+      // callback entirely.
+      if (!pointer || !this.onCellClick || !this.data) return;
+      const dx = pointer.x - this.dragStartPointerX;
+      const dy = pointer.y - this.dragStartPointerY;
+      if (Math.hypot(dx, dy) > EmbeddedMapPreview.CLICK_PIXEL_THRESHOLD) return;
+      if (!this.pointerInViewport(pointer)) return;
+      const cell = this.pointerToCell(pointer);
+      if (!cell) return;
+      this.onCellClick(cell.col, cell.row);
+    };
     scene.input.on("pointermove", this.moveHandler);
     scene.input.on("pointerup", this.upHandler);
     scene.input.on("pointerupoutside", this.upHandler);
+  }
+
+  /** Convert a scene-space pointer to a (col, row) tile coordinate, or
+   *  null when the pointer is outside the map's drawn area. */
+  private pointerToCell(pointer: Phaser.Input.Pointer): { col: number; row: number } | null {
+    if (!this.data) return null;
+    const localX = (pointer.x - this.viewportCenterX - this.panX) / this.zoom;
+    const localY = (pointer.y - this.viewportCenterY - this.panY) / this.zoom;
+    const totalW = this.data.width * TILE_PX;
+    const totalH = this.data.height * TILE_PX;
+    const gridX = localX + totalW / 2;
+    const gridY = localY + totalH / 2;
+    if (gridX < 0 || gridY < 0 || gridX >= totalW || gridY >= totalH) return null;
+    return {
+      col: Math.floor(gridX / TILE_PX),
+      row: Math.floor(gridY / TILE_PX),
+    };
+  }
+
+  /** Replace the cell-click handler (e.g. enabled when EDIT tab activates,
+   *  cleared when leaving it). */
+  setOnCellClick(cb: ((col: number, row: number) => void) | null): void {
+    this.onCellClick = cb;
   }
 
   /** Set the map currently displayed. Also resets pan/zoom and recomputes
@@ -235,6 +284,14 @@ export class EmbeddedMapPreview {
 
   setBusy(busy: boolean): void {
     this.busyTextEl.style.display = busy ? "flex" : "none";
+  }
+
+  /** Re-render the current map without touching pan / zoom. Used by the Map
+   *  Editor's EDIT tab after each paint click — `setData` would otherwise
+   *  reset the viewport on every brush stroke. The caller is responsible for
+   *  having mutated the existing data reference before invoking. */
+  repaintInPlace(): void {
+    this.renderGrid();
   }
 
   setVisible(visible: boolean): void {
@@ -337,13 +394,16 @@ export class EmbeddedMapPreview {
         const tx = startX + x * TILE_PX + TILE_PX / 2;
         const ty = startY + y * TILE_PX + TILE_PX / 2;
         const groundGid = data.terrainData[i];
-        if (groundGid > 0) {
+        // `!== 0` instead of `> 0`: rotated/flipped GIDs are negative signed
+        // int32s (Tiled's H/V/D flag bits set on the high end). Filtering
+        // them out as "empty" was hiding every rotated wall in the preview.
+        if (groundGid !== 0) {
           this.drawTile(tx, ty, groundGid);
         } else {
           this.gridContainer.add(this.scene.add.rectangle(tx, ty, TILE_PX, TILE_PX, 0x556677));
         }
         const objectGid = data.objectData[i];
-        if (objectGid > 0) this.drawTile(tx, ty, objectGid);
+        if (objectGid !== 0) this.drawTile(tx, ty, objectGid);
 
         if (this.zones) {
           const key = `${x},${y}`;
