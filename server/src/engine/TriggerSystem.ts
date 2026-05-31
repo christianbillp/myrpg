@@ -7,6 +7,12 @@ import { pickNarrationVariant } from './NarrationSystem.js';
 import { d20 as d20Local } from './Dice.js';
 import { setRelation, adjustRelation } from './FactionRelations.js';
 import { PLAYER_FACTION_ID } from '../../../shared/types.js';
+import { formatCoins as formatCoinsTrigger } from '../../../shared/currency.js';
+import {
+  startConversation, endConversation, setConversationNode,
+  applyNpcRemember, applyNpcForget, applyNpcAdjustRelationship,
+  applyNpcRecordJournal, applyNpcSetArcPhase,
+} from './ConversationSystem.js';
 
 /**
  * TriggerSystem (v2) — subscribes encounter triggers to the engine event bus.
@@ -58,6 +64,12 @@ function validateTrigger(trigger: EncounterTrigger, ctx: GameContext): void {
     }
     if (a.type === 'narrate' && !narrationIds.has(a.narrationId)) {
       warn(`narrate references unknown narrationId "${a.narrationId}"`);
+    }
+    if (a.type === 'set_npc_hidden' && !monsterIds.has(a.defId) && !ctx.defs.npcs.some((n) => n.id === a.defId)) {
+      warn(`set_npc_hidden references unknown defId "${a.defId}" (not in monster or NPC roster)`);
+    }
+    if (a.type === 'set_npc_dead' && !monsterIds.has(a.defId) && !ctx.defs.npcs.some((n) => n.id === a.defId)) {
+      warn(`set_npc_dead references unknown defId "${a.defId}" (not in monster or NPC roster)`);
     }
   }
   if (trigger.when.event === 'item_picked_up' && trigger.when.defId && !itemIds.has(trigger.when.defId)) {
@@ -169,6 +181,8 @@ function guardHolds(ctx: GameContext, guard: TriggerGuard): boolean {
       const value = s.factionStandings[guard.factionId] ?? 0;
       return compare(value, guard.op, guard.value);
     }
+    case 'balance_cp':
+      return compare(s.player.balanceCp, guard.op, guard.value);
   }
 }
 
@@ -260,6 +274,67 @@ export function fireAction(ctx: GameContext, action: TriggerAction): void {
     case 'reveal_faction': {
       if (!ctx.state.discoveredFactions.includes(action.factionId)) {
         ctx.state.discoveredFactions.push(action.factionId);
+      }
+      return;
+    }
+    case 'set_npc_dead': {
+      // Mark every matching NPC as a corpse. Sets hp to 0, tags the `dead`
+      // condition (so condition-aware code paths — incapacitation gates,
+      // perception sweeps, AIGM combatant listings — treat them uniformly),
+      // forces disposition to neutral (a corpse can't be hostile), drops
+      // their `inventoryIds` to the map (mirrors `killNpc`) unless the
+      // author opts out via `dropInventory: false`, and attaches the
+      // optional one-shot search payload. Idempotent on the hp/condition
+      // fields; the corpseSearch payload overwrites any prior.
+      const dropInventory = action.dropInventory !== false;
+      for (const npc of ctx.state.npcs.filter((n) => n.defId === action.defId)) {
+        npc.hp = 0;
+        if (!npc.conditions.includes('dead')) npc.conditions.push('dead');
+        npc.conditions = npc.conditions.filter((c) => c !== 'hidden' && c !== 'invisible');
+        npc.hideDC = undefined;
+        npc.revealedByTrigger = undefined;
+        npc.disposition = 'neutral';
+        if (dropInventory && npc.inventoryIds.length > 0) {
+          for (const defId of npc.inventoryIds) {
+            ctx.state.mapItems.push({ id: ctx.uid(), defId, tileX: npc.tileX, tileY: npc.tileY });
+          }
+          npc.inventoryIds = [];
+        }
+        if (action.corpseSearch) npc.corpseSearch = { ...action.corpseSearch };
+      }
+      return;
+    }
+    case 'set_npc_hidden': {
+      // Hide/reveal every living NPC matching `defId`. Stored as the standard
+      // `hidden` condition + `hideDC` so the existing perception machinery
+      // (Vision.canSee, runPerceptionSweep, runPassivePerceptionSweep) finds
+      // and resolves them with no special-casing. Default DC is derived from
+      // the monster's `stealthBonus` (10 + bonus) so authors don't have to
+      // hand-pick one for routine scrub/ambush starts. When
+      // `revealedBy: 'trigger'` is set, the npc also gets the
+      // `revealedByTrigger` flag so the passive Perception sweep skips it —
+      // only an explicit `hidden: false` reveal will surface it.
+      //
+      // On reveal (`hidden: false`), if the NPC's tile is occupied by the
+      // player or another living NPC (possible when the player walked
+      // through a trigger-locked tile), the NPC is bumped to the nearest
+      // free passable tile so the two creatures don't share a cell.
+      for (const npc of ctx.state.npcs.filter((n) => n.defId === action.defId && n.hp > 0)) {
+        if (action.hidden) {
+          if (!npc.conditions.includes('hidden')) npc.conditions.push('hidden');
+          if (typeof action.hideDC === 'number') {
+            npc.hideDC = action.hideDC;
+          } else if (typeof npc.hideDC !== 'number') {
+            const def = ctx.resolveMonsterDef(npc.defId);
+            npc.hideDC = 10 + (def?.stealthBonus ?? 0);
+          }
+          npc.revealedByTrigger = action.revealedBy === 'trigger';
+        } else {
+          npc.conditions = npc.conditions.filter((c) => c !== 'hidden' && c !== 'invisible');
+          npc.hideDC = undefined;
+          npc.revealedByTrigger = undefined;
+          bumpOffOccupiedTile(ctx, npc);
+        }
       }
       return;
     }
@@ -382,12 +457,103 @@ export function fireAction(ctx: GameContext, action: TriggerAction): void {
       });
       return;
     }
+    case 'adjust_player_balance_cp': {
+      // Same semantics as the AIGM `award_coins` tool: positive = award,
+      // negative = spend. A spend that would leave the player below zero is
+      // refused (no mutation, a refusal log) so a conversation choice can't
+      // accidentally bankrupt the player past zero. Authors who want a
+      // visible "can you afford this?" branch should gate the choice with
+      // `balance_cp` upstream.
+      const delta = Math.floor(action.deltaCp);
+      if (!Number.isFinite(delta) || delta === 0) return;
+      const before = ctx.state.player.balanceCp;
+      if (delta < 0 && before + delta < 0) {
+        ctx.addLog({
+          left: action.reason
+            ? `You can't afford ${action.reason} — you have ${formatCoinsTrigger(before)}.`
+            : `You can't afford that — you have ${formatCoinsTrigger(before)}.`,
+          style: 'status',
+        });
+        return;
+      }
+      ctx.state.player.balanceCp = before + delta;
+      const verb = delta > 0 ? "Received" : "Paid";
+      const amount = formatCoinsTrigger(Math.abs(delta));
+      const tail = action.reason ? ` (${action.reason})` : "";
+      ctx.addLog({
+        left: `${verb} ${amount}${tail}. Purse: ${formatCoinsTrigger(ctx.state.player.balanceCp)}.`,
+        style: delta > 0 ? 'heal' : 'status',
+      });
+      return;
+    }
+    // ── Conversation system ────────────────────────────────────────────
+    case 'start_conversation':
+      startConversation(ctx, action.npcRef, action.conversationId);
+      return;
+    case 'end_conversation':
+      endConversation(ctx);
+      return;
+    case 'set_conversation_node':
+      setConversationNode(ctx, action.nodeId);
+      return;
+    // ── NPC persistence ────────────────────────────────────────────────
+    case 'npc_remember':
+      applyNpcRemember(ctx, action.ref, action.fact, action.value, action.source ?? 'authored');
+      return;
+    case 'npc_forget':
+      applyNpcForget(ctx, action.ref, action.fact);
+      return;
+    case 'npc_adjust_relationship':
+      applyNpcAdjustRelationship(ctx, action.ref, action.target, action.delta);
+      return;
+    case 'npc_record_journal':
+      applyNpcRecordJournal(ctx, action.ref, action.text, action.source ?? 'authored', action.salience);
+      return;
+    case 'npc_set_arc_phase':
+      applyNpcSetArcPhase(ctx, action.ref, action.phase);
+      return;
   }
 }
 
 function clampDuration(raw: number, max: number): number {
   if (!Number.isFinite(raw) || raw < 0) return 0;
   return Math.min(max, Math.floor(raw));
+}
+
+/**
+ * If the NPC's current tile is also occupied by the player or another
+ * living NPC, move them to the nearest free passable tile in expanding
+ * rings (Chebyshev). Called from the `set_npc_hidden { hidden: false }`
+ * reveal path so a trigger-locked NPC that was sitting under the player's
+ * feet (player walked through their incorporeal tile) doesn't end up
+ * sharing the cell once they materialise. No-op when the tile is already
+ * free or when no free tile is reachable within 8 rings (silently leaves
+ * the NPC on their tile in the pathological case).
+ */
+function bumpOffOccupiedTile(ctx: GameContext, npc: import('./types.js').NpcState): void {
+  const s = ctx.state;
+  const overlapsPlayer = s.player.tileX === npc.tileX && s.player.tileY === npc.tileY;
+  const overlapsOther = s.npcs.some((n) => n !== npc && n.hp > 0 && n.tileX === npc.tileX && n.tileY === npc.tileY);
+  if (!overlapsPlayer && !overlapsOther) return;
+  const { cols, rows, passable } = s.map;
+  const occupied = new Set<string>([
+    `${s.player.tileX},${s.player.tileY}`,
+    ...s.npcs.filter((n) => n.hp > 0 && n !== npc).map((n) => `${n.tileX},${n.tileY}`),
+  ]);
+  for (let dist = 1; dist <= 8; dist++) {
+    for (let dc = -dist; dc <= dist; dc++) {
+      for (let dr = -dist; dr <= dist; dr++) {
+        if (Math.abs(dc) !== dist && Math.abs(dr) !== dist) continue;
+        const tc = npc.tileX + dc, tr = npc.tileY + dr;
+        if (tc < 0 || tc >= cols || tr < 0 || tr >= rows) continue;
+        if (!passable[tr][tc]) continue;
+        if (occupied.has(`${tc},${tr}`)) continue;
+        npc.tileX = tc;
+        npc.tileY = tr;
+        return;
+      }
+    }
+  }
 }
 
 // ── Faction & rumor helpers (also called from AIGMTools) ─────────────────────

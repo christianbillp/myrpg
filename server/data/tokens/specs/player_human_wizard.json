@@ -3,12 +3,11 @@
   "slots": {
     "body": "crescent",
     "ears": "round_small",
-    "face": "oblong",
-    "beard": "stubble_light",
     "eyes": "normal",
     "mouth": "neutral",
     "hair": "long_curly",
-    "accessory": "circlet"
+    "accessory": "circlet",
+    "face": "oblong"
   },
   "palette": {
     "body": "#ffffff",

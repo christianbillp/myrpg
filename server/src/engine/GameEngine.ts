@@ -17,7 +17,7 @@ import { setRelation, getRelation, isHostileTo } from './FactionRelations.js';
 import { runOffCameraTick as runOffCameraTickImpl } from './WorldTick.js';
 import { PLAYER_FACTION_ID } from '../../../shared/types.js';
 import * as Guard from './ActionGuards.js';
-import { clearHide } from './ConditionSystem.js';
+import { clearHide, isDead } from './ConditionSystem.js';
 import type { GameContext } from './GameContext.js';
 import {
   endCombat as cfEndCombat, autoEndCombatIfNoEnemies as cfAutoEndCombat,
@@ -44,6 +44,11 @@ import { maybeBreakConcentration } from './ConcentrationSystem.js';
 import { doUseFeature } from './FeatureRegistry.js';
 import { buildSessionState, SavedMapRecord } from './SessionBuilder.js';
 import { registerTriggers, adjustFactionStanding, recordRumor, fireAction as triggerFireAction } from './TriggerSystem.js';
+import {
+  startConversation as cnStartConversation,
+  advanceConversation as cnAdvanceConversation,
+  endConversation as cnEndConversation,
+} from './ConversationSystem.js';
 import { registerDirector } from './Director.js';
 import { registerAdventureProgress } from './AdventureProgress.js';
 import { registerEncounterLifecycle, publishEncounterStarted } from './EncounterLifecycle.js';
@@ -232,6 +237,10 @@ export class GameEngine {
       removeNpc: (id) => this.removeNpcFromEncounter(id),
       eventSink: null,
       isConstructing: false,
+      engineRef: {
+        fireSingleAction: (action) => triggerFireAction(this.ctx, action),
+        getNpcSaves: () => this.npcSaves,
+      },
     };
   }
 
@@ -352,6 +361,18 @@ export class GameEngine {
         s.logScrollOffset = Math.max(0, Math.min(maxOffset, s.logScrollOffset + (action.delta > 0 ? -1 : 1)));
         break;
       }
+      case 'startConversation':
+        cnStartConversation(this.ctx, action.npcRef, action.conversationId);
+        break;
+      case 'conversationChoice':
+        cnAdvanceConversation(this.ctx, action.choiceIndex);
+        break;
+      case 'conversationEnd':
+        cnEndConversation(this.ctx);
+        break;
+      case 'devCompleteEncounter':
+        this.devCompleteEncounter(events);
+        break;
     }
 
     // Route through getState() so dev-mode resource topups (unlimited
@@ -829,6 +850,49 @@ export class GameEngine {
     cfAutoEndCombat(this.ctx);
   }
 
+  /**
+   * Dev-only fast-forward to encounter end. Mirrors both legitimate
+   * completion paths so adventures, chapter wraps, and single encounters
+   * all settle correctly:
+   *   • If the encounter declares a `completionFlag`, set it. Publishes
+   *     `flag_set` → `AdventureProgress` maps it to `encounterComplete`.
+   *   • If there are living enemies, kill each one — the engine's normal
+   *     `killNpc` path publishes `npc_killed` and `autoEndCombatIfNoEnemies`
+   *     fires `combat_ended` after the last drop.
+   * The result is the same `state.encounterComplete` flip the player would
+   * reach normally — wrap-up overlay, next-chapter button, the rest of the
+   * adventure machinery all keep working.
+   */
+  private devCompleteEncounter(_events: GameEvent[]): void {
+    if (!this.state.devFlags?.completePrimaryObjective) return; // server-side gate
+    this.addLog({ left: "[DEV] Completing primary objective…", style: 'header' });
+    const flag = this.state.encounterCompletionFlag;
+    if (flag) {
+      this.state.worldFlags[flag] = true;
+      this.bus.publish({ type: 'flag_set', name: flag, value: true });
+    }
+    const livingEnemies = this.state.npcs.filter((n) => n.hp > 0 && n.disposition === 'enemy');
+    for (const npc of livingEnemies) {
+      this.killNpc(npc.id);
+    }
+    // Defensive backstops — content has many ways to leave `encounterComplete`
+    // unset (chapter without a completionFlag, encounter flag that doesn't
+    // match the chapter's flag, social scene with neither). The dev button
+    // is supposed to be bulletproof regardless of authoring, so:
+    //   • Publish `encounter_completed` if no flag was set and no kills
+    //     happened (already-empty exploration room).
+    //   • If we're in an adventure and `encounterComplete` is still false
+    //     after all of the above, force it to true so the wrap-up overlay
+    //     opens and the Next Chapter button surfaces.
+    if (!flag && livingEnemies.length === 0) {
+      this.bus.publish({ type: 'encounter_completed' });
+    }
+    if (this.state.adventureContext && !this.state.encounterComplete) {
+      this.state.encounterComplete = true;
+      this.addLog({ left: "[DEV] Chapter wrapped — proceed to the next chapter.", style: 'header' });
+    }
+  }
+
   private resistMod(damage: number, damageType: string, def: MonsterDef, displayName: string): { finalDamage: number; log: LogEntry | null } {
     if (def.immunities?.includes(damageType)) {
       return { finalDamage: 0, log: { left: `${displayName} is immune to ${damageType} — ${damage}→0`, right: '×0', style: 'status' } };
@@ -936,6 +1000,7 @@ export class GameEngine {
       canAttack: Guard.canAttackTarget(this.ctx),
       throwableItemIds,
       canHide: Guard.canHide(this.ctx),
+      canSearch: Guard.canSearch(this.ctx),
       usableFeatureIds: Guard.usableFeatureIds(this.ctx),
       canDash: Guard.canDash(this.ctx),
       canDodge: Guard.canDodge(this.ctx),
@@ -1031,6 +1096,49 @@ export class GameEngine {
    *  manager uses this to write the updated character back to disk after a
    *  level-up. */
   getPlayerDef(): PlayerDef { return this.playerDef; }
+
+  // ── NPC save layer (per-session in-memory copies) ──────────────────────
+  //
+  // Loaded asynchronously by the WS layer after session creation (so the
+  // engine constructor stays sync) and attached here. Mutations during the
+  // session land in these objects directly; the WS layer flushes them back
+  // to disk on session destruction / chapter advance via `getNpcSaves()`.
+
+  /** Keyed by NPC def id. Only persistent NPCs land here. */
+  private npcSaves: Map<string, import("../../../shared/types.js").NpcSave> = new Map();
+
+  attachNpcSaves(saves: import("../../../shared/types.js").NpcSave[]): void {
+    for (const s of saves) this.npcSaves.set(s.npcId, s);
+  }
+
+  /** Live in-memory NPC saves — used by the conversation system + trigger
+   *  actions for read/write. Caller MUST NOT replace entries; mutate them
+   *  in place. */
+  getNpcSaves(): Map<string, import("../../../shared/types.js").NpcSave> { return this.npcSaves; }
+
+  /** Snapshot for end-of-session flushing. Stamps `lastSeen` on every save
+   *  with the current encounter context before returning. */
+  collectNpcSavesForFlush(): import("../../../shared/types.js").NpcSave[] {
+    const adventureCtx = this.state.adventureContext;
+    for (const save of this.npcSaves.values()) {
+      const npc = this.state.npcs.find((n) => n.defId === save.npcId);
+      if (npc) {
+        save.stateOverrides.currentHp = npc.hp;
+        save.stateOverrides.conditions = [...npc.conditions];
+        save.stateOverrides.disposition = npc.disposition;
+        save.stateOverrides.factionId = npc.factionId;
+        save.status = isDead(npc) ? "dead" : "alive";
+        save.nameKnownToPlayer = !!npc.revealedName;
+      }
+      save.lastSeen = {
+        at: new Date().toISOString(),
+        ...(adventureCtx?.adventureId ? { adventureId: adventureCtx.adventureId } : {}),
+        ...(adventureCtx?.chapterId   ? { chapterId:   adventureCtx.chapterId   } : {}),
+        ...(this.state.encounterTitle ? { encounterId: this.state.encounterTitle } : {}),
+      };
+    }
+    return Array.from(this.npcSaves.values());
+  }
 
   // ── Long Rest ──────────────────────────────────────────────────────────────
 

@@ -15,7 +15,7 @@ import { buildEncounter } from "./encounterService.js";
 import { generateEncounter, generateMap } from "./encounterGenerator.js";
 import { registerGenerateRoutes } from "./routes/generate.js";
 import { processAIGMChat, AIGMChatRequest } from "./aigm.js";
-import { loadSettings } from "./settings.js";
+import { loadSettings, settingPromptBlock } from "./settings.js";
 import { loadServerConfig, saveServerConfig } from "./serverConfig.js";
 import {
   generateStorylog,
@@ -37,6 +37,9 @@ import {
   loadPartsLibrary, composeToken, listPartCatalog,
   type PartsLibrary, type TokenSlot, TOKEN_SLOTS,
 } from "./tokenCompose.js";
+import {
+  loadOrCreateNpcSave, flushNpcSaves, deleteAllNpcSavesForCharacter,
+} from "./engine/NpcSavePersistence.js";
 import {
   createSession,
   getEngine,
@@ -93,6 +96,8 @@ async function resolveDevFlags(
   if (file.unlimitedSpellSlots || clientFlags?.unlimitedSpellSlots) merged.unlimitedSpellSlots = true;
   if (file.unlockAllSpells     || clientFlags?.unlockAllSpells)     merged.unlockAllSpells = true;
   if (file.unlimitedActions    || clientFlags?.unlimitedActions)    merged.unlimitedActions = true;
+  if (file.allowRetryChecks    || clientFlags?.allowRetryChecks)    merged.allowRetryChecks = true;
+  if (file.completePrimaryObjective || clientFlags?.completePrimaryObjective) merged.completePrimaryObjective = true;
   return Object.keys(merged).length === 0 ? undefined : merged;
 }
 
@@ -135,6 +140,7 @@ const defs: GameDefs = {
   settings: [],
   activeSetting: null,
   tileLegend: { notes: "", tiles: {} },
+  conversations: [],
 };
 
 async function loadDefs(): Promise<void> {
@@ -163,6 +169,7 @@ async function loadDefs(): Promise<void> {
     features,
     narration,
     factions,
+    conversations,
   ] = await Promise.all([
     readDirOrEmpty<GameDefs["playerDefs"][0]>(settingSub("characters")),
     readDir<GameDefs["monsters"][0]>(join(DATA_DIR, "monsters")),
@@ -176,10 +183,12 @@ async function loadDefs(): Promise<void> {
     readDir<GameDefs["features"][0]>(join(DATA_DIR, "features")),
     readDir<GameDefs["narration"][0]>(join(DATA_DIR, "narration")),
     readDirOrEmpty<GameDefs["factions"][0]>(settingSub("factions")),
+    readDirOrEmpty<GameDefs["conversations"][0]>(settingSub("conversations")),
   ]) as [
     GameDefs["playerDefs"], GameDefs["monsters"], GameDefs["npcs"], GameDefs["equipment"],
     TiledMapFile[], GameDefs["feats"], GameDefs["backgrounds"], GameDefs["species"],
     GameDefs["spells"], GameDefs["features"], GameDefs["narration"], GameDefs["factions"],
+    GameDefs["conversations"],
   ];
   defs.playerDefs = playerDefs;
   defs.monsters = monsters;
@@ -192,6 +201,7 @@ async function loadDefs(): Promise<void> {
   defs.features = features;
   defs.narration = narration;
   defs.factions = factions;
+  defs.conversations = conversations;
   for (const p of defs.playerDefs) {
     applySpecies(p, defs.species);
     applyFeats(p, defs.feats);
@@ -390,6 +400,7 @@ server.get("/characters", async () => defs.playerDefs);
 server.get("/monsters", async () => defs.monsters);
 server.get("/npcs", async () => defs.npcs);
 server.get("/factions", async () => defs.factions);
+server.get("/conversations", async () => defs.conversations);
 server.get("/equipment", async () => defs.equipment);
 server.get("/feats", async () => defs.feats);
 server.get("/backgrounds", async () => defs.backgrounds);
@@ -509,6 +520,94 @@ server.post<{
     return reply.code(500).send({ error: msg });
   }
 });
+
+/**
+ * POST /npc/test-chat — author-side preview of how Claude will roleplay an
+ * NPC given a persona. No game session is required; the request carries the
+ * draft directly. Returns a one-shot reply (the conversation history is
+ * client-managed and echoed back on every call).
+ *
+ * Mirrors the in-game AIGM flow at the prompt level — same persona-driven
+ * roleplay voice, same setting block — but strips combat / encounter
+ * context that doesn't apply at authoring time. Use this to dial in voice
+ * and persona before saving the NPC and running it in an encounter.
+ */
+server.post<{
+  Body: {
+    draft: {
+      name: string;
+      monsterClass?: string;
+      factionId?: string;
+      persona: string;
+    };
+    history: Array<{ role: "user" | "assistant"; content: string }>;
+    prompt: string;
+  };
+}>("/npc/test-chat", async (req, reply) => {
+  const { draft, history, prompt } = req.body;
+  if (!draft || typeof draft !== "object") {
+    return reply.code(400).send({ error: "draft must be an object" });
+  }
+  if (!prompt || prompt.trim().length === 0) {
+    return reply.code(400).send({ error: "prompt is required" });
+  }
+  if (!draft.persona || draft.persona.trim().length === 0) {
+    return reply.code(400).send({ error: "draft.persona is required for a test chat" });
+  }
+
+  const setting = settingPromptBlock(defs.activeSetting ?? null, "summary");
+  const monsterDef = draft.monsterClass ? defs.monsters.find((m) => m.id === draft.monsterClass) : undefined;
+  const faction = draft.factionId ? defs.factions.find((f) => f.id === draft.factionId) : undefined;
+  const factionLine = faction ? `${faction.name} (${faction.id})` : draft.factionId || "none";
+  const statLine = monsterDef
+    ? `${monsterDef.name} — ${monsterDef.type ?? "—"} · CR ${monsterDef.cr ?? "0"} · HP ${monsterDef.maxHp}`
+    : "(no monster class set — improvise their physicality if asked)";
+
+  const system = `${setting ? setting + "\n\n" : ""}You are roleplaying a single NPC in a 2D tile-based SRD 5.2.1 RPG. This is an AUTHORING preview — the user (the author) is talking to you to test the NPC's voice before they save the NPC and run them in an encounter. Stay in character at all times; do not break the fourth wall.
+
+CHARACTER SHEET:
+  Name: ${draft.name || "(unnamed)"}
+  Monster class (stat block they inherit): ${statLine}
+  Faction: ${factionLine}
+
+PERSONA — keep replies SHORT and in their voice. Reply in plain prose only; no system messages, no tool calls, no meta:
+${draft.persona.trim()}
+
+INSTRUCTIONS:
+- Speak ONLY as the NPC. Keep replies to 1-3 sentences unless the author explicitly invites a longer answer.
+- Stay grounded in the setting (above) and the persona (above). Do not invent setting facts that contradict it.
+- The author may ask the NPC to talk about themselves, react to scenes, or play out a hypothetical exchange. Roleplay it.
+- If the author asks an out-of-character question (e.g. "what's your stat block?"), answer it briefly and clearly — this is a preview, the author is checking their work.`;
+
+  // Build the message history Claude will see. We capture only the most
+  // recent ~16 exchanges to keep the API call lean; the client maintains the
+  // full transcript locally.
+  const trimmedHistory = history.slice(-16).filter((m) => m.content && m.content.trim().length > 0);
+  const messages = [
+    ...trimmedHistory.map((m) => ({ role: m.role, content: m.content })),
+    { role: "user" as const, content: prompt.trim() },
+  ];
+
+  try {
+    const resp = await anthropic.messages.create({
+      model: "claude-sonnet-4-6",
+      max_tokens: 512,
+      system,
+      messages,
+    });
+    const reply_text = resp.content
+      .filter((b) => b.type === "text")
+      .map((b) => (b as { type: "text"; text: string }).text)
+      .join("")
+      .trim();
+    return reply.send({ reply: reply_text || "(The NPC stays silent.)" });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error("[POST /npc/test-chat] failed", msg);
+    return reply.code(500).send({ error: msg });
+  }
+});
+
 /**
  * GET /server-config — single endpoint backing the Configuration page. Returns
  * the full persisted `ServerConfig` (active setting id + Development Mode
@@ -559,6 +658,8 @@ server.put<{ Body: { activeSettingId?: string | null; devFlags?: import("../../s
     if (body.devFlags.unlockAllSpells)      sanitised.unlockAllSpells = true;
     if (body.devFlags.unlimitedActions)     sanitised.unlimitedActions = true;
     if (body.devFlags.showDeleteSaveButton) sanitised.showDeleteSaveButton = true;
+    if (body.devFlags.allowRetryChecks)     sanitised.allowRetryChecks = true;
+    if (body.devFlags.completePrimaryObjective) sanitised.completePrimaryObjective = true;
     next.devFlags = sanitised;
   }
 
@@ -638,7 +739,10 @@ server.post<{ Params: { characterId: string }; Body: { devFlags?: import("../../
     // append to `completedChapterIds`.
     if (save.inRest) {
       const found = findSessionByCharacter(characterId);
-      if (found) deleteSession(found.sessionId);
+      if (found) {
+        await flushSessionNpcSaves(found.sessionId);
+        deleteSession(found.sessionId);
+      }
       save.inRest = false;
       await deleteWorldSave();
       await writeAdventureSave(save);
@@ -667,6 +771,7 @@ server.post<{ Params: { characterId: string }; Body: { devFlags?: import("../../
       save.factionRelations = structuredClone(finishedState.factionRelations);
       save.discoveredFactions = [...finishedState.discoveredFactions];
       save.rumors = [...finishedState.rumors];
+      await flushSessionNpcSaves(found.sessionId);
       deleteSession(found.sessionId);
     }
 
@@ -730,6 +835,7 @@ server.post<{ Params: { characterId: string }; Body: { devFlags?: import("../../
       save.factionRelations = structuredClone(finishedState.factionRelations);
       save.discoveredFactions = [...finishedState.discoveredFactions];
       save.rumors = [...finishedState.rumors];
+      await flushSessionNpcSaves(found.sessionId);
       deleteSession(found.sessionId);
     }
 
@@ -977,11 +1083,14 @@ server.post<{ Body: TokenSpec; Querystring: { overwrite?: string } }>("/token", 
   }
   // Validate each part id is in the loaded library so a typo doesn't silently
   // produce a missing-layer token. Empty slots are allowed (skipped at
-  // compose time).
+  // compose time). Existence check uses `in` rather than truthiness so a
+  // legitimate part whose SVG fragment happens to be empty (placeholder)
+  // still passes — the truthy form rejected anything whose composed string
+  // was "".
   for (const slot of TOKEN_SLOTS) {
     const partId = spec.slots[slot];
     if (!partId) continue;
-    if (!tokenPartsLibrary.parts[slot]?.[partId]) {
+    if (!(partId in (tokenPartsLibrary.parts[slot] ?? {}))) {
       return reply.code(400).send({ error: `slot "${slot}" references unknown part "${partId}"` });
     }
   }
@@ -1058,6 +1167,9 @@ type SessionPlayerState = Pick<
 type WorldSave = Omit<GameState, "player"> & {
   player: SessionPlayerState;
   enemies?: unknown;
+  /** Legacy spelling of `encounterComplete` — read by the migration shim
+   *  in `loadWorldSave` so saves written before the rename still resume. */
+  chapterComplete?: boolean;
   aigmHistory?: AigmMessage[];
 };
 
@@ -1181,7 +1293,10 @@ async function loadWorldState(): Promise<{
     discoveredFactions: worldSave.discoveredFactions ?? [],
     rumors: worldSave.rumors ?? [],
     adventureContext: worldSave.adventureContext ?? null,
-    chapterComplete: worldSave.chapterComplete ?? false,
+    // Save-shape migration: older saves stored this as `chapterComplete`
+    // before the field was renamed to `encounterComplete` (the same flag
+    // now also drives single-encounter wrap-up). Read either spelling.
+    encounterComplete: worldSave.encounterComplete ?? worldSave.chapterComplete ?? false,
     objective: worldSave.objective ?? '',
     environment: worldSave.environment ?? {},
     npcs: (worldSave.npcs ?? []).map((n) => ({ ...n, ongoingEffects: n.ongoingEffects ?? [] })),
@@ -1447,6 +1562,7 @@ async function startAdventureChapter(
   };
 
   const engine = GameEngine.createSession(sessionId, { ...req, encounterContext }, defs, savedMap);
+  await attachPersistentNpcSaves(engine, playerDef.id);
   createSession(sessionId, engine);
   installWorldTick(sessionId, engine);
   await ensureSaveExists(playerDef.id);
@@ -1454,6 +1570,53 @@ async function startAdventureChapter(
   // matching comment on the main `/game/session` route. Keeps the chapter-
   // advance path consistent with single-encounter session creation.
   return { sessionId, state: engine.getState(), playerDef: engine.getPlayerDef() };
+}
+
+/**
+ * Load the saves for every persistent NPC the engine spawned and attach them
+ * to the engine. Mutations during the session land in the in-memory copies;
+ * `flushSessionNpcSaves` writes them back at session boundaries.
+ */
+async function attachPersistentNpcSaves(engine: GameEngine, characterId: string): Promise<void> {
+  const settingDir = settingSubDir("");
+  if (!settingDir) return; // no active setting → no persistence
+  const state = engine.getState();
+  const seen = new Set<string>();
+  const saves = [] as Awaited<ReturnType<typeof loadOrCreateNpcSave>>[];
+  for (const npc of state.npcs) {
+    if (seen.has(npc.defId)) continue;
+    seen.add(npc.defId);
+    const def = defs.npcs.find((n) => n.id === npc.defId);
+    if (!def?.persistent) continue;
+    // Use the parent setting dir (settingSubDir("") returns the trailing slash)
+    const settingDataDir = join(DATA_DIR, "settings", defs.activeSetting!.id);
+    saves.push(await loadOrCreateNpcSave(settingDataDir, characterId, def));
+  }
+  engine.attachNpcSaves(saves);
+  // Apply stateOverrides onto the spawned NpcStates so prior HP / conditions /
+  // disposition / faction carry across encounters.
+  for (const save of saves) {
+    const npc = state.npcs.find((n) => n.defId === save.npcId);
+    if (!npc) continue;
+    const o = save.stateOverrides;
+    if (o.currentHp !== undefined && o.currentHp > 0) npc.hp = Math.min(npc.maxHp, o.currentHp);
+    if (o.conditions) npc.conditions = [...o.conditions];
+    if (o.disposition) npc.disposition = o.disposition;
+    if (o.factionId)   npc.factionId   = o.factionId;
+    if (save.nameKnownToPlayer && !npc.revealedName) npc.revealedName = npc.name;
+  }
+}
+
+/** Flush every persistent NPC save attached to the session's engine, then
+ *  release the in-memory copies. Idempotent — calling on a session without
+ *  loaded saves is a no-op. */
+async function flushSessionNpcSaves(sessionId: string): Promise<void> {
+  const engine = getEngine(sessionId);
+  if (!engine || !defs.activeSetting) return;
+  const settingDataDir = join(DATA_DIR, "settings", defs.activeSetting.id);
+  const saves = engine.collectNpcSavesForFlush();
+  if (saves.length === 0) return;
+  await flushNpcSaves(settingDataDir, saves);
 }
 
 /**
@@ -1552,6 +1715,7 @@ async function startAdventureRest(
   };
 
   const engine = GameEngine.createSession(sessionId, { ...req, encounterContext }, defs, savedMap);
+  await attachPersistentNpcSaves(engine, playerDef.id);
   createSession(sessionId, engine);
   installWorldTick(sessionId, engine);
   await ensureSaveExists(playerDef.id);
@@ -1604,12 +1768,17 @@ server.post("/save/:characterId", async (req, reply) => {
   return reply.code(200).send({ ok: true });
 });
 server.delete("/save/:characterId", async (req, reply) => {
+  const characterId = (req.params as { characterId: string }).characterId;
   try {
-    await unlink(
-      saveFilePath((req.params as { characterId: string }).characterId),
-    );
+    await unlink(saveFilePath(characterId));
   } catch {
     /* gone */
+  }
+  // Also wipe every persistent NPC's memory tree scoped to this character so
+  // a replay with the same character id starts each NPC from a clean slate.
+  if (defs.activeSetting) {
+    const settingDataDir = join(DATA_DIR, "settings", defs.activeSetting.id);
+    await deleteAllNpcSavesForCharacter(settingDataDir, characterId);
   }
   return reply.code(200).send({ ok: true });
 });
@@ -1626,6 +1795,7 @@ server.get("/world", async (_req, reply) => {
   let engine = getEngine(state.sessionId);
   if (!engine) {
     engine = new GameEngine(state, defs);
+    await attachPersistentNpcSaves(engine, state.player.defId);
     createSession(state.sessionId, engine);
     setAigmHistory(state.sessionId, aigmHistory);
   }
@@ -2072,6 +2242,7 @@ server.delete("/game/session/:id", async (req, reply) => {
       });
     }
   }
+  await flushSessionNpcSaves(id);
   deleteSession(id);
   await deleteWorldSave();
   return reply.code(200).send({ ok: true });

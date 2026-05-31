@@ -1,0 +1,96 @@
+{
+  "playerDefId": "halden_marrick",
+  "hp": 13,
+  "xp": 0,
+  "balanceCp": 1400,
+  "inventoryIds": [
+    "javelin",
+    "javelin",
+    "javelin",
+    "javelin",
+    "dagger",
+    "health_potion"
+  ],
+  "resources": {
+    "second-wind": 2
+  },
+  "spellSlots": [],
+  "preparedSpellIds": [
+    "alarm",
+    "burning-hands",
+    "charm-person",
+    "chromatic-orb",
+    "color-spray",
+    "comprehend-languages",
+    "detect-magic",
+    "disguise-self",
+    "expeditious-retreat",
+    "false-life",
+    "feather-fall",
+    "find-familiar",
+    "fire-bolt",
+    "floating-disk",
+    "fog-cloud",
+    "grease",
+    "hideous-laughter",
+    "ice-knife",
+    "identify",
+    "illusory-script",
+    "jump",
+    "light",
+    "longstrider",
+    "mage-armor",
+    "mage-hand",
+    "magic-missile",
+    "minor-illusion",
+    "prestidigitation",
+    "protection-from-evil-and-good",
+    "ray-of-frost",
+    "ray-of-sickness",
+    "shield",
+    "silent-image",
+    "sleep",
+    "thunderwave",
+    "unseen-servant"
+  ],
+  "equippedSlots": {
+    "armorId": "chain_mail",
+    "weaponId": "longsword",
+    "shieldId": "shield"
+  },
+  "encounterLog": [
+    {
+      "id": "930b864e-aaf4-4ddc-8fb7-94f796303a22",
+      "timestamp": "2026-05-31T08:00:37.839Z",
+      "description": "Rain has followed you the whole way from the coach road. The waystation is warm, low-ceilinged, and full of the smell of tallow and wet wool. Behind the long bar a broad man polishes a cup he has already polished twice; at a corner table a local nurses a mug and watches you over the rim. Your cape is still stiff with road-dust. You are the only Cape these people have seen in a long while, and they all know it before you have said a word. Somewhere in your satchel is a sealed writ: walk the Reach Circuit, recertify its wardstones — routine work — and \"ascertain the standing\" of Senior Cape Edran Vael, who has not filed a report in three seasons.",
+      "encounterTitle": "A Posting in the Reach",
+      "xpGained": 0,
+      "cpGained": 0,
+      "outcome": "survived",
+      "lines": []
+    },
+    {
+      "id": "3f1fa142-7b72-4336-aa47-8f7abf1717cb",
+      "timestamp": "2026-05-31T07:54:21.024Z",
+      "description": "Rain has followed you the whole way from the coach road. The waystation is warm, low-ceilinged, and full of the smell of tallow and wet wool. Behind the long bar a broad man polishes a cup he has already polished twice; at a corner table a local nurses a mug and watches you over the rim. Your cape is still stiff with road-dust. You are the only Cape these people have seen in a long while, and they all know it before you have said a word. Somewhere in your satchel is a sealed writ: walk the Reach Circuit, recertify its wardstones — routine work — and \"ascertain the standing\" of Senior Cape Edran Vael, who has not filed a report in three seasons.",
+      "encounterTitle": "A Posting in the Reach",
+      "xpGained": 0,
+      "cpGained": 0,
+      "outcome": "survived",
+      "lines": [
+        {
+          "type": "dm_player",
+          "text": "[Halden Marrick says to Local Villager]: hello"
+        },
+        {
+          "type": "combat",
+          "text": "💬 Local Villager: \"Evening. You're a long way from a city, Cape.\""
+        },
+        {
+          "type": "dm_reply",
+          "text": "The villager glances up from their mug, eyes sliding briefly to the white of your cape before settling on your face — a quick calculation happening behind cautious eyes.\nThey wrap both hands around their mug and don't quite smile — not unfriendly, but not open either. Across the room, the tavern keeper sets down his polishing cloth and watches without pretending not to."
+        }
+      ]
+    }
+  ]
+}

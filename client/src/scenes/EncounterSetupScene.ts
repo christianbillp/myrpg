@@ -27,6 +27,16 @@ const ENC_CARD_W = 360;
 const ENC_CARD_H = 155;
 const ENC_COL1_CX = 1120;
 const ENC_COL2_CX = 1500;
+/** Vertical centre of the first row of cards. */
+const ENC_ROW_FIRST_CY = 211;
+/** Vertical spacing between successive row centres. */
+const ENC_ROW_SPACING = 169;
+/** Visible band: top + bottom Y bounds (scene-space) the scroller clamps
+ *  card positions into. Anything fully outside this rect is hidden so it
+ *  doesn't bleed into the bottom-bar or character column. */
+const ENC_VIEWPORT_TOP = ENC_ROW_FIRST_CY - ENC_CARD_H / 2 - 4;
+const ENC_VIEWPORT_BOTTOM = 808;
+const ENC_VISIBLE_ROWS = 4;
 
 
 const LAST_CHAR_KEY = 'myrpg_last_character';
@@ -48,6 +58,11 @@ interface LocalSave {
 
 interface EncCardElems {
   cardBtn: HtmlButtonHandle;
+  /** Row index in the conceptual grid (0..N). Used by `applyEncScrollOffset`
+   *  to compute the card's current y after the user scrolls. */
+  row: number;
+  /** Column x — kept verbatim because the columns don't move on scroll. */
+  cx: number;
 }
 
 export class EncounterSetupScene extends Phaser.Scene {
@@ -66,6 +81,14 @@ export class EncounterSetupScene extends Phaser.Scene {
   private encounters: EncounterDef[] = [];
   private allSaves: Map<string, LocalSave> = new Map();
   private selectedSave: LocalSave | null = null;
+  /** Vertical scroll offset (in scene-space pixels) applied to every
+   *  encounter card. Zero shows the first 8 cards; positive values shift
+   *  cards upward to reveal lower rows. Clamped in `setEncScrollOffset`. */
+  private encScrollOffset = 0;
+  /** Optional scrollbar — visible only when the roster exceeds the viewport.
+   *  Updated whenever the offset changes. */
+  private encScrollbarTrack: Phaser.GameObjects.Rectangle | null = null;
+  private encScrollbarThumb: Phaser.GameObjects.Rectangle | null = null;
 
   constructor() {
     super({ key: "EncounterSetupScene" });
@@ -177,16 +200,17 @@ export class EncounterSetupScene extends Phaser.Scene {
       onChange: (def) => this.selectChar(def),
     });
 
-    const encPositions: [number, number][] = [
-      [ENC_COL1_CX, 211], [ENC_COL2_CX, 211],
-      [ENC_COL1_CX, 380], [ENC_COL2_CX, 380],
-      [ENC_COL1_CX, 549], [ENC_COL2_CX, 549],
-      [ENC_COL1_CX, 718], [ENC_COL2_CX, 718],
-    ];
+    // Layout: 2 columns × N rows. The first ENC_VISIBLE_ROWS rows fit in
+    // the viewport; surplus rows scroll into view via the wheel handler
+    // installed by `installEncScroll`.
+    this.encScrollOffset = 0;
     this.encounters.forEach((enc, i) => {
-      const [cx, cy] = encPositions[i] ?? [ENC_COL1_CX, 216 + i * 161];
-      this.buildEncounterCard(enc, cx, cy);
+      const row = Math.floor(i / 2);
+      const cx = i % 2 === 0 ? ENC_COL1_CX : ENC_COL2_CX;
+      this.buildEncounterCard(enc, row, cx);
     });
+    this.installEncScroll();
+    this.applyEncScrollOffset();
 
     this.buildBackButton(120, H - 36);
     this.buildBeginButton(W / 2, H - 36);
@@ -263,7 +287,8 @@ export class EncounterSetupScene extends Phaser.Scene {
     this.refreshPromoteButton();
   }
 
-  private buildEncounterCard(def: EncounterDef, cx: number, cy: number): void {
+  private buildEncounterCard(def: EncounterDef, row: number, cx: number): void {
+    const cy = ENC_ROW_FIRST_CY + row * ENC_ROW_SPACING;
     const left = cx - ENC_CARD_W / 2;
     const top = cy - ENC_CARD_H / 2;
 
@@ -310,7 +335,84 @@ export class EncounterSetupScene extends Phaser.Scene {
     desc.style.cssText = "margin-top: 10px; font-size: 10px; color: #8899aa; line-height: 1.5;";
     inner.appendChild(desc);
 
-    this.encounterCards.set(def.id, { cardBtn });
+    this.encounterCards.set(def.id, { cardBtn, row, cx });
+  }
+
+  // ── Scrolling ──────────────────────────────────────────────────────────
+
+  /** Total number of rows in the encounter grid (2 columns wide). */
+  private encRowCount(): number {
+    return Math.ceil(this.encounters.length / 2);
+  }
+
+  /** Maximum vertical scroll, in scene-space pixels. Zero when the grid
+   *  fits in the viewport. */
+  private encMaxScroll(): number {
+    const extraRows = Math.max(0, this.encRowCount() - ENC_VISIBLE_ROWS);
+    return extraRows * ENC_ROW_SPACING;
+  }
+
+  /** Install a Phaser wheel listener and the visual scrollbar. Wheel
+   *  events only steer the encounter offset while the pointer is over the
+   *  encounter column (right of the character/encounter divider). */
+  private installEncScroll(): void {
+    const max = this.encMaxScroll();
+    if (max <= 0) return; // grid fits — no scroll, no scrollbar
+
+    // Discrete scrollbar so the user knows scrolling is possible. Lives
+    // along the right edge of the right column.
+    const trackX = W - 28;
+    const trackY = ENC_VIEWPORT_TOP;
+    const trackH = ENC_VIEWPORT_BOTTOM - ENC_VIEWPORT_TOP;
+    this.encScrollbarTrack = this.add.rectangle(trackX, trackY, 6, trackH, 0x1a2230, 1)
+      .setOrigin(0.5, 0);
+    this.encScrollbarThumb = this.add.rectangle(trackX, trackY, 6, trackH, 0x4a6a9a, 1)
+      .setOrigin(0.5, 0);
+
+    this.input.on("wheel", (pointer: Phaser.Input.Pointer, _g: Phaser.GameObjects.GameObject[], _dx: number, dy: number) => {
+      // Only react when the pointer is over the encounter column — otherwise
+      // wheel events on the character carousel would steer this scroller.
+      const sx = pointer.x;
+      const sy = pointer.y;
+      if (sx < CHAR_DIVIDER_X) return;
+      if (sy < ENC_VIEWPORT_TOP || sy > ENC_VIEWPORT_BOTTOM) return;
+      this.setEncScrollOffset(this.encScrollOffset + Math.sign(dy) * (ENC_ROW_SPACING / 2));
+    });
+  }
+
+  private setEncScrollOffset(value: number): void {
+    const max = this.encMaxScroll();
+    const clamped = Math.max(0, Math.min(max, value));
+    if (clamped === this.encScrollOffset) return;
+    this.encScrollOffset = clamped;
+    this.applyEncScrollOffset();
+  }
+
+  /** Re-place every encounter card based on the current scroll offset and
+   *  hide any card whose centre falls outside the visible band. Also
+   *  positions the scrollbar thumb. */
+  private applyEncScrollOffset(): void {
+    for (const elems of this.encounterCards.values()) {
+      const cy = ENC_ROW_FIRST_CY + elems.row * ENC_ROW_SPACING - this.encScrollOffset;
+      const left = elems.cx - ENC_CARD_W / 2;
+      const top = cy - ENC_CARD_H / 2;
+      const offscreen = cy + ENC_CARD_H / 2 < ENC_VIEWPORT_TOP || cy - ENC_CARD_H / 2 > ENC_VIEWPORT_BOTTOM;
+      elems.cardBtn.setBounds(left, top, ENC_CARD_W, ENC_CARD_H);
+      elems.cardBtn.setVisible(!offscreen);
+    }
+    // Position the scrollbar thumb. Thumb height = visible fraction of
+    // total grid; thumb y = lerped against the scroll offset.
+    if (this.encScrollbarTrack && this.encScrollbarThumb) {
+      const totalRows = this.encRowCount();
+      const fraction = ENC_VISIBLE_ROWS / Math.max(ENC_VISIBLE_ROWS, totalRows);
+      const trackH = ENC_VIEWPORT_BOTTOM - ENC_VIEWPORT_TOP;
+      const thumbH = Math.max(20, Math.floor(trackH * fraction));
+      const max = this.encMaxScroll();
+      const t = max > 0 ? this.encScrollOffset / max : 0;
+      const thumbY = ENC_VIEWPORT_TOP + (trackH - thumbH) * t;
+      this.encScrollbarThumb.setSize(6, thumbH);
+      this.encScrollbarThumb.setPosition(this.encScrollbarTrack.x, thumbY);
+    }
   }
 
   private selectEncounter(def: EncounterDef): void {
@@ -319,8 +421,23 @@ export class EncounterSetupScene extends Phaser.Scene {
       elems.cardBtn.el.style.borderColor = active ? "#e2b96f" : "#334455";
     }
     this.selectedEncounter = def;
+    this.scrollEncounterIntoView(def);
     this.refreshBeginButton();
     this.refreshPromoteButton();
+  }
+
+  /** Ensure the card for `def` is fully visible in the encounter viewport.
+   *  Used by `pendingEncounterId` auto-select and by manual selections so
+   *  the user always sees what they just clicked. */
+  private scrollEncounterIntoView(def: EncounterDef): void {
+    const elems = this.encounterCards.get(def.id);
+    if (!elems) return;
+    const cyAtZero = ENC_ROW_FIRST_CY + elems.row * ENC_ROW_SPACING;
+    const cyShown = cyAtZero - this.encScrollOffset;
+    if (cyShown - ENC_CARD_H / 2 >= ENC_VIEWPORT_TOP && cyShown + ENC_CARD_H / 2 <= ENC_VIEWPORT_BOTTOM) return;
+    // Centre the row in the viewport.
+    const target = cyAtZero - (ENC_VIEWPORT_TOP + ENC_VIEWPORT_BOTTOM) / 2;
+    this.setEncScrollOffset(target);
   }
 
   private isReady(): boolean {
@@ -449,6 +566,8 @@ export class EncounterSetupScene extends Phaser.Scene {
     this.htmlTexts = [];
     this.htmlButtons = [];
     this.encounterCards.clear();
+    this.encScrollbarTrack?.destroy(); this.encScrollbarTrack = null;
+    this.encScrollbarThumb?.destroy(); this.encScrollbarThumb = null;
     this.characterCarousel?.destroy();
     this.characterCarousel = null;
     this.characterDetail?.destroy();

@@ -1,0 +1,35 @@
+{
+  "id": "the_reach_circuit",
+  "title": "The Reach Circuit",
+  "description": "Junior Cape Reed is handed a cold assignment — walk the failing wardstone circuit, find out what happened to the senior Cape who never came back, and keep the Reach quiet. One Cape. Five stones. The silence is already cracking.",
+  "introduction": "The letter arrives with a Bureau seal and a single line of instruction: *Complete the Circuit inspection. Report findings to the Capital.* No map. No partner. No mention of Senior Cape Edran Vael by name — only the reference number of his last filed report, stamped OPEN. The wardstones that ring this stretch of the Reach are older than the New Empire, older than the White Capes who were given responsibility for them. They are supposed to hum. They are not humming. Somewhere out in the forest and the ruins and the deep places beneath, Vael went to listen — and the silence swallowed him. You are Junior Cape Reed. The cape is stiff at the shoulders, the ink on your certification barely dry. The road out of the last holdfast is empty in both directions. You pick the one that matches the first waypoint on the Circuit, and you walk.",
+  "chapters": [
+    {
+      "id": "ch1_a_posting_in_the_reach",
+      "title": "A Posting in the Reach",
+      "encounterId": "a_posting_in_the_reach"
+    },
+    {
+      "id": "ch2_the_wardstone_in_the_wood",
+      "title": "The Wardstone in the Wood",
+      "encounterId": "the_wardstone_in_the_wood"
+    },
+    {
+      "id": "ch3_the_toll_at_blackgorge_bridge",
+      "title": "The Toll at Blackgorge Bridge",
+      "encounterId": "the_toll_at_blackgorge_bridge"
+    },
+    {
+      "id": "ch4_sages_council",
+      "title": "The Sage's Counsel",
+      "encounterId": "sages_council"
+    },
+    {
+      "id": "ch5_broken_ward",
+      "title": "Broken Ward",
+      "encounterId": "broken_ward"
+    }
+  ],
+  "aiContext": "THE REACH CIRCUIT — AIGM CONTEXT\n\nReed is a newly certified Junior Cape of the White Capes, the state-sanctioned magical regulatory body of Arcania. Her assignment is the Circuit: a chain of wardstones maintained by Cape patrols that suppress dangerous ambient magic bleed-out from the old empire's ruins. The Circuit for this stretch has gone dark because the Capital has been filing maintenance reports without sending anyone capable of actual arcane repair. Senior Cape Edran Vael discovered the rot in the paperwork, went into the field alone to hold the keystone by hand — a desperate stopgap — and disappeared. The Capital knows. It has said nothing.\n\nThe overarching arc is Reed's recertification through action: each encounter strips away one more illusion about what the White Capes actually are, and forces her to use her authority, her wits, and finally her magic in ways the rulebook did not prepare her for. By the climax she re-seals the keystone herself, which is both a literal rescue of the Circuit and a quiet rite of passage — the cape stops feeling like borrowed clothes. Tone throughout should be bureaucratic-horror shading into genuine heroism: the institution is failing, but the work still matters.\n\nFactions in play: White Capes (Reed's employer, distant and indifferent), Bureau of Adjustment (may have patrols on the road — treat them as a complication, not an ally), local population (frightened, quietly resentful of Arcanian authority, but not hostile). A struck-off Cape appears in Chapter 4 as a morally grey lore-dump: they broke a regulation Reed may soon break herself. No named NPCs beyond those established in the brief (Bram Holdfast as a local contact, the unnamed struck-off Cape). Vael is absent throughout — present only as evidence, notes, and a body to be found.",
+  "restEncounterId": "tavern_small_quiet_night"
+}

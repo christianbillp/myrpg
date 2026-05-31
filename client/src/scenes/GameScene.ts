@@ -217,9 +217,20 @@ export class GameScene extends Phaser.Scene {
       onAcceptReaction:  () => gameClient.sendAction({ type: "resolveReaction", accept: true }),
       onDeclineReaction: () => gameClient.sendAction({ type: "resolveReaction", accept: false }),
       onAdvanceChapter:  () => this.advanceChapter(),
+      onLeaveEncounter:  () => this.leaveEncounter(),
       onIntroClosed:     (intro) => this.hud.addGmAssistantMessage(intro),
       getItems:    () => this.registry.get("equipment") as ItemDef[],
       getSpells:   () => (this.registry.get("spells") ?? []) as SpellDef[],
+      // Conversation system wiring — the overlay ships choice / end actions
+      // through the same `sendAction` path every other interactive surface
+      // uses. The state-update tick refreshes the overlay against the
+      // server's `activeConversation`.
+      onConversationChoice: (index) => gameClient.sendAction({ type: "conversationChoice", choiceIndex: index }),
+      onConversationEnd:    () => gameClient.sendAction({ type: "conversationEnd" }),
+      onConversationOpenAigm: () => this.hud.openGmInput(),
+      resolveSpeakerName: (ref) => this.resolveConversationSpeakerName(ref),
+      resolveSpeakerToken: (ref) => this.resolveConversationSpeakerToken(ref),
+      getConversations: () => (this.registry.get("conversations") ?? []) as import("../net/types").ConversationDef[],
     });
     if (this.pendingIsResume) this.overlays.markResumed();
 
@@ -247,12 +258,13 @@ export class GameScene extends Phaser.Scene {
     // Park the screen at full black until the first `state_update` arrives.
     // Without this, the bare HUD/Player Panel/Target Panel flash for a few
     // hundred ms before any encounter-start cinematic events get to run.
+    // The fade-OUT is unconditional; the fade-IN is driven by either the
+    // server's startup events (supertitle + screen_fade in) or by the
+    // safety fall-back in `handleStateUpdate` when neither is present. The
+    // old eager `queueScreenFadeOnReady()` raced ahead of the supertitle and
+    // cleared the black before the title played, so chapter advances landed
+    // the supertitle on a half-revealed world.
     this.screenEffects.fadeOut(0);
-    if (this.pendingFadeInOnStart) {
-      // Coming back from a chapter-advance restart: pre-blacked above, fade
-      // back in once the scene has laid out (handled by queueScreenFadeOnReady).
-      this.queueScreenFadeOnReady();
-    }
 
     this.setupInput();
     this.buildHUD();
@@ -300,15 +312,6 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
-  /** Queue the chapter-advance fade-in to play once the scene has finished
-   *  laying out — without the delay the fade kicks off before the new map is
-   *  drawn and the first frame leaks through. */
-  private queueScreenFadeOnReady(): void {
-    this.events.once('postupdate', () => {
-      this.screenEffects.fadeIn(this.pendingFadeInDurationMs);
-    });
-  }
-
   // ── State update pipeline ─────────────────────────────────────────────────
 
   private handleStateUpdate(state: GameState, events: GameEvent[]): void {
@@ -346,8 +349,11 @@ export class GameScene extends Phaser.Scene {
     // short fade-in at the head of the event queue so it plays before any
     // entity moves the same payload carries.
     if (isFirst) {
-      const hasFade = events.some((e) => e.type === "screen_fade") || this.pendingFadeInOnStart;
+      const hasFade = events.some((e) => e.type === "screen_fade");
       if (!hasFade) {
+        // Server didn't ship a fade in its startup events (e.g. encounter
+        // with `disableSupertitle` dev flag) — drive ourselves out of black
+        // so the player isn't stranded on a dark screen.
         this.eventQueue.unshift({ type: "screen_fade", mode: "in", durationMs: 400 });
       }
     }
@@ -485,7 +491,8 @@ export class GameScene extends Phaser.Scene {
     if (!this.pendingIntroState) this.overlays.showIntroIfNeeded(state);
     this.overlays.refreshCharacterSheetIfOpen(state);
     this.overlays.syncReactionPrompt(state);
-    this.overlays.syncChapterComplete(state);
+    this.overlays.syncEncounterComplete(state);
+    this.overlays.syncConversation(state);
 
     this.updateHUD(state);
   }
@@ -493,7 +500,13 @@ export class GameScene extends Phaser.Scene {
   // ── Entity reconciliation ─────────────────────────────────────────────────
 
   private reconcileNpcs(state: GameState): void {
-    const allIds = new Set(state.npcs.map(n => n.id));
+    // NPCs flagged as `hidden` (server-side Vision system — set via the
+    // `set_npc_hidden` trigger action and cleared by the passive Perception
+    // sweep on movement) are invisible to the player. They still exist in
+    // `state.npcs` for combat/AI; the client just doesn't render them or
+    // surface them in the Target Panel until the engine clears the flag.
+    const visibleNpcs = state.npcs.filter(n => !n.conditions.includes('hidden'));
+    const allIds = new Set(visibleNpcs.map(n => n.id));
     for (const [id, token] of this.npcTokens) {
       if (!allIds.has(id)) {
         token.destroy();
@@ -504,7 +517,7 @@ export class GameScene extends Phaser.Scene {
         }
       }
     }
-    for (const nState of state.npcs) {
+    for (const nState of visibleNpcs) {
       let token = this.npcTokens.get(nState.id);
       if (!token) {
         const def = this.resolveMonsterDef(nState.defId);
@@ -741,25 +754,8 @@ export class GameScene extends Phaser.Scene {
       onLongRest:       () => void this.openLongRestOverlay(),
       onCommandSummon:  (summonNpcId) => this.beginSummonDirect(summonNpcId),
       onTalk:           () => this.openSpeechInput(),
-      onLeaveEncounter: () => {
-        // Rest-stop interlude: LEAVE here means "I'm done resting, take me
-        // to the next chapter". Route through the existing chapter-advance
-        // flow — the server's /advance route detects `inRest` and routes to
-        // the next chapter without re-summarising. The advanceChapter helper
-        // also preserves the server session through `scene.restart`.
-        if (this.gameState?.adventureContext?.isRestSession) {
-          void this.advanceChapter();
-          return;
-        }
-        this.uiDestroyed = true;
-        this.playerPanel.destroy();
-        this.targetPanel.destroy();
-        this.hud.destroy();
-        this.speechBubbles.destroy();
-        this.screenEffects.destroy();
-        this.uiScale.destroy();
-        gameClient.disconnect().then(() => this.scene.start("EncounterSetupScene"));
-      },
+      onDevCompleteObjective: () => gameClient.sendAction({ type: "devCompleteEncounter" }),
+      onLeaveEncounter: () => this.leaveEncounter(),
     });
     this.targetPanel = new TargetPanel(this.uiScale);
     this.hud = new HUD(this.uiScale, {
@@ -1220,6 +1216,29 @@ export class GameScene extends Phaser.Scene {
    * disconnect and reloads the page — bouncing the player back to the main
    * menu.
    */
+  /**
+   * Tear down the live session and return to the encounter-setup menu.
+   * Fired by the Player Panel's LEAVE ENCOUNTER button AND by the single-
+   * encounter wrap-up overlay's RETURN TO MENU CTA — both routes need to
+   * dispose the canvas-bound UI before the scene swaps. Inside a rest
+   * session we route through the chapter-advance flow instead so the
+   * server picks up the next chapter (LEAVE means "I'm done resting").
+   */
+  private leaveEncounter(): void {
+    if (this.gameState?.adventureContext?.isRestSession) {
+      void this.advanceChapter();
+      return;
+    }
+    this.uiDestroyed = true;
+    this.playerPanel.destroy();
+    this.targetPanel.destroy();
+    this.hud.destroy();
+    this.speechBubbles.destroy();
+    this.screenEffects.destroy();
+    this.uiScale.destroy();
+    void gameClient.disconnect().then(() => this.scene.start("EncounterSetupScene"));
+  }
+
   private async advanceChapter(): Promise<void> {
     // First-time chapter advance (NOT leaving a rest session): if the adventure
     // has a rest-stop encounter configured AND we're not on the final chapter,
@@ -1335,11 +1354,9 @@ export class GameScene extends Phaser.Scene {
   }
 
   private updateHUD(state: GameState): void {
-    const showSearch = state.secrets.length > 0;
     this.playerPanel.refresh(
       state.player.hp,
       this.playerDef.maxHp,
-      showSearch,
       state.objective,
     );
 
@@ -1647,6 +1664,29 @@ export class GameScene extends Phaser.Scene {
     return (this.registry.get("factions") as FactionDef[] | undefined) ?? [];
   }
 
+  /** Resolve a conversation speaker ref (`"player"` or `"npc_<id>"`) to a
+   *  display name. Used by `ConversationOverlay` via `OverlayManager`. */
+  private resolveConversationSpeakerName(ref: string): string {
+    if (ref === "player") return this.playerDef.name;
+    // Strip the "npc_" prefix and look up the runtime NPC by instance id.
+    const id = ref.startsWith("npc_") ? ref.slice(4) : ref;
+    const npc = this.gameState?.npcs.find((n) => n.id === id || n.defId === id);
+    if (!npc) return ref;
+    return npc.revealedName ?? npc.name;
+  }
+
+  /** Resolve a conversation speaker ref to a token asset URL the overlay
+   *  can embed. Returns null when no token is known. */
+  private resolveConversationSpeakerToken(ref: string): string | null {
+    if (ref === "player") return `${API_URL}${tokenAssetForPlayer(this.playerDef)}`;
+    const id = ref.startsWith("npc_") ? ref.slice(4) : ref;
+    const npc = this.gameState?.npcs.find((n) => n.id === id || n.defId === id);
+    if (!npc) return null;
+    const def = this.resolveMonsterDef(npc.defId);
+    const path = def.tokenAsset ?? tokenAssetForMonster(def);
+    return path ? `${API_URL}${path}` : null;
+  }
+
   private resolveMonsterDef(defId: string): MonsterDef {
     const monsters = this.registry.get("monsters") as MonsterDef[];
     const monster = monsters.find(m => m.id === defId);
@@ -1685,11 +1725,24 @@ export class GameScene extends Phaser.Scene {
    */
   private openSpeechInput(): void {
     if (!this.gameState || !this.selectedEntityId) return;
+    // Conversation-system path: when the selected NPC has a `conversationId`
+    // and the engine isn't in combat, the TALK button opens the
+    // ConversationOverlay instead of the AIGM speech bubble. The AIGM
+    // remains the fallback for combat sayto and for NPCs without a
+    // scripted conversation.
+    const target = this.gameState.npcs.find((n) => n.id === this.selectedEntityId);
+    if (target && this.gameState.phase === "exploring") {
+      const npcDefs = (this.registry.get("npcs") ?? []) as NPCDef[];
+      const def = npcDefs.find((n) => n.id === target.defId);
+      if (def?.conversationId) {
+        gameClient.sendAction({ type: "startConversation", npcRef: `npc_${target.id}`, conversationId: def.conversationId });
+        return;
+      }
+    }
     if (this.speechInputBubble) {
       this.speechInputBubble.destroy();
       this.speechInputBubble = null;
     }
-    const target = this.gameState.npcs.find((n) => n.id === this.selectedEntityId);
     const targetName = target ? (target.revealedName ?? target.name) : null;
     this.input.keyboard?.disableGlobalCapture();
     this.speechInputBubble = new SpeechInputBubble({

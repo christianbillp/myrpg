@@ -101,7 +101,11 @@ const EMPTY_FORM_SEED: FormSeed = {
   playerCells: new Set(), allyCells: new Set(), enemyCells: new Set(), neutralCells: new Set(),
   allyIds: [], enemyIds: [], neutralIds: [],
   triggers: [],
-  placementMode: 'zones',
+  // Default to exact mode for new encounters — placement is the more common
+  // intent now. Legacy encounters that were saved before placementMode existed
+  // still fall back to 'zones' at load time so their behaviour doesn't change
+  // (see `enc.placementMode ?? 'zones'` in the loader).
+  placementMode: 'exact',
   placements: [],
 };
 
@@ -136,7 +140,17 @@ export class EncounterCreatorScene extends Phaser.Scene {
   // obvious these are live form values, not seeds or decoded JSON.
   private formTitle = "";
   private formIntroduction = "";
+  /** Player-facing one-paragraph card text. Stored on `EncounterDef.description`
+   *  and rendered on the Single Encounter Setup card so the player sees a
+   *  human summary before launching. Authored via the DESCRIPTION field in
+   *  the editor's BASIC INFORMATION tab. */
   private formDescription = "";
+  /** Long-form scene context handed silently to the AIGM. Stored on
+   *  `EncounterDef.customContext`. Authored via the AIGM CONTEXT field in
+   *  the editor. (The internal AI-proposal contract still uses the wire-name
+   *  `description` for this slot for legacy reasons — translation happens
+   *  at the save/load boundary.) */
+  private formAigmContext = "";
   private formObjective = "";
   private formCompletionFlag = "";
   private formTitleInput: HTMLInputElement | null = null;
@@ -144,7 +158,8 @@ export class EncounterCreatorScene extends Phaser.Scene {
    *  as the in-game supertitle (hides the editor for the duration). */
   private titlePreviewBtn: HtmlButtonHandle | null = null;
   private formIntroInput: HTMLTextAreaElement | null = null;
-  private formDescInput: HTMLTextAreaElement | null = null;
+  private formDescriptionInput: HTMLTextAreaElement | null = null;
+  private formAigmContextInput: HTMLTextAreaElement | null = null;
   private formObjectiveInput: HTMLInputElement | null = null;
   private formCompletionFlagInput: HTMLInputElement | null = null;
 
@@ -232,6 +247,7 @@ export class EncounterCreatorScene extends Phaser.Scene {
     this.formTitle = "";
     this.formIntroduction = "";
     this.formDescription = "";
+    this.formAigmContext = "";
     this.formObjective = "";
     this.formCompletionFlag = "";
     this.formSeed = EMPTY_FORM_SEED;
@@ -361,6 +377,7 @@ export class EncounterCreatorScene extends Phaser.Scene {
     this.formTitle          = "";
     this.formIntroduction   = "";
     this.formDescription    = "";
+    this.formAigmContext    = "";
     this.formObjective      = "";
     this.formCompletionFlag = "";
     this.formSeed = EMPTY_FORM_SEED;
@@ -383,7 +400,8 @@ export class EncounterCreatorScene extends Phaser.Scene {
     this.isDraft = false;
     this.formTitle          = enc.encounterTitle    ?? "";
     this.formIntroduction   = enc.customIntroduction ?? "";
-    this.formDescription    = enc.customContext     ?? "";
+    this.formDescription    = enc.description       ?? "";
+    this.formAigmContext    = enc.customContext     ?? "";
     this.formObjective      = enc.objective         ?? "";
     this.formCompletionFlag = enc.completionFlag    ?? "";
 
@@ -456,7 +474,8 @@ export class EncounterCreatorScene extends Phaser.Scene {
     this.titlePreviewBtn = null;
     this.formTitleInput = null;
     this.formIntroInput = null;
-    this.formDescInput = null;
+    this.formDescriptionInput = null;
+    this.formAigmContextInput = null;
     this.formObjectiveInput = null;
     this.formCompletionFlagInput = null;
     this.emptyStateText = null;
@@ -876,6 +895,7 @@ export class EncounterCreatorScene extends Phaser.Scene {
     return {
       title:          this.formTitle,
       introduction:   this.formIntroduction,
+      aigmContext:    this.formAigmContext,
       description:    this.formDescription,
       objective:      this.formObjective,
       completionFlag: this.formCompletionFlag,
@@ -1060,6 +1080,7 @@ export class EncounterCreatorScene extends Phaser.Scene {
     addTextDiff("TITLE",           base.title,          p.title);
     addTextDiff("INTRODUCTION",    base.introduction,   p.introduction);
     addTextDiff("DESCRIPTION",     base.description,    p.description);
+    addTextDiff("AIGM CONTEXT",    base.aigmContext,    p.aigmContext);
     addTextDiff("OBJECTIVE",       base.objective,      p.objective);
     addTextDiff("COMPLETION FLAG", base.completionFlag, p.completionFlag);
     addArrayDiff("ALLY IDS",       base.allyIds,        p.allyIds);
@@ -1094,11 +1115,13 @@ export class EncounterCreatorScene extends Phaser.Scene {
     if (p.title          !== undefined) this.formTitle          = p.title;
     if (p.introduction   !== undefined) this.formIntroduction   = p.introduction;
     if (p.description    !== undefined) this.formDescription    = p.description;
+    if (p.aigmContext    !== undefined) this.formAigmContext    = p.aigmContext;
     if (p.objective      !== undefined) this.formObjective      = p.objective;
     if (p.completionFlag !== undefined) this.formCompletionFlag = p.completionFlag;
     if (this.formTitleInput          && p.title          !== undefined) this.formTitleInput.value          = p.title;
     if (this.formIntroInput          && p.introduction   !== undefined) this.formIntroInput.value          = p.introduction;
-    if (this.formDescInput           && p.description    !== undefined) this.formDescInput.value           = p.description;
+    if (this.formDescriptionInput    && p.description    !== undefined) this.formDescriptionInput.value    = p.description;
+    if (this.formAigmContextInput    && p.aigmContext    !== undefined) this.formAigmContextInput.value    = p.aigmContext;
     if (this.formObjectiveInput      && p.objective      !== undefined) this.formObjectiveInput.value      = p.objective;
     if (this.formCompletionFlagInput && p.completionFlag !== undefined) this.formCompletionFlagInput.value = p.completionFlag;
 
@@ -1211,13 +1234,17 @@ export class EncounterCreatorScene extends Phaser.Scene {
 
   /**
    * Build the BASIC INFORMATION tab's contents inside the right column.
-   * Stacks title (+PREVIEW button), introduction, description, and an
-   * objective + completion-flag row. Heights split the available area so the
-   * intro + description textareas grow with the panel.
+   * Stacks title (+PREVIEW button), introduction, description (player card
+   * text), AIGM context (long-form scene grounding for the GM), and an
+   * objective + completion-flag row. The two long textareas (introduction
+   * + AIGM context) flex to fill the panel; the player description is a
+   * single short textarea since the encounter card has limited room.
    */
   private buildBasicInfoTab(x: number, y: number, w: number, h: number): void {
     const oneLineH = 28;
-    const fixedHeight = (22 + oneLineH) + 14 + 22 + 14 + 22 + 14 + (22 + oneLineH);
+    const descShortH = 70;
+    // title(28+22) + intro(22) + desc(22+short+14) + aigm(22) + obj(22+28) + spacers
+    const fixedHeight = (22 + oneLineH) + 14 + 22 + 14 + (22 + descShortH) + 14 + 22 + 14 + (22 + oneLineH);
     const textareaH = Math.max(60, Math.floor((h - fixedHeight) / 2));
     /** Push a label into the main label set, the basic-info subset (for
      *  tab toggling), and the formChrome (for bulk dispose). */
@@ -1262,18 +1289,28 @@ export class EncounterCreatorScene extends Phaser.Scene {
       this.formIntroduction,
     ));
 
-    // ── DESCRIPTION ───────────────────────────────────────────────────
+    // ── DESCRIPTION (player-facing card text) ─────────────────────────
     const descY = introY + 22 + textareaH + 14;
     pushBasicLabel(this.makeSubLabel(x, descY, w, "DESCRIPTION"));
-    this.formDescInput = trackHtmlInput(this.buildTextarea(
-      x, descY + 22, w, textareaH,
-      "Scene context (the AIGM sees this silently)…",
+    this.formDescriptionInput = trackHtmlInput(this.buildTextarea(
+      x, descY + 22, w, descShortH,
+      "Short summary shown on the encounter card — what the player sees before launching.",
       (val) => { this.formDescription = val; },
       this.formDescription,
     ));
 
+    // ── AIGM CONTEXT (long-form scene grounding for the GM) ───────────
+    const aigmY = descY + 22 + descShortH + 14;
+    pushBasicLabel(this.makeSubLabel(x, aigmY, w, "AIGM CONTEXT"));
+    this.formAigmContextInput = trackHtmlInput(this.buildTextarea(
+      x, aigmY + 22, w, textareaH,
+      "Scene context the AIGM sees silently — atmosphere, what NPCs know, what to gate behind checks, how the scene should resolve.",
+      (val) => { this.formAigmContext = val; },
+      this.formAigmContext,
+    ));
+
     // ── OBJECTIVE + COMPLETION FLAG row ──────────────────────────────
-    const objFlagY = descY + 22 + textareaH + 14;
+    const objFlagY = aigmY + 22 + textareaH + 14;
     const halfW = Math.floor((w - 8) / 2);
     pushBasicLabel(this.makeSubLabel(x, objFlagY, halfW, "OBJECTIVE"));
     this.formObjectiveInput = trackHtmlInput(this.buildLineInput(
@@ -1388,7 +1425,8 @@ export class EncounterCreatorScene extends Phaser.Scene {
     const d = visible ? "" : "none";
     if (this.formTitleInput)          this.formTitleInput.style.display          = d;
     if (this.formIntroInput)          this.formIntroInput.style.display          = d;
-    if (this.formDescInput)           this.formDescInput.style.display           = d;
+    if (this.formDescriptionInput)    this.formDescriptionInput.style.display    = d;
+    if (this.formAigmContextInput)    this.formAigmContextInput.style.display    = d;
     if (this.formObjectiveInput)      this.formObjectiveInput.style.display      = d;
     if (this.formCompletionFlagInput) this.formCompletionFlagInput.style.display = d;
     if (this.titlePreviewBtn)        this.titlePreviewBtn.setVisible(visible);
@@ -1527,6 +1565,7 @@ export class EncounterCreatorScene extends Phaser.Scene {
       const placements = this.zonePainter.getPlacements();
       const triggers = this.triggerEditor?.getTriggers() ?? [];
       const commonFields = {
+        aigmContext: this.formAigmContext,
         description: this.formDescription,
         startingZonesData,
         placementMode,

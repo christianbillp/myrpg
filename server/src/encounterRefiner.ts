@@ -48,6 +48,9 @@ export interface RefinerTrigger {
 export interface EncounterDraftForRefine {
   title: string;
   introduction: string;
+  /** Long-form AIGM scene context (maps to encounter JSON's `customContext`). */
+  aigmContext: string;
+  /** Player-facing card summary (maps to encounter JSON's `description`). */
   description: string;
   objective: string;
   completionFlag: string;
@@ -89,6 +92,9 @@ export interface RefineResponse {
   proposed: Partial<{
     title: string;
     introduction: string;
+    /** Long-form AIGM scene context. */
+    aigmContext: string;
+    /** Player-facing card summary. */
     description: string;
     objective: string;
     completionFlag: string;
@@ -113,6 +119,7 @@ interface RefinerPayload {
   rationale: string;
   title?: string;
   introduction?: string;
+  aigmContext?: string;
   description?: string;
   objective?: string;
   completionFlag?: string;
@@ -172,6 +179,7 @@ export async function refineEncounter(
   const proposed: RefineResponse['proposed'] = {};
   if (payload.title          !== undefined) proposed.title          = payload.title;
   if (payload.introduction   !== undefined) proposed.introduction   = payload.introduction;
+  if (payload.aigmContext    !== undefined) proposed.aigmContext    = payload.aigmContext;
   if (payload.description    !== undefined) proposed.description    = payload.description;
   if (payload.objective      !== undefined) proposed.objective      = payload.objective;
   if (payload.completionFlag !== undefined) proposed.completionFlag = payload.completionFlag;
@@ -273,7 +281,7 @@ TRIGGER OBJECTS — when you propose \`triggerObjects\`, return a FULL trigger l
 - \`region\`: \`{ x, y, w, h }\` — rectangular tile region. \`w\`/\`h\` ≥ 1. Must fit inside the map.
 - \`kind\`: one of:
   - \`perception\` — DC perception check. Required: \`dc\`, \`passMessage\`, \`message\` (fail text).
-  - \`combat\` — flips monsters to enemy disposition + starts combat. Required: \`defIds\` (list of monster ids that get flipped). Use ids from the proposed/current \`enemyIds\` (or \`neutralIds\` for hostile-on-trigger NPCs).
+  - \`combat\` — flips monsters to enemy disposition + starts combat. Required: \`defIds\` (list of **definition ids** that get flipped — e.g. \`"bandit"\`, \`"goblin_minion"\`). These are the SAME strings that appear in \`enemyIds\` / \`neutralIds\` / \`allyIds\` (or in the global monster/NPC rosters). DO NOT use slot refs (\`neutral_1\`, \`enemy_0\`), combat labels (\`enemy_A\`), or instance ids (\`bandit_1\`) — only the bare defId. Flipping one defId flips every NPC in the encounter with that def, which is usually what you want for "the bandits attack".
   - \`log\` — appends a text line to the event log. Required: \`message\`.
   - \`speech\` — an NPC speaks a line. Required: \`entityRef\` (e.g. \`npc_<id>\` or \`enemy_A\`), \`message\`.
   - \`aigm\` — feeds a cue to the AI Game Master so it narrates the next reply with the line. Required: \`message\`.
@@ -318,10 +326,11 @@ ${passability}
 
 CURRENT DRAFT:
 
-Title:           ${d.title || "(empty)"}
-Introduction:    ${d.introduction || "(empty)"}
-Description:     ${d.description || "(empty)"}
-Objective:       ${d.objective || "(empty)"}
+Title:                  ${d.title || "(empty)"}
+Introduction:           ${d.introduction || "(empty)"}
+Description (player):   ${d.description || "(empty)"}
+AIGM Context:           ${d.aigmContext || "(empty)"}
+Objective:              ${d.objective || "(empty)"}
 Completion flag: ${d.completionFlag || "(empty)"}
 Ally ids:        ${d.allyIds.length === 0 ? "(none)" : d.allyIds.join(", ")}
 Enemy ids:       ${d.enemyIds.length === 0 ? "(none)" : d.enemyIds.join(", ")}
@@ -396,7 +405,8 @@ function buildResponseTool() {
         rationale:      { type: "string", description: "1-2 sentence explanation of what was changed and why." },
         title:          { type: "string" },
         introduction:   { type: "string" },
-        description:    { type: "string" },
+        description:    { type: "string", description: "Short player-facing card summary shown on the Single Encounter Setup screen. Maps to the encounter's description field." },
+        aigmContext:    { type: "string", description: "Long-form AIGM scene context — grounding the GM reads silently. Maps to the encounter's customContext field." },
         objective:      { type: "string" },
         completionFlag: { type: "string", description: "snake_case slug, or empty string to clear." },
         allyIds:        { type: "array", items: { type: "string" } },
@@ -432,14 +442,21 @@ function validateRefinement(
   if (p.completionFlag !== undefined && p.completionFlag !== "" && !/^[a-z0-9_]+$/.test(p.completionFlag)) {
     throw new Error(`completionFlag "${p.completionFlag}" must be snake_case (lowercase letters, digits, underscores).`);
   }
+  // Spawn resolves NPC ids first, then monster ids (SpawnHelpers.spawnNpc),
+  // so allyIds/enemyIds can carry either. Accept both rosters here — the
+  // previous monster-only check rejected encounters that legitimately put
+  // a named NPC in an ally/enemy slot (e.g. `frightened_traveller`).
   if (p.allyIds !== undefined) {
-    for (const id of p.allyIds) if (!validMonsterIds.has(id)) throw new Error(`allyIds contains unknown monster id "${id}"`);
+    for (const id of p.allyIds) if (!validMonsterIds.has(id) && !validNpcIds.has(id))
+      throw new Error(`allyIds contains unknown id "${id}" (not in monster or NPC roster)`);
   }
   if (p.enemyIds !== undefined) {
-    for (const id of p.enemyIds) if (!validMonsterIds.has(id)) throw new Error(`enemyIds contains unknown monster id "${id}"`);
+    for (const id of p.enemyIds) if (!validMonsterIds.has(id) && !validNpcIds.has(id))
+      throw new Error(`enemyIds contains unknown id "${id}" (not in monster or NPC roster)`);
   }
   if (p.neutralIds !== undefined) {
-    for (const id of p.neutralIds) if (!validNpcIds.has(id)) throw new Error(`neutralIds contains unknown NPC id "${id}"`);
+    for (const id of p.neutralIds) if (!validNpcIds.has(id) && !validMonsterIds.has(id))
+      throw new Error(`neutralIds contains unknown id "${id}" (not in NPC or monster roster)`);
   }
 
   const passRows = passability.split("\n");
@@ -494,9 +511,35 @@ function validateRefinement(
         if (!t.passMessage) throw new Error(`perception trigger "${t.id}" missing passMessage`);
       } else if (t.kind === "combat") {
         if (!t.defIds || t.defIds.length === 0) throw new Error(`combat trigger "${t.id}" missing defIds (the monsters to flip)`);
+        // The model occasionally produces slot-role refs (`neutral_1`,
+        // `enemy_2`, `ally_1`) when it's been looking at `placements[]`
+        // entries shaped `{ role: "neutral", index: 1 }`. Combat triggers
+        // flip by `defId` (the underlying `set_disposition_by_def_id`
+        // action keys on def, not on instance), so we resolve those slot
+        // refs back to the def at that index — accepting either 1-based
+        // (most natural for an LLM) or 0-based — and dedupe. Anything
+        // unrecognisable falls through to the error path below.
+        const slotRefRe = /^(enemy|neutral|ally)_(\d+)$/;
+        const listFor = (role: string): string[] => role === "enemy" ? effectiveEnemyIds
+                                                  : role === "neutral" ? effectiveNeutralIds
+                                                  : effectiveAllyIds;
+        const seen = new Set<string>();
+        const resolved: string[] = [];
+        for (const raw of t.defIds) {
+          let id = raw;
+          const m = raw.match(slotRefRe);
+          if (m) {
+            const list = listFor(m[1]);
+            const n = parseInt(m[2], 10);
+            if (n - 1 >= 0 && n - 1 < list.length) id = list[n - 1];
+            else if (n >= 0 && n < list.length)   id = list[n];
+          }
+          if (!seen.has(id)) { seen.add(id); resolved.push(id); }
+        }
+        t.defIds = resolved;
         for (const id of t.defIds) {
           if (!effectiveEnemyIds.includes(id) && !effectiveNeutralIds.includes(id) && !validMonsterIds.has(id) && !validNpcIds.has(id)) {
-            throw new Error(`combat trigger "${t.id}" references unknown id "${id}"`);
+            throw new Error(`combat trigger "${t.id}" references unknown id "${id}" — use a defId from the encounter roster (e.g. "bandit"), not a slot ref like "neutral_1" or a combat label like "enemy_A".`);
           }
         }
       } else if (t.kind === "speech") {

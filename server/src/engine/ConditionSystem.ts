@@ -3,8 +3,18 @@
  * Functions here apply equally to any creature: player, ally, or enemy.
  */
 
-/** Conditions that prevent actions, bonus actions, and reactions. */
-export const INCAPACITATING_CONDITIONS = ['paralyzed', 'stunned', 'unconscious', 'incapacitated'];
+/** Conditions that prevent actions, bonus actions, and reactions. `dead`
+ *  is included so any incapacitation gate (turn skipping, AOE saving-throw
+ *  exclusion, etc.) treats corpses the same as unconscious creatures. */
+export const INCAPACITATING_CONDITIONS = ['paralyzed', 'stunned', 'unconscious', 'incapacitated', 'dead'];
+
+/** True when the creature is a corpse — `hp <= 0` is the canonical signal,
+ *  but the `dead` tag is the authored marker (set by `set_npc_dead`) that
+ *  also flags creatures spawned dead from the start (e.g. a found body) so
+ *  the engine doesn't try to revive, target, or reveal them. */
+export function isDead<T extends { hp: number; conditions: string[] }>(target: T): boolean {
+  return target.hp <= 0 || target.conditions.includes('dead');
+}
 
 /** Conditions that give attackers Advantage against the creature (prone handled separately). */
 export const ADVANTAGE_AGAINST_CONDITIONS = ['blinded', 'paralyzed', 'restrained', 'stunned', 'unconscious'];

@@ -62,6 +62,11 @@ export interface RefinerTrigger {
 export interface EncounterRefineDraft {
   title: string;
   introduction: string;
+  /** Long-form scene context the AIGM reads silently — maps to the
+   *  encounter's `customContext` field on disk. */
+  aigmContext: string;
+  /** Player-facing card summary — maps to the encounter's `description`
+   *  field on disk. Surfaced on the Single Encounter Setup screen. */
   description: string;
   objective: string;
   completionFlag: string;
@@ -92,6 +97,9 @@ export interface EncounterRefineDraft {
 export interface EncounterRefineProposed {
   title?: string;
   introduction?: string;
+  /** Long-form AIGM scene context (writes to `customContext`). */
+  aigmContext?: string;
+  /** Player-facing card summary (writes to `description`). */
   description?: string;
   objective?: string;
   completionFlag?: string;
@@ -112,6 +120,79 @@ export interface EncounterRefineProposed {
  *  fields the model wants to change are present. */
 export interface EncounterRefineResponse {
   proposed: EncounterRefineProposed;
+  rationale: string;
+}
+
+/** Shape of one adventure chapter sent to / proposed by the adventure
+ *  refiner. Mirrors the `AdventureChapter` shape minus optional fields the
+ *  AI doesn't author. */
+export interface AdventureRefineChapter {
+  id: string;
+  title: string;
+  encounterId: string;
+  completionFlag?: string;
+}
+
+/** Shape of the adventure draft sent to `/generate/adventure/refine`. Mirrors
+ *  `AdventureDraftForRefine` on the server. */
+export interface AdventureRefineDraft {
+  /** snake_case adventure id. The AI sees it for context but doesn't propose
+   *  changes — the user owns the id. */
+  id: string;
+  title: string;
+  description: string;
+  introduction: string;
+  aiContext: string;
+  chapters: AdventureRefineChapter[];
+  /** Empty string when no rest encounter is set. */
+  restEncounterId: string;
+}
+
+/** Subset of the draft the AI is allowed to propose. `chapters` and
+ *  `restEncounterId` replace the existing values wholesale when present. */
+export interface AdventureRefineProposed {
+  title?: string;
+  description?: string;
+  introduction?: string;
+  aiContext?: string;
+  chapters?: AdventureRefineChapter[];
+  /** Empty string clears the rest encounter. */
+  restEncounterId?: string;
+}
+
+export interface AdventureRefineResponse {
+  proposed: AdventureRefineProposed;
+  rationale: string;
+}
+
+/** Draft shape sent to `/generate/npc/refine`. Mirrors `NpcDraftForRefine`
+ *  on the server: identity + persona + persistent / conversation. */
+export interface NpcRefineDraft {
+  id: string;
+  name: string;
+  monsterClass: string;
+  factionId: string;
+  color: string;
+  tokenAsset: string;
+  persona: string;
+  persistent: boolean;
+  conversationId: string;
+}
+
+/** Subset of the draft the AI is allowed to propose. */
+export interface NpcRefineProposed {
+  name?: string;
+  monsterClass?: string;
+  factionId?: string;
+  color?: string;
+  tokenAsset?: string;
+  persona?: string;
+  persistent?: boolean;
+  conversationId?: string;
+}
+
+export interface NpcRefineResponse {
+  proposed: NpcRefineProposed;
   rationale: string;
 }
 
@@ -405,6 +486,42 @@ export class GameClient {
     return res.json() as Promise<EncounterRefineResponse>;
   }
 
+  /** Adventure counterpart to `refineEncounter`. The server picks the
+   *  encounter pool fresh from disk so newly authored encounters are
+   *  immediately available as chapter / rest picks. */
+  async refineAdventure(
+    draft: AdventureRefineDraft,
+    prompt: string,
+  ): Promise<AdventureRefineResponse> {
+    const res = await fetch(`${API_URL}/generate/adventure/refine`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ draft, prompt }),
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({ error: `HTTP ${res.status}` })) as { error?: string };
+      throw new Error(body.error ?? `Refine failed: ${res.status}`);
+    }
+    return res.json() as Promise<AdventureRefineResponse>;
+  }
+
+  /** NPC counterpart to `refineEncounter` / `refineAdventure`. */
+  async refineNpc(
+    draft: NpcRefineDraft,
+    prompt: string,
+  ): Promise<NpcRefineResponse> {
+    const res = await fetch(`${API_URL}/generate/npc/refine`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ draft, prompt }),
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({ error: `HTTP ${res.status}` })) as { error?: string };
+      throw new Error(body.error ?? `Refine failed: ${res.status}`);
+    }
+    return res.json() as Promise<NpcRefineResponse>;
+  }
+
   /**
    * Compose a map deterministically from terrain + features toggles. Used
    * when the player has set any of the map-style toggles on
@@ -492,6 +609,9 @@ export class GameClient {
     existingMapId?: string;
     terrain?: 'grassland' | 'forest' | 'dungeon';
     features?: Array<'ruins' | 'buildings' | 'campsites' | 'path' | 'coastline' | '3-room' | '5-room'>;
+    /** Long-form AIGM scene context (writes to the encounter's `customContext`). */
+    aigmContext?: string;
+    /** Player-facing card summary (writes to the encounter's `description`). */
     description?: string;
     seed?: number;
     startingZonesData?: number[];
@@ -678,6 +798,24 @@ export class GameClient {
     return res.json() as Promise<{ npcId: string }>;
   }
 
+  /** Author-side preview chat for an NPC draft. No session required. */
+  async testNpcChat(
+    draft: { name: string; monsterClass?: string; factionId?: string; persona: string },
+    history: Array<{ role: "user" | "assistant"; content: string }>,
+    prompt: string,
+  ): Promise<{ reply: string }> {
+    const res = await fetch(`${API_URL}/npc/test-chat`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ draft, history, prompt }),
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({ error: `HTTP ${res.status}` })) as { error?: string };
+      throw new Error(body.error ?? `Test chat failed: ${res.status}`);
+    }
+    return res.json() as Promise<{ reply: string }>;
+  }
+
   /**
    * Update an existing encounter in place — used by `EncounterCreatorScene`.
    * Mirrors `composeEncounter`'s body shape but requires an `encounterId`
@@ -687,6 +825,9 @@ export class GameClient {
   async updateEncounter(args: {
     encounterId: string;
     mapId?: string;
+    /** Long-form AIGM scene context (writes to the encounter's `customContext`). */
+    aigmContext?: string;
+    /** Player-facing card summary (writes to the encounter's `description`). */
     description?: string;
     startingZonesData?: number[];
     /** Starting-location mode (`'zones'` = random in zones, `'exact'` = per-entity tiles). */

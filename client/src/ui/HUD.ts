@@ -625,6 +625,12 @@ export class HUD {
     this.renderDmHistory();
   }
 
+  /** Focus the GM input — used by the ConversationOverlay's "Speak freely"
+   *  hand-off (Phase 5 will pre-load the transcript here). */
+  openGmInput(): void {
+    this.gmInputEl.focus();
+  }
+
   /**
    * Mirror an NPC's spoken line into the GM chat so it persists as a
    * scrollable record alongside the transient speech bubble above the
@@ -780,8 +786,8 @@ export class HUD {
       const rc    = styleColorDim(entry.style);
       const lhtml = String(marked.parseInline(entry.left));
       const rhtml = entry.right ? escHtml(entry.right) : '';
-      return `<div style="display:flex;justify-content:space-between;min-height:${ROW_H}px;padding:1px 0;">
-        <span style="color:${lc};flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${lhtml}</span>
+      return `<div style="display:flex;justify-content:space-between;align-items:flex-start;min-height:${ROW_H}px;padding:1px 0;">
+        <span style="color:${lc};flex:1;min-width:0;overflow-wrap:break-word;word-break:break-word;padding-left:12px;text-indent:-12px;">${lhtml}</span>
         ${rhtml ? `<span style="color:${rc};padding-left:8px;flex-shrink:0;">${rhtml}</span>` : ''}
       </div>`;
     }).join('');

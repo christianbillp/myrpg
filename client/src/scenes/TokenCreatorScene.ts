@@ -108,7 +108,7 @@ export class TokenCreatorScene extends Phaser.Scene {
     this.returnTo = data?.returnTo ?? null;
     this.spec = {
       id: "",
-      slots: { body: "plain", ears: "round", face: "oval", beard: "none", eyes: "normal", mouth: "neutral", hair: "short", accessory: "none" },
+      slots: { body: "plain", ears: "round", face: "oval", eyes: "normal", mouth: "neutral", hair: "short" },
       palette: { body: "#7a6a44", skin: "#e8b888", hair: "#3a2a1a" },
     };
   }
@@ -222,12 +222,35 @@ export class TokenCreatorScene extends Phaser.Scene {
       if (key === "body") this.bodyColorInput = input;
       if (key === "skin") this.skinColorInput = input;
       if (key === "hair") this.hairColorInput = input;
-      // Live colour swatch next to the input.
-      const swatch = document.createElement("div");
+      // Live colour swatch next to the input — also clickable, opens the
+      // browser's native colour picker so the user can pick a hue visually
+      // without typing the hex code. Changes flow back into the text input
+      // and the spec via the same `oninput` plumbing.
+      const swatch = document.createElement("input");
+      swatch.type = "color";
+      swatch.value = normaliseHex(input.value);
       swatch.style.cssText = `
-        position: absolute; background: ${input.value || "#aabbcc"};
-        border: 1px solid #445566; z-index: 10;
+        position: absolute; padding: 0; margin: 0;
+        border: 1px solid #445566; background: ${input.value || "#aabbcc"};
+        cursor: pointer; z-index: 10;
+        -webkit-appearance: none; appearance: none;
       `;
+      // Hide the default colour swatch chrome the browser draws inside the
+      // input so the swatch reads as a flat coloured square.
+      const styleEl = document.createElement("style");
+      styleEl.textContent = `input[type="color"]::-webkit-color-swatch{border:none;padding:0;} input[type="color"]::-webkit-color-swatch-wrapper{padding:0;border:none;}`;
+      if (!document.head.querySelector("style[data-token-color-swatch]")) {
+        styleEl.setAttribute("data-token-color-swatch", "true");
+        document.head.appendChild(styleEl);
+      }
+      swatch.addEventListener("input", () => {
+        const hex = swatch.value;
+        input.value = hex;
+        if (!this.spec.palette) this.spec.palette = {};
+        this.spec.palette[key] = hex;
+        swatch.style.background = hex;
+        this.refreshPreview();
+      });
       document.body.appendChild(swatch);
       this.attachPlacement(swatch, colX + labelW + inputW + 6, yRow + 4, swatchW, pH - 8);
       this.chrome.push({ setVisible: (v) => { swatch.style.display = v ? "" : "none"; }, dispose: () => swatch.remove() });
@@ -281,7 +304,9 @@ export class TokenCreatorScene extends Phaser.Scene {
   }
 
   /** One slot row in the picker: a header line followed by a grid of small
-   *  thumbnails the user can click to pick a part. */
+   *  thumbnails the user can click to pick a part. A sentinel "NONE" cell is
+   *  always prepended so every slot can be cleared from the UI — selecting it
+   *  drops the slot from `spec.slots` entirely. */
   private buildSlotSection(host: HTMLDivElement, slot: TokenSlot): void {
     const section = document.createElement("div");
     section.style.cssText = "margin-bottom: 10px;";
@@ -304,11 +329,37 @@ export class TokenCreatorScene extends Phaser.Scene {
     section.appendChild(grid);
     this.slotRows.set(slot, grid);
 
+    grid.appendChild(this.buildNoneThumbnail(slot));
     const ids = this.catalog[slot] ?? [];
     for (const id of ids) {
+      if (id === "none") continue; // legacy placeholder — sentinel covers it
       const cell = this.buildPartThumbnail(slot, id);
       grid.appendChild(cell);
     }
+  }
+
+  /** Sentinel "clear this slot" thumbnail. `partId === null` is the UI's
+   *  signal to omit the slot from the saved spec; the server then skips it
+   *  at compose time the same as any unset slot. */
+  private buildNoneThumbnail(slot: TokenSlot): HTMLDivElement {
+    const cell = document.createElement("div");
+    const isSelected = (): boolean => !this.spec.slots?.[slot];
+    cell.title = `${slot} · none`;
+    cell.style.cssText = `
+      width: 100%; aspect-ratio: 1 / 1; box-sizing: border-box;
+      border: 2px solid ${isSelected() ? ACCENT : "#1a1a2a"};
+      background: #0a0e16;
+      cursor: pointer; overflow: hidden;
+      display: flex; align-items: center; justify-content: center;
+      color: #556677; font-family: monospace; font-size: 9px;
+      letter-spacing: 1px;
+    `;
+    cell.textContent = "NONE";
+    cell.addEventListener("mouseenter", () => { if (!isSelected()) cell.style.borderColor = "#557788"; });
+    cell.addEventListener("mouseleave", () => { if (!isSelected()) cell.style.borderColor = "#1a1a2a"; });
+    cell.addEventListener("click", () => this.selectPart(slot, null, cell));
+    if (isSelected()) this.selectedThumbEls.set(slot, cell);
+    return cell;
   }
 
   private buildPartThumbnail(slot: TokenSlot, partId: string): HTMLDivElement {
@@ -339,10 +390,16 @@ export class TokenCreatorScene extends Phaser.Scene {
     return cell;
   }
 
-  private selectPart(slot: TokenSlot, partId: string, cell: HTMLDivElement): void {
+  /** `partId === null` clears the slot — the spec drops the key so the
+   *  server's compose loop skips it. Otherwise sets the slot to the picked
+   *  part id. */
+  private selectPart(slot: TokenSlot, partId: string | null, cell: HTMLDivElement): void {
     const prev = this.selectedThumbEls.get(slot);
     if (prev) prev.style.borderColor = "#1a1a2a";
-    this.spec.slots = { ...this.spec.slots, [slot]: partId };
+    const nextSlots = { ...this.spec.slots };
+    if (partId === null) delete nextSlots[slot];
+    else nextSlots[slot] = partId;
+    this.spec.slots = nextSlots as TokenSpec["slots"];
     cell.style.borderColor = ACCENT;
     this.selectedThumbEls.set(slot, cell);
     this.refreshPreview();
@@ -390,7 +447,10 @@ export class TokenCreatorScene extends Phaser.Scene {
   }
 
   /** After load/randomize the selected slot picks change wholesale — walk
-   *  the picker grids and flip every thumb's border to match the new spec. */
+   *  the picker grids and flip every thumb's border to match the new spec.
+   *  Grid layout: cell 0 is the sentinel "NONE" thumbnail; cells 1..N are
+   *  the catalog entries (skipping any legacy "none" placeholder so indices
+   *  line up with `cellIds`). */
   private reflowSelectedThumbs(): void {
     for (const slot of TOKEN_SLOTS) {
       const grid = this.slotRows.get(slot);
@@ -398,9 +458,20 @@ export class TokenCreatorScene extends Phaser.Scene {
       const wanted = this.spec.slots?.[slot];
       this.selectedThumbEls.get(slot)?.style.setProperty("border-color", "#1a1a2a");
       this.selectedThumbEls.delete(slot);
-      const ids = this.catalog[slot] ?? [];
-      ids.forEach((id, i) => {
-        const cell = grid.children[i] as HTMLDivElement | undefined;
+
+      const noneCell = grid.children[0] as HTMLDivElement | undefined;
+      if (noneCell) {
+        if (!wanted) {
+          noneCell.style.borderColor = ACCENT;
+          this.selectedThumbEls.set(slot, noneCell);
+        } else {
+          noneCell.style.borderColor = "#1a1a2a";
+        }
+      }
+
+      const cellIds = (this.catalog[slot] ?? []).filter((id) => id !== "none");
+      cellIds.forEach((id, i) => {
+        const cell = grid.children[i + 1] as HTMLDivElement | undefined;
         if (!cell) return;
         if (id === wanted) {
           cell.style.borderColor = ACCENT;
@@ -568,4 +639,12 @@ export class TokenCreatorScene extends Phaser.Scene {
     if (this.statusEl) { this.statusEl.remove(); this.statusEl = null; }
     if (this.picker)   { this.picker.destroy(); this.picker = null; }
   }
+}
+
+/** `<input type="color">` requires a 7-character `#rrggbb` value. Normalise
+ *  user-entered hex so the swatch always has a valid starting value. */
+function normaliseHex(raw: string | undefined): string {
+  if (!raw) return "#aabbcc";
+  const s = raw.trim().replace(/^#/, "");
+  return /^[0-9a-fA-F]{6}$/.test(s) ? `#${s.toLowerCase()}` : "#aabbcc";
 }

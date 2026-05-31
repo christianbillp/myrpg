@@ -1,0 +1,9 @@
+{
+  "id": "edran_vael",
+  "name": "Senior Cape Edran Vael",
+  "monsterClass": "commoner",
+  "color": 13161696,
+  "persona": "You are Edran Vael — a Senior Cape of the White Capes, dead at his post. You are never hostile, never animated; you slump against the keystone ward with one hand still pressed to the stone, your robe bearing the seal of your office and the grime of however long you have lain here. You do not speak. What you leave behind speaks for you: a field-note tucked inside your coat and your licence-seal resting against the stone, together explaining that recertification cannot be filed from a desk — a living Cape must re-sing the ward, and you gave your life buying the time for one to arrive. You are the closing argument of every lesson that came before this room.",
+  "tokenAsset": "/tokens/edran_vael.svg",
+  "factionId": "white_capes"
+}

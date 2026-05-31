@@ -31,7 +31,7 @@
 import type { GameContext } from './GameContext.js';
 import type { GameMap, GameState, NpcState, Senses } from './types.js';
 import { d20 } from './Dice.js';
-import { clearHide } from './ConditionSystem.js';
+import { clearHide, isDead } from './ConditionSystem.js';
 
 const TILE_FT = 5;
 
@@ -153,6 +153,70 @@ export function effectivePerception(basePP: number, vision: VisionResult): numbe
 }
 
 /**
+ * Default range (in tiles) for ambient noticing: the player can passively
+ * spot a hidden NPC out to this distance if line-of-sight is clear and
+ * effective passive Perception meets the NPC's `hideDC`. 10 tiles ≈ 50 ft,
+ * matching the SRD "you can see clearly at typical adventure distances"
+ * baseline before darkvision / dim light kicks in.
+ */
+const PASSIVE_REVEAL_RANGE_TILES = 10;
+
+/**
+ * Player-driven, no-roll perception sweep. Called automatically after every
+ * player move so authored hidden NPCs (`conditions: ['hidden']` + `hideDC`)
+ * surface as soon as the player wanders close enough to passively notice
+ * them — no Search action required. For each hidden NPC within range:
+ *   • Compute `canSee` ignoring the NPC's `hidden`/`invisible` flags so the
+ *     walker reports cover + obscurance + sense source as if they weren't
+ *     concealed.
+ *   • Adjust the player's passive Perception via `effectivePerception`
+ *     (Darkvision/Lightly-obscured maths the same as the active sweep).
+ *   • If effective PP ≥ `hideDC`, clear the `hidden` condition (and the
+ *     companion `invisible` granted by Hide) and log the spot.
+ * Returns the list of newly-revealed NPC ids — callers can log or pause
+ * exploration when something steps out of concealment.
+ */
+export function runPassivePerceptionSweep(ctx: GameContext): string[] {
+  const s = ctx.state;
+  const px = s.player.tileX, py = s.player.tileY;
+  const observer: Observer = { tileX: px, tileY: py, senses: ctx.playerDef.senses };
+  const passivePP = 10 + (ctx.playerDef.skills['perception'] ?? 0);
+  const revealed: string[] = [];
+
+  for (const npc of s.npcs) {
+    if (isDead(npc)) continue;
+    if (!npc.conditions.includes('hidden')) continue;
+    if (typeof npc.hideDC !== 'number') continue;
+    // Trigger-locked NPCs are invisible to passive sweeps — only an
+    // authored `set_npc_hidden { hidden: false }` action surfaces them.
+    if (npc.revealedByTrigger) continue;
+    if (chebyshevTiles({ tileX: px, tileY: py }, { tileX: npc.tileX, tileY: npc.tileY }) > PASSIVE_REVEAL_RANGE_TILES) continue;
+
+    // Probe LOS as if the hider weren't hidden — we already gate on hidden
+    // above; the question now is purely "would the line of sight reach you
+    // if you were standing in the open?".
+    const probe: VisionTarget = {
+      tileX: npc.tileX, tileY: npc.tileY, id: npc.id,
+      conditions: npc.conditions.filter((c) => c !== 'hidden' && c !== 'invisible'),
+    };
+    const vision = canSee(s, observer, probe);
+    // `canSee` reports `via: 'none'` when total cover, blindness, or heavy
+    // obscurance kills the line — in any of those cases the player cannot
+    // passively notice the hider regardless of PP.
+    if (!vision.sees) continue;
+
+    const ePP = effectivePerception(passivePP, vision);
+    if (ePP >= npc.hideDC) {
+      const label = npc.revealedName ?? npc.name;
+      ctx.addLog({ left: `${ctx.playerDef.name} notices ${label}`, right: `PP ${ePP} ≥ DC ${npc.hideDC}`, style: 'status' });
+      clearHide(npc);
+      revealed.push(npc.id);
+    }
+  }
+  return revealed;
+}
+
+/**
  * Run an opposed Perception sweep against the hider. For every potential
  * observer (non-ally, non-incapacitated NPC + the player if the hider is an
  * NPC), roll an active Wisdom (Perception) check + the observer's passive
@@ -205,7 +269,7 @@ export function runPerceptionSweep(ctx: GameContext, hider: 'player' | string): 
   }
   for (const npc of s.npcs) {
     if (npc.id === hider) continue;
-    if (npc.hp <= 0) continue;
+    if (isDead(npc)) continue;
     if (npc.conditions.includes('incapacitated') || npc.conditions.includes('unconscious')) continue;
     const def = ctx.resolveMonsterDef(npc.defId);
     if (!def) continue;

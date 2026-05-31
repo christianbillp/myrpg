@@ -4,10 +4,10 @@ import { drinkPotion } from './CombatSystem.js';
 import { doEnemyOpportunityAttack as caDoEnemyOA } from './CombatActions.js';
 import { doStartCombat as cfDoStartCombat } from './CombatFlow.js';
 import { chebyshev } from './EnemyAI.js';
-import { isIncapacitated, isVisible } from './ConditionSystem.js';
+import { isIncapacitated, isVisible, clearHide } from './ConditionSystem.js';
 import { d, d20, mod } from './Dice.js';
-import { runPerceptionSweep } from './Vision.js';
-import { canShortRest as guardCanShortRest } from './ActionGuards.js';
+import { runPerceptionSweep, runPassivePerceptionSweep } from './Vision.js';
+import { canShortRest as guardCanShortRest, canSearch as guardCanSearch } from './ActionGuards.js';
 import { formatCoins } from '../../../shared/currency.js';
 
 export function doMove(ctx: GameContext, dx: number, dy: number, events: GameEvent[]): void {
@@ -22,7 +22,28 @@ export function doMove(ctx: GameContext, dx: number, dy: number, events: GameEve
   if (dx !== 0 && dy !== 0) {
     if (!s.map.passable[s.player.tileY][nx] && !s.map.passable[ny][s.player.tileX]) return;
   }
-  if (s.npcs.some((n) => n.hp > 0 && n.tileX === nx && n.tileY === ny)) return;
+  // Living-NPC collision check with hidden-NPC handling:
+  //   • Trigger-locked hidden NPC (in_a_niche, behind_a_wall) — incorporeal
+  //     until an authored reveal fires; the player passes through with no
+  //     log line, preserving the narrative beat.
+  //   • Normal hidden NPC — the player stumbles into a creature they had
+  //     no idea was there. Clear the hidden state (so the token + name
+  //     surface) and block the step, with a log line so the player
+  //     understands why their move didn't land.
+  //   • Living, visible NPC — block as before.
+  const blocker = s.npcs.find((n) => n.hp > 0 && n.tileX === nx && n.tileY === ny);
+  if (blocker) {
+    const blockerHidden = blocker.conditions.includes('hidden');
+    if (blockerHidden && blocker.revealedByTrigger) {
+      // Walk through silently — the trigger owns the reveal beat.
+    } else {
+      if (blockerHidden) {
+        clearHide(blocker);
+        ctx.addLog({ left: `${ctx.playerDef.name} stumbles into ${blocker.revealedName ?? blocker.name}!`, style: 'status' });
+      }
+      return;
+    }
+  }
   if (s.phase === 'player_turn' && s.player.movesLeft <= 0) return;
 
   const oldX = s.player.tileX;
@@ -48,6 +69,15 @@ export function doMove(ctx: GameContext, dx: number, dy: number, events: GameEve
   } else {
     checkItemPickup(ctx);
   }
+
+  // Passive Perception vs Stealth: any hidden NPC the player has just
+  // stepped within range/LOS of, whose `hideDC` ≤ Reed's effective passive
+  // Perception, is noticed without a roll. Fired BEFORE `player_moved`
+  // publishes so authored triggers gated on `player_moved` (e.g. ambush
+  // start-combat) see the reveals already applied — a hidden ambusher that
+  // gets spotted on the same step that triggers combat enters the fight
+  // visible.
+  runPassivePerceptionSweep(ctx);
 
   // Publish player_moved on the bus BEFORE the combat-start proximity check
   // so an enter_area trigger that spawns enemies near the player can kick
@@ -75,7 +105,12 @@ export function doMoveTo(ctx: GameContext, targetX: number, targetY: number, eve
       if (nr < 0 || nr >= rows || nc < 0 || nc >= cols) continue;
       if (!passable[nr][nc]) continue;
       if (dr !== 0 && dc !== 0 && !passable[cy][nc] && !passable[nr][cx]) continue;
-      if (s.npcs.some((n) => n.hp > 0 && n.tileX === nc && n.tileY === nr)) continue;
+      // Trigger-locked hidden NPCs are treated as walk-through here so the
+      // BFS doesn't carve detours around invisible creatures; `doMove` will
+      // let the step land on their tile silently. Normal hidden + visible
+      // living NPCs still block routing.
+      if (s.npcs.some((n) => n.hp > 0 && n.tileX === nc && n.tileY === nr
+          && !(n.conditions.includes('hidden') && n.revealedByTrigger))) continue;
       if (dist[nr][nc] !== -1) continue;
       dist[nr][nc] = dist[cy][cx] + 1;
       prev[nr][nc] = [cy, cx];
@@ -125,7 +160,12 @@ function checkCombatTrigger(ctx: GameContext, events: GameEvent[]): void {
 
 export function doSearch(ctx: GameContext): void {
   const s = ctx.state;
-  if (s.phase !== 'exploring') return;
+  if (!guardCanSearch(ctx)) return;
+
+  // Search costs the full Action in combat (SRD); no economy during
+  // exploration. Spending here keeps the action-button greying logic in
+  // sync — `canSearch` flips to false until the next turn.
+  if (s.phase === 'player_turn') s.player.actionUsed = true;
 
   const roll = d20() + (ctx.playerDef.skills['perception'] ?? 0);
   const adj = s.secrets.filter(
@@ -147,8 +187,28 @@ export function doSearch(ctx: GameContext): void {
   );
   for (const h of hidersInRange) runPerceptionSweep(ctx, h.id);
 
+  // SRD Search [Action] — corpse rifling: any adjacent NPC with an authored
+  // `corpseSearch` payload resolves against the same roll. Payload is
+  // single-use — cleared on resolution so a second SEARCH while still
+  // adjacent reports "nothing else here." Pairs with the `set_npc_dead`
+  // trigger action.
+  const corpseLogs: LogEntry[] = [];
+  for (const npc of s.npcs) {
+    if (!npc.corpseSearch) continue;
+    if (chebyshev(s.player.tileX, s.player.tileY, npc.tileX, npc.tileY) > 1) continue;
+    const cs = npc.corpseSearch;
+    const succeeded = roll >= cs.dc;
+    corpseLogs.push({
+      left: `Search ${npc.revealedName ?? npc.name} (${roll} vs DC ${cs.dc}) — ${succeeded ? cs.successText : cs.failureText}`,
+      style: succeeded ? 'hit' : 'miss',
+    });
+    npc.corpseSearch = undefined;
+    npc.corpseSearched = true;
+  }
+
   if (adj.length === 0) {
-    if (hidersInRange.length === 0) ctx.addLog({ left: `Search (${roll}) — nothing found`, style: 'miss' });
+    if (corpseLogs.length > 0) ctx.addLogs(corpseLogs);
+    else if (hidersInRange.length === 0) ctx.addLog({ left: `Search (${roll}) — nothing found`, style: 'miss' });
     return;
   }
 
@@ -156,7 +216,7 @@ export function doSearch(ctx: GameContext): void {
   const success = roll >= secret.def.dc;
   s.secrets = s.secrets.filter((sec) => sec !== secret);
 
-  const logs: LogEntry[] = [];
+  const logs: LogEntry[] = [...corpseLogs];
   if (success) {
     logs.push({ left: `Search (${roll} vs DC ${secret.def.dc}) — ${secret.def.successText}`, style: 'hit' });
     const r = secret.def.reward;

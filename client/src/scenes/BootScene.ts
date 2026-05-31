@@ -48,6 +48,7 @@ export class BootScene extends Phaser.Scene {
     this.load.json("tilesets",            `${API_URL}/tilesets`);
     this.load.json("tileLegend",          `${API_URL}/tilesets/legends`);
     this.load.json("factions",            `${API_URL}/factions`);
+    this.load.json("conversations",       `${API_URL}/conversations`);
   }
 
   async create(): Promise<void> {
@@ -76,6 +77,7 @@ export class BootScene extends Phaser.Scene {
       this.registry.set("encounters",          this.cache.json.get("encounters"));
       this.registry.set("adventures",          this.cache.json.get("adventures"));
       this.registry.set("factions",            this.cache.json.get("factions"));
+      this.registry.set("conversations",       this.cache.json.get("conversations") ?? []);
       // `tileLegend` is the per-tileset payload from /tilesets/legends — each
       // entry has its own LOCAL gid keys, so the client can keep scribble's
       // tile "1" distinct from water's tile "1". Used by the Map Editor's

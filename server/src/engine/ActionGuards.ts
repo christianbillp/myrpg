@@ -40,10 +40,13 @@ export function hasCunningAction(ctx: GameContext): boolean {
   return ctx.playerDef.sneakAttackDice > 0 && ctx.playerDef.level >= 2;
 }
 
-/** Can the player Hide right now? Cost depends on phase + Cunning Action. */
+/** Can the player Hide right now? Cost depends on phase + Cunning Action.
+ *  SRD 5.2.1: Hide is a general Action available to every character — the
+ *  earlier Rogue-only restriction was a UI carve-out that we've dropped so
+ *  Wizards / Clerics / non-rogues can also conceal themselves before an
+ *  encounter starts or set up a Cast-from-cover opener. */
 export function canHide(ctx: GameContext): boolean {
   const s = ctx.state;
-  if (ctx.playerDef.sneakAttackDice <= 0) return false;             // UI currently Rogue-only
   if (s.player.conditions.includes('hidden')) return false;
   // Exploring: no action economy and no enemy gate — the player can hide
   // proactively, e.g. to set up a Sneak Attack opener against currently-
@@ -121,6 +124,16 @@ export function canDash(ctx: GameContext): boolean {
 
 /** Can the player Dodge this turn? */
 export function canDodge(ctx: GameContext): boolean { return canSpendAction(ctx); }
+
+/** Can the player take the SEARCH action right now? Always free during
+ *  exploration; in combat it costs the full Action (no Cunning Action
+ *  fast-track per SRD — Search is not on the Bonus Action list). */
+export function canSearch(ctx: GameContext): boolean {
+  const s = ctx.state;
+  if (s.phase === 'exploring') return true;
+  if (s.phase !== 'player_turn') return false;
+  return canSpendAction(ctx);
+}
 
 /** Can the player Disengage this turn? Requires a living enemy to be meaningful. Rogues L2+ may spend a Bonus Action via Cunning Action instead. */
 export function canDisengage(ctx: GameContext): boolean {

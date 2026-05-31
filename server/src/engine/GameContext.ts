@@ -64,4 +64,14 @@ export interface GameContext {
    * See `GameEngine.runPendingTurnAdvance` for the deferred path.
    */
   isConstructing: boolean;
+  /**
+   * Back-reference to the owning GameEngine, used by subsystems that need
+   * access to engine-only state (e.g. ConversationSystem reads the in-memory
+   * NpcSave map and routes non-conversation effects through
+   * `fireSingleAction`). Typed loosely to avoid the cyclic import.
+   */
+  engineRef: {
+    fireSingleAction(action: import('../../../shared/types.js').TriggerAction): void;
+    getNpcSaves(): Map<string, import('../../../shared/types.js').NpcSave>;
+  } | null;
 }

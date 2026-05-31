@@ -22,6 +22,8 @@ import { composeMap, type Terrain, type Feature } from "../engine/MapComposer.js
 import { writeMapJson, isGeneratedId } from "../engine/MapPersistence.js";
 import { generateEncounter, generateMap } from "../encounterGenerator.js";
 import { refineEncounter, type EncounterDraftForRefine } from "../encounterRefiner.js";
+import { refineAdventure, type AdventureDraftForRefine, type EncounterPoolEntry } from "../adventureRefiner.js";
+import { refineNpc, type NpcDraftForRefine } from "../npcRefiner.js";
 import type { GameDefs } from "../engine/types.js";
 import { STARTING_ZONE_PLAYER } from "../../../shared/startingZones.js";
 
@@ -210,7 +212,10 @@ export function registerGenerateRoutes(server: FastifyInstance, ctx: GenerateRou
       width?: number;
       height?: number;
       seed?: number;
+      /** Player-facing card summary (writes to the encounter's `description`). */
       description?: string;
+      /** Long-form AIGM scene context (writes to `customContext`). */
+      aigmContext?: string;
       startingZonesData?: number[];
       /** Optional placement mode (zones | exact). When 'exact', `placements` is used. */
       placementMode?: 'zones' | 'exact';
@@ -265,7 +270,7 @@ export function registerGenerateRoutes(server: FastifyInstance, ctx: GenerateRou
       }>;
     };
   }>("/generate/encounter/composed", async (req, reply) => {
-    const { existingMapId, terrain, features, width = 30, height = 22, seed, description, startingZonesData, placementMode, placements, allyIds, enemyIds, neutralIds, customTitle, customIntroduction, customObjective, completionFlag, triggers: composedTriggers } = req.body;
+    const { existingMapId, terrain, features, width = 30, height = 22, seed, description, aigmContext, startingZonesData, placementMode, placements, allyIds, enemyIds, neutralIds, customTitle, customIntroduction, customObjective, completionFlag, triggers: composedTriggers } = req.body;
     const defs = getDefs();
     const hasEnemies = (enemyIds ?? []).length > 0;
     try {
@@ -460,14 +465,17 @@ export function registerGenerateRoutes(server: FastifyInstance, ctx: GenerateRou
       const encounterJson = {
         id: encounterId,
         encounterTitle: customTitle?.trim() || mapName,
-        description: mapDescription,
+        // Player-facing card summary. Author's `description` wins; we fall
+        // back to the map's mapdescription so generated encounters still
+        // have something on the card before the author touches it.
+        description: description?.trim() || mapDescription,
         mapId,
         npcIds: (neutralIds ?? []).filter((id) => validIds.has(id)),
         allyIds: (allyIds ?? []).filter((id) => validIds.has(id)),
         enemyIds: (enemyIds ?? []).filter((id) => validIds.has(id)),
         customIntroduction: customIntroduction?.trim() ?? "",
-        customContext: description?.trim() ?? "",
-        objective: customObjective?.trim() || (description?.trim() ? description.trim().split(/[.!?]/)[0].slice(0, 80) : (hasEnemies ? "Defeat the hostile creatures." : "Explore the area.")),
+        customContext: aigmContext?.trim() ?? "",
+        objective: customObjective?.trim() || (aigmContext?.trim() ? aigmContext.trim().split(/[.!?]/)[0].slice(0, 80) : (hasEnemies ? "Defeat the hostile creatures." : "Explore the area.")),
         completionFlag: completionFlag?.trim() ? sanitiseFlag(completionFlag) : (hasEnemies ? undefined : `${slug}_resolved`),
         generated: true,
         startingZones: { width: mapWidth, height: mapHeight, data: zoneData },
@@ -512,7 +520,10 @@ export function registerGenerateRoutes(server: FastifyInstance, ctx: GenerateRou
     Body: {
       encounterId: string;
       mapId?: string;
+      /** Player-facing card summary (writes to the encounter's `description`). */
       description?: string;
+      /** Long-form AIGM scene context (writes to `customContext`). */
+      aigmContext?: string;
       startingZonesData?: number[];
       placementMode?: 'zones' | 'exact';
       placements?: import("../../../shared/types.js").EncounterPlacement[];
@@ -548,7 +559,7 @@ export function registerGenerateRoutes(server: FastifyInstance, ctx: GenerateRou
       }>;
     };
   }>("/generate/encounter/update", async (req, reply) => {
-    const { encounterId, mapId: requestedMapId, description, startingZonesData, placementMode, placements, allyIds, enemyIds, neutralIds, customTitle, customIntroduction, customObjective, completionFlag, triggers: composedTriggers } = req.body;
+    const { encounterId, mapId: requestedMapId, description, aigmContext, startingZonesData, placementMode, placements, allyIds, enemyIds, neutralIds, customTitle, customIntroduction, customObjective, completionFlag, triggers: composedTriggers } = req.body;
     if (!encounterId) return reply.code(400).send({ error: "encounterId is required" });
     const defs = getDefs();
     try {
@@ -575,6 +586,13 @@ export function registerGenerateRoutes(server: FastifyInstance, ctx: GenerateRou
       for (const id of [...(allyIds ?? []), ...(enemyIds ?? []), ...(neutralIds ?? [])]) {
         if (!validIds.has(id)) return reply.code(400).send({ error: `Unknown creature id "${id}"` });
       }
+
+      // Snake-case slug helper used both inside the trigger expansion below
+      // and by the `completionFlag` write. Declared up here so the trigger
+      // `set_flag` action can call it without hitting a TDZ error (it used
+      // to be declared further down, which broke saves that included any
+      // SET FLAG trigger).
+      const sanitiseFlag = (s: string): string => s.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 48);
 
       // Starting zones — if omitted, preserve the existing layer; otherwise
       // require it to match the (possibly new) map's cell count. A player
@@ -678,8 +696,6 @@ export function registerGenerateRoutes(server: FastifyInstance, ctx: GenerateRou
         return { id: baseId, when, if: guards, then, once: true };
       });
 
-      const sanitiseFlag = (s: string): string => s.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 48);
-
       // Build the updated JSON — preserve all unrecognised top-level fields
       // (environment, tileProperties, generated, customContext from a prior
       // session, etc.) by spreading `existing` first and overwriting just the
@@ -692,7 +708,8 @@ export function registerGenerateRoutes(server: FastifyInstance, ctx: GenerateRou
       };
       if (customTitle !== undefined)        updated.encounterTitle    = customTitle.trim() || (existing.encounterTitle ?? encounterId);
       if (customIntroduction !== undefined) updated.customIntroduction = customIntroduction.trim();
-      if (description !== undefined)        updated.customContext     = description.trim();
+      if (aigmContext !== undefined)        updated.customContext     = aigmContext.trim();
+      if (description !== undefined)        updated.description       = description.trim();
       if (customObjective !== undefined)    updated.objective         = customObjective.trim() || (existing.objective ?? "Complete the encounter.");
       if (completionFlag !== undefined) {
         const cf = completionFlag.trim();
@@ -797,6 +814,106 @@ export function registerGenerateRoutes(server: FastifyInstance, ctx: GenerateRou
       return reply.code(400).send({ error: msg });
     }
   });
+
+  /**
+   * Refine an in-progress adventure draft. Mirrors the encounter refine route
+   * shape: the model returns only the fields it wants to change plus a
+   * rationale; the frontend computes the diff and presents Accept / Reject.
+   * The encounter pool is built fresh from disk so newly authored encounters
+   * are immediately pickable as chapters or rest stops.
+   */
+  server.post<{
+    Body: { draft: AdventureDraftForRefine; prompt: string };
+  }>("/generate/adventure/refine", async (req, reply) => {
+    const { draft, prompt } = req.body;
+    if (!draft || typeof draft !== "object") {
+      return reply.code(400).send({ error: "draft must be an object" });
+    }
+    if (!prompt || prompt.trim().length < 4) {
+      return reply.code(400).send({ error: "prompt must be at least 4 characters" });
+    }
+    try {
+      const pool = await loadEncounterPool();
+      const result = await refineAdventure(anthropic, getDefs(), { draft, prompt, encounterPool: pool });
+      return reply.send(result);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error("[generate/adventure/refine] failed", msg);
+      return reply.code(400).send({ error: msg });
+    }
+  });
+
+  /**
+   * Refine an in-progress NPC draft. Same shape as the encounter / adventure
+   * routes: the model returns the fields it wants to change plus a rationale.
+   * The pool of valid monster ids, faction ids, and conversation ids is read
+   * from `getDefs()` so freshly authored content is immediately referenceable.
+   */
+  server.post<{
+    Body: { draft: NpcDraftForRefine; prompt: string };
+  }>("/generate/npc/refine", async (req, reply) => {
+    const { draft, prompt } = req.body;
+    if (!draft || typeof draft !== "object") {
+      return reply.code(400).send({ error: "draft must be an object" });
+    }
+    if (!prompt || prompt.trim().length < 4) {
+      return reply.code(400).send({ error: "prompt must be at least 4 characters" });
+    }
+    try {
+      const defs = getDefs();
+      const pool = {
+        monsters: defs.monsters.map((m) => ({
+          id: m.id,
+          name: m.name,
+          type: m.type ?? "—",
+          cr: String(m.cr ?? "0"),
+          hp: m.maxHp ?? 0,
+        })),
+        factions: defs.factions.map((f) => ({
+          id: f.id,
+          name: f.name,
+          description: f.description ?? "",
+        })),
+        conversations: defs.conversations.map((c) => ({ id: c.id })),
+      };
+      const result = await refineNpc(anthropic, defs, { draft, prompt, pool });
+      return reply.send(result);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error("[generate/npc/refine] failed", msg);
+      return reply.code(400).send({ error: msg });
+    }
+  });
+
+  /** Read every `encounters/*.json` in the active setting and project to the
+   *  one-line summaries the adventure refiner ships to the model. Filters out
+   *  empty / unreadable files silently. */
+  async function loadEncounterPool(): Promise<EncounterPoolEntry[]> {
+    const dir = join(dataDir(), "encounters");
+    let files: string[] = [];
+    try { files = await readdir(dir); } catch { return []; }
+    const out: EncounterPoolEntry[] = [];
+    for (const f of files) {
+      if (!f.endsWith(".json")) continue;
+      try {
+        const raw = await readFile(join(dir, f), "utf-8");
+        const enc = JSON.parse(raw) as {
+          id: string;
+          encounterTitle?: string;
+          encounterTypes?: string[];
+          description?: string;
+        };
+        if (!enc?.id) continue;
+        out.push({
+          id: enc.id,
+          title: enc.encounterTitle ?? "",
+          types: (enc.encounterTypes ?? []).join(","),
+          description: enc.description ?? "",
+        });
+      } catch { /* skip unreadable file */ }
+    }
+    return out;
+  }
 
   /**
    * Delete every generated map and encounter — the `gen_*` namespace. Used by

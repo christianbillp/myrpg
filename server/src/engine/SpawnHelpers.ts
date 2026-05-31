@@ -102,6 +102,15 @@ export function spawnNpc(
    * working spawn instead of silently dropping the NPC.
    */
   exactTile?: [number, number],
+  /**
+   * Disambiguates duplicate spawns of the same defId. When > 1, the spawned
+   * NPC's name gets a ` #N` suffix (1-based) so the player and the AIGM can
+   * tell two bandits apart in the Event Log, Target Panel, and tool-result
+   * narration. Caller (`populateNpcs`) computes `dupCount` and passes the
+   * 1-based ordinal so the suffix is stable across spawns.
+   */
+  dupOrdinal?: number,
+  dupCount?: number,
 ): void {
   // Resolve the def: NPC roster first (named characters with personas),
   // then the monster roster (raw creature stats). This lets the
@@ -136,6 +145,13 @@ export function spawnNpc(
     factionId = monsterDef.factionId ?? defId;
   }
 
+  // Per-def deterministic instance id + name suffix when the encounter
+  // spawns more than one of the same defId. Singletons keep the bare
+  // defId as id (preserves existing references like `npc_tavern_keeper`).
+  const isDup = (dupCount ?? 1) > 1;
+  const instanceId = isDup ? `${defId}_${dupOrdinal ?? 1}` : defId;
+  if (isDup) name = `${name} #${dupOrdinal ?? 1}`;
+
   const occupied = new Set<string>([
     `${px},${py}`,
     ...out.map((n) => `${n.tileX},${n.tileY}`),
@@ -155,7 +171,7 @@ export function spawnNpc(
         combatLabel = String.fromCharCode(65 + enemyCount);
       }
       out.push({
-        id: disposition === 'enemy' ? `enemy_${out.filter((n) => n.disposition === 'enemy').length}` : `${defId}_${out.length}`,
+        id: instanceId,
         defId,
         name,
         tileX: ex, tileY: ey,
@@ -197,7 +213,7 @@ export function spawnNpc(
   }
 
   out.push({
-    id: disposition === 'enemy' ? `enemy_${out.filter((n) => n.disposition === 'enemy').length}` : `${defId}_${out.length}`,
+    id: instanceId,
     defId,
     name,
     tileX: nx, tileY: ny,
@@ -278,14 +294,33 @@ export function populateNpcs(
   const exactFor = (role: 'ally' | 'enemy' | 'neutral', index: number): [number, number] | undefined =>
     placementByRoleIndex[`${role}:${index}`];
 
+  // Count duplicates per defId across all three spawn arrays so a defId
+  // appearing once in allyIds and once in enemyIds is still treated as
+  // two distinct entities (each gets its own ` #N` suffix). The counter
+  // tracks how many of each defId have spawned so far, giving a stable
+  // 1-based ordinal per spawn.
+  const totalByDef = new Map<string, number>();
+  for (const id of allyIds ?? [])  totalByDef.set(id, (totalByDef.get(id) ?? 0) + 1);
+  for (const id of enemyIds ?? []) totalByDef.set(id, (totalByDef.get(id) ?? 0) + 1);
+  for (const id of npcIds ?? [])   totalByDef.set(id, (totalByDef.get(id) ?? 0) + 1);
+  const seenByDef = new Map<string, number>();
+  const nextOrdinal = (defId: string): number => {
+    const n = (seenByDef.get(defId) ?? 0) + 1;
+    seenByDef.set(defId, n);
+    return n;
+  };
+
   (allyIds ?? []).forEach((defId, i) => {
-    spawnNpc(out.npcs, map, defs.npcs, defs.monsters, defId, playerX, playerY, 'ally', allyZone, exactFor('ally', i));
+    spawnNpc(out.npcs, map, defs.npcs, defs.monsters, defId, playerX, playerY, 'ally', allyZone,
+      exactFor('ally', i), nextOrdinal(defId), totalByDef.get(defId) ?? 1);
   });
   (enemyIds ?? []).forEach((defId, i) => {
-    spawnNpc(out.npcs, map, defs.npcs, defs.monsters, defId, playerX, playerY, 'enemy', enemyZone, exactFor('enemy', i));
+    spawnNpc(out.npcs, map, defs.npcs, defs.monsters, defId, playerX, playerY, 'enemy', enemyZone,
+      exactFor('enemy', i), nextOrdinal(defId), totalByDef.get(defId) ?? 1);
   });
   (npcIds ?? []).forEach((defId, i) => {
-    spawnNpc(out.npcs, map, defs.npcs, defs.monsters, defId, playerX, playerY, 'neutral', npcZone, exactFor('neutral', i));
+    spawnNpc(out.npcs, map, defs.npcs, defs.monsters, defId, playerX, playerY, 'neutral', npcZone,
+      exactFor('neutral', i), nextOrdinal(defId), totalByDef.get(defId) ?? 1);
   });
   if ((enemyIds ?? []).length > 0) {
     spawnItems(out.mapItems, map, defs.equipment, playerX, playerY, out.npcs);

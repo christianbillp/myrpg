@@ -1,0 +1,18 @@
+{
+  "id": "edran_vael",
+  "slots": {
+    "body": "crescent",
+    "ears": "round_large",
+    "face": "oval",
+    "beard": "full",
+    "eyes": "closed",
+    "mouth": "deep_frown",
+    "hair": "high_ponytail",
+    "accessory": "scar_cheek"
+  },
+  "palette": {
+    "body": "#33302a",
+    "skin": "#fbe6c8",
+    "hair": "#dddddd"
+  }
+}

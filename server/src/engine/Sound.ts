@@ -25,7 +25,7 @@
 
 import type { GameContext } from './GameContext.js';
 import { runPerceptionSweep } from './Vision.js';
-import { clearHide } from './ConditionSystem.js';
+import { clearHide, isDead } from './ConditionSystem.js';
 
 export const NOISE_WHISPER = 1;
 export const NOISE_FOOTSTEP = 2;
@@ -57,7 +57,7 @@ export function registerSoundHooks(ctx: GameContext): void {
     //     behind Total Cover still won't yield a perfect spot unless the
     //     observer can route around the LOS block.
     for (const npc of ctx.state.npcs) {
-      if (npc.hp <= 0) continue;
+      if (isDead(npc)) continue;
       if (!npc.conditions.includes('hidden') && !ctx.state.player.conditions.includes('hidden')) continue;
       const dist = chebyshev(npc.tileX, npc.tileY, e.x, e.y);
       if (dist > e.intensity) continue;

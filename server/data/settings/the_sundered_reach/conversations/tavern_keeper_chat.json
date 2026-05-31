@@ -1,0 +1,255 @@
+{
+  "id": "tavern_keeper_chat",
+  "defaultParticipants": ["player", "npc_self"],
+  "startNode": "intro",
+  "nodes": [
+    {
+      "id": "intro",
+      "lines": [
+        "Bram looks up from the counter, a wet cloth in one hand. \"Evening. What'll it be?\"",
+        "Bram nods at you, eyes flicking to the door behind you. \"Sit. Drink. Talk quietly if you talk at all.\""
+      ],
+      "onEnter": [
+        { "type": "npc_remember", "ref": "self", "fact": "met_the_player", "source": "authored" }
+      ],
+      "choices": [
+        { "label": "A drink, please.", "next": "ask_menu" },
+        { "label": "What's on tap?", "next": "ask_menu" },
+        { "label": "Heard any news?", "next": "ask_news" },
+        { "label": "Has another Cape passed through here?", "next": "ask_about_vael" },
+        { "label": "Tell me about the wardstones on this stretch.", "next": "ask_about_circuit" },
+        {
+          "label": "What do you know about the Concordat?",
+          "check": { "skill": "persuasion", "dc": 12 },
+          "onPass": {
+            "actions": [
+              { "type": "npc_adjust_relationship", "ref": "self", "target": "party", "delta": 5 },
+              { "type": "npc_record_journal", "ref": "self", "text": "Stranger came in asking after the Capes. Spoke careful. Told them what little I could.", "source": "authored", "salience": 2 }
+            ],
+            "next": "concordat_open"
+          },
+          "onFail": {
+            "actions": [
+              { "type": "npc_adjust_relationship", "ref": "self", "target": "party", "delta": -3 },
+              { "type": "npc_record_journal", "ref": "self", "text": "Some stranger started asking about the Capes loud as a bell. Sent them off.", "source": "authored", "salience": 2 }
+            ],
+            "next": "concordat_closed"
+          }
+        },
+        {
+          "label": "[Insight DC 10] Read his mood",
+          "check": { "skill": "insight", "dc": 10 },
+          "onPass": {
+            "actions": [
+              { "type": "show_log", "message": "He's watchful — every glance toward the door, every pause before he speaks. He's afraid of being overheard." }
+            ],
+            "next": "intro"
+          },
+          "onFail": { "next": "intro" }
+        },
+        { "label": "Speak freely with him…", "openAigm": true }
+      ]
+    },
+    {
+      "id": "ask_menu",
+      "lines": [
+        "He counts off on calloused fingers without looking up. \"Small ale, five copper. Dark stuff in a tankard, one silver. Buy a round for the room, half a silver to each — call it five silver and we'll square up.\""
+      ],
+      "choices": [
+        { "label": "Small ale, please. (5 cp)", "visibleIf": [{ "type": "balance_cp", "op": "ge", "value": 5 }],  "actions": [{ "type": "adjust_player_balance_cp", "deltaCp": -5, "reason": "a small ale" }], "next": "served_drink_small" },
+        { "label": "Tankard of the dark stuff. (1 sp)", "visibleIf": [{ "type": "balance_cp", "op": "ge", "value": 10 }], "actions": [{ "type": "adjust_player_balance_cp", "deltaCp": -10, "reason": "a tankard of dark ale" }], "next": "served_drink_dark" },
+        { "label": "A round for the room. (5 sp)", "visibleIf": [{ "type": "balance_cp", "op": "ge", "value": 50 }], "actions": [{ "type": "adjust_player_balance_cp", "deltaCp": -50, "reason": "a round for the room" }, { "type": "npc_adjust_relationship", "ref": "self", "target": "party", "delta": 10 }], "next": "served_drink_round" },
+        { "label": "I'm short on coin tonight.", "visibleIf": [{ "type": "balance_cp", "op": "lt", "value": 5 }], "next": "cant_afford_drink" },
+        { "label": "Maybe later.", "next": "intro" }
+      ]
+    },
+    {
+      "id": "served_drink_small",
+      "lines": [
+        "He fishes the copper out of your palm, sorting it into a tin under the counter without comment. A clay cup of pale ale slides across the wood. \"Drink slow. It bites.\"",
+        "\"Five copper.\" He drops them one by one into a tin — you hear five small notes, then a sixth as he absent-mindedly drops a half-coin he found among them. A clay cup follows. \"Drink slow.\""
+      ],
+      "choices": [
+        { "label": "(Sip)", "next": "intro" },
+        { "label": "Goodbye.", "end": true }
+      ]
+    },
+    {
+      "id": "served_drink_dark",
+      "lines": [
+        "He takes the silver between two fingers, holds it up to the lamp out of habit, then tucks it away. A wooden tankard thuds onto the counter — black as river-mud and twice as heavy. \"That'll put colour back in you. Or take it.\"",
+        "\"Silver. Right. I've not bit a coin in six years, but old habits.\" He weighs it, nods, and slides a heavy tankard across. The ale inside is so dark the lamp doesn't bottom it out."
+      ],
+      "choices": [
+        { "label": "(Drink)", "next": "intro" },
+        { "label": "Goodbye.", "end": true }
+      ]
+    },
+    {
+      "id": "served_drink_round",
+      "lines": [
+        "Bram blinks at you, then at the silver coins, then back at you. \"That's — well.\" He raises his voice without looking up. \"Cape's buying. Don't all stand up at once.\" A few heads turn; a few quiet thanks drift back. He sets a cup aside for himself, too, and nods at you. \"Kind of you. Tin's lighter for it.\"",
+        "He scoops up the silver and weighs it on his palm without much ceremony. \"Round on the Cape, then. I'll take the change from your next visit — that way you've a reason to come back.\" He pours, and pours, and pours. The room loosens, just slightly."
+      ],
+      "onEnter": [
+        { "type": "npc_remember", "ref": "self", "fact": "bought_round_for_the_room", "source": "authored" }
+      ],
+      "choices": [
+        { "label": "(Settle in)", "next": "intro" },
+        { "label": "Goodbye.", "end": true }
+      ]
+    },
+    {
+      "id": "cant_afford_drink",
+      "lines": [
+        "He looks at your purse without looking at your purse, then at your face. \"Coppers I can keep change for. Less than that, I keep credit, and credit's for friends. Come back when you've earned a coin or two.\"",
+        "\"You're light, friend. I'll pour you a half-cup of water — that's on the house — and we'll call it even.\" He sets a wooden cup of cool water in front of you with the same care he'd serve a coin-paying drinker."
+      ],
+      "choices": [
+        { "label": "Fair enough.", "next": "intro" },
+        { "label": "Goodbye.", "end": true }
+      ]
+    },
+    {
+      "id": "ask_news",
+      "lines": [
+        "He glances around the room before answering. \"Two riders came through this morning — Concordat colours. They asked after a mage. Didn't say which one.\""
+      ],
+      "choices": [
+        { "label": "Did you say anything?", "next": "ask_news_followup" },
+        { "label": "Thanks for the warning.", "next": "intro" }
+      ]
+    },
+    {
+      "id": "ask_news_followup",
+      "lines": [
+        "\"I told them I keep a tavern, not a register.\" He almost smiles. \"They left coin and rode on.\""
+      ],
+      "onEnter": [
+        { "type": "npc_remember", "ref": "self", "fact": "warned_player_about_riders", "source": "authored" },
+        { "type": "set_flag", "name": "tavern_keeper_warned_about_riders", "value": true }
+      ],
+      "choices": [
+        { "label": "I'll keep that in mind.", "next": "intro" }
+      ]
+    },
+    {
+      "id": "concordat_open",
+      "lines": [
+        "He sets the cloth down and meets your eyes. \"Bad sort. They came up the road three winters ago and they've been carving the country up ever since. Don't trust the Overseers. Don't trust the Capes either, while we're at it.\""
+      ],
+      "choices": [
+        { "label": "Why are they here?", "next": "concordat_why" },
+        { "label": "Thank you.", "next": "intro" }
+      ]
+    },
+    {
+      "id": "concordat_why",
+      "lines": [
+        "\"They say it's order. I say it's tribute. Same thing, different cup.\" He shrugs. \"Mind your own road and they'll mind theirs. Mostly.\""
+      ],
+      "choices": [
+        { "label": "Understood.", "next": "intro" }
+      ]
+    },
+    {
+      "id": "concordat_closed",
+      "lines": [
+        "His face closes like a shutter. \"Tavern keeper. Not a magistrate. Ask someone else.\""
+      ],
+      "onEnter": [
+        { "type": "npc_remember", "ref": "self", "fact": "stranger_asked_about_concordat_loudly", "source": "authored" }
+      ],
+      "choices": [
+        { "label": "My mistake.", "next": "intro" },
+        { "label": "Goodbye.", "end": true }
+      ]
+    },
+    {
+      "id": "ask_about_vael",
+      "lines": [
+        "Bram stops polishing. The cloth goes still in his hand. He glances at the door, then back at you. \"A Cape came through here last autumn. Tall, grey at the temples, didn't sit. Said he was walking the Circuit. Bought a flask of small ale to carry and asked the way to the north trail.\" A long pause. \"He never came back. Nobody's gone looking.\""
+      ],
+      "onEnter": [
+        { "type": "npc_remember", "ref": "self", "fact": "told_player_about_vael", "source": "authored" }
+      ],
+      "choices": [
+        { "label": "Did he give a name?", "next": "vael_name" },
+        { "label": "Did he say anything about the wardstones?", "next": "vael_wardstones" },
+        { "label": "When was that, exactly?", "next": "vael_when" },
+        { "label": "I see. Thank you.", "next": "intro" }
+      ]
+    },
+    {
+      "id": "vael_name",
+      "lines": [
+        "\"Vael. Said it like he expected me to know it. Maybe I should have.\" He shrugs, slow. \"Older Cape. Cape long enough that he wore the white like a coat instead of a costume.\""
+      ],
+      "choices": [
+        { "label": "Did he say anything about the wardstones?", "next": "vael_wardstones" },
+        { "label": "When was that, exactly?", "next": "vael_when" },
+        { "label": "Thank you.", "next": "intro" }
+      ]
+    },
+    {
+      "id": "vael_wardstones",
+      "lines": [
+        "Bram leans closer, voice dropped to a register the rest of the room won't catch. \"He said one of them was cracked. The stone in the north wood — half a day off the old trail. Said it 'rang wrong, like a struck bell that didn't want to ring.'\" He shakes his head. \"I don't know what that means. He did. He went to look. He didn't come back.\""
+      ],
+      "onEnter": [
+        { "type": "set_flag", "name": "wardstone_lead_confirmed", "value": true },
+        { "type": "npc_remember", "ref": "self", "fact": "told_player_about_cracked_wardstone", "source": "authored" }
+      ],
+      "choices": [
+        { "label": "I'll go take a look myself.", "next": "intro" },
+        { "label": "Did anyone else go after him?", "next": "vael_search" }
+      ]
+    },
+    {
+      "id": "vael_when",
+      "lines": [
+        "He counts back without thinking, the way someone counts the seasons by what's in the kettle. \"Autumn equinox. Three seasons gone now. Rain washed his prints out the next day.\""
+      ],
+      "choices": [
+        { "label": "Did anyone else go looking?", "next": "vael_search" },
+        { "label": "Did he say anything about the wardstones?", "next": "vael_wardstones" },
+        { "label": "I see.", "next": "ask_about_vael" }
+      ]
+    },
+    {
+      "id": "vael_search",
+      "lines": [
+        "Bram's mouth tightens. \"Nobody who keeps a tavern. The Capes haven't sent anyone in his stead — not until you walked in tonight, near as I can tell.\" His eyes flick to your cape. \"Mind how you go, up there.\""
+      ],
+      "choices": [
+        { "label": "Did he say anything about the wardstones?", "next": "vael_wardstones" },
+        { "label": "I will. Thank you.", "next": "intro" }
+      ]
+    },
+    {
+      "id": "ask_about_circuit",
+      "lines": [
+        "He sets the cloth down. \"The stones? Old work. Older than the Capes, my father used to say. There's five of them on this stretch — north wood, the gorge bridge, the ruins past the gorge, the lake reach, and the moor. They're meant to hum, soft, if you put a hand on one.\" A beat. \"Last one I touched, four months back, was quiet as a coffin.\""
+      ],
+      "choices": [
+        { "label": "Which one was quiet?", "next": "circuit_which" },
+        { "label": "Has another Cape passed through here?", "next": "ask_about_vael" },
+        { "label": "Thank you.", "next": "intro" }
+      ]
+    },
+    {
+      "id": "circuit_which",
+      "lines": [
+        "\"The one in the north wood. Trail past the old yew. I went up to gather mushrooms and put my palm on it the way my da' showed me. Nothing.\" He shrugs, and the shrug is forced. \"Maybe nothing means nothing. Maybe.\""
+      ],
+      "onEnter": [
+        { "type": "set_flag", "name": "wardstone_lead_confirmed", "value": true },
+        { "type": "npc_remember", "ref": "self", "fact": "told_player_about_silent_wardstone", "source": "authored" }
+      ],
+      "choices": [
+        { "label": "I'll go take a look.", "next": "intro" },
+        { "label": "Has another Cape passed through?", "next": "ask_about_vael" }
+      ]
+    }
+  ]
+}

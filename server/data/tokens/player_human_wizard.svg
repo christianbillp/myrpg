@@ -3,7 +3,6 @@
     <circle cx="32" cy="32" r="29" fill="#ffffff" stroke="#222222" stroke-width="3.4"/><path d="M3 32 A29 29 0 0 1 32 3" fill="none" stroke="#222222" stroke-width="1.2" stroke-dasharray="3,2"/>
     <circle cx="20" cy="34" r="3" fill="#d8a070"/><circle cx="44" cy="34" r="3" fill="#d8a070"/>
     <ellipse cx="32" cy="34" rx="12" ry="17" fill="#d8a070"/>
-    <path d="M24 42 Q32 45 40 42 L40 44 Q32 46 24 44 Z" fill="#1a1605" opacity="0.3"/>
     <circle cx="26" cy="33" r="2.2" fill="#222222"/><circle cx="38" cy="33" r="2.2" fill="#222222"/>
     <path d="M28 43 L36 43" fill="none"/>
     <path d="M17 18 Q22 8 32 10 Q42 8 47 18 Q50 28 47 38 Q44 32 44 26 Q32 20 24 26 Q20 32 17 38 Q14 28 17 18 Z" fill="#1a1605"/>

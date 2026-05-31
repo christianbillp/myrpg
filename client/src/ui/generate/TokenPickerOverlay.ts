@@ -6,6 +6,7 @@
  * Mirrors the visual language of the other picker overlays
  * (NpcPickerOverlay / AdventurePickerOverlay / EncounterPickerOverlay).
  */
+const API_URL = "http://localhost:3000";
 const COLOR_BG_BACKDROP   = "rgba(0,0,0,0.75)";
 const COLOR_PANEL         = "#141426";
 const COLOR_PANEL_BORDER  = "#88ccaa";
@@ -182,7 +183,7 @@ export class TokenPickerOverlay {
     card.addEventListener("click", () => onSelect(id));
 
     const img = document.createElement("img");
-    img.src = `/tokens/${filename}`;
+    img.src = `${API_URL}/tokens/${filename}`;
     img.style.cssText = "width: 64px; height: 64px; image-rendering: auto;";
     card.appendChild(img);
 

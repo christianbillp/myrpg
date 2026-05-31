@@ -3,6 +3,7 @@ import { GameEngine } from './engine/GameEngine.js';
 import { GameEvent } from './engine/types.js';
 import { applyAIGMTool, resetTurnGuards, AIGMToolContext } from './engine/AIGMTools.js';
 import { isHostileTo, isFriendlyTo } from './engine/FactionRelations.js';
+import { isDead } from './engine/ConditionSystem.js';
 import { PLAYER_FACTION_ID } from '../../shared/types.js';
 import type { NpcState } from '../../shared/types.js';
 import type { AigmMessage } from './sessions.js';
@@ -142,7 +143,11 @@ If a tool you call returns an "already spent" or "not performed" message, relay 
 
 TURN ORDER: When PHASE is "player_turn", the player acts first — do NOT narrate or simulate enemy turns. Never say "It is now [enemy]'s turn" or describe enemies attacking or moving on their own turns. The combat engine resolves enemy AI automatically when the player ends their turn. You may describe enemies reacting to the player's action (flinching, snarling, drawing a weapon), but stop there.
 
-SEARCHING CORPSES: When the player searches a body, corpse, or dead creature, always call request_ability_check (skill: "perception", DC 10 for a straightforward search, DC 15 if items are concealed in clothing or hidden pouches) before narrating what is found. Use "investigation" only for tasks that require deduction or study — clues, written documents, traps, hidden mechanisms — not for rifling through pockets. On a success, describe what the player finds and use add_item or award_coins to deliver any rewards. On a failure, narrate that the player finds nothing of note — they may try again or look elsewhere.
+SEARCHING CORPSES: Three resolution paths exist; pick the one that matches CURRENT STATE.
+  (1) If the corpse is tagged "[SEARCHED — do NOT roll a second Perception check on this body]" in the CORPSES section, the deterministic SEARCH action has already resolved it. DO NOT call request_ability_check on this body. The Event Log already contains the find/no-find line; narrate based on that outcome — do not roll a second check.
+  (2) If the corpse is tagged "[UNSEARCHED — authored loot at Perception DC X]", an authored corpseSearch payload is waiting. Either invite the player to press SEARCH (preferred — keeps mechanics consistent) or call request_ability_check yourself with the same DC X; both routes are mechanically equivalent.
+  (3) If the corpse carries no tag (no authored payload), follow the legacy rule: call request_ability_check (skill: "perception", DC 10 for a straightforward search, DC 15 if items are concealed) before narrating what is found.
+Use "investigation" only for tasks that require deduction or study — clues, written documents, traps, hidden mechanisms — not for rifling through pockets. On a success, describe what the player finds and use add_item or award_coins to deliver any rewards. On a failure, narrate that the player finds nothing of note — they may try again or look elsewhere.
 
 EVENT LOG: The RECENT EVENT LOG in CURRENT STATE is the complete log for this encounter. If the player asks to "see", "read", or "show" the event log, direct them to the Event Log panel in their UI — it has better formatting than anything you can narrate.
 
@@ -207,7 +212,13 @@ function buildStateMessage(engine: GameEngine): string {
       })()
     : 'Focused on: nothing';
 
-  const livingCombatants = s.npcs.filter((n) => n.hp > 0 && (isHostileNpc(n) || isFriendlyNpc(n)));
+  // Hidden NPCs (engine Vision system — `set_npc_hidden` trigger action,
+  // cleared by passive Perception sweep on movement) are filtered out of
+  // the combatant + neutral lists shown to the AIGM. The player can't see
+  // them yet, so the GM shouldn't narrate them either; encounter authors
+  // who want the GM to allude to their presence carry that context in the
+  // encounter's `customContext` instead.
+  const livingCombatants = s.npcs.filter((n) => n.hp > 0 && !n.conditions.includes('hidden') && (isHostileNpc(n) || isFriendlyNpc(n)));
   const combatantLines = livingCombatants.length > 0
     ? livingCombatants.map((n) => {
         const entityRef = entityRefFor(n);
@@ -232,7 +243,7 @@ function buildStateMessage(engine: GameEngine): string {
       }).join('\n')
     : '  None';
 
-  const livingNeutrals = s.npcs.filter((n) => n.hp > 0 && !isHostileNpc(n) && !isFriendlyNpc(n));
+  const livingNeutrals = s.npcs.filter((n) => n.hp > 0 && !n.conditions.includes('hidden') && !isHostileNpc(n) && !isFriendlyNpc(n));
   const neutralNpcLines = livingNeutrals.length > 0
     ? livingNeutrals.map((n) => {
         const knownAs = n.revealedName ? ` (known as: ${n.revealedName})` : '';
@@ -240,9 +251,23 @@ function buildStateMessage(engine: GameEngine): string {
       }).join('\n')
     : '  None';
 
-  const corpses = s.npcs.filter((n) => n.hp <= 0);
+  const corpses = s.npcs.filter((n) => isDead(n));
   const corpseLines = corpses.length > 0
-    ? corpses.map((n) => `  ${n.name} at tile (${n.tileX},${n.tileY})`).join('\n')
+    ? corpses.map((n) => {
+        // `[SEARCHED]` means the engine has already resolved the corpse via
+        // the SEARCH action — the GM must NOT call request_ability_check
+        // again on this body. `[UNSEARCHED — authored loot DC X]` flags an
+        // unresolved authored corpseSearch payload — the GM may either let
+        // the player drive it with the SEARCH button or call
+        // request_ability_check itself (the result is mechanically
+        // equivalent since both roll against the same DC).
+        const tag = n.corpseSearched
+          ? ' [SEARCHED — do NOT roll a second Perception check on this body]'
+          : n.corpseSearch
+            ? ` [UNSEARCHED — authored loot at Perception DC ${n.corpseSearch.dc}]`
+            : '';
+        return `  ${n.name} at tile (${n.tileX},${n.tileY})${tag}`;
+      }).join('\n')
     : '  None';
 
   const itemLines = s.mapItems.length > 0
@@ -281,7 +306,7 @@ function buildStateMessage(engine: GameEngine): string {
   // GM can reference earlier scenes ("word of what you did at the bridge
   // has travelled ahead of you").
   const adventureBlock = s.adventureContext
-    ? `\nADVENTURE: ${s.adventureContext.adventureTitle} — ${s.adventureContext.chapterTitle} (chapter ${s.adventureContext.chapterIndex + 1} of ${s.adventureContext.totalChapters})${s.adventureContext.completionFlag ? `\nCHAPTER COMPLETION FLAG: "${s.adventureContext.completionFlag}" — call set_world_flag with this name set to true at the moment the chapter's core business is resolved (see encounter CONTEXT for the resolution criteria). Combat encounters auto-complete on enemy defeat; non-combat chapters depend on this flag.${s.chapterComplete ? ' [ALREADY SET — do not call again.]' : ''}` : ''}${s.adventureContext.priorChapterSummaries.length > 0 ? `\nPRIOR CHAPTERS:\n${s.adventureContext.priorChapterSummaries.map((c) => `  • ${c.chapterTitle}: ${c.summary}`).join('\n')}` : ''}\n`
+    ? `\nADVENTURE: ${s.adventureContext.adventureTitle} — ${s.adventureContext.chapterTitle} (chapter ${s.adventureContext.chapterIndex + 1} of ${s.adventureContext.totalChapters})${s.adventureContext.completionFlag ? `\nCHAPTER COMPLETION FLAG: "${s.adventureContext.completionFlag}" — call set_world_flag with this name set to true at the moment the chapter's core business is resolved (see encounter CONTEXT for the resolution criteria). Combat encounters auto-complete on enemy defeat; non-combat chapters depend on this flag.${s.encounterComplete ? ' [ALREADY SET — do not call again.]' : ''}` : ''}${s.adventureContext.priorChapterSummaries.length > 0 ? `\nPRIOR CHAPTERS:\n${s.adventureContext.priorChapterSummaries.map((c) => `  • ${c.chapterTitle}: ${c.summary}`).join('\n')}` : ''}\n`
     : '';
 
   return `SETTING: ${s.mapName} | PHASE: ${s.phase}

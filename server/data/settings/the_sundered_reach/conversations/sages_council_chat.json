@@ -1,0 +1,429 @@
+{
+  "id": "sages_council_chat",
+  "defaultParticipants": ["player", "npc_self"],
+  "startNode": "intro",
+  "nodes": [
+    {
+      "id": "intro",
+      "lines": [
+        "Cault does not turn from the fire. She gestures, slow, to the stones across from her. \"Sit if you like. Stand if you must.\""
+      ],
+      "onEnter": [
+        { "type": "npc_remember", "ref": "self", "fact": "met_the_player", "source": "authored" },
+        { "type": "award_xp", "amount": 75 }
+      ],
+      "choices": [
+        { "label": "I'm Junior Cape Reed. And you?", "next": "introduce_self" },
+        { "label": "You knew Vael.", "next": "vael_q" },
+        { "label": "Tell me about the wardstones.", "next": "wardstones_q" },
+        {
+          "label": "[Insight DC 12] Take her measure",
+          "check": { "skill": "insight", "dc": 12 },
+          "onPass": {
+            "actions": [
+              { "type": "show_log", "message": "Not weariness — guilt. The kind that sits where breath usually goes. She has spent years writing answers in her head to a question no one came to ask, and now you have arrived at her fire." }
+            ],
+            "next": "intro_after_insight"
+          },
+          "onFail": {
+            "actions": [
+              { "type": "show_log", "message": "Her face is unreadable. She prefers it that way." }
+            ],
+            "next": "intro"
+          }
+        },
+        { "label": "(Speak freely with her.)", "openAigm": true }
+      ]
+    },
+    {
+      "id": "intro_after_insight",
+      "lines": [
+        "She stirs the fire with a stick that used to be furniture. \"Ask me something. I will tell you if I can.\""
+      ],
+      "choices": [
+        { "label": "I'm Junior Cape Reed. And you?", "next": "introduce_self" },
+        { "label": "You knew Vael.", "next": "vael_q" },
+        { "label": "Tell me about the wardstones.", "next": "wardstones_q" },
+        { "label": "(Speak freely with her.)", "openAigm": true }
+      ]
+    },
+    {
+      "id": "introduce_self",
+      "lines": [
+        "She nods, the smallest motion. \"Cault. I used to wear the white. They took it back.\""
+      ],
+      "choices": [
+        { "label": "Why?", "next": "why_struck_off" },
+        { "label": "I'm sorry to hear that.", "next": "sympathy" },
+        { "label": "Then you'll know what's happening to the Circuit.", "next": "wardstones_q" },
+        { "label": "Back.", "next": "intro" }
+      ]
+    },
+    {
+      "id": "sympathy",
+      "lines": [
+        "She looks at you for the first time. \"It is what it is. Thank you for saying so. Not many would.\""
+      ],
+      "onEnter": [
+        { "type": "npc_adjust_relationship", "ref": "self", "target": "party", "delta": 5 }
+      ],
+      "choices": [
+        { "label": "Tell me about the Circuit.", "next": "wardstones_q" },
+        { "label": "Tell me about Vael.", "next": "vael_q" },
+        { "label": "Back.", "next": "intro" }
+      ]
+    },
+    {
+      "id": "why_struck_off",
+      "lines": [
+        "\"I refused a posting. The capital takes that personally.\" A long breath. \"It is an old story and a long one. We have shorter problems tonight.\""
+      ],
+      "choices": [
+        { "label": "Like what?", "next": "wardstones_q" },
+        { "label": "Tell me anyway.", "next": "struck_off_detail" },
+        { "label": "Back.", "next": "introduce_self" }
+      ]
+    },
+    {
+      "id": "struck_off_detail",
+      "lines": [
+        "\"I was asked to stamp a stretch of circuit that had not been re-sung in eleven years. I would not. They took my licence.\" She looks past you, toward the open ground. \"You walked across the same stretch to reach me. If you were sent here, you were sent for the same reason.\""
+      ],
+      "onEnter": [
+        { "type": "npc_remember", "ref": "self", "fact": "told_player_about_strike_off", "source": "authored" }
+      ],
+      "choices": [
+        { "label": "Re-sung?", "next": "wardstones_q" },
+        { "label": "Why send me, then?", "next": "why_send_reed" },
+        { "label": "Back.", "next": "introduce_self" }
+      ]
+    },
+    {
+      "id": "why_send_reed",
+      "lines": [
+        "\"Because no one else has come, and the paperwork has to look like it does.\" A pause that is not unkind. \"I do not blame you for being sent. I would blame you for leaving without doing the work.\""
+      ],
+      "choices": [
+        { "label": "Then tell me how to do the work.", "next": "wardstones_q" },
+        { "label": "Back.", "next": "introduce_self" }
+      ]
+    },
+    {
+      "id": "wardstones_q",
+      "lines": [
+        "She looks up. \"The Reach Circuit is older than the Capes who watch it. Older than the New Empire, by some readings. A ring of stones meant to keep the catacombs quiet.\" A breath. \"They are not quiet.\""
+      ],
+      "choices": [
+        {
+          "label": "[Persuasion DC 12] What do they actually need?",
+          "check": { "skill": "persuasion", "dc": 12 },
+          "onPass": { "next": "about_singing" },
+          "onFail": { "next": "wardstones_q_failed" }
+        },
+        { "label": "Sabotage?", "next": "about_cracks" },
+        { "label": "What was meant to be held?", "next": "keystone_q" },
+        { "label": "Back.", "next": "intro" }
+      ]
+    },
+    {
+      "id": "wardstones_q_failed",
+      "lines": [
+        "\"Maintenance. The same answer the capital has given for a decade.\" She shrugs, slow. \"I am sorry — I do not have a better one to offer the wrong audience.\""
+      ],
+      "choices": [
+        {
+          "label": "[Persuasion DC 12] Speak plainly. I'm not the capital.",
+          "check": { "skill": "persuasion", "dc": 12 },
+          "onPass": { "next": "about_singing" },
+          "onFail": { "next": "wardstones_q" }
+        },
+        { "label": "Back.", "next": "wardstones_q" }
+      ]
+    },
+    {
+      "id": "about_singing",
+      "lines": [
+        "She sets the stick down. \"They must be re-sung. By a Cape — alive, voice and breath against the stone. It is the rite the wardstones were carved to receive. The Canticle of Sealed Thresholds.\" Her mouth twists, briefly. \"The capital stopped sending anyone trained to sing it. They send paperwork now.\""
+      ],
+      "onEnter": [
+        { "type": "set_flag", "name": "knows_about_singing", "value": true },
+        { "type": "award_xp", "amount": 50 },
+        { "type": "npc_remember", "ref": "self", "fact": "told_player_about_singing", "source": "authored" }
+      ],
+      "choices": [
+        { "label": "So the recertifications were lies.", "next": "recertify_lies" },
+        { "label": "Where would I find the rite?", "next": "dedication_stones_hint" },
+        { "label": "And the cracks?", "next": "about_cracks" },
+        { "label": "Back.", "next": "wardstones_q" }
+      ]
+    },
+    {
+      "id": "recertify_lies",
+      "lines": [
+        "\"Quietly. Politely. Yes.\" A pause. \"It is easier to falsify a stamp than to train a singer. The signatures are still real. The work is not.\""
+      ],
+      "choices": [
+        { "label": "And the cracks?", "next": "about_cracks" },
+        { "label": "Did Vael know?", "next": "vael_knew" },
+        { "label": "Back.", "next": "about_singing" }
+      ]
+    },
+    {
+      "id": "dedication_stones_hint",
+      "lines": [
+        "\"Near the sanctum threshold. Half-buried in the masonry that came down with the roof. The face is still legible if you brush the moss back — read it carefully. You will need its first three lines.\""
+      ],
+      "choices": [
+        { "label": "Thank you. I'll look.", "next": "about_singing" },
+        { "label": "Back.", "next": "about_singing" }
+      ]
+    },
+    {
+      "id": "about_cracks",
+      "lines": [
+        "\"Age. Neglect. The two we can name and the longer list we cannot.\" She almost smiles. \"The capital prefers a villain to a mirror, so it puts the word *sabotage* in its letters. There is no villain. There is only the Circuit, and what the Circuit was meant to hold, and the absence where the rite used to be.\""
+      ],
+      "onEnter": [
+        { "type": "set_flag", "name": "knows_truth_about_cracks", "value": true },
+        { "type": "npc_remember", "ref": "self", "fact": "told_player_truth_about_cracks", "source": "authored" }
+      ],
+      "choices": [
+        { "label": "What was meant to be held?", "next": "keystone_q" },
+        { "label": "Did Vael know all of this?", "next": "vael_knew" },
+        { "label": "Back.", "next": "wardstones_q" }
+      ]
+    },
+    {
+      "id": "keystone_q",
+      "lines": [
+        "She glances toward the dark mouth at the back of the sanctum. \"What the Circuit was built for. I will not name it on this side of the stones — names give purchase.\" A long beat. \"It stirs. The wardstones fail, and what they held remembers that it used to move.\""
+      ],
+      "onEnter": [
+        { "type": "set_flag", "name": "knows_keystone_failing", "value": true },
+        { "type": "npc_remember", "ref": "self", "fact": "told_player_about_keystone", "source": "authored" }
+      ],
+      "choices": [
+        { "label": "How long do we have?", "next": "how_long" },
+        { "label": "Show me the way down.", "next": "ready_to_descend" },
+        { "label": "Back.", "next": "wardstones_q" }
+      ]
+    },
+    {
+      "id": "how_long",
+      "lines": [
+        "\"Less than the capital will believe. More than the wardstones think.\" She looks at you, evenly. \"Long enough for you to learn the rite and walk to the keystone — if you start tonight.\""
+      ],
+      "choices": [
+        { "label": "Then I'll start tonight.", "next": "ready_to_descend" },
+        { "label": "Back.", "next": "keystone_q" }
+      ]
+    },
+    {
+      "id": "vael_q",
+      "lines": [
+        "Her voice softens by half a step. \"I knew him long enough to know what kind of Cape he became. A patient one. A worrying one. He read the same archives I did.\""
+      ],
+      "choices": [
+        {
+          "label": "[Insight DC 12] She's leaving something out.",
+          "check": { "skill": "insight", "dc": 12 },
+          "onPass": {
+            "actions": [
+              { "type": "show_log", "message": "Cault is choosing her words around grief, not around secrecy. The pause before each sentence is for her, not for you." }
+            ],
+            "next": "vael_q"
+          },
+          "onFail": {
+            "actions": [
+              { "type": "show_log", "message": "Her face gives nothing." }
+            ],
+            "next": "vael_q"
+          }
+        },
+        { "label": "He came here.", "next": "vael_came_here" },
+        { "label": "Did he know about the singing?", "next": "vael_knew" },
+        { "label": "Where is he now?", "next": "vael_where" },
+        { "label": "Back.", "next": "intro" }
+      ]
+    },
+    {
+      "id": "vael_knew",
+      "lines": [
+        "\"He learned it before I did. He spent a year in the lower archive, finding any line the censors had missed.\""
+      ],
+      "choices": [
+        { "label": "And then?", "next": "vael_then" },
+        { "label": "Where did he go?", "next": "vael_where" },
+        { "label": "Back.", "next": "vael_q" }
+      ]
+    },
+    {
+      "id": "vael_then",
+      "lines": [
+        "\"Then he came west. He stopped at this ruin to refill his lamp. He drank tea with me. He did not stay the night.\""
+      ],
+      "choices": [
+        { "label": "Where did he go from here?", "next": "vael_where" },
+        { "label": "Back.", "next": "vael_knew" }
+      ]
+    },
+    {
+      "id": "vael_came_here",
+      "lines": [
+        "\"Twice. The first time he was excited, the way new Capes are. The second time he was carrying a satchel of working notes and the lamp he had refilled three times on the way.\" A breath. \"He left both with me. I have kept them.\""
+      ],
+      "choices": [
+        { "label": "Could I see them?", "next": "take_vael_notes" },
+        { "label": "What happened after?", "next": "vael_where" },
+        { "label": "Back.", "next": "vael_q" }
+      ]
+    },
+    {
+      "id": "take_vael_notes",
+      "lines": [
+        "She reaches behind her cloak and produces a worn satchel, hands it across the fire. \"They are yours, then. Take them. They will save you a season's reading you do not have.\""
+      ],
+      "onEnter": [
+        { "type": "award_xp", "amount": 25 },
+        { "type": "npc_remember", "ref": "self", "fact": "gave_player_vael_notes", "source": "authored" }
+      ],
+      "choices": [
+        { "label": "Thank you.", "next": "vael_q" },
+        { "label": "Did he know what he was walking into?", "next": "vael_knew" }
+      ]
+    },
+    {
+      "id": "vael_where",
+      "lines": [
+        "Her voice changes — quieter, the way someone steps around an open grave. \"Down. Into the catacombs. To the keystone. To hold it by hand because the rite no longer reaches it through the stone.\""
+      ],
+      "onEnter": [
+        { "type": "npc_remember", "ref": "self", "fact": "told_player_vael_descended", "source": "authored" }
+      ],
+      "choices": [
+        {
+          "label": "[Insight DC 14] What aren't you saying?",
+          "check": { "skill": "insight", "dc": 14 },
+          "onPass": { "next": "vael_fate_revealed" },
+          "onFail": { "next": "vael_where" }
+        },
+        { "label": "Last autumn?", "next": "vael_timing" },
+        { "label": "Did he come back?", "next": "ask_came_back" },
+        { "label": "Back.", "next": "vael_q" }
+      ]
+    },
+    {
+      "id": "vael_timing",
+      "lines": [
+        "\"Autumn. The first cold. He left on the day the leaves turned.\""
+      ],
+      "choices": [
+        { "label": "And after?", "next": "ask_came_back" },
+        { "label": "Back.", "next": "vael_where" }
+      ]
+    },
+    {
+      "id": "ask_came_back",
+      "lines": [
+        "\"No.\""
+      ],
+      "choices": [
+        { "label": "Has anyone gone in after him?", "next": "no_one_went_after" },
+        {
+          "label": "[Insight DC 14] Tell me what really happened.",
+          "check": { "skill": "insight", "dc": 14 },
+          "onPass": { "next": "vael_fate_revealed" },
+          "onFail": { "next": "vael_where" }
+        },
+        { "label": "I'll go down myself.", "next": "ready_to_descend" },
+        { "label": "Back.", "next": "vael_where" }
+      ]
+    },
+    {
+      "id": "no_one_went_after",
+      "lines": [
+        "\"No one was sent. No one volunteered. I am not what I was.\""
+      ],
+      "choices": [
+        { "label": "I will go.", "next": "ready_to_descend" },
+        { "label": "Back.", "next": "ask_came_back" }
+      ]
+    },
+    {
+      "id": "vael_fate_revealed",
+      "lines": [
+        "She looks down at her hands a long moment before she speaks. \"He went to hold the keystone with his own hands. The rite stops being a song when there is no stone left to sing into — it becomes a body, standing in the way.\" A long, quiet pause. \"He has been standing there since autumn. If he is still standing.\""
+      ],
+      "onEnter": [
+        { "type": "set_flag", "name": "knows_vael_fate", "value": true },
+        { "type": "award_xp", "amount": 75 },
+        { "type": "npc_remember", "ref": "self", "fact": "told_player_vael_fate", "source": "authored" },
+        { "type": "npc_record_journal", "ref": "self", "text": "I told the new one the truth about Vael. She did not turn away.", "source": "authored", "salience": 3 }
+      ],
+      "choices": [
+        { "label": "What is the keystone holding back?", "next": "keystone_q" },
+        { "label": "Then I need the way down.", "next": "ready_to_descend" },
+        { "label": "Back.", "next": "vael_q" }
+      ]
+    },
+    {
+      "id": "ready_to_descend",
+      "lines": [
+        "She nods, once. \"Behind the sanctum. A trapdoor we used to keep clear. I have kept it clear. The first stair is loose. The second is honest.\""
+      ],
+      "choices": [
+        { "label": "How long is the descent?", "next": "descent_length" },
+        { "label": "Will you come?", "next": "will_you_come" },
+        { "label": "Anything else I should know?", "next": "final_warning_prep" },
+        { "label": "I'm ready.", "next": "way_down_given" }
+      ]
+    },
+    {
+      "id": "descent_length",
+      "lines": [
+        "\"Half a day if you do not stop. A day if you sing as you go. Sing as you go.\""
+      ],
+      "choices": [
+        { "label": "I'm ready.", "next": "way_down_given" },
+        { "label": "Back.", "next": "ready_to_descend" }
+      ]
+    },
+    {
+      "id": "will_you_come",
+      "lines": [
+        "A small smile, the first you have seen. \"I am very old. I would slow you. I will keep the fire. If you come back up, the tea will be hot.\""
+      ],
+      "choices": [
+        { "label": "I'll come back up.", "next": "way_down_given" },
+        { "label": "Back.", "next": "ready_to_descend" }
+      ]
+    },
+    {
+      "id": "final_warning_prep",
+      "lines": [
+        "\"Sing only at the stone. Do not sing in the passages. Do not stop singing once you begin.\" Her eyes find yours. \"Whatever you find with Vael — do not call to it by name.\""
+      ],
+      "onEnter": [
+        { "type": "npc_remember", "ref": "self", "fact": "warned_player_about_passages", "source": "authored" }
+      ],
+      "choices": [
+        { "label": "Understood.", "next": "way_down_given" },
+        { "label": "Back.", "next": "ready_to_descend" }
+      ]
+    },
+    {
+      "id": "way_down_given",
+      "lines": [
+        "She rises, slow, and pulls back a piece of canvas at the rear of the sanctum. A trapdoor, planks dark with age, iron pull worn smooth. \"Then go. No one will certify this for you. Whatever you find down there, whatever you do with it — that is yours alone. The capital has not sent anyone in three years. I will not pretend they will come if you fall.\" A pause. \"Walk steady, Junior Cape.\""
+      ],
+      "onEnter": [
+        { "type": "set_flag", "name": "sage_way_down_given", "value": true },
+        { "type": "award_xp", "amount": 100 },
+        { "type": "npc_remember", "ref": "self", "fact": "gave_player_way_down", "source": "authored" },
+        { "type": "npc_record_journal", "ref": "self", "text": "She did not turn away. I gave her the trap and the warning. May the work hold.", "source": "authored", "salience": 3 }
+      ],
+      "ends": true,
+      "choices": []
+    }
+  ]
+}

@@ -64,9 +64,9 @@ Every user message is prefixed with a `[CURRENT STATE]` block that the engine bu
 
 - Map name, phase, and encounter types
 - Player tile, HP, gold, inventory, equipped items, and explicit action-economy fields: `Action: AVAILABLE`/`USED`, `Bonus: AVAILABLE`/`USED`, `N moves left`, `HIDDEN`. Class-feature resource pools appear as `{feature-id} ×N` chips (e.g. `second-wind ×2`) — one chip per non-empty entry in `PlayerState.resources`. Caster characters additionally show `Slots L1:n[,L2:n…]`, `Concentrating: <spellId>` while a concentration spell is active, and a `Prepared spells: [ids]` line beneath the equipped slots.
-- All combatants (enemies and allies) with HP, tile, disposition, conditions, and (while combat is active) a `Reaction: AVAILABLE`/`USED` flag — Reactions refresh at the start of each creature's own turn, so an enemy that has already burned its Reaction (e.g. on an Opportunity Attack) cannot react again until its next turn comes around
-- Neutral NPCs with tile, including revealed names if any (see [`reveal_npc_name`](#reveal_npc_name))
-- A separate **CORPSES** section listing dead NPCs (searchable but cannot act)
+- All combatants (enemies and allies) with HP, tile, disposition, conditions, and (while combat is active) a `Reaction: AVAILABLE`/`USED` flag — Reactions refresh at the start of each creature's own turn, so an enemy that has already burned its Reaction (e.g. on an Opportunity Attack) cannot react again until its next turn comes around. **Hidden NPCs are filtered out** of both this list and the neutrals list below — the GM is not told they exist, matching what the player sees. They surface here only after a passive Perception sweep or an explicit `set_npc_hidden { hidden: false }` reveal clears the `hidden` condition.
+- Neutral NPCs with tile, including revealed names if any (see [`reveal_npc_name`](#reveal_npc_name)). Same hidden filter applies.
+- A separate **CORPSES** section listing dead NPCs (cannot act, but **searchable**). Each entry carries one of three tags: **`[SEARCHED — do NOT roll a second Perception check on this body]`** means the deterministic SEARCH action has already resolved the corpse (the Event Log shows what was found); **`[UNSEARCHED — authored loot at Perception DC X]`** means a `corpseSearch` payload is waiting (use that DC if you call `request_ability_check`, or invite the player to press SEARCH); no tag means a regular corpse (use the SRD perception fallback in the [Searching corpses rule](#searching-corpses-rule)).
 - Active quests with progress
 - Items on the ground, with a trailing `Secrets remaining: N` count
 - NPC personas
@@ -141,6 +141,18 @@ The wrapper is produced in two places client-side:
   - Player Panel — the **TALK** button opens an inline speech-bubble input pinned to the player token; submitting routes through the same `HUD.sendSayto` path.
 
 At entry to `POST /game/session/:id/aigm` the server matches the wrapper with `/^\[(.+?) says to (.+?)\]:\s*(.+)$/s`. When it matches, the server immediately writes a `<player> → <target>: "<line>"` row into the Event Log and pushes a fresh `state_update` **before** `processAIGMChat` runs — so the player sees their dialogue land in the log on submit, not when the GM reply finally streams. The client also spawns a player speech bubble (with overlap-avoidance against the target token) and a persistent typing indicator over the target NPC; the indicator clears on `aigm_done`.
+
+## Searching corpses rule
+
+Three resolution paths exist; pick the one that matches CURRENT STATE.
+
+1. If the corpse is tagged **`[SEARCHED — do NOT roll a second Perception check on this body]`** in the CORPSES section, the deterministic SEARCH action has already resolved it. DO NOT call `request_ability_check` on this body — the Event Log already contains the find/no-find line. Narrate based on that outcome only; do not roll a second check.
+2. If the corpse is tagged **`[UNSEARCHED — authored loot at Perception DC X]`**, an authored `corpseSearch` payload is waiting. Either invite the player to press the SEARCH button (preferred — keeps mechanics consistent) or call `request_ability_check` yourself with the same DC X. Both routes are mechanically equivalent.
+3. If the corpse carries no tag (no authored payload), follow the legacy rule: call `request_ability_check` (skill: `perception`, DC 10 for a straightforward search, DC 15 if items are concealed) before narrating what is found.
+
+Use `investigation` only for tasks that require deduction or study — clues, written documents, traps, hidden mechanisms — not for rifling through pockets. On a success, describe what the player finds and use `add_item` or `award_coins` to deliver any rewards. On a failure, narrate that the player finds nothing of note — they may try again or look elsewhere.
+
+---
 
 ## Narrative-mirror rule
 

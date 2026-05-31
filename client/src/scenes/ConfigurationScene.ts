@@ -295,6 +295,16 @@ export class ConfigurationScene extends Phaser.Scene {
         description: "Reveal the destructive Delete Save button on the character setup screen. Off by default to protect save data.",
         flag: "showDeleteSaveButton",
       },
+      {
+        label: "Allow retry checks",
+        description: "Let the player re-roll a failed conversation ability check. The choice stays clickable after the first attempt and is tagged [DEV] so the override is visible.",
+        flag: "allowRetryChecks",
+      },
+      {
+        label: "Complete primary objective",
+        description: "Surface a ★ COMPLETE OBJECTIVE button on the Player Panel that finishes the encounter instantly — sets the completion flag and clears living enemies. Useful for blasting through an adventure while testing chapter transitions.",
+        flag: "completePrimaryObjective",
+      },
     ];
 
     for (const t of toggles) {
@@ -445,13 +455,15 @@ export class ConfigurationScene extends Phaser.Scene {
     DevMode.unlockAllSpells      = !!flags.unlockAllSpells;
     DevMode.unlimitedActions     = !!flags.unlimitedActions;
     DevMode.showDeleteSaveButton = !!flags.showDeleteSaveButton;
+    DevMode.allowRetryChecks     = !!flags.allowRetryChecks;
+    DevMode.completePrimaryObjective = !!flags.completePrimaryObjective;
   }
 
   /** True when there is a pending change waiting on CONFIRM — either a
    *  different setting id, or any dev-flag toggle that differs from saved. */
   private hasPendingChanges(): boolean {
     if (this.pendingId !== this.activeId) return true;
-    const fields: (keyof DevFlags)[] = ['disableSupertitle', 'unlimitedSpellSlots', 'unlockAllSpells', 'unlimitedActions', 'showDeleteSaveButton'];
+    const fields: (keyof DevFlags)[] = ['disableSupertitle', 'unlimitedSpellSlots', 'unlockAllSpells', 'unlimitedActions', 'showDeleteSaveButton', 'allowRetryChecks', 'completePrimaryObjective'];
     return fields.some((k) => !!this.pendingDevFlags[k] !== !!this.savedDevFlags[k]);
   }
 

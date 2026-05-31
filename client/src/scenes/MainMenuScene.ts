@@ -27,7 +27,7 @@ export class MainMenuScene extends Phaser.Scene {
 
     this.htmlTexts.push(createHtmlText({
       scene: this, sceneWidth: w,
-      x: 0, y: h * 0.22 - 50, w, h: 80,
+      x: 0, y: 80, w, h: 80,
       text: "MyRPG",
       fontFamily: "serif",
       fontSize: 72,
@@ -38,7 +38,7 @@ export class MainMenuScene extends Phaser.Scene {
 
     this.htmlTexts.push(createHtmlText({
       scene: this, sceneWidth: w,
-      x: 0, y: h * 0.32 - 12, w, h: 24,
+      x: 0, y: 168, w, h: 24,
       text: "A browser RPG built on the SRD",
       fontFamily: "serif",
       fontSize: 18,
@@ -46,40 +46,100 @@ export class MainMenuScene extends Phaser.Scene {
       align: "center",
     }));
 
-    this.makeMenuButton(w / 2, h * 0.32, "ADVENTURE", "A string of encounters with overarching narrative", () => {
+    // Two-column layout. Left column hosts PLAY cards (Adventure +
+    // Single Encounter); right column hosts CREATE cards (the five
+    // authoring scenes). Each column has its own header label. The
+    // CONFIGURATION button leaves the main grid entirely and becomes a
+    // small cog floated into the bottom-right corner.
+    const COL_W = 460;
+    const COL_GAP = 80;
+    const totalW = COL_W * 2 + COL_GAP;
+    const leftX  = (w - totalW) / 2;
+    const rightX = leftX + COL_W + COL_GAP;
+    const colHeaderY = 230;
+    const cardsStartY = 280;
+
+    this.htmlTexts.push(createHtmlText({
+      scene: this, sceneWidth: w,
+      x: leftX, y: colHeaderY, w: COL_W, h: 24,
+      text: "PLAY",
+      fontFamily: "monospace", fontSize: 13, letterSpacing: 3,
+      color: "#88aacc", align: "center",
+    }));
+    this.htmlTexts.push(createHtmlText({
+      scene: this, sceneWidth: w,
+      x: rightX, y: colHeaderY, w: COL_W, h: 24,
+      text: "CREATE",
+      fontFamily: "monospace", fontSize: 13, letterSpacing: 3,
+      color: "#cca888", align: "center",
+    }));
+
+    const playCx = leftX + COL_W / 2;
+    const createCx = rightX + COL_W / 2;
+    const cardSpacing = 100;
+    const cardHalfH = 46;
+    const playY = (i: number): number => cardsStartY + cardHalfH + i * cardSpacing;
+    const createY = (i: number): number => cardsStartY + cardHalfH + i * cardSpacing;
+
+    // ── PLAY column ──────────────────────────────────────────────
+    this.makeMenuButton(playCx, playY(0), "ADVENTURE", "A string of encounters with overarching narrative", () => {
       this.scene.start("AdventureSetupScene");
     });
-
-    this.makeMenuButton(w / 2, h * 0.40, "SINGLE ENCOUNTER", "Play a one-off scenario", () => {
+    this.makeMenuButton(playCx, playY(1), "SINGLE ENCOUNTER", "Play a one-off scenario", () => {
       this.scene.start("EncounterSetupScene");
     });
 
-    this.makeMenuButton(w / 2, h * 0.48, "MAP EDITOR", "Generate and save maps; the Encounter Creator picks them up", () => {
-      this.scene.start("MapEditorScene");
-    });
-
-    this.makeMenuButton(w / 2, h * 0.56, "ENCOUNTER CREATOR", "Build an encounter manually or with AI assistance — title, monsters, zones, triggers", () => {
-      this.scene.start("EncounterCreatorScene");
-    });
-
-    this.makeMenuButton(w / 2, h * 0.64, "ADVENTURE CREATOR", "String encounters into an adventure with overarching story, AI context, and a rest stop", () => {
+    // ── CREATE column ────────────────────────────────────────────
+    this.makeMenuButton(createCx, createY(0), "ADVENTURE CREATOR", "String encounters into an adventure with overarching story, AI context, and a rest stop", () => {
       this.scene.start("AdventureCreatorScene");
     });
-
-    this.makeMenuButton(w / 2, h * 0.72, "NPC CREATOR", "Author an NPC on top of an existing monster — name, faction, persona, token", () => {
+    this.makeMenuButton(createCx, createY(1), "ENCOUNTER CREATOR", "Build an encounter manually or with AI assistance — title, monsters, zones, triggers", () => {
+      this.scene.start("EncounterCreatorScene");
+    });
+    this.makeMenuButton(createCx, createY(2), "MAP EDITOR", "Generate and save maps; the Encounter Creator picks them up", () => {
+      this.scene.start("MapEditorScene");
+    });
+    this.makeMenuButton(createCx, createY(3), "NPC CREATOR", "Author an NPC on top of an existing monster — name, faction, persona, token", () => {
       this.scene.start("NpcCreatorScene");
     });
-
-    this.makeMenuButton(w / 2, h * 0.80, "TOKEN CREATOR", "Mix and match parts (hair, eyes, beard, …) to build an NPC token", () => {
+    this.makeMenuButton(createCx, createY(4), "TOKEN CREATOR", "Mix and match parts (hair, eyes, beard, …) to build an NPC token", () => {
       this.scene.start("TokenCreatorScene");
     });
 
-    this.makeMenuButton(w / 2, h * 0.88, "CONFIGURATION", "Choose the active setting; future game-wide options live here", () => {
-      this.scene.start("ConfigurationScene");
-    });
+    // ── Configuration cog ────────────────────────────────────────
+    this.makeCogButton(() => this.scene.start("ConfigurationScene"));
 
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => this.teardown());
     this.events.once(Phaser.Scenes.Events.DESTROY, () => this.teardown());
+  }
+
+  /** Small ⚙ button anchored in the lower-right corner so the front page
+   *  isn't dominated by a full-width CONFIGURATION row. The cog is a serif
+   *  glyph styled to match the rest of the menu chrome. */
+  private makeCogButton(onClick: () => void): void {
+    const w = this.scale.width;
+    const h = this.scale.height;
+    const SIZE = 64;
+    const margin = 32;
+    const x = w - SIZE - margin;
+    const y = h - SIZE - margin;
+    const btn = createHtmlButton({
+      scene: this, sceneWidth: w,
+      x, y, w: SIZE, h: SIZE,
+      label: "⚙",
+      variant: "secondary",
+      fontSize: 32,
+      onClick,
+    });
+    btn.el.style.fontFamily = "serif";
+    btn.el.style.background = "#1a2238";
+    btn.el.style.borderColor = "#4a6a9a";
+    btn.el.style.color = "#e8d8a8";
+    btn.el.style.borderRadius = "50%";
+    btn.el.title = "Configuration";
+    btn.el.addEventListener("mouseenter", () => { btn.el.style.background = "#243250"; btn.el.style.color = "#fff4d8"; });
+    btn.el.addEventListener("mouseleave", () => { btn.el.style.background = "#1a2238"; btn.el.style.color = "#e8d8a8"; });
+    this.htmlButtons.push(btn);
   }
 
   private makeMenuButton(cx: number, cy: number, label: string, hint: string, onClick: () => void): void {

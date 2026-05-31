@@ -17,6 +17,8 @@ const KEY_UNLIMITED_SPELL_SLOTS = 'myrpg_dev_unlimited_spell_slots';
 const KEY_UNLOCK_ALL_SPELLS = 'myrpg_dev_unlock_all_spells';
 const KEY_UNLIMITED_ACTIONS = 'myrpg_dev_unlimited_actions';
 const KEY_SHOW_DELETE_SAVE  = 'myrpg_dev_show_delete_save';
+const KEY_ALLOW_RETRY_CHECKS = 'myrpg_dev_allow_retry_checks';
+const KEY_COMPLETE_PRIMARY_OBJECTIVE = 'myrpg_dev_complete_primary_objective';
 
 function readUrlParam(name: string): boolean | null {
   const param = new URLSearchParams(window.location.search).get(name);
@@ -65,6 +67,10 @@ export const DevMode = {
   set unlimitedActions(v: boolean)      { writeBoolStorage(KEY_UNLIMITED_ACTIONS, v); },
   get showDeleteSaveButton(): boolean   { return readBoolStorage(KEY_SHOW_DELETE_SAVE); },
   set showDeleteSaveButton(v: boolean)  { writeBoolStorage(KEY_SHOW_DELETE_SAVE, v); },
+  get allowRetryChecks(): boolean       { return readBoolStorage(KEY_ALLOW_RETRY_CHECKS); },
+  set allowRetryChecks(v: boolean)      { writeBoolStorage(KEY_ALLOW_RETRY_CHECKS, v); },
+  get completePrimaryObjective(): boolean   { return readBoolStorage(KEY_COMPLETE_PRIMARY_OBJECTIVE); },
+  set completePrimaryObjective(v: boolean)  { writeBoolStorage(KEY_COMPLETE_PRIMARY_OBJECTIVE, v); },
 
   /** Snapshot the current flags for inclusion in a `CreateSessionRequest`.
    *  Only set fields that are TRUE so the request stays lean. Returns
@@ -77,6 +83,8 @@ export const DevMode = {
     if (this.unlockAllSpells)      flags.unlockAllSpells = true;
     if (this.unlimitedActions)     flags.unlimitedActions = true;
     if (this.showDeleteSaveButton) flags.showDeleteSaveButton = true;
+    if (this.allowRetryChecks)     flags.allowRetryChecks = true;
+    if (this.completePrimaryObjective) flags.completePrimaryObjective = true;
     return Object.keys(flags).length === 0 ? undefined : flags;
   },
 };

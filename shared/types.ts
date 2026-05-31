@@ -379,6 +379,280 @@ export interface NPCDef {
    * when omitted (legacy NPCs preserve current implicit faction behaviour).
    */
   factionId?: string;
+  /**
+   * Default conversation graph id this NPC opens when the player initiates
+   * dialogue. Resolves against `server/data/settings/<setting>/conversations/`.
+   * Encounter authors can override per-encounter via
+   * `EncounterDef.conversationOverrides` (see EncounterDef).
+   */
+  conversationId?: string;
+  /**
+   * When true, the engine maintains a per-character `NpcSave` file recording
+   * this NPC's relationship, memories, and stateful overrides across sessions,
+   * encounters, and adventures. Most NPCs are throwaway and leave this false
+   * — flip it on for named characters the player is expected to interact with
+   * again. Save file path: `<setting>/saves/<characterId>_npcs/<npcId>.json`.
+   * See `NpcSave` for the schema.
+   */
+  persistent?: boolean;
+}
+
+// ── Conversation system ─────────────────────────────────────────────────────
+//
+// Deterministic dialogue graphs that let an encounter play through scripted
+// social beats without invoking the AIGM. Designed participant-agnostic from
+// day one so simulation-mode NPC-vs-NPC conversations (future scope) reuse
+// the same runtime: `participants` is an array (`["player", "npc_bram"]`
+// today; `["npc_bram", "npc_overseer"]` once the sim runs), choices carry
+// an optional `actor` ref, and effects can target any entity. Today the UI
+// only renders when the player is a participant, but the data model and the
+// engine don't bake in that assumption.
+
+/** Entity reference. `"player"` is the player; `"npc_<id>"` is an NPC instance
+ *  by def id; `"enemy_A"` / `"ally_A"` are combat-label refs the AIGM already
+ *  understands. New code MUST accept all four — old data that hard-codes
+ *  `"player"` keeps working. */
+export type EntityRef = string;
+
+export interface ConversationDef {
+  /** Snake_case slug — used as the filename and as the lookup key. */
+  id: string;
+  /** Id of the first node entered when the conversation starts. */
+  startNode: string;
+  /** Default participants when the conversation is opened. Today always
+   *  `["player", "<npc-ref>"]`; the simulation runtime substitutes
+   *  `["npc_a", "npc_b"]`. `start_conversation` may override at call time. */
+  defaultParticipants: EntityRef[];
+  /** All nodes in the graph. The loader validates that every `next` field
+   *  references a real id and that no node is unreachable from `startNode`. */
+  nodes: ConversationNode[];
+}
+
+export interface ConversationNode {
+  id: string;
+  /** Lines the speaker delivers when the node is entered. Multiple entries
+   *  rotate with anti-repeat memory (mirrors the `narrate` action). */
+  lines: string[];
+  /** Optional speaker override — defaults to the NPC whose `conversationId`
+   *  opened this graph. For multi-character scenes (or future NPC-vs-NPC),
+   *  set this to the entity ref of the actual speaker. */
+  speaker?: EntityRef;
+  /** Effects fired the instant the node is entered (before the player sees
+   *  any choices). Common uses: `set_flag`, `npc_speaks` for atmosphere
+   *  lines, `npc_remember` for "the NPC noticed the player came back". */
+  onEnter?: TriggerAction[];
+  /** Player-facing choices. Empty array + `ends: true` makes a terminal node. */
+  choices: ConversationChoice[];
+  /** When true, the conversation ends after `onEnter` runs. Choices ignored. */
+  ends?: boolean;
+}
+
+export interface ConversationChoice {
+  /** Display label. May contain a `[Skill DC N]` tag — purely cosmetic;
+   *  the actual roll is configured under `check`. */
+  label: string;
+  /** Optional gate. ALL guards must hold for the choice to be visible. */
+  visibleIf?: TriggerGuard[];
+  /** Optional gate. ALL guards must hold for the choice to be enabled but
+   *  visible — surfaced greyed-out otherwise so the player sees the
+   *  branch exists. Use this for "you could try this if your relationship
+   *  with them were higher" hints. */
+  enabledIf?: TriggerGuard[];
+  /** Ability / saving-throw check. When set, the engine rolls d20 + the
+   *  matching modifier; `total >= dc` routes to `onPass`, otherwise to
+   *  `onFail`. `actor` defaults to the player; future NPC-driven choices
+   *  pass an explicit ref. */
+  check?: {
+    actor?: EntityRef;
+    /** Mutually exclusive with `ability` — use the higher-level skill modifier. */
+    skill?: string;
+    /** Mutually exclusive with `skill` — use the raw ability modifier. */
+    ability?: 'str' | 'dex' | 'con' | 'int' | 'wis' | 'cha';
+    dc: number;
+    advantage?: 'normal' | 'advantage' | 'disadvantage';
+  };
+  /** When `check` resolves true (or no check is configured), run these
+   *  effects and jump to `next` / end the conversation. */
+  onPass?: ConversationChoiceOutcome;
+  /** When `check` resolves false, run these effects + jump. Allows
+   *  "try to persuade and fail loudly" branches. */
+  onFail?: ConversationChoiceOutcome;
+  /** Effects + next when there's no check at all. Equivalent to onPass for
+   *  uncheck'd choices; both forms accepted to keep authoring readable. */
+  actions?: TriggerAction[];
+  next?: string;
+  end?: boolean;
+  /** Hands off control to the AIGM with the full conversation transcript +
+   *  the speaker's `NpcSave` context. The AIGM may re-anchor the player to
+   *  a graph node via `set_conversation_node` or close the conversation. */
+  openAigm?: boolean;
+}
+
+export interface ConversationChoiceOutcome {
+  actions?: TriggerAction[];
+  next?: string;
+  end?: boolean;
+}
+
+/** Runtime conversation state stored on `GameState`. `null` when no
+ *  conversation is active. The transcript is the canonical record handed to
+ *  the AIGM on free-text handoff, and to the persistent NPC save when the
+ *  conversation ends. */
+export interface ActiveConversation {
+  conversationId: string;
+  /** Current node id; null briefly between effect dispatch and the next
+   *  node entry while a long-running effect chain resolves. */
+  currentNodeId: string;
+  /** Entity refs of every participant. Today always includes `"player"`;
+   *  future simulation runs may omit it. */
+  participants: EntityRef[];
+  /** Speaker for the most-recently rendered line. Drives the overlay's
+   *  portrait + nameplate. */
+  currentSpeaker: EntityRef;
+  /** Linear transcript of what each participant has said / chosen so far.
+   *  Capped at ~24 entries with oldest evicted to keep AIGM context bounded. */
+  exchanges: ConversationExchange[];
+  /** Set of node ids the conversation has visited this session — drives
+   *  "first-visit only" effects and lets the UI tint repeat choices. */
+  visitedNodeIds: string[];
+  /** Per-node line-variant rotation memory (mirrors `narrationLastUsed`).
+   *  Keyed by node id; value is the last variant index used. */
+  lineLastUsed: Record<string, number>;
+  /** Choice slots whose ability check the player has already rolled. Each
+   *  key is `${nodeId}#${choiceIndex}`. The server rejects a second attempt
+   *  on the same slot unless `devFlags.allowRetryChecks` is true; the client
+   *  reads this to hide the choice (or surface it with a `[DEV]` tag when
+   *  retry is dev-enabled). */
+  attemptedCheckKeys: string[];
+  /** Set when the conversation is paused awaiting an ability-check resolution.
+   *  The engine writes the outcome and resumes via the choice's onPass/onFail. */
+  pendingCheck?: {
+    choiceIndex: number;
+    actor: EntityRef;
+    skill?: string;
+    ability?: string;
+    dc: number;
+    advantage?: 'normal' | 'advantage' | 'disadvantage';
+  };
+}
+
+export type ConversationExchangeKind = 'line' | 'choice' | 'roll' | 'aigm' | 'event';
+
+export interface ConversationExchange {
+  /** Who acted at this step. */
+  speaker: EntityRef;
+  /** Display name resolved at write time (so the transcript reads cleanly
+   *  even after a `revealedName` flip). */
+  speakerName: string;
+  /** Kind drives how the AIGM context formatter renders the line. */
+  kind: ConversationExchangeKind;
+  text: string;
+  /** ISO timestamp at write — used as a tiebreaker when sorting NPC saves
+   *  by recency and as a recency hint for the AIGM. */
+  at: string;
+}
+
+// ── NPC save layer ─────────────────────────────────────────────────────────
+//
+// Persistent NPCs maintain a per-character save file. Conversations write to
+// it explicitly via the new `npc_remember` / `npc_adjust_relationship` /
+// `npc_record_journal` actions; the engine also writes implicitly when the
+// NPC is involved in canonical events (death, name reveal, faction flip).
+// Future `WitnessSystem` will write inter-NPC observation records here too.
+
+/** Fact values stored under `NpcSave.facts`. Booleans for binary memory
+ *  ("met_the_player"), numbers for counters ("times_lied_to"), strings for
+ *  free-form tags ("favorite_drink:dwarven_ale"), or a structured shape
+ *  with an occurrence count + last-at timestamp. */
+export type NpcFactValue =
+  | boolean
+  | number
+  | string
+  | { count: number; lastAt: string };
+
+export interface NpcFactEntry {
+  value: NpcFactValue;
+  /** Provenance of the write. Drives future "how confident is the NPC?"
+   *  reasoning — author-scripted facts are ground truth, witness facts are
+   *  observational, AIGM facts are roleplay-driven. */
+  source: 'authored' | 'aigm' | 'witness' | 'system';
+  recordedAt: string;
+}
+
+export interface NpcJournalEntry {
+  text: string;
+  /** 1 = trivia, 3 = pivotal. Capacity-limited evictor uses salience first,
+   *  age second when the journal is full. */
+  salience?: 1 | 2 | 3;
+  source: 'authored' | 'aigm' | 'witness' | 'system';
+  recordedAt: string;
+}
+
+export interface NpcConversationHistoryEntry {
+  conversationId: string;
+  /** Node where the conversation ended (terminal node id or last-rendered
+   *  node when ended via AIGM `end_conversation`). */
+  endedAtNodeId: string;
+  /** Sequence of choice labels the player picked through the graph —
+   *  surfaced to the AIGM so future free-text exchanges can reference
+   *  "you said you'd come back for me". */
+  chosenPath: string[];
+  /** Every check rolled during the conversation. */
+  rolledChecks: Array<{ skill: string; dc: number; total: number; passed: boolean }>;
+  at: string;
+}
+
+export interface NpcSave {
+  /** NPC def id this save belongs to. */
+  npcId: string;
+  /** Character def id this save is scoped to — each player keeps their own
+   *  memory tree of every NPC. */
+  characterId: string;
+  /** Liveness. `dead` saves are retained so other NPCs / future scenes can
+   *  reference "the NPC died" without the def needing special handling. */
+  status: 'alive' | 'dead' | 'fled';
+  /** Provenance of the last update. */
+  lastSeen: {
+    at: string;
+    adventureId?: string;
+    chapterId?: string;
+    encounterId?: string;
+  };
+  /** Has the player's character learned this NPC's true name? Drives token
+   *  nameplate + Target Panel display, mirrors `NpcState.revealedName`. */
+  nameKnownToPlayer: boolean;
+  /** Stateful overrides applied when the NPC is re-spawned in a future
+   *  encounter. Only fields the design wants to persist live here; HP is
+   *  optional (future "wounds persist between chapters" rule), conditions
+   *  for long-term ones (cursed, etc.). The engine's spawn path layers
+   *  these on top of the def's defaults. */
+  stateOverrides: {
+    currentHp?: number;
+    conditions?: string[];
+    addedItemIds?: string[];
+    removedItemIds?: string[];
+    factionId?: string;
+    disposition?: 'ally' | 'neutral' | 'enemy';
+  };
+  /** Relationship scores keyed by entity ref. `"party"` is the player —
+   *  conversation gates and the AIGM both read this. Other keys hold
+   *  NPC-to-NPC standings (used by the future simulation runtime; the
+   *  conversation system today writes only `"party"`). Bounded ±100. */
+  relationship: Record<EntityRef, number>;
+  /** Optional trust / respect axes — see plan. Kept optional so existing
+   *  saves don't need a migration when the axes are introduced. */
+  trust?: Record<EntityRef, number>;
+  respect?: Record<EntityRef, number>;
+  /** Queryable structured memory. Conversation `visibleIf` predicates and
+   *  future AIGM `npc_remember` tool both read/write here. */
+  facts: Record<string, NpcFactEntry>;
+  /** Free-form narrative log surfaced to the AIGM for future conversations.
+   *  Capacity-limited (default 20). */
+  journal: NpcJournalEntry[];
+  /** Per-conversation completion record. */
+  conversationHistory: NpcConversationHistoryEntry[];
+  /** Optional personal-arc state — for NPCs with their own storyline. */
+  arc?: { phase: string; updatedAt: string };
 }
 
 // ── Equipment item types ─────────────────────────────────────────────────────
@@ -842,6 +1116,13 @@ export interface EncounterDef {
    */
   allowsLongRest?: boolean;
   /**
+   * Per-NPC conversation overrides — keyed by NPC def id, value is a
+   * `ConversationDef.id`. Lets one encounter give a recurring NPC a
+   * scene-specific dialogue without editing the NPC's default conversation.
+   * Falls back to `NPCDef.conversationId` when an override isn't set.
+   */
+  conversationOverrides?: Record<string, string>;
+  /**
    * Per-GID semantics for the referenced map's tiles in this encounter.
    * Required to make any tile of the map passable; tiles without a matching
    * entry are treated as impassable by SessionBuilder.
@@ -1026,7 +1307,11 @@ export type TriggerGuard =
   | { type: 'npcs_alive'; defId: string; op: ComparisonOp; count: number }
   | { type: 'phase'; in: CombatMode[] }
   /** True when the player's standing with `factionId` satisfies the comparison. Unknown factions default to 0. */
-  | { type: 'faction_standing'; factionId: string; op: ComparisonOp; value: number };
+  | { type: 'faction_standing'; factionId: string; op: ComparisonOp; value: number }
+  /** True when the player's coin purse (in copper pieces — see
+   *  `PlayerState.balanceCp`) satisfies the comparison. Use to gate
+   *  conversation choices on whether the player can afford something. */
+  | { type: 'balance_cp'; op: ComparisonOp; value: number };
 
 export type TriggerAction =
   | { type: 'spawn_enemy_near_player'; monsterId: string; minDist?: number; maxDist?: number }
@@ -1056,6 +1341,41 @@ export type TriggerAction =
   | { type: 'record_rumor'; id: string; text: string; salience?: number }
   /** Promotes (or demotes) every NPC currently in the encounter whose `defId` matches. Faction-mates of a newly hostile NPC are auto-aggroed via the existing `aggroFaction` path. Use together with `trigger_combat` to turn a peaceful scene hostile when the player crosses a threshold. */
   | { type: 'set_disposition_by_def_id'; defId: string; disposition: 'ally' | 'neutral' | 'enemy' }
+  /**
+   * Hide (or reveal) every NPC currently in the encounter whose `defId`
+   * matches. When `hidden: true`, the NPC starts invisible to the player —
+   * the client skips rendering the token and the AIGM combatant list omits
+   * it.
+   *
+   * Reveal modes:
+   *   • `'perception'` (default) — the NPC stays hidden until the player's
+   *     passive Perception meets the NPC's `hideDC` on a movement-time
+   *     sweep (line-of-sight respected via the Vision system). `hideDC`
+   *     defaults to `10 + monsterDef.stealthBonus`. Use for stealth
+   *     creatures and scrub ambushers where skill matters.
+   *   • `'trigger'` — the NPC is invisible to passive Perception sweeps
+   *     entirely; it is only revealed by an explicit `set_npc_hidden
+   *     { hidden: false }` action. Use for narratively-locked reveals
+   *     (the dead rise from their niches, the wall slides open) where
+   *     no roll should be able to spoil the beat.
+   */
+  | { type: 'set_npc_hidden'; defId: string; hidden: boolean; hideDC?: number; revealedBy?: 'perception' | 'trigger' }
+  /**
+   * Mark every living NPC currently in the encounter whose `defId` matches
+   * as dead. Sets `hp = 0`, applies the `dead` condition, and (optionally)
+   * attaches a `corpseSearch` payload — when set, the player's SEARCH
+   * action picks the corpse up as a one-shot Perception target while
+   * adjacent. Authors use this for found-bodies-as-clues setups: spawn an
+   * NPC at a tile, then mark the def dead on `encounter_started` with a
+   * tailored success/failure pair. Idempotent: if the NPC is already dead,
+   * only the optional `corpseSearch` payload is applied.
+   *
+   * `dropInventory` (default `true`) mirrors the normal `killNpc` path —
+   * the NPC's `inventoryIds` become map items at their tile. Set to
+   * `false` for found bodies whose gear should NOT scatter (Vael's
+   * licence-seal stays on his person, surfaced via `corpseSearch`).
+   */
+  | { type: 'set_npc_dead'; defId: string; corpseSearch?: { dc: number; successText: string; failureText: string }; dropInventory?: boolean }
   /** Kicks off combat when the engine is in the exploring phase and at least one enemy is alive. Idempotent — no-ops if either precondition fails. */
   | { type: 'trigger_combat' }
   /** Award XP to the player. Use for trigger-fired story rewards (parley success, scouted clue, riddle solved) where no kill rolled the XP automatically. */
@@ -1074,7 +1394,47 @@ export type TriggerAction =
    *  for "you've reached the inn" beats where the room becomes restable
    *  partway through the encounter, or for revoking a rest privilege when
    *  the situation turns hostile. Idempotent. */
-  | { type: 'set_long_rest'; allowed: boolean };
+  | { type: 'set_long_rest'; allowed: boolean }
+  /** Add (positive) or deduct (negative) copper from the player's coin
+   *  purse. Mirrors the AIGM `award_coins` tool. When `deltaCp` is negative
+   *  and the player can't pay, the action becomes a no-op AND logs a
+   *  configurable refusal message — gate on `balance_cp` upstream when the
+   *  conversation needs to branch on the affordance. */
+  | { type: 'adjust_player_balance_cp'; deltaCp: number; reason?: string }
+  // ── Conversation system ────────────────────────────────────────────────
+  /** Open a conversation. `npcRef` resolves to a live NPC instance (`npc_<id>`
+   *  or a combat-label ref); `conversationId` defaults to that NPC's
+   *  `NPCDef.conversationId` when omitted. No-op when another conversation
+   *  is already active or the ref doesn't resolve. */
+  | { type: 'start_conversation'; npcRef: string; conversationId?: string }
+  /** Close the active conversation. No-op when none is open. Flushes the
+   *  participating persistent NPCs' saves so the transcript persists. */
+  | { type: 'end_conversation' }
+  /** Jump the active conversation to a different node. Used by AIGM
+   *  `set_conversation_node` tool calls + by author scripting to splice in
+   *  an event mid-dialogue. No-op when no conversation is active or the
+   *  node id doesn't exist. */
+  | { type: 'set_conversation_node'; nodeId: string }
+  // ── NPC persistence (writes to NpcSave) ────────────────────────────────
+  /** Record a structured fact on the named NPC's save. `ref` accepts
+   *  `"self"` (resolves to the speaker of the current conversation node),
+   *  `npc_<id>`, or a combat-label ref. `value` defaults to `true`.
+   *  No-op when the target NPC isn't persistent. */
+  | { type: 'npc_remember'; ref: string; fact: string; value?: NpcFactValue; source?: 'authored' | 'aigm' | 'witness' | 'system' }
+  /** Forget a previously-recorded fact. Rare — memory-wipe magic, retcons,
+   *  AIGM corrections. */
+  | { type: 'npc_forget'; ref: string; fact: string }
+  /** Adjust an NPC's relationship axis with `target` by `delta` (clamped
+   *  ±100). `target` is an entity ref — `"party"` for the player or
+   *  `npc_<id>` for inter-NPC standings. `axis` defaults to `"party"`
+   *  (the base relationship) — `"trust"` / `"respect"` reserved for the
+   *  three-axis expansion. */
+  | { type: 'npc_adjust_relationship'; ref: string; target: string; delta: number; axis?: 'party' | 'trust' | 'respect' }
+  /** Append a free-form journal line to the NPC's save. Capacity-limited;
+   *  the lowest-salience oldest entry is evicted when full. */
+  | { type: 'npc_record_journal'; ref: string; text: string; salience?: 1 | 2 | 3; source?: 'authored' | 'aigm' | 'witness' | 'system' }
+  /** Advance the NPC's personal-arc phase. */
+  | { type: 'npc_set_arc_phase'; ref: string; phase: string };
 
 export interface EncounterTrigger {
   /** Unique within the encounter; used as the dedupe key in `firedTriggerIds`. */
@@ -1355,6 +1715,10 @@ export interface AvailableActions {
   canAttack: boolean;
   throwableItemIds: string[];
   canHide: boolean;
+  /** True when the player can take the SEARCH action right now — always available
+   *  during exploration (no action economy); during combat, gated on the player
+   *  having an Action to spend (Search costs the full Action per SRD). */
+  canSearch: boolean;
   /** Class-feature ids the player can use *right now* (action economy + remaining resource + class-level gating). */
   usableFeatureIds: string[];
   canDash: boolean;
@@ -1501,12 +1865,35 @@ export interface NpcState {
   /** SRD Hide outcome for this NPC — Stealth roll total recorded when the
    *  creature took the Hide action. Opposed by player / other NPC Perception. */
   hideDC?: number;
+  /** When true, the passive Perception movement-sweep skips this NPC
+   *  entirely — they can only be revealed by an explicit
+   *  `set_npc_hidden { hidden: false }` action. Used by encounter authors
+   *  for narrative reveals (the dead rising, a wall sliding open) where
+   *  no roll should be able to surface the creature early. Set via the
+   *  `set_npc_hidden` action with `revealedBy: 'trigger'`. */
+  revealedByTrigger?: boolean;
   /** Last tile the player observed this NPC on. Set whenever `Vision.canSee`
    *  reports the player saw this creature. Used by the client to render the
    *  NPC's last-known position as a faded ghost when the player loses sight
    *  (SRD "out of sight, not out of mind"). Cleared when the player sees
    *  the creature again at its current tile. */
   lastSeenTile?: { x: number; y: number };
+  /** Authored payload that turns this NPC's corpse into a one-shot search
+   *  target — picked up by the player's SEARCH action when adjacent. The
+   *  Perception roll is opposed by `dc`; the success / failure branches
+   *  emit their texts to the Event Log. Single-use: the payload is cleared
+   *  after the first resolution so a second search just reports "nothing
+   *  found". Attached at spawn time via the `set_npc_dead` trigger action,
+   *  so any encounter can author corpse-bound clues / loot prompts without
+   *  engine code changes. */
+  corpseSearch?: { dc: number; successText: string; failureText: string };
+  /** Set true once the deterministic SEARCH action has resolved this
+   *  corpse (regardless of pass/fail). The AIGM reads this flag in the
+   *  CURRENT STATE corpses section: when true, the GM must NOT roll a
+   *  second Perception check on this body — the engine already wrote
+   *  the outcome to the Event Log. Stays true for the rest of the
+   *  encounter. */
+  corpseSearched?: boolean;
   inventoryIds: string[];
   // Initiative roll total for the current combat (d20 + initiativeBonus, with
   // optional Disadvantage if Surprised). Cleared when combat ends.
@@ -1579,6 +1966,10 @@ export interface GameState {
   availableActions: AvailableActions;
   /** Set when the engine has paused on a reaction-eligible trigger. The next player action must be `resolveReaction`. Cleared on resolution. */
   pendingReaction: PendingReaction | null;
+  /** Active conversation when one is open — `null` otherwise. The client
+   *  renders the ConversationOverlay whenever this transitions non-null.
+   *  Pauses world tick (`isWorldTickEligible` skips when set). */
+  activeConversation: ActiveConversation | null;
   /** True when an `encounter_started` combat trigger fired during session
    *  construction and the engine deferred `advanceTurn` so the player has
    *  a chance to see the intro overlay / announcement before NPC turns
@@ -1631,7 +2022,7 @@ export interface GameState {
   /** Set when the current session is a chapter of an adventure. Drives the END CHAPTER button and the chapter-advance flow. Null for single-encounter sessions. */
   adventureContext: AdventureSessionContext | null;
   /** Set true when the active chapter has been resolved (combat-ended or `completionFlag` set). Drives the END CHAPTER button. */
-  chapterComplete: boolean;
+  encounterComplete: boolean;
   /** Optional world-flag name that, when set, marks the encounter complete. Mirrors `EncounterDef.completionFlag` for standalone (non-adventure) encounters so the `encounter_completed` engine event can fire on flag-driven resolutions. */
   encounterCompletionFlag?: string;
   /** Environmental flags consulted by combat resolvers — sourced from EncounterDef.environment at session creation. */
@@ -1670,6 +2061,19 @@ export interface DevFlags {
    *  default so non-developers can't accidentally wipe a character's progress.
    *  Client-only — server ignores this field. */
   showDeleteSaveButton?: boolean;
+  /** Allow the player to retry a failed (or already-attempted) conversation
+   *  ability check. When OFF (default) the server rejects a second attempt
+   *  on the same `node#choiceIndex` and the client hides the choice. When
+   *  ON the choice remains clickable and the overlay flags it with a
+   *  `[DEV]` tag so the player knows the option is only reachable because
+   *  the dev override is active. */
+  allowRetryChecks?: boolean;
+  /** Surfaces a "★ COMPLETE OBJECTIVE" button on the Player Panel that
+   *  fires the encounter's completion path (sets the `completionFlag` if
+   *  one is authored, or ends combat by clearing every enemy) so a tester
+   *  can blast through adventures without playing them out. Off by
+   *  default. */
+  completePrimaryObjective?: boolean;
 }
 
 export interface AdventureSessionContext {
@@ -1811,7 +2215,23 @@ export type PlayerAction =
   | { type: 'equip'; slot: 'armor' | 'weapon' | 'shield'; itemId: string }
   | { type: 'unequip'; slot: 'armor' | 'weapon' | 'shield' }
   | { type: 'selectTarget'; entityId: string | null }
-  | { type: 'scrollLog'; delta: number };
+  | { type: 'scrollLog'; delta: number }
+  // ── Conversation system ─────────────────────────────────────────────
+  /** Open a conversation with the named NPC. `npcRef` is a runtime entity
+   *  ref (`npc_<id>` or a combat-label ref). `conversationId` defaults to
+   *  the NPC's `NPCDef.conversationId` when omitted. */
+  | { type: 'startConversation'; npcRef: EntityRef; conversationId?: string }
+  /** Advance the active conversation by selecting the choice at the given
+   *  index in the current node's choice list. */
+  | { type: 'conversationChoice'; choiceIndex: number }
+  /** Close the active conversation (cancel / × / "Goodbye"). */
+  | { type: 'conversationEnd' }
+  /** Dev-mode shortcut — completes the current encounter so the tester can
+   *  fast-forward through an adventure. Server-side this sets the
+   *  encounter's `completionFlag` (when authored) AND clears every living
+   *  enemy so the combat-end path fires too; clients should only send it
+   *  when `devFlags.completePrimaryObjective` is on. */
+  | { type: 'devCompleteEncounter' };
 
 // ── WebSocket protocol (server → client) ─────────────────────────────────────
 

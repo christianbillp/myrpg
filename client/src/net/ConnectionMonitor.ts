@@ -27,7 +27,16 @@ class ConnectionMonitorClass {
     if (ok) {
       this.overlay?.destroy();
       this.overlay = null;
-      window.location.reload();
+      // Only reload when there's an active game session to recover —
+      // otherwise the player is on a creator / setup / main-menu scene
+      // that doesn't depend on the WebSocket, and a forced reload would
+      // throw away in-progress form state (typing a persona, painting an
+      // encounter map, etc.) for no benefit. The disconnect was caused by
+      // a server restart or a brief network blip; the next user action
+      // that needs the server will succeed naturally.
+      if (gameClient.getSessionId()) {
+        window.location.reload();
+      }
     } else {
       this.scheduleProbe();
     }

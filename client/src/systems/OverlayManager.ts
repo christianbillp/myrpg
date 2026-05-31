@@ -3,9 +3,10 @@ import { ItemDef, EquipmentDef } from "../data/equipment";
 import { CharacterSheetOverlay, CharacterSheetInputs } from "../ui/CharacterSheetOverlay";
 import { IntroductionOverlay } from "../ui/IntroductionOverlay";
 import { ReactionPromptOverlay } from "../ui/ReactionPromptOverlay";
-import { ChapterCompleteOverlay } from "../ui/ChapterCompleteOverlay";
+import { EncounterCompleteOverlay } from "../ui/EncounterCompleteOverlay";
 import { NextChapterButton } from "../ui/NextChapterButton";
-import type { GameState, SpellDef, PendingReaction } from "../net/types";
+import { ConversationOverlay } from "../ui/ConversationOverlay";
+import type { GameState, SpellDef, PendingReaction, ConversationDef } from "../net/types";
 import { UIScale } from "../ui/UIScale";
 import { WorldPause } from "../net/WorldPause";
 import { DevMode } from "../devMode";
@@ -24,12 +25,28 @@ export interface OverlayCallbacks {
   onDeclineReaction: () => void;
   /** Player pressed NEXT CHAPTER on the chapter-complete overlay. */
   onAdvanceChapter: () => void;
+  /** Player pressed RETURN TO MENU on the single-encounter completion
+   *  overlay. Wired by the host scene to the same teardown path as the
+   *  Player Panel's LEAVE ENCOUNTER button. */
+  onLeaveEncounter: () => void;
   /** Player dismissed the IntroductionOverlay — push the introduction text
    *  into the GM chat so it persists as the opening narration after the
    *  modal closes. */
   onIntroClosed: (introduction: string) => void;
   getItems: () => ItemDef[];
   getSpells: () => SpellDef[];
+  /** Conversation system — host scene wires these to PlayerAction sends.
+   *  `onOpenAigm` is Phase 5: surfaces the GM chat dropup with the
+   *  conversation transcript pre-loaded. For now it can be a no-op. */
+  onConversationChoice: (index: number) => void;
+  onConversationEnd: () => void;
+  onConversationOpenAigm?: () => void;
+  /** Lookup helpers the overlay needs to render speakers — host scene
+   *  computes from `state.npcs` + `playerDef`. */
+  resolveSpeakerName: (entityRef: string) => string;
+  resolveSpeakerToken: (entityRef: string) => string | null;
+  /** Conversation registry loaded at boot — see `BootScene`. */
+  getConversations: () => ConversationDef[];
 }
 
 export class OverlayManager {
@@ -40,13 +57,18 @@ export class OverlayManager {
   private introOverlay: IntroductionOverlay | null = null;
   private characterSheet: CharacterSheetOverlay | null = null;
   private reactionPrompt: ReactionPromptOverlay | null = null;
-  private chapterComplete: ChapterCompleteOverlay | null = null;
-  /** Persistent top-center button shown after the chapter-complete overlay is dismissed. */
+  private encounterCompleteOverlay: EncounterCompleteOverlay | null = null;
+  private conversation: ConversationOverlay | null = null;
+  /** Tracks which conversation id the open overlay is for so a state change
+   *  to a different conversation re-opens cleanly. */
+  private conversationShownFor: string | null = null;
+  /** Persistent top-center button shown after the encounter-complete overlay is dismissed. */
   private nextChapterButton: NextChapterButton | null = null;
   /** Tracks which pending-reaction the open prompt is for, so we don't rebuild on every state update. */
   private reactionShownFor: PendingReaction | null = null;
-  /** Tracks which chapter the complete-overlay was shown for, so reopening on every tick is suppressed. */
-  private chapterCompleteShownFor: string | null = null;
+  /** Tracks which dedup key the encounter-complete overlay was shown for,
+   *  so reopening on every tick is suppressed. */
+  private encounterCompleteShownFor: string | null = null;
   private introShown = false;
 
   constructor(scale: UIScale, playerDef: PlayerDef, callbacks: OverlayCallbacks) {
@@ -56,7 +78,7 @@ export class OverlayManager {
   }
 
   get isAnyOpen(): boolean {
-    return !!(this.introOverlay || this.characterSheet || this.reactionPrompt || this.chapterComplete);
+    return !!(this.introOverlay || this.characterSheet || this.reactionPrompt || this.encounterCompleteOverlay || this.conversation);
   }
 
   reset(): void {
@@ -64,9 +86,11 @@ export class OverlayManager {
     this.characterSheet = null;
     this.reactionPrompt = null;
     this.reactionShownFor = null;
-    if (this.chapterComplete) { this.chapterComplete.destroy(); this.chapterComplete = null; }
+    if (this.encounterCompleteOverlay) { this.encounterCompleteOverlay.destroy(); this.encounterCompleteOverlay = null; }
     if (this.nextChapterButton) { this.nextChapterButton.destroy(); this.nextChapterButton = null; }
-    this.chapterCompleteShownFor = null;
+    if (this.conversation) { this.conversation.destroy(); this.conversation = null; }
+    this.conversationShownFor = null;
+    this.encounterCompleteShownFor = null;
     this.introShown = false;
   }
 
@@ -170,55 +194,108 @@ export class OverlayManager {
   }
 
   /**
-   * Two-stage flow when a chapter completes:
-   *   1. The first time `state.chapterComplete` is true, open the
+   * Mirror `state.activeConversation` into the ConversationOverlay. Opens
+   * the overlay when a conversation appears, refreshes the rendered node on
+   * every state tick (so server-driven node jumps land), and closes it the
+   * instant the server clears `activeConversation`.
+   */
+  syncConversation(state: GameState): void {
+    const ac = state.activeConversation;
+    if (!ac) {
+      if (this.conversation) this.closeConversation();
+      return;
+    }
+    // Conversation changed (different id) → tear down the old overlay so the
+    // new one renders against the right def.
+    if (this.conversationShownFor !== ac.conversationId) {
+      this.closeConversation();
+      const defs = this.callbacks.getConversations();
+      const def = defs.find((c) => c.id === ac.conversationId);
+      if (!def) return;
+      WorldPause.acquire('overlay:conversation');
+      this.conversationShownFor = ac.conversationId;
+      this.conversation = new ConversationOverlay(
+        this.scale, def, ac,
+        (ref) => this.callbacks.resolveSpeakerName(ref),
+        (ref) => this.callbacks.resolveSpeakerToken(ref),
+        {
+          onChoice: (i) => this.callbacks.onConversationChoice(i),
+          onEnd: () => this.callbacks.onConversationEnd(),
+          onOpenAigm: this.callbacks.onConversationOpenAigm,
+        },
+      );
+      return;
+    }
+    // Same conversation, possibly a different node — refresh.
+    this.conversation?.refresh(ac);
+  }
+
+  private closeConversation(): void {
+    if (!this.conversation) return;
+    this.conversation.destroy();
+    this.conversation = null;
+    this.conversationShownFor = null;
+    WorldPause.release('overlay:conversation');
+  }
+
+  /**
+   * Two-stage flow when an encounter completes:
+   *   1. The first time `state.encounterComplete` is true, open the
    *      "Wrap Up Loose Ends" overlay. The player can dismiss it (close
    *      button, X, or backdrop click) and continue exploring.
-   *   2. Once dismissed, render a persistent NEXT CHAPTER button at the
-   *      top-center of the screen. Clicking it fires `onAdvanceChapter`.
+   *   2. Once dismissed, render a persistent NEXT CHAPTER / RETURN TO MENU
+   *      button at the top-center of the screen. Clicking it fires the
+   *      appropriate callback.
    *
-   * The overlay only opens once per chapter (`chapterCompleteShownFor`
-   * tracks the chapter id). The persistent button stays visible until the
-   * scene resets (next chapter starts or player returns to menu).
+   * Adventure mode keys the "shown once" dedup on the chapter id; single-
+   * encounter mode keys it on a sentinel string (only one encounter per
+   * session, so any non-null marker works). The persistent button stays
+   * visible until the scene resets.
    */
-  syncChapterComplete(state: GameState): void {
+  syncEncounterComplete(state: GameState): void {
+    if (!state.encounterComplete) return;
     const ctx = state.adventureContext;
-    if (!ctx || !state.chapterComplete) return;
-    if (this.chapterCompleteShownFor === ctx.chapterId) return;
-    this.chapterCompleteShownFor = ctx.chapterId;
-    const isFinal = ctx.chapterIndex >= ctx.totalChapters - 1;
-    const buttonLabel = isFinal ? "Finish Adventure" : `Next Chapter →`;
-    const advance = () => {
-      this.closeChapterComplete();
+    const dedupKey = ctx ? ctx.chapterId : "single-encounter";
+    if (this.encounterCompleteShownFor === dedupKey) return;
+    this.encounterCompleteShownFor = dedupKey;
+
+    const isFinal = ctx ? ctx.chapterIndex >= ctx.totalChapters - 1 : false;
+    const buttonLabel = !ctx
+      ? "Return to Menu"
+      : isFinal
+        ? "Finish Adventure"
+        : "Next Chapter →";
+    const advance = (): void => {
+      this.closeEncounterComplete();
       if (this.nextChapterButton) { this.nextChapterButton.destroy(); this.nextChapterButton = null; }
-      this.callbacks.onAdvanceChapter();
+      if (ctx) this.callbacks.onAdvanceChapter();
+      else this.callbacks.onLeaveEncounter();
     };
-    WorldPause.acquire('overlay:chapter-complete');
-    this.chapterComplete = new ChapterCompleteOverlay(
+    WorldPause.acquire('overlay:encounter-complete');
+    this.encounterCompleteOverlay = new EncounterCompleteOverlay(
       this.scale,
       state.encounterTitle,
-      ctx.chapterIndex,
-      ctx.totalChapters,
+      ctx ? { index: ctx.chapterIndex, total: ctx.totalChapters } : null,
       () => {
-        this.closeChapterComplete();
-        this.showNextChapterButton(buttonLabel);
+        this.closeEncounterComplete();
+        this.showNextChapterButton(buttonLabel, advance);
       },
       advance,
     );
   }
 
-  private closeChapterComplete(): void {
-    if (!this.chapterComplete) return;
-    this.chapterComplete.destroy();
-    this.chapterComplete = null;
-    WorldPause.release('overlay:chapter-complete');
+  private closeEncounterComplete(): void {
+    if (!this.encounterCompleteOverlay) return;
+    this.encounterCompleteOverlay.destroy();
+    this.encounterCompleteOverlay = null;
+    WorldPause.release('overlay:encounter-complete');
   }
 
-  private showNextChapterButton(label: string): void {
+  private showNextChapterButton(label: string, onAdvance: () => void): void {
     if (this.nextChapterButton) return;
     this.nextChapterButton = new NextChapterButton(this.scale, label, () => {
       if (this.nextChapterButton) { this.nextChapterButton.destroy(); this.nextChapterButton = null; }
-      this.callbacks.onAdvanceChapter();
+      onAdvance();
     });
   }
 

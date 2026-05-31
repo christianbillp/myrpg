@@ -3,6 +3,7 @@ import { PlayerDef } from '../data/player';
 import { AvailableActions, CombatMode } from '../net/types';
 import { UIScale } from './UIScale';
 import { STATUS_TONE_COLOR } from './PlayerStatus';
+import { DevMode } from '../devMode';
 
 const GRID_H   = GRID_ROWS * TILE_SIZE;
 const PANEL_H  = GRID_H + HUD_HEIGHT;
@@ -71,6 +72,11 @@ export interface PlayerPanelCallbacks {
   onLeaveEncounter: () => void;
   onLevelUp: () => void;
   onLongRest: () => void;
+  /** Dev-only fast-forward — server fires the encounter completion path
+   *  (set completion flag + clear enemies). Only sent when the
+   *  `DevMode.completePrimaryObjective` flag is on, which is also what
+   *  governs the button's visibility. */
+  onDevCompleteObjective: () => void;
   onCommandSummon: (summonNpcId: string) => void;
   /** Open the inline TALK input near the player token so the player can
    *  type a line for the currently-selected target. No-op when no target
@@ -100,7 +106,7 @@ export class PlayerPanel {
   private readonly statusEl: HTMLElement;
   private readonly objectiveEl: HTMLElement;
   private readonly actionArea: HTMLElement;
-  private readonly searchBtn: HTMLButtonElement;
+  private readonly devCompleteBtn: HTMLButtonElement;
   private readonly endTurnBtn: HTMLButtonElement;
   private readonly offResize: () => void;
 
@@ -157,8 +163,8 @@ export class PlayerPanel {
       <div style="position:absolute;bottom:0;left:0;right:0;height:108px;display:flex;flex-direction:column-reverse;gap:4px;padding:0 8px 8px;">
         <button class="gui-btn" style="background:#3a1a1a;" data-leave-enc>LEAVE ENCOUNTER</button>
         <button class="gui-btn" style="background:#3a3020;display:none;" data-end-turn>END TURN</button>
-        <button class="gui-btn" style="background:#1a2a3a;display:none;" data-search>SEARCH</button>
         <button class="gui-btn" style="background:#0a1a2a;" data-charsheet>CHARACTER</button>
+        <button class="gui-btn" style="background:#1a3a1a;color:#bbeeaa;display:none;" data-dev-complete>★ COMPLETE OBJECTIVE [DEV]</button>
       </div>
     `;
 
@@ -172,13 +178,14 @@ export class PlayerPanel {
     this.objectiveEl = ref('objective');
     this.actionArea = ref('actions');
     this.headerSubEl = ref('header-sub');
-    this.searchBtn  = ref('search')   as HTMLButtonElement;
     this.endTurnBtn = ref('end-turn') as HTMLButtonElement;
 
     (ref('charsheet') as HTMLButtonElement).onclick = () => callbacks.onOpenCharacterSheet();
     (ref('leave-enc') as HTMLButtonElement).onclick = () => callbacks.onLeaveEncounter();
     this.endTurnBtn.onclick = () => callbacks.onEndTurn();
-    this.searchBtn.onclick  = () => callbacks.onSearch();
+    this.devCompleteBtn = ref('dev-complete') as HTMLButtonElement;
+    this.devCompleteBtn.onclick = () => callbacks.onDevCompleteObjective();
+    if (DevMode.completePrimaryObjective) this.devCompleteBtn.style.display = "block";
 
     this.el.appendChild(this.buildResizeHandle());
 
@@ -282,15 +289,13 @@ export class PlayerPanel {
     return handle;
   }
 
-  refresh(hp: number, maxHp: number, showSearch = false, objective = ''): void {
+  refresh(hp: number, maxHp: number, objective = ''): void {
     const pct = maxHp > 0 ? hp / maxHp : 0;
     this.hpFill.style.width = `${Math.floor(pct * 100)}%`;
     this.hpFill.style.background = hpColor(pct);
     this.hpText.textContent = `${hp} / ${maxHp}`;
 
     this.objectiveEl.textContent = objective || '—';
-
-    this.searchBtn.style.display = showSearch ? 'block' : 'none';
   }
 
   refreshActions(state: PlayerPanelActionState): void {
@@ -376,6 +381,14 @@ export class PlayerPanel {
       const hideColor = hasCunningAction ? BONUS_BLUE : '#1a3a1a';
       if (aa.canHide) this.actionArea.prepend(btn('HIDE', hideColor, this.callbacks.onHide));
 
+      // SEARCH — green Action button. Free during exploration; the same
+      // button surfaces during combat as a full-Action cost below. Engine
+      // side resolves adjacent secrets, hidden NPCs, and corpse-search
+      // payloads on a single Perception roll.
+      const searchExEl = btn('SEARCH', '#1a4a1e', this.callbacks.onSearch);
+      searchExEl.disabled = !aa.canSearch;
+      this.actionArea.prepend(searchExEl);
+
       // Player-owned summons during exploration — no action economy, just
       // click DIRECT to move them.
       for (const summon of state.summons) {
@@ -459,6 +472,13 @@ export class PlayerPanel {
         const hideColor = hasCunningAction ? BONUS_BLUE : '#1a3a1a';
         this.actionArea.prepend(btn('HIDE', hideColor, this.callbacks.onHide));
       }
+
+      // SEARCH — green Action button. Costs a full Action in combat (no
+      // Cunning Action fast-track per SRD); greys out once the Action has
+      // been spent this turn.
+      const searchEl = btn('SEARCH', GREEN, this.callbacks.onSearch);
+      searchEl.disabled = !aa.canSearch;
+      this.actionArea.prepend(searchEl);
 
       const moveEl = this.makeBtn('MOVE', moveMode ? '#5a4800' : '#3a3000', this.callbacks.onToggleMoveMode);
       moveEl.disabled = movesLeft <= 0;

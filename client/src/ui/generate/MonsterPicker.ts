@@ -335,7 +335,17 @@ export class MonsterPicker {
       padding: 6px 6px 2px;
     `;
     this.rosterEl.appendChild(header);
+    // Per-id ordinals so duplicates show `#1` / `#2` suffixes. Two bandit
+    // slots otherwise read identical and the author can't tell them apart.
+    const idCounts = new Map<string, number>();
+    const idTotals = new Map<string, number>();
+    for (const id of slots) idTotals.set(id, (idTotals.get(id) ?? 0) + 1);
     slots.forEach((id, idx) => {
+      const ordinal = (idCounts.get(id) ?? 0) + 1;
+      idCounts.set(id, ordinal);
+      const isDup = (idTotals.get(id) ?? 1) > 1;
+      const dupSuffix = isDup ? ` #${ordinal}` : "";
+
       const row = document.createElement("div");
       row.style.cssText = `
         display: flex; align-items: center;
@@ -352,10 +362,20 @@ export class MonsterPicker {
       `;
       row.appendChild(tag);
       const name = document.createElement("span");
-      name.style.cssText = "flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-right: 8px;";
+      name.style.cssText = "flex: 1; min-width: 0; overflow: hidden; margin-right: 8px;";
       // Names resolve through both rosters so an NPC slot reads the authored
-      // display name instead of the inherited monster's name.
-      name.textContent = this.resolveDisplayName(id);
+      // display name instead of the inherited monster's name. The id is
+      // surfaced beneath the name in muted text so the author can scan
+      // which roster entry each slot resolves to.
+      const displayName = this.resolveDisplayName(id);
+      const nameEl = document.createElement("div");
+      nameEl.textContent = `${displayName}${dupSuffix}`;
+      nameEl.style.cssText = "overflow: hidden; text-overflow: ellipsis; white-space: nowrap;";
+      name.appendChild(nameEl);
+      const idEl = document.createElement("div");
+      idEl.textContent = `${id}${dupSuffix}`;
+      idEl.style.cssText = "color: #6a7888; font-size: 9px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;";
+      name.appendChild(idEl);
       row.appendChild(name);
       const removeBtn = document.createElement("button");
       removeBtn.type = "button";
