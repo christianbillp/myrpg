@@ -116,8 +116,8 @@ function buildToolList() { return [
   },
   {
     name: 'request_ability_check',
-    description: "Ask the player to make an ability check. The server rolls d20 + the relevant skill modifier automatically. Set DC using SRD guidelines: Very Easy 5, Easy 10, Medium 15, Hard 20, Very Hard 25.",
-    input_schema: { type: 'object' as const, properties: { skill: { type: 'string' }, dc: { type: 'integer' }, reason: { type: 'string' } }, required: ['skill', 'dc', 'reason'] },
+    description: "Ask the player to make an ability check. The server rolls d20 + the relevant skill modifier automatically. Set DC using SRD guidelines: Very Easy 5, Easy 10, Medium 15, Hard 20, Very Hard 25. For Influence checks (deception, intimidation, performance, persuasion, animalHandling), set `target_npc` to the NPC entity ref so the server applies the SRD attitude modifier: Friendly → Advantage, Hostile → Disadvantage, Indifferent → normal (US-092).",
+    input_schema: { type: 'object' as const, properties: { skill: { type: 'string' }, dc: { type: 'integer' }, target_npc: { type: 'string' }, reason: { type: 'string' } }, required: ['skill', 'dc', 'reason'] },
   },
   {
     name: 'set_disposition',
@@ -156,8 +156,13 @@ function buildToolList() { return [
   },
   {
     name: 'set_exhaustion_level',
-    description: 'Set the player\'s Exhaustion level (0–5). Each level imposes −2 to all D20 Tests (ability checks and saving throws). Level 5 is lethal. Per SRD: a Long Rest removes one Exhaustion level.',
+    description: 'Set the player\'s Exhaustion level (0–6). Each level imposes −2 to ability checks and saving throws AND reduces Speed by 5 ft × level. Level 6 is lethal. Per SRD: a Long Rest removes one Exhaustion level.',
     input_schema: { type: 'object' as const, properties: { level: { type: 'integer' }, reason: { type: 'string' } }, required: ['level', 'reason'] },
+  },
+  {
+    name: 'set_attitude',
+    description: 'Set an NPC\'s SOCIAL attitude toward the party (US-092) — distinct from combat disposition. Attitude is "Friendly" / "Indifferent" / "Hostile" per SRD and drives Influence-check Advantage/Disadvantage; it does NOT decide whether the NPC fights (use set_disposition for combat). Use this after a successful Persuasion to shift indifferent → friendly, after a botched bribe to shift indifferent → hostile, or when narrating a relationship change. Entity: "enemy_A" (by label), "ally_A" (by combat label), or "npc_[id]" (any NPC by id). Attitude: "friendly" | "indifferent" | "hostile".',
+    input_schema: { type: 'object' as const, properties: { entity: { type: 'string' }, attitude: { type: 'string' }, reason: { type: 'string' } }, required: ['entity', 'attitude', 'reason'] },
   },
   {
     name: 'reveal_npc_name',
@@ -488,10 +493,11 @@ export function applyAIGMTool(
     case 'request_ability_check': {
       const skill = input['skill'] as string;
       const dc = input['dc'] as number;
-      const { roll, total, success } = engine.rollAbilityCheck(skill, dc);
-      engine.addLog(`Ability check (${skill}): d20+mod = ${total} vs DC ${dc} — ${success ? 'Success!' : 'Failure'}`);
-      toolResultContent = `Roll result: d20 + ${skill} mod = ${total} vs DC ${dc}. ${success ? 'SUCCESS' : 'FAILURE'}.`;
-      rollResult = `${skill}: d20(${roll}) = ${total} vs DC ${dc} — ${success ? 'SUCCESS' : 'FAILURE'}`;
+      const targetNpc = input['target_npc'] as string | undefined;
+      const { roll, total, success, attitudeNote } = engine.rollAbilityCheck(skill, dc, targetNpc);
+      engine.addLog(`Ability check (${skill})${attitudeNote ? ` ${attitudeNote}` : ''}: d20+mod = ${total} vs DC ${dc} — ${success ? 'Success!' : 'Failure'}`);
+      toolResultContent = `Roll result: d20 + ${skill} mod = ${total} vs DC ${dc}.${attitudeNote ? ` ${attitudeNote}.` : ''} ${success ? 'SUCCESS' : 'FAILURE'}.`;
+      rollResult = `${skill}${attitudeNote ? ` ${attitudeNote}` : ''}: d20(${roll}) = ${total} vs DC ${dc} — ${success ? 'SUCCESS' : 'FAILURE'}`;
       break;
     }
     case 'request_saving_throw': {
@@ -527,6 +533,22 @@ export function applyAIGMTool(
       events = engine.setExhaustionLevel(input['level'] as number);
       toolResultContent = `Exhaustion level set to ${input['level'] as number}.`;
       break;
+    case 'set_attitude': {
+      const entity = String(input['entity'] ?? '').trim();
+      const attitude = String(input['attitude'] ?? '').trim().toLowerCase();
+      const valid = attitude === 'friendly' || attitude === 'indifferent' || attitude === 'hostile';
+      if (!valid) {
+        toolResultContent = `set_attitude: attitude must be "friendly", "indifferent", or "hostile" (got "${attitude}").`;
+        break;
+      }
+      const before = engine.setAttitude(entity, attitude as 'friendly' | 'indifferent' | 'hostile');
+      if (before === null) {
+        toolResultContent = `set_attitude: unknown entity ref "${entity}". Use one from CURRENT STATE.`;
+      } else {
+        toolResultContent = `${entity} attitude: ${before} → ${attitude}.`;
+      }
+      break;
+    }
     case 'reveal_npc_name': {
       const entity = input['entity'] as string;
       const revealedName = input['revealed_name'] as string;

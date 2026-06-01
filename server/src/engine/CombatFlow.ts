@@ -2,7 +2,7 @@ import { GameEvent, NpcState, LogEntry, CombatMode } from './types.js';
 import type { GameContext } from './GameContext.js';
 import { rollOneInitiative, rollDeathSave, type RolledBonusDamage } from './CombatSystem.js';
 import { chebyshev } from './EnemyAI.js';
-import { isIncapacitated, hasSpeedZero, proneStandCost, TURN_CONDITIONS, clearHide } from './ConditionSystem.js';
+import { isIncapacitated, hasSpeedZero, proneStandCost, speedAfterExhaustion, TURN_CONDITIONS, clearHide } from './ConditionSystem.js';
 import { applyEquipment } from './EquipmentSystem.js';
 import { runPerceptionSweep } from './Vision.js';
 import { mod, d20 as d20Local } from './Dice.js';
@@ -258,11 +258,12 @@ export function enterPlayerTurn(ctx: GameContext): void {
     // base speed. Expeditious Retreat additionally grants a free Dash each
     // turn while active (added once movement is computed, mirroring
     // CombatActions' Dash semantics).
-    const tileSpeed = (ctx.playerDef.speed + s.player.speedBonus) / 5;
+    const baseFt = speedAfterExhaustion(ctx.playerDef.speed + s.player.speedBonus, s.player.exhaustionLevel ?? 0);
+    const tileSpeed = baseFt / 5;
     const standCost = proneStandCost(s.player.conditions, tileSpeed);
     s.player.movesLeft = Math.max(0, tileSpeed - standCost);
     if (s.player.expeditiousRetreat) {
-      s.player.movesLeft += Math.floor((ctx.playerDef.speed + s.player.speedBonus) / 5);
+      s.player.movesLeft += Math.floor(baseFt / 5);
     }
     if (standCost > 0) s.player.conditions = s.player.conditions.filter((c) => c !== 'prone');
   }
@@ -336,7 +337,7 @@ export function doRollDeathSave(ctx: GameContext, events: GameEvent[]): void {
 
   if (nextPhase === 'player_turn') {
     // nat20 or stabilize-on-3rd-success: wake up and take what remains of this turn.
-    s.player.movesLeft = ctx.playerDef.speed / 5;
+    s.player.movesLeft = speedAfterExhaustion(ctx.playerDef.speed, s.player.exhaustionLevel ?? 0) / 5;
     s.phase = 'player_turn';
   } else if (nextPhase === 'enemy_turn') {
     // Advance to the next combatant in initiative order.

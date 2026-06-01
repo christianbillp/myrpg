@@ -15,7 +15,7 @@ import { chebyshev } from './EnemyAI.js';
 import { buildAIGMTools } from './AIGMTools.js';
 import { setRelation, getRelation, isHostileTo } from './FactionRelations.js';
 import { runOffCameraTick as runOffCameraTickImpl } from './WorldTick.js';
-import { PLAYER_FACTION_ID } from '../../../shared/types.js';
+import { PLAYER_FACTION_ID, INFLUENCE_SKILLS } from '../../../shared/types.js';
 import * as Guard from './ActionGuards.js';
 import { clearHide, isDead } from './ConditionSystem.js';
 import type { GameContext } from './GameContext.js';
@@ -435,8 +435,16 @@ export class GameEngine {
   }
 
   setExhaustionLevel(level: number): GameEvent[] {
-    this.state.player.exhaustionLevel = Math.max(0, Math.min(5, level));
-    this.addLog(`Exhaustion level: ${this.state.player.exhaustionLevel} (−${this.state.player.exhaustionLevel * 2} to all D20 Tests)`);
+    const clamped = Math.max(0, Math.min(6, level));
+    this.state.player.exhaustionLevel = clamped;
+    const speedDrop = clamped * 5;
+    this.addLog(`Exhaustion level: ${clamped} (−${clamped * 2} to all D20 Tests, −${speedDrop} ft Speed)`);
+    if (clamped >= 6) {
+      // SRD: Exhaustion level 6 is lethal.
+      this.addLog({ left: `${this.playerDef.name} succumbs to exhaustion.`, style: 'kill' });
+      this.state.player.hp = 0;
+      this.state.phase = 'defeat';
+    }
     return [];
   }
 
@@ -639,6 +647,7 @@ export class GameEngine {
       combatLabel: '',  // summons don't carry a combat label
       tileX: fx, tileY: fy,
       disposition: 'ally',
+      attitude: 'friendly',
       factionId: `summon:${spellId}`,
       summonSpellId: spellId,
       summonOwnerId: 'player',
@@ -680,7 +689,7 @@ export class GameEngine {
     const npc: NpcState = {
       id: `e${++uidCounter}`, defId: def.id, name: def.name, combatLabel,
       tileX: tx, tileY: ty,
-      disposition: 'enemy', factionId: def.id,
+      disposition: 'enemy', attitude: 'hostile', factionId: def.id,
       hp: def.maxHp, maxHp: def.maxHp,
       isActive: false,
       reactionUsed: false, conditions: [], inventoryIds: [], ongoingEffects: [],
@@ -769,6 +778,21 @@ export class GameEngine {
     return [];
   }
 
+  /**
+   * US-092: set the social Attitude of an NPC toward the party. Returns the
+   * pre-change attitude when the NPC was found (so the AIGM tool can log
+   * `before → after`), or `null` when the entity ref is unknown. Does not
+   * touch combat disposition — attitude and disposition are orthogonal.
+   */
+  setAttitude(entity: string, attitude: 'friendly' | 'indifferent' | 'hostile'): 'friendly' | 'indifferent' | 'hostile' | null {
+    const npc = this.resolveNpcByEntity(entity);
+    if (!npc) return null;
+    const before = npc.attitude ?? 'indifferent';
+    npc.attitude = attitude;
+    this.addLog({ left: `${npc.revealedName ?? npc.name}: attitude ${before} → ${attitude}`, style: 'status' });
+    return before;
+  }
+
   applyCondition(entity: string, condition: string): GameEvent[] {
     const s = this.state;
     if (entity === 'player') {
@@ -788,16 +812,46 @@ export class GameEngine {
       s.player.conditions = s.player.conditions.filter((c) => c !== condition);
     } else {
       const npc = this.resolveNpcByEntity(entity);
-      if (npc) npc.conditions = npc.conditions.filter((c) => c !== condition);
+      if (npc) {
+        npc.conditions = npc.conditions.filter((c) => c !== condition);
+        // US-092: when Charm Person's `charmed` condition ends, restore the
+        // pre-cast social attitude. The condition might also be removed by
+        // an explicit AIGM remove_condition or by the spell's duration; the
+        // restore branch fires the same way in every path.
+        if (condition === 'charmed' && npc.attitudePreCharm !== undefined) {
+          npc.attitude = npc.attitudePreCharm;
+          npc.attitudePreCharm = undefined;
+        }
+      }
     }
     return [];
   }
 
-  rollAbilityCheck(skill: string, dc: number): { roll: number; total: number; success: boolean } {
+  /**
+   * Roll a player ability check. When `targetNpcEntity` is supplied AND
+   * the skill is an Influence check (Deception / Intimidation / Performance
+   * / Persuasion / Animal Handling), the target NPC's social attitude
+   * (US-092) modifies the roll: Friendly → Advantage, Hostile → Disadvantage,
+   * Indifferent → normal. `attitudeNote` is a short human-readable string
+   * (e.g. "[Friendly: Advantage]") the caller appends to log lines.
+   */
+  rollAbilityCheck(skill: string, dc: number, targetNpcEntity?: string): { roll: number; total: number; success: boolean; attitudeNote: string } {
     const { conditions, exhaustionLevel } = this.state.player;
     const skillMod = (this.playerDef.skills[skill] ?? 0) - exhaustionLevel * 2;
-    const withDisadvantage = conditions.includes('poisoned') || conditions.includes('frightened');
-    return rollSkillCheck(skillMod, dc, false, withDisadvantage);
+    let withAdvantage = false;
+    let withDisadvantage = conditions.includes('poisoned') || conditions.includes('frightened');
+    let attitudeNote = '';
+    if (targetNpcEntity && INFLUENCE_SKILLS.includes(skill)) {
+      const npc = this.resolveNpcByEntity(targetNpcEntity);
+      if (npc) {
+        const att = npc.attitude ?? 'indifferent';
+        if (att === 'friendly') { withAdvantage = true; attitudeNote = '[Friendly: Adv]'; }
+        else if (att === 'hostile') { withDisadvantage = true; attitudeNote = '[Hostile: Dis]'; }
+        else attitudeNote = '[Indifferent]';
+      }
+    }
+    const result = rollSkillCheck(skillMod, dc, withAdvantage, withDisadvantage);
+    return { ...result, attitudeNote };
   }
 
   rollPlayerSavingThrow(ability: string, dc: number): { roll: number; total: number; success: boolean; autoFail: boolean } {

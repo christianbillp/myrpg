@@ -959,6 +959,15 @@ function resolveSaveSpell(
       for (const c of conds) {
         if (!target.conditions.includes(c)) target.conditions.push(c);
       }
+      // US-092: Charm Person additionally flips the target's social Attitude
+      // to Friendly while charmed, satisfying the SRD Charmed condition's
+      // "Social Advantage" branch (the charmer has Advantage on Influence-type
+      // checks against the charmed creature). The pre-cast attitude is
+      // captured in `attitudePreCharm` so spell-end can restore it.
+      if (!success && spell.id === 'charm-person' && conds.includes('charmed')) {
+        if (target.attitudePreCharm === undefined) target.attitudePreCharm = target.attitude;
+        target.attitude = 'friendly';
+      }
       ctx.addLog({
         left: `${combatantDisplayName(target, ctx.state.npcs)} ${success ? 'resists' : conditionLogText(spell, conds)}`,
         right: `d20(${roll})+${saveBonus}=${total} vs DC ${dc}`,

@@ -384,6 +384,21 @@ export interface TokenSpec {
   };
 }
 
+/**
+ * SRD social attitude (US-092). Parallel to but distinct from combat
+ * `Disposition`: attitude is "how does this NPC feel about the party"
+ * (affects Influence checks), disposition is "is this NPC fighting me"
+ * (affects target selection). See SRD `Attitude.md` + the three attitude
+ * glossary entries. `'indifferent'` is the SRD default for unannotated
+ * monsters.
+ */
+export type Attitude = 'friendly' | 'indifferent' | 'hostile';
+
+/** Skills that count as Influence checks per SRD `Influence_[Action].md`. */
+export const INFLUENCE_SKILLS: readonly string[] = [
+  'deception', 'intimidation', 'performance', 'persuasion', 'animalHandling',
+];
+
 export interface NPCDef {
   id: string;
   name: string;
@@ -393,6 +408,13 @@ export interface NPCDef {
   /** Optional per-NPC SVG override. When unset, the NPC falls back to the
    *  token of its `monsterClass`. */
   tokenAsset?: string;
+  /**
+   * Starting social attitude toward the party (US-092). Defaults to
+   * `'indifferent'` per SRD when omitted. Independent of `disposition` —
+   * a hostile-attitude shopkeeper can still be a neutral-disposition NPC
+   * who refuses to fight but resists persuasion.
+   */
+  attitude?: Attitude;
   /**
    * Default faction membership for this NPC. Same role as `MonsterDef.factionId`
    * — overrides the monster-class default and falls back to the NPC's own id
@@ -2167,6 +2189,17 @@ export interface NpcState {
   tileX: number;
   tileY: number;
   disposition: Disposition;
+  /**
+   * Live social attitude (US-092). Seeded from `NPCDef.attitude` at spawn;
+   * default `'indifferent'`. Mutable via AIGM `set_attitude` and the
+   * `set_npc_attitude` trigger action. Charm Person sets it to
+   * `'friendly'` while the spell is active and restores the prior value
+   * on spell end (`attitudePreCharm`).
+   */
+  attitude: Attitude;
+  /** Captured attitude prior to a Charm-induced friendly override, so the
+   *  pre-cast attitude can be restored when the spell ends. */
+  attitudePreCharm?: Attitude;
   factionId: string;
   combatLabel: string;
   revealedName?: string;

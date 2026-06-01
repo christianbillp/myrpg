@@ -104,6 +104,15 @@ export function proneStandCost(conditions: string[], speedTiles: number): number
 }
 
 /**
+ * SRD Exhaustion speed reduction: −5 ft per level. Clamped at 0.
+ * `baseFt` is the creature's base speed in feet (PlayerDef.speed + any
+ * speedBonus from buffs like Longstrider). Returns the reduced ft value.
+ */
+export function speedAfterExhaustion(baseFt: number, exhaustionLevel: number): number {
+  return Math.max(0, baseFt - (exhaustionLevel ?? 0) * 5);
+}
+
+/**
  * Clear a Hide-granted invisibility on a creature. SRD: the Hide action's
  * Invisible condition ends when the creature attacks, makes noise above a
  * whisper, or is spotted. We track that the invisibility came from Hide via

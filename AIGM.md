@@ -217,13 +217,16 @@ Rolls `d20 + skill modifier` vs DC. Active conditions modify the roll automatica
 
 - **Disadvantage**: `poisoned`, `frightened`
 
+**Influence checks** (`deception`, `intimidation`, `performance`, `persuasion`, `animalHandling`) accept an optional `target_npc` parameter. When set, the server reads the target NPC's social **attitude** (US-092) and applies SRD modifiers: Friendly → Advantage, Hostile → Disadvantage, Indifferent → normal. The roll log and tool result include an attitude note (e.g. `[Friendly: Adv]`).
+
 Skill names match the player's `skills` map keys, e.g. `"perception"`, `"stealth"`, `"athletics"`.
 
-| Parameter | Type    | Required |
-| --------- | ------- | -------- |
-| `skill`   | string  | yes      |
-| `dc`      | integer | yes      |
-| `reason`  | string  | yes      |
+| Parameter    | Type    | Required | Notes                                                                                          |
+| ------------ | ------- | -------- | ---------------------------------------------------------------------------------------------- |
+| `skill`      | string  | yes      |                                                                                                |
+| `dc`         | integer | yes      |                                                                                                |
+| `target_npc` | string  | no       | Entity ref of the NPC the player is influencing. Triggers attitude-based Adv/Disadv (US-092). |
+| `reason`     | string  | yes      |                                                                                                |
 
 #### `request_saving_throw`
 
@@ -404,7 +407,7 @@ Removes an NPC from the map. Does not award XP or gold.
 
 #### `set_disposition`
 
-Changes a creature's disposition, which determines who they attack and how they are rendered.
+Changes a creature's **combat** disposition — who they attack in combat and how they are rendered on the map. **Distinct from attitude** (see `set_attitude` below): disposition is the combat axis ("does this creature fight me?"), attitude is the social axis ("how does this creature feel about me?"). The two are orthogonal — change one without the other.
 
 | Disposition | Behaviour                                                                    |
 | ----------- | ---------------------------------------------------------------------------- |
@@ -417,6 +420,22 @@ Changes a creature's disposition, which determines who they attack and how they 
 | `entity`      | string | yes      | Entity reference                    |
 | `disposition` | string | yes      | `"ally"`, `"neutral"`, or `"enemy"` |
 | `reason`      | string | yes      |
+
+#### `set_attitude`
+
+Changes a creature's **social** attitude toward the party (US-092). Drives Advantage/Disadvantage on Influence-type ability checks (Deception, Intimidation, Performance, Persuasion, Animal Handling). **Does not start combat or change disposition** — a hostile-attitude shopkeeper can still be a neutral-disposition NPC who refuses to fight but resists persuasion. Use after a successful Persuasion to shift Indifferent → Friendly, after a botched bribe to shift Indifferent → Hostile, or to track narrative relationship changes that don't yet warrant combat. Charm Person auto-sets attitude to `friendly` while charmed and restores the pre-cast value when the condition ends.
+
+| Attitude        | Effect on Influence checks (US-057) |
+| --------------- | ----------------------------------- |
+| `"friendly"`    | Advantage on the player's roll      |
+| `"indifferent"` | Normal roll (SRD default)           |
+| `"hostile"`     | Disadvantage on the player's roll   |
+
+| Parameter   | Type   | Required | Notes                                          |
+| ----------- | ------ | -------- | ---------------------------------------------- |
+| `entity`    | string | yes      | Entity reference                               |
+| `attitude`  | string | yes      | `"friendly"`, `"indifferent"`, or `"hostile"` |
+| `reason`    | string | yes      |                                                |
 
 #### `move_entity`
 

@@ -1313,7 +1313,12 @@ async function loadWorldState(): Promise<{
     encounterComplete: worldSave.encounterComplete ?? worldSave.chapterComplete ?? false,
     objective: worldSave.objective ?? '',
     environment: worldSave.environment ?? {},
-    npcs: (worldSave.npcs ?? []).map((n) => ({ ...n, ongoingEffects: n.ongoingEffects ?? [] })),
+    npcs: (worldSave.npcs ?? []).map((n) => ({
+      ...n,
+      ongoingEffects: n.ongoingEffects ?? [],
+      // US-092 backfill: pre-attitude saves default to SRD's Indifferent.
+      attitude: n.attitude ?? 'indifferent',
+    })),
   };
   return { state, aigmHistory };
 }

@@ -118,6 +118,7 @@ TOOL-FIRST RULE: Every game effect you describe must be enacted via the correspo
   • Item gained or lost → call add_item or remove_item.
   • Condition applied or removed → call apply_condition or remove_condition.
   • Creature disposition change → call set_disposition. If you change any NPC to "enemy" disposition while the phase is "exploring", you MUST call trigger_combat immediately after all disposition changes are complete — set_disposition does not start combat on its own.
+  • Creature attitude change (social) → call set_attitude. Attitude (friendly / indifferent / hostile) is the SOCIAL axis — it reflects how the NPC feels about the party and affects Influence-check Advantage/Disadvantage. **Attitude is distinct from disposition**: a hostile-attitude shopkeeper can still be neutral-disposition (won't draw a blade but resists persuasion); a successful Persuasion shifts attitude, not disposition. Call set_attitude after a successful Persuasion / Deception / Intimidation / Performance / Animal Handling check shifts the NPC's feelings, or after a botched social interaction sours them. Never use set_attitude as a shortcut to start combat — use set_disposition + trigger_combat for that.
   • Stealth change → call set_player_hidden.
   • Anything noteworthy during combat → call add_log_entry so it appears in the event log.
   • NPC departure, fleeing, or leaving the scene → call despawn_npc to remove them from the map, or move_entity to reposition them. Never narrate an NPC as gone unless the tool confirms it.
@@ -265,7 +266,7 @@ function buildStateMessage(engine: GameEngine): string {
         const attackStr = def?.attacks.map(a =>
           `${a.name} (${a.attackType}, +${a.bonus} to hit, ${a.damageDice}d${a.damageSides}+${a.damageBonus} ${a.damageType})`
         ).join('; ') ?? 'unknown';
-        return `  [${entityRef}] ${n.defId}${knownAs} (${n.disposition}): ${n.hp}/${n.maxHp} HP, tile (${n.tileX},${n.tileY})${cFlags ? ` [${cFlags}]` : ''}\n    Attacks: ${attackStr}`;
+        return `  [${entityRef}] ${n.defId}${knownAs} (${n.disposition} disp · ${n.attitude ?? 'indifferent'} att): ${n.hp}/${n.maxHp} HP, tile (${n.tileX},${n.tileY})${cFlags ? ` [${cFlags}]` : ''}\n    Attacks: ${attackStr}`;
       }).join('\n')
     : '  None';
 
@@ -273,7 +274,7 @@ function buildStateMessage(engine: GameEngine): string {
   const neutralNpcLines = livingNeutrals.length > 0
     ? livingNeutrals.map((n) => {
         const knownAs = n.revealedName ? ` (known as: ${n.revealedName})` : '';
-        return `  ${n.defId} [npc_${n.id}] at tile (${n.tileX},${n.tileY})${knownAs}`;
+        return `  ${n.defId} [npc_${n.id}] (${n.attitude ?? 'indifferent'} att) at tile (${n.tileX},${n.tileY})${knownAs}`;
       }).join('\n')
     : '  None';
 

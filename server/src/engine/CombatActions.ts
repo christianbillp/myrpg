@@ -7,6 +7,7 @@ import {
 import {
   isIncapacitated, grantsAdvantageAgainst, grantsDisadvantageAgainst,
   hasAttackDisadvantage, hasAttackAdvantage, isAutoCrit, clearHide,
+  speedAfterExhaustion,
 } from './ConditionSystem.js';
 import { chebyshev } from './EnemyAI.js';
 import { makePlayerAttack } from './EquipmentSystem.js';
@@ -489,10 +490,11 @@ function canTakeHideAction(ctx: GameContext): boolean {
 export function doDash(ctx: GameContext): void {
   const s = ctx.state;
   if (!guardCanDash(ctx)) return;
-  s.player.movesLeft += ctx.playerDef.speed / 5;
+  const dashTiles = speedAfterExhaustion(ctx.playerDef.speed, s.player.exhaustionLevel ?? 0) / 5;
+  s.player.movesLeft += dashTiles;
   s.player.conditions.push('dashing');
   spendCunningOrAction(ctx);
-  ctx.addLog({ left: `${ctx.playerDef.name} Dashes — +${ctx.playerDef.speed / 5} tiles movement`, style: 'status' });
+  ctx.addLog({ left: `${ctx.playerDef.name} Dashes — +${dashTiles} tiles movement`, style: 'status' });
 }
 
 export function doDodge(ctx: GameContext): void {
