@@ -35,6 +35,8 @@ Thumbs.db
 
 # Saves
 server/data/saves/*
+server/data/settings/the_sundered_reach/saves/*
+!server/data/settings/the_sundered_reach/saves/.gitkeep
 server/data/maps/gen_*
 .gitignore
 server/data/encounters/gen_*
