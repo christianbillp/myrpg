@@ -138,6 +138,7 @@ export function applyEquipment(
   allItems: ItemDef[],
   mageArmor = false,
   shieldSpellActive = false,
+  magicWeaponBonus = 0,
 ): void {
   const byId = Object.fromEntries(allItems.map((i) => [i.id, i]));
   const armor = slots.armorId ? (byId[slots.armorId] as ArmorDef | undefined) ?? null : null;
@@ -145,7 +146,13 @@ export function applyEquipment(
   const weapon = slots.weaponId ? (byId[slots.weaponId] as WeaponDef | undefined) ?? null : null;
 
   playerDef.ac = computeAC(playerDef, armor, shield, mageArmor, shieldSpellActive);
-  playerDef.mainAttack = weapon
+  const base = weapon
     ? makePlayerAttack(playerDef, weapon)
-    : { name: 'Unarmed Strike', statKey: 'str', damageDice: 1, damageSides: 1, damageType: 'bludgeoning', savageAttacker: false, finesse: false, graze: false, vex: false, sap: false, slow: false, push: false, topple: false };
+    : { name: 'Unarmed Strike', statKey: 'str' as const, damageDice: 1, damageSides: 1, damageType: 'bludgeoning', savageAttacker: false, finesse: false, graze: false, vex: false, sap: false, slow: false, push: false, topple: false };
+  // SRD Magic Weapon spell: +N to attack and damage rolls. The bonus rides
+  // on the PlayerAttack so the existing CombatSystem resolver consumes it
+  // without a separate state lookup; reset to 0 when the spell ends.
+  playerDef.mainAttack = magicWeaponBonus > 0
+    ? { ...base, magicWeaponBonus }
+    : base;
 }

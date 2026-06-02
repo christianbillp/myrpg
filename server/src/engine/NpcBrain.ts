@@ -2,6 +2,7 @@ import type { NpcState, MonsterDef } from './types.js';
 import type { GameContext } from './GameContext.js';
 import { chebyshev, nextStepToward } from './EnemyAI.js';
 import { hasSpeedZero, proneStandCost, isIncapacitated } from './ConditionSystem.js';
+import { Logger } from '../Logger.js';
 
 /**
  * NpcBrain (Phase D — utility AI) — decides what high-level behavior an NPC
@@ -23,14 +24,23 @@ interface BehaviorScores {
 }
 
 export function chooseNpcBehavior(ctx: GameContext, npc: NpcState, def: MonsterDef): NpcBehavior {
-  if (isIncapacitated(npc.conditions)) return 'hold';
+  if (isIncapacitated(npc.conditions)) {
+    Logger.log('ai.behavior_pick', { npcId: npc.id, defId: npc.defId, chosen: 'hold', reason: 'incapacitated' });
+    return 'hold';
+  }
 
   const scores = scoreBehaviors(ctx, npc, def);
+  let chosen: NpcBehavior;
   // Pick the highest. Ties resolve attack > hold > flee — keeps default
   // gameplay feel when no need dominates.
-  if (scores.attack >= scores.flee && scores.attack >= scores.hold) return 'attack';
-  if (scores.hold >= scores.flee) return 'hold';
-  return 'flee';
+  if (scores.attack >= scores.flee && scores.attack >= scores.hold) chosen = 'attack';
+  else if (scores.hold >= scores.flee) chosen = 'hold';
+  else chosen = 'flee';
+  Logger.log('ai.behavior_pick', {
+    npcId: npc.id, defId: npc.defId, chosen,
+    hp: npc.hp, maxHp: npc.maxHp, scores,
+  });
+  return chosen;
 }
 
 function scoreBehaviors(ctx: GameContext, npc: NpcState, def: MonsterDef): BehaviorScores {

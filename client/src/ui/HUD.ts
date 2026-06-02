@@ -3,9 +3,9 @@ import {
   TILE_SIZE, GRID_COLS, GRID_ROWS, HUD_HEIGHT,
   PLAYER_PANEL_WIDTH, TARGET_PANEL_WIDTH,
 } from '../constants';
-import { CombatMode, LogEntry, LogEntryStyle } from '../net/types';
+import { CombatMode, LogEntry, LogEntryStyle } from '../../../shared/types';
 import { NpcToken } from '../entities/NpcToken';
-import { PlayerDef } from '../data/player';
+import { PlayerDef } from '../../../shared/types';
 import { UIScale } from './UIScale';
 import { DevMode } from '../devMode';
 import type { ChatMessage, GMPersona } from './AIGMOverlay';

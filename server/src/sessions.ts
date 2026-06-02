@@ -1,6 +1,7 @@
 import type { WebSocket } from '@fastify/websocket';
 import { GameEngine } from './engine/GameEngine.js';
 import type { ServerWSMessage, GameEvent, GameState } from './engine/types.js';
+import { Logger } from './Logger.js';
 
 export interface AigmMessage { role: 'user' | 'assistant'; content: string; }
 
@@ -59,6 +60,21 @@ export function createSession(sessionId: string, engine: GameEngine): void {
     aigmBusy: false,
     worldPaused: false,
     worldTickHandle: null,
+  });
+  // US-093: open the per-session structured log file. Fire-and-forget;
+  // the binding is async (mkdir + rotation), so we don't block the
+  // request path on it. Subsequent `Logger.log` calls before binding
+  // completes still land in stdout (the per-file fallback is graceful).
+  void Logger.bindSession(sessionId).then(() => {
+    Logger.log('session.created', {
+      sessionId,
+      encounterTitle: s.encounterTitle,
+      playerDef: s.player.defId,
+      hp: s.player.hp,
+      xp: s.player.xp,
+      phase: s.phase,
+      npcCount: s.npcs.length,
+    });
   });
 }
 
@@ -175,4 +191,6 @@ export function deleteSession(sessionId: string): void {
   if (session?.worldTickHandle) clearInterval(session.worldTickHandle);
   if (session?.ws) { try { session.ws.close(); } catch { /* ignore */ } }
   sessions.delete(sessionId);
+  Logger.log('session.deleted', { sessionId }, 'info', sessionId);
+  Logger.unbindSession(sessionId);
 }

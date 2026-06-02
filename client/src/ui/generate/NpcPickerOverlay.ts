@@ -1,4 +1,4 @@
-import type { NPCDef, MonsterDef } from "../../net/types";
+import type { NPCDef, MonsterDef } from "../../../../shared/types";
 
 /**
  * NpcPickerOverlay — HTML modal listing every authored NPC in the active

@@ -1,6 +1,6 @@
 import { PLAYER_PANEL_WIDTH, GRID_ROWS, TILE_SIZE, HUD_HEIGHT } from '../constants';
-import { PlayerDef } from '../data/player';
-import { AvailableActions, CombatMode } from '../net/types';
+import { PlayerDef } from '../../../shared/types';
+import { AvailableActions, CombatMode } from '../../../shared/types';
 import { UIScale } from './UIScale';
 import { STATUS_TONE_COLOR } from './PlayerStatus';
 import { DevMode } from '../devMode';
@@ -48,7 +48,7 @@ export interface PlayerPanelActionState {
   /** Active player-owned summons (Mage Hand, Unseen Servant). The panel
    *  renders one DIRECT button per entry — clicking enters a "click a tile
    *  to move the summon" mode in the GameScene. */
-  summons: Array<{ id: string; name: string; spellName: string }>;
+  summons: Array<{ id: string; name: string; spellName: string; costsBonusAction?: boolean }>;
   /** True when a creature is currently selected as the target. The TALK
    *  button needs a target so the line can be routed to a `sayto`. */
   hasSelectedTarget: boolean;
@@ -193,7 +193,13 @@ export class PlayerPanel {
     this.endTurnBtn.onclick = () => callbacks.onEndTurn();
     this.devCompleteBtn = ref('dev-complete') as HTMLButtonElement;
     this.devCompleteBtn.onclick = () => callbacks.onDevCompleteObjective();
-    if (DevMode.completePrimaryObjective) this.devCompleteBtn.style.display = "block";
+    // The ★ COMPLETE OBJECTIVE dev button lives in the DevTools panel now.
+    // Surface a fallback copy here only when DevTools is hidden, so the
+    // player still has a way to trigger it without first enabling the
+    // panel from the Configuration scene.
+    if (DevMode.completePrimaryObjective && !DevMode.showDevToolsPanel) {
+      this.devCompleteBtn.style.display = "block";
+    }
 
     this.el.appendChild(this.buildResizeHandle());
 
@@ -420,6 +426,16 @@ export class PlayerPanel {
       if (this.playerDef.spellcastingAbility) {
         this.actionArea.appendChild(this.makeBtn('CAST', '#1a3a4a', this.callbacks.onOpenSpells));
       }
+      // RELEASE — also surfaced during exploration so the player can drop a
+      // running concentration spell (a Web they set up in advance, a Mage
+      // Armor they no longer want) without having to enter combat first.
+      // SRD: ending concentration is free.
+      if (state.concentratingOn) {
+        const label = state.concentratingOnName
+          ? `RELEASE ${state.concentratingOnName.toUpperCase()}`
+          : 'RELEASE CONCENTRATION';
+        this.actionArea.appendChild(this.makeBtn(label, '#3a2a4a', this.callbacks.onReleaseConcentration));
+      }
 
       // LEVEL UP and LONG REST sit above the MOVE button. The action area uses
       // `flex-direction: column-reverse`, so a later DOM child renders higher.
@@ -475,11 +491,13 @@ export class PlayerPanel {
         this.actionArea.prepend(featEl);
       }
 
-      // Player-owned summons (Mage Hand, Unseen Servant). One DIRECT button
-      // per summon — costs an Action when invoked.
+      // Player-owned summons (Mage Hand, Unseen Servant, Flaming Sphere).
+      // One DIRECT button per summon. Most summons cost an Action; Flaming
+      // Sphere costs a Bonus Action (the SRD specifies the sphere is
+      // moved with a Bonus Action).
       for (const summon of state.summons) {
         const sEl = this.makeBtn(`DIRECT ${summon.name.toUpperCase()}`, '#2a3a55', () => this.callbacks.onCommandSummon(summon.id));
-        sEl.disabled = actionUsed;
+        sEl.disabled = summon.costsBonusAction ? state.bonusActionUsed : actionUsed;
         this.actionArea.prepend(sEl);
       }
 

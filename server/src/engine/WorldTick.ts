@@ -27,6 +27,9 @@ import { runEnemyTurn, chebyshev, type EnemyAttackTarget } from './EnemyAI.js';
 import { isHostileTo } from './FactionRelations.js';
 import { PLAYER_FACTION_ID } from '../../../shared/types.js';
 import { applyNpcAttackHit } from './NpcDamage.js';
+import { tickActiveZones } from './SpellSystem.js';
+import { tickSpellConditionExpiries } from './CombatFlow.js';
+import { Logger } from '../Logger.js';
 
 /**
  * Run one round of off-camera NPC-vs-NPC combat. Returns the events the
@@ -36,6 +39,15 @@ import { applyNpcAttackHit } from './NpcDamage.js';
 export function runOffCameraTick(ctx: GameContext): GameEvent[] {
   const s = ctx.state;
   const events: GameEvent[] = [];
+  const tickStart = Date.now();
+
+  // Age persistent AOE zones one round per real-time tick (6 s) — same cadence
+  // as combat rounds. Fog Cloud cast 9 ticks ago in exploration phase fades
+  // here exactly as it would after 9 player-turn-starts in combat.
+  tickActiveZones(ctx);
+  // Tick spell-imposed condition expiries too (Color Spray's blindness etc.).
+  // Same cadence — one off-camera tick == one player turn end == 6 seconds.
+  tickSpellConditionExpiries(ctx);
 
   // Escalate to combat if any living NPC turns hostile to the party while
   // the world was running off-camera (most likely an AIGM faction shift or a
@@ -82,6 +94,7 @@ export function runOffCameraTick(ctx: GameContext): GameEvent[] {
       hidden: target.conditions.includes('hidden'),
       dodging: target.conditions.includes('dodging'),
       invisible: target.conditions.includes('invisible'),
+      conditions: target.conditions,
       passivePerception: 10,
     };
 
@@ -112,6 +125,9 @@ export function runOffCameraTick(ctx: GameContext): GameEvent[] {
     }
   }
 
+  if (events.length > 0) {
+    Logger.log('world.tick_fired', { durationMs: Date.now() - tickStart, eventCount: events.length });
+  }
   return events;
 }
 

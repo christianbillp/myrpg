@@ -1,8 +1,8 @@
 import {
   PLAYER_PANEL_WIDTH, GRID_COLS, GRID_ROWS, TILE_SIZE, TARGET_PANEL_WIDTH, HUD_HEIGHT,
 } from '../constants';
-import { MonsterDef } from '../data/monsters';
-import { NpcState, FactionDef } from '../net/types';
+import { MonsterDef } from '../../../shared/types';
+import { NpcState, FactionDef } from '../../../shared/types';
 import { UIScale } from './UIScale';
 import { DevMode } from '../devMode';
 
@@ -29,6 +29,37 @@ function statMod(v: number): string {
 function escapeHtml(s: string): string {
   return s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]!));
 }
+
+/** SRD 5.2.1 condition summaries surfaced as native `title` tooltips on
+ *  the Target Panel's condition chips. Short — the chip is a small UI
+ *  element and the tooltip should read at a glance. Engine-internal
+ *  conditions (blurred, no-healing) get a one-line explanation of their
+ *  effect in this engine since they're not in the SRD by that name. */
+const CONDITION_DESCRIPTIONS: Record<string, string> = {
+  blinded: 'Blinded — auto-fail sight-based checks; attacks against have Advantage; attacks have Disadvantage.',
+  charmed: "Charmed — can't attack the charmer; charmer has Advantage on social checks against the charmed creature.",
+  dashing: 'Dashing — speed doubled this turn (already applied to movement budget).',
+  deafened: "Deafened — auto-fail hearing-based checks.",
+  disengaged: "Disengaged — moving out of an enemy's reach this turn does not provoke an Opportunity Attack.",
+  dodging: 'Dodging — attacks against have Disadvantage until the start of this creature\'s next turn.',
+  enfeebled: 'Enfeebled — Strength-keyed attacks deal half damage.',
+  frightened: 'Frightened — Disadvantage on ability checks and attacks while source is in sight; cannot willingly move closer to source.',
+  'heavily-obscured': 'Heavily Obscured — attacks against have Disadvantage; counts as Blinded for sight.',
+  hidden: 'Hidden — invisible to creatures that fail to spot you. Attacks from Hidden have Advantage; revealed on attacking.',
+  incapacitated: 'Incapacitated — cannot take actions, bonus actions, or reactions; concentration ends.',
+  invisible: "Invisible — attacks against have Disadvantage; attacks from Invisible have Advantage.",
+  'no-healing': "Can't regain Hit Points until the start of your next turn (Chill Touch).",
+  'no-reactions': "Cannot take Reactions this turn (Shocking Grasp).",
+  paralyzed: "Paralyzed — Incapacitated, can't move, auto-fail STR/DEX saves; melee hits within 5 ft are Critical Hits.",
+  petrified: 'Petrified — transformed to stone; Incapacitated, Resistance to all damage, immune to poison and disease.',
+  poisoned: 'Poisoned — Disadvantage on attacks and ability checks.',
+  prone: 'Prone — Disadvantage on attacks; melee attacks against have Advantage; ranged attacks against have Disadvantage. Standing costs half movement.',
+  restrained: "Restrained — speed 0; attacks against have Advantage; own attacks have Disadvantage; Disadvantage on DEX saves.",
+  slowed: 'Slowed — speed halved (Ray of Frost).',
+  stunned: "Stunned — Incapacitated; auto-fail STR/DEX saves; attacks against have Advantage.",
+  unconscious: 'Unconscious — Incapacitated, Prone, dropped items; auto-fail STR/DEX saves; melee hits within 5 ft are Critical Hits.',
+  blurred: 'Blurred — attacks against have Disadvantage (Blur spell).',
+};
 
 export class TargetPanel {
   private readonly el: HTMLDivElement;
@@ -254,8 +285,11 @@ export class TargetPanel {
         chip.textContent = c.toUpperCase();
         chip.style.cssText = `
           padding: 1px 6px; background: #2a1810; border: 1px solid #5a3220;
-          color: #d99966; font-size: 9px; letter-spacing: 1px;
+          color: #d99966; font-size: 9px; letter-spacing: 1px; cursor: help;
         `;
+        // Native tooltip rendered by the browser on hover. Short SRD
+        // summaries — see CONDITION_DESCRIPTIONS below.
+        chip.title = CONDITION_DESCRIPTIONS[c] ?? c;
         this.conditionsEl.appendChild(chip);
       }
     } else {

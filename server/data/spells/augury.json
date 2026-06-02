@@ -1,0 +1,15 @@
+{
+  "id": "augury",
+  "name": "Augury",
+  "level": 2,
+  "school": "divination",
+  "classes": ["cleric", "druid", "wizard"],
+  "castingTime": "1 minute",
+  "range": "self",
+  "rangeFeet": 0,
+  "components": { "verbal": true, "somatic": true, "material": "specially marked sticks, bones, cards, or other divinatory tokens worth 25+ GP" },
+  "duration": "instantaneous",
+  "concentration": false,
+  "ritual": true,
+  "description": "You receive an omen from an otherworldly entity about the results of a course of action that you plan to take within the next 30 minutes. The GM chooses the omen from the Omens table: Weal (good results), Woe (bad results), Weal and Woe (both), or Nothing (no particularly good or bad results). For each augury you cast beyond the first within 24 hours, the GM has an increasing chance of giving a random reading."
+}

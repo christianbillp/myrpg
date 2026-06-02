@@ -307,5 +307,42 @@
         0
       ]
     }
+  ],
+  "zones": [
+    {
+      "id": "zone_mpwthwi4_1t34",
+      "name": "bar",
+      "color": "#ff7766",
+      "cells": [
+        "2,2",
+        "3,2",
+        "4,2",
+        "5,2",
+        "6,2",
+        "7,2",
+        "8,2",
+        "9,2",
+        "10,2",
+        "11,2"
+      ]
+    },
+    {
+      "id": "zone_mpwti7x6_pxok",
+      "name": "west tables",
+      "color": "#ffaa44",
+      "cells": [
+        "2,4",
+        "2,5"
+      ]
+    },
+    {
+      "id": "zone_mpwtid98_umvm",
+      "name": "east tables",
+      "color": "#ffd966",
+      "cells": [
+        "11,4",
+        "11,5"
+      ]
+    }
   ]
 }

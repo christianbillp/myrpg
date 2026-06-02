@@ -1,6 +1,6 @@
 import Phaser from "phaser";
 import { gameClient } from "../net/GameClient";
-import type { NPCDef, MonsterDef, FactionDef } from "../net/types";
+import type { NPCDef, MonsterDef, FactionDef } from "../../../shared/types";
 import type { NpcRefineProposed } from "../net/GameClient";
 import { createHtmlButton, createHtmlText, type HtmlButtonHandle, type HtmlTextHandle } from "../ui/htmlButtons";
 import { NpcPickerOverlay } from "../ui/generate/NpcPickerOverlay";

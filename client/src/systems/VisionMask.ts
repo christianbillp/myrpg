@@ -15,8 +15,8 @@
  */
 import Phaser from "phaser";
 import { TILE_SIZE } from "../constants";
-import type { GameState } from "../net/types";
-import type { PlayerDef } from "../data/player";
+import type { GameState } from "../../../shared/types";
+import type { PlayerDef } from "../../../shared/types";
 
 const VEIL_DARK_ALPHA = 0.78;
 const VEIL_HEAVY_ALPHA = 0.55;

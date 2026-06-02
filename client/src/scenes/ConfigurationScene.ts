@@ -184,6 +184,9 @@ export class ConfigurationScene extends Phaser.Scene {
     // ── Development Mode section ─────────────────────────────────────────
     root.appendChild(this.buildDevModeSection());
 
+    // ── Tools section: launch sub-pages keyed off Configuration ─────────
+    root.appendChild(this.buildToolsSection());
+
     // ── Footer: divider, status, BACK + CONFIRM ─────────────────────────
     const footerDivider = document.createElement("div");
     footerDivider.style.cssText = `
@@ -282,7 +285,7 @@ export class ConfigurationScene extends Phaser.Scene {
       },
       {
         label: "Unlock all spells",
-        description: "Seed every spell in the game as known + prepared at session start so any spell is castable.",
+        description: "Seed every cantrip + every L1+ class spell as known + prepared at session start, AND grant 4 slots of every level represented in the shipped roster so L1, L2, L3+ spells are actually castable rather than just visible. Combine with Unlimited spell slots to keep the pool topped off.",
         flag: "unlockAllSpells",
       },
       {
@@ -302,8 +305,13 @@ export class ConfigurationScene extends Phaser.Scene {
       },
       {
         label: "Complete primary objective",
-        description: "Surface a ★ COMPLETE OBJECTIVE button on the Player Panel that finishes the encounter instantly — sets the completion flag and clears living enemies. Useful for blasting through an adventure while testing chapter transitions.",
+        description: "Surface a ★ COMPLETE OBJECTIVE button (in the DevTools panel when shown, or below CHARACTER otherwise) that finishes the encounter instantly — sets the completion flag and clears living enemies. Useful for blasting through an adventure while testing chapter transitions.",
         flag: "completePrimaryObjective",
+      },
+      {
+        label: "Show DevTools panel",
+        description: "Show a small bottom-anchored DevTools bar to the right of the Player Panel during play. Hosts dev-only tools (Reload Encounter, Complete Objective, …) so they don't clutter the Player Panel.",
+        flag: "showDevToolsPanel",
       },
     ];
 
@@ -385,6 +393,55 @@ export class ConfigurationScene extends Phaser.Scene {
     return card;
   }
 
+  /** Tools section — list of buttons that launch a sub-page focused on a
+   *  single Configuration concern (currently: tile enable / disable). The
+   *  section sits below the dev-mode toggles and above the footer. */
+  private buildToolsSection(): HTMLDivElement {
+    const section = document.createElement("div");
+    section.style.cssText = `
+      margin-top: 22px;
+      padding-top: 18px;
+      border-top: 1px solid ${COLOR_DIVIDER};
+      display: flex; flex-direction: column; gap: 12px;
+    `;
+    const label = document.createElement("div");
+    label.textContent = "TOOLS";
+    label.style.cssText = `
+      font-family: monospace; font-size: 11px;
+      color: ${COLOR_SUBLABEL}; letter-spacing: 2px;
+      text-align: center;
+    `;
+    section.appendChild(label);
+
+    const row = document.createElement("div");
+    row.style.cssText = `
+      display: flex; gap: 12px; justify-content: center; flex-wrap: wrap;
+    `;
+    const btn = document.createElement("button");
+    btn.textContent = "CONFIGURE TILES";
+    btn.style.cssText = `
+      background: transparent; color: ${COLOR_TITLE};
+      border: 1px solid ${COLOR_TITLE};
+      font-family: monospace; font-size: 11px; letter-spacing: 2px;
+      padding: 10px 22px; min-width: 220px; cursor: pointer;
+    `;
+    btn.addEventListener("click", () => void this.openTileConfigOverlay());
+    row.appendChild(btn);
+    section.appendChild(row);
+    return section;
+  }
+
+  /** Open the tile-enable / disable sub-page. Loads the current tile
+   *  legend, paints a thumbnail grid grouped by tileset, and lets the
+   *  user click each tile to flip its enabled state. Persists on CONFIRM,
+   *  discards on CANCEL, and returns to the Configuration menu on BACK. */
+  private async openTileConfigOverlay(): Promise<void> {
+    const { TileConfigOverlay } = await import("../ui/configure/TileConfigOverlay");
+    new TileConfigOverlay(this, {
+      onClose: () => { /* overlay self-removes; nothing further to do */ },
+    });
+  }
+
   /** Footer button styled like the other scenes' overlay buttons. */
   private makeFooterButton(label: string, primary: boolean): HTMLButtonElement {
     const btn = document.createElement("button");
@@ -457,13 +514,14 @@ export class ConfigurationScene extends Phaser.Scene {
     DevMode.showDeleteSaveButton = !!flags.showDeleteSaveButton;
     DevMode.allowRetryChecks     = !!flags.allowRetryChecks;
     DevMode.completePrimaryObjective = !!flags.completePrimaryObjective;
+    DevMode.showDevToolsPanel    = !!flags.showDevToolsPanel;
   }
 
   /** True when there is a pending change waiting on CONFIRM — either a
    *  different setting id, or any dev-flag toggle that differs from saved. */
   private hasPendingChanges(): boolean {
     if (this.pendingId !== this.activeId) return true;
-    const fields: (keyof DevFlags)[] = ['disableSupertitle', 'unlimitedSpellSlots', 'unlockAllSpells', 'unlimitedActions', 'showDeleteSaveButton', 'allowRetryChecks', 'completePrimaryObjective'];
+    const fields: (keyof DevFlags)[] = ['disableSupertitle', 'unlimitedSpellSlots', 'unlockAllSpells', 'unlimitedActions', 'showDeleteSaveButton', 'allowRetryChecks', 'completePrimaryObjective', 'showDevToolsPanel'];
     return fields.some((k) => !!this.pendingDevFlags[k] !== !!this.savedDevFlags[k]);
   }
 

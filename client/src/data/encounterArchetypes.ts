@@ -18,11 +18,8 @@
  *     entries weights toward common creature types.
  */
 
-export type Terrain = 'grassland' | 'forest' | 'dungeon';
-export type Feature =
-  | 'ruins' | 'buildings' | 'campsites' | 'path'
-  | 'coastline'
-  | '3-room' | '5-room';
+export type Terrain = 'grassland' | 'forest' | 'dungeon' | 'tavern';
+export type Feature = 'campsites' | 'coastline' | 'path' | 'intersection' | 'buildings' | '3-room' | '5-room';
 
 /**
  * Anchors the randomizer can target for placement. The list is walked in order;
@@ -30,21 +27,19 @@ export type Feature =
  * its preference + a fallback so an unusual map roll (e.g. campsites failed to
  * place because of water) still gets reasonable spawns.
  *
- *   • `entrance`  / `vault`        — dungeon room centers
- *   • `far_room`                   — any dungeon room other than the entrance
- *   • `campfire`                   — first campfire center
- *   • `building` / `ruin`          — interior of first stamped building / ruin
- *   • `path_endpoint`              — either map-edge endpoint of the path
- *   • `inland`                     — dry-side band when coastline is on
- *   • `edge:<dir>`                 — fallback: a band along the named edge
- *   • `away_from:<anchor>`         — fallback: any open cell far from the named anchor
+ *   • `entrance` / `vault` / `far_room` — dungeon room centers
+ *   • `campfire`                        — first campfire center
+ *   • `building`                        — interior of first stamped building
+ *   • `inland`                          — dry-side band when coastline is on
+ *   • `edge:<dir>`                      — fallback: a band along the named edge
+ *   • `away_from:<anchor>`              — fallback: any open cell far from the named anchor
  */
 export type PlacementAnchor =
   | 'entrance' | 'vault' | 'far_room'
-  | 'campfire' | 'building' | 'ruin'
-  | 'path_endpoint' | 'inland'
+  | 'campfire' | 'building'
+  | 'inland'
   | 'edge:south' | 'edge:north' | 'edge:west' | 'edge:east'
-  | 'away_from:campfire' | 'away_from:ruin' | 'away_from:building' | 'away_from:entrance';
+  | 'away_from:campfire' | 'away_from:entrance' | 'away_from:building';
 
 /**
  * Trigger template — a single trigger declaration the randomizer resolves into
@@ -142,13 +137,13 @@ export const ENCOUNTER_ARCHETYPES: EncounterArchetype[] = [
     name: 'Forest Ambush',
     weight: 2,
     terrain: 'forest',
-    featurePicks: { from: ['ruins', 'path', 'campsites'], count: [1, 2] },
+    featurePicks: { from: ['campsites'], count: [0, 1] },
     titles: [
       'Forest Ambush', 'Whispering Wood', 'Bandit Picket', 'The Snare in the Trees',
     ],
     introductions: [
-      'A narrow trail bends out of sight ahead. The forest leans close, and the only sound is your own breath.',
-      'Shafts of grey light fall between the trees. Somewhere off the path, a twig snaps that should not have snapped.',
+      'The forest leans close, and the only sound is your own breath.',
+      'Shafts of grey light fall between the trees. Somewhere in the undergrowth, a twig snaps that should not have snapped.',
       'The wind dies. Birds stop. Whatever was watching has decided you are close enough.',
     ],
     descriptions: [
@@ -162,25 +157,21 @@ export const ENCOUNTER_ARCHETYPES: EncounterArchetype[] = [
     completionFlag: 'forest_ambush_resolved',
     enemyPool: ['goblin_minion', 'goblin_minion', 'bandit', 'kobold_warrior'],
     enemyCount: [2, 4],
-    // Player walks in along the path, ambushers hide in the trees off the path
-    // at the other end of the trail. Fall back to north / south edges if the
-    // path didn't kink the way we expected.
-    playerAnchors: ['path_endpoint', 'edge:south'],
-    enemyAnchors:  ['away_from:entrance', 'path_endpoint', 'edge:north'],
+    // Party enters from the south edge of the clearing; ambushers wait at
+    // the far north end.
+    playerAnchors: ['edge:south'],
+    enemyAnchors:  ['edge:north'],
     triggerTemplates: [
       {
         kind: 'perception',
-        anchor: 'path_endpoint',
+        anchor: 'edge:north',
         radius: 3,
         dc: 12,
-        passMessage: 'You catch movement in the undergrowth — someone is watching the trail.',
+        passMessage: 'You catch movement in the undergrowth — someone is watching the clearing.',
       },
-      // The ambushers break cover the moment the party reaches the far end
-      // of the trail. `combat` is the second slot so an early perception
-      // success warns the player before this fires.
       {
         kind: 'combat',
-        anchor: 'path_endpoint',
+        anchor: 'edge:north',
         radius: 2,
       },
     ],
@@ -234,133 +225,38 @@ export const ENCOUNTER_ARCHETYPES: EncounterArchetype[] = [
     name: 'Sunken Shore',
     weight: 1,
     terrain: 'grassland',
-    features: ['coastline', 'ruins'],
+    features: ['coastline'],
     titles: [
-      'Sunken Shore', 'The Drowned Wall', 'Ruins on the Tide-line',
+      'Sunken Shore', 'The Drowned Wall', 'The Tide-line',
     ],
     introductions: [
-      'Salt wind pulls at your cloak. Half-buried stonework juts from the grass where the tide has eaten the shore.',
-      "The smell of brine and old earth hangs thick. Somewhere among the broken walls, wings stir that shouldn't.",
+      'Salt wind pulls at your cloak. The tide has eaten into the grass shore.',
+      "The smell of brine and old earth hangs thick. Somewhere along the waterline, wings stir that shouldn't.",
     ],
     descriptions: [
-      'Old ruins half-claimed by water. Stirges nest in the broken arches; risen things stir in the wet earth. The AIGM should lean into the briny, abandoned atmosphere.',
+      'A bleak coastline. Stirges hunt low over the surf; risen things stir in the wet earth. The AIGM should lean into the briny, abandoned atmosphere.',
     ],
     objectives: [
-      'Clear the ruined shoreline',
-      'Find what the stones are guarding',
+      'Clear the shoreline',
+      'Find what the tide brought in',
     ],
     completionFlag: 'sunken_shore_resolved',
     enemyPool: ['stirge', 'stirge', 'skeleton'],
     enemyCount: [2, 3],
     // Party arrives from inland (the dry side away from the water); the
-    // undead and stirges nest in the half-buried ruins along the tide-line.
+    // undead and stirges crouch along the tide-line at the opposite edge.
     playerAnchors: ['inland', 'edge:south'],
-    enemyAnchors:  ['ruin', 'away_from:entrance', 'edge:north'],
+    enemyAnchors:  ['away_from:campfire', 'edge:north'],
     triggerTemplates: [
       {
         kind: 'perception',
-        anchor: 'ruin',
+        anchor: 'inland',
         dc: 14,
-        passMessage: 'The brackish puddles inside the ruin are rippling — something just below the surface stirred when you came near.',
-      },
-      // Crossing the threshold rouses the stirges + risen guardian inside.
-      {
-        kind: 'combat',
-        anchor: 'ruin',
-      },
-    ],
-  },
-
-  {
-    id: 'crossroads_skirmish',
-    name: 'Crossroads Skirmish',
-    weight: 1,
-    terrain: 'grassland',
-    features: ['path', 'buildings'],
-    titles: [
-      'Crossroads Skirmish', 'Trouble at the Mile-stone', 'The Wayside Quarrel',
-    ],
-    introductions: [
-      'Two cart tracks meet at a stone mile-marker. Voices are raised, weapons drawn. A traveller backs toward you, eyes wide.',
-      'The crossroads should be quiet at this hour. It is not.',
-    ],
-    descriptions: [
-      'A flare-up at a rural crossroads — outlaws shaking down a traveller. The AIGM should give the bystander a voice and let the party choose to intervene.',
-    ],
-    objectives: [
-      'Resolve the quarrel at the crossroads',
-      'Protect the traveller and drive off the outlaws',
-    ],
-    completionFlag: 'crossroads_skirmish_resolved',
-    enemyPool: ['bandit', 'bandit'],
-    enemyCount: [2, 3],
-    allyPool: ['commoner'],
-    allyCount: [1, 1],
-    // The flare-up happens at the meeting of the roads — bandits and the
-    // traveller are clustered there. The party arrives down the path from
-    // one of its endpoints.
-    playerAnchors: ['path_endpoint', 'edge:south'],
-    enemyAnchors:  ['building', 'campfire', 'edge:north'],
-    triggerTemplates: [
-      {
-        kind: 'log',
-        anchor: 'path_endpoint',
-        radius: 3,
-        message: 'A traveller calls out for help up ahead — voices raised at the crossroads, weapons drawn.',
+        passMessage: 'The brackish puddles along the shore are rippling — something just below the surface stirred when you came near.',
       },
       {
         kind: 'combat',
-        anchor: 'building',
-        radius: 1,
-        defId: 'bandit',
-      },
-    ],
-  },
-
-  {
-    id: 'dungeon_sweep',
-    name: 'Dungeon Sweep',
-    weight: 2,
-    terrain: 'dungeon',
-    featurePicks: { from: ['3-room', '5-room'], count: [1, 1] },
-    titles: [
-      'Forgotten Crypt', 'Stones Below', 'The Sealed Chamber', 'Warren of Bones',
-    ],
-    introductions: [
-      'The stone steps end in cold corridors. Dust motes hang where your torch passes. Something down here is older than this dungeon was supposed to be.',
-      'The air is thicker here. The first chamber yawns open ahead — and you can hear something dragging across the floor in the next one.',
-    ],
-    descriptions: [
-      'A sealed crypt or warren — skeletons or kobolds garrison the deeper chambers. The AIGM should emphasise echoes, dripping water, and old bones; reward cautious movement.',
-    ],
-    objectives: [
-      'Clear the chambers',
-      'Recover what was sealed below',
-      'Map the warren and survive what lives in it',
-    ],
-    completionFlag: 'dungeon_sweep_resolved',
-    enemyPool: ['skeleton', 'skeleton', 'kobold_warrior'],
-    enemyCount: [2, 3],
-    // Player party enters from the southern stair (the dungeon's `entrance`
-    // anchor); the guardians wait in the deepest chamber (`vault`).
-    playerAnchors: ['entrance', 'edge:south'],
-    enemyAnchors:  ['vault', 'far_room', 'edge:north'],
-    triggerTemplates: [
-      {
-        kind: 'aigm',
-        anchor: 'entrance',
-        message: 'Echoes carry deeper into the stone — describe a far-off dragging sound, dust trickling from a vault door, and the sense that the party has been heard.',
-      },
-      {
-        kind: 'perception',
-        anchor: 'far_room',
-        dc: 12,
-        passMessage: 'Bone fragments crunch under your boot. Something has been pacing this room for a long time.',
-      },
-      {
-        kind: 'combat',
-        anchor: 'vault',
-        radius: 1,
+        anchor: 'edge:north',
       },
     ],
   },

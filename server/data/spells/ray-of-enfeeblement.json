@@ -1,0 +1,19 @@
+{
+  "id": "ray-of-enfeeblement",
+  "name": "Ray of Enfeeblement",
+  "level": 2,
+  "school": "necromancy",
+  "classes": ["warlock", "wizard"],
+  "castingTime": "action",
+  "range": "60 feet",
+  "rangeFeet": 60,
+  "components": { "verbal": true, "somatic": true, "material": null },
+  "duration": "concentration, up to 1 minute",
+  "durationRounds": 10,
+  "concentration": true,
+  "ritual": false,
+  "save": { "ability": "con", "halfOnSuccess": false },
+  "effect": { "onFail": "enfeebled" },
+  "description": "A beam of enervating energy shoots from you toward a creature within range. The target must make a Constitution saving throw. On a successful save, the target has Disadvantage on the next attack roll it makes until the start of your next turn (engine: Vexed). On a failed save, the target has Disadvantage on its attack rolls for the duration (engine: Enfeebled — applies to all attacks, not just STR-based, since MonsterAttack does not carry a stat-key tag yet). The SRD's 1d8 damage-roll subtraction is descriptive only in the current engine. The target repeats the save at the end of each of its turns, ending the spell on a success.",
+  "repeatSave": { "ability": "con", "removeOnSuccess": ["enfeebled"] }
+}

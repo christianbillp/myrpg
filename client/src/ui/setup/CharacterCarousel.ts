@@ -10,7 +10,7 @@
  * natural pixel sizes regardless of the canvas scale factor.
  */
 import Phaser from "phaser";
-import type { PlayerDef } from "../../data/player";
+import type { PlayerDef } from "../../../../shared/types";
 import { tokenAssetForPlayer } from "../../data/tokens";
 
 const API_URL = "http://localhost:3000";
@@ -33,6 +33,10 @@ export interface CharacterCarouselOptions {
   width: number;
   height: number;
   characters: PlayerDef[];
+  /** Per-character effective level (source level + accumulated level-ups).
+   *  When absent the carousel falls back to `def.level`, which matches the
+   *  pre-level-up source JSON and is incorrect for any leveled character. */
+  effectiveLevels?: Map<string, number>;
   /** Starting index (clamped to the valid range). Defaults to 0. */
   initialIndex?: number;
   /** Fires every time the selection moves, including the initial microtask
@@ -106,6 +110,16 @@ export class CharacterCarousel {
 
   getCurrent(): PlayerDef | null { return this.characters[this.currentIndex] ?? null; }
   getIndex(): number { return this.currentIndex; }
+
+  /** Update one character's effective level and re-render the cards. The
+   *  host scene calls this once a per-character server save arrives, so the
+   *  carousel's subtitle stays in sync with the detail panel without
+   *  rebuilding the carousel. */
+  setEffectiveLevel(id: string, level: number): void {
+    if (!this.opts.effectiveLevels) this.opts.effectiveLevels = new Map();
+    this.opts.effectiveLevels.set(id, level);
+    this.renderCards();
+  }
 
   destroy(): void {
     this.opts.scene.scale.off("resize", this.placeHandler);
@@ -207,7 +221,13 @@ export class CharacterCarousel {
     card.appendChild(name);
 
     const sub = document.createElement("div");
-    sub.textContent = `${def.speciesName} · ${def.className} ${def.level}`;
+    // Effective level = source JSON level + recorded level-ups. The source
+    // JSON sits at L1 for every character; the leveled total comes from the
+    // server save (passed in by the host scene). Without this, a L4 wizard
+    // shows as "Wizard 1" in the carousel even though the Character Sheet
+    // shows L4.
+    const effLevel = this.opts.effectiveLevels?.get(def.id) ?? def.level;
+    sub.textContent = `${def.speciesName} · ${def.className} ${effLevel}`;
     sub.style.cssText = `
       margin-top: 4px;
       font-size: ${isCenter ? 10 : 9}px;

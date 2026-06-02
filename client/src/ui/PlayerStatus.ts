@@ -14,7 +14,7 @@
  *                   player's own action).
  *   • `concentration` — the spell the player is currently maintaining.
  */
-import type { PlayerState } from "../net/types";
+import type { PlayerState } from "../../../shared/types";
 
 export type PlayerStatusTone = "condition" | "buff" | "debuff" | "concentration";
 
@@ -162,13 +162,22 @@ export function buildPlayerStatusChips(
   // Ongoing periodic effects (DoTs, attach bites, …). One chip per effect
   // so the player can see how many sources are biting.
   for (const eff of player.ongoingEffects) {
-    const dot = eff.dot;
-    const bonus = dot.bonus > 0 ? `+${dot.bonus}` : dot.bonus < 0 ? `${dot.bonus}` : "";
-    chips.push({
-      label: `${eff.kind === "attach" ? "Attached" : "Ongoing"}: ${dot.dice}d${dot.sides}${bonus} ${dot.damageType}`,
-      tone: "debuff",
-      tooltip: `Periodic damage at the start of the source's turn. Source NPC id: ${eff.sourceNpcId}.`,
-    });
+    if (eff.kind === "attach") {
+      const dot = eff.dot;
+      const bonus = dot.bonus > 0 ? `+${dot.bonus}` : dot.bonus < 0 ? `${dot.bonus}` : "";
+      chips.push({
+        label: `Attached: ${dot.dice}d${dot.sides}${bonus} ${dot.damageType}`,
+        tone: "debuff",
+        tooltip: `Periodic damage at the start of the source's turn. Source NPC id: ${eff.sourceNpcId}.`,
+      });
+    } else if (eff.kind === "delayed-self-damage") {
+      const bonus = eff.bonus > 0 ? `+${eff.bonus}` : eff.bonus < 0 ? `${eff.bonus}` : "";
+      chips.push({
+        label: `Lingering: ${eff.dice}d${eff.sides}${bonus} ${eff.damageType}`,
+        tone: "debuff",
+        tooltip: `Damage at the end of your next turn (from ${eff.spellId}).`,
+      });
+    }
   }
 
   return chips;

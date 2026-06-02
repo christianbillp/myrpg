@@ -13,7 +13,9 @@ import { d as rollDie } from './Dice.js';
  * and the application logic here — callers and turn hooks stay untouched.
  */
 
-function rollDot(dot: OngoingEffect['dot']): { total: number; rolls: number[] } {
+type AttachOngoingEffect = Extract<OngoingEffect, { kind: 'attach' }>;
+
+function rollDot(dot: AttachOngoingEffect['dot']): { total: number; rolls: number[] } {
   const rolls: number[] = [];
   for (let i = 0; i < dot.dice; i++) rolls.push(rollDie(dot.sides));
   return { total: rolls.reduce((a, b) => a + b, 0) + dot.bonus, rolls };
@@ -75,7 +77,7 @@ export function applyTurnStartPeriodicDamage(
 
   // Player victim.
   const playerHits = s.player.ongoingEffects.filter(
-    (oe) => oe.kind === 'attach' && oe.sourceNpcId === combatantId,
+    (oe): oe is AttachOngoingEffect => oe.kind === 'attach' && oe.sourceNpcId === combatantId,
   );
   for (const eff of playerHits) {
     if (s.player.hp <= 0) break;
@@ -95,7 +97,7 @@ export function applyTurnStartPeriodicDamage(
   for (const npc of s.npcs) {
     if (npc.hp <= 0) continue;
     const npcHits = npc.ongoingEffects.filter(
-      (oe) => oe.kind === 'attach' && oe.sourceNpcId === combatantId,
+      (oe): oe is AttachOngoingEffect => oe.kind === 'attach' && oe.sourceNpcId === combatantId,
     );
     for (const eff of npcHits) {
       if (npc.hp <= 0) break;

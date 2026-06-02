@@ -43,9 +43,7 @@
     "stealth": 7,
     "survival": 1
   },
-  "defaultFeatureIds": [
-    "cunning-action"
-  ],
+  "defaultFeatureIds": [],
   "hitDieType": 8,
   "sneakAttackDice": 1,
   "color": 4218196,

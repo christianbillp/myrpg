@@ -1,0 +1,16 @@
+{
+  "id": "detect-thoughts",
+  "name": "Detect Thoughts",
+  "level": 2,
+  "school": "divination",
+  "classes": ["bard", "sorcerer", "wizard"],
+  "castingTime": "action",
+  "range": "self",
+  "rangeFeet": 0,
+  "components": { "verbal": true, "somatic": true, "material": "1 Copper Piece" },
+  "duration": "concentration, up to 1 minute",
+  "durationRounds": 10,
+  "concentration": true,
+  "ritual": false,
+  "description": "You activate one of the effects below. Until the spell ends, you can activate either effect as a Magic action on your later turns. (1) Sense Thoughts — sense the presence of thoughts within 30 feet of yourself that belong to creatures that know languages or are telepathic. (2) Probe Mind — choose a creature you can see within 30 feet; it makes a Wisdom saving throw against your spell save DC. On a failure, you can read its surface thoughts (what it is thinking about in this moment) for as long as you concentrate."
+}

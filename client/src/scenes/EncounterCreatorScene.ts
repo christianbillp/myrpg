@@ -1,10 +1,10 @@
 import Phaser from "phaser";
 import { gameClient } from "../net/GameClient";
 import type { EncounterRefineDraft, EncounterRefineResponse } from "../net/GameClient";
-import type { MonsterDef } from "../data/monsters";
+import type { MonsterDef } from "../../../shared/types";
 import type { MapPreviewData } from "../ui/EmbeddedMapPreview";
 import { tilesetTextureKey } from "./BootScene";
-import type { SavedMapDef, EncounterDef, EncounterTrigger, NPCDef } from "../net/types";
+import type { SavedMapDef, EncounterDef, EncounterTrigger, NPCDef } from "../../../shared/types";
 import { STARTING_ZONE_PLAYER, STARTING_ZONE_ALLY, STARTING_ZONE_ENEMY, STARTING_ZONE_NEUTRAL } from "../../../shared/startingZones";
 import { MonsterPicker } from "../ui/generate/MonsterPicker";
 import { ZonePainter } from "../ui/generate/ZonePainter";
@@ -1763,7 +1763,7 @@ export class EncounterCreatorScene extends Phaser.Scene {
 
 /** Decode a `startingZones` layer into four per-role cell sets keyed `"x,y"`. */
 function decodeStartingZones(
-  layer: import("../net/types").EncounterDef["startingZones"],
+  layer: import("../../../shared/types").EncounterDef["startingZones"],
 ): { playerCells: Set<string>; allyCells: Set<string>; enemyCells: Set<string>; neutralCells: Set<string> } {
   const playerCells = new Set<string>();
   const allyCells = new Set<string>();

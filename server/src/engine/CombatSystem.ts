@@ -1,5 +1,6 @@
 import { d, d20, mod, rollAdvantage, rollDisadvantage } from './Dice.js';
 import { PlayerDef, PlayerAttack, MonsterDef, MonsterAttack, ConsumableDef, LogEntry, BonusDamage, RolledBonusDamage } from './types.js';
+import { Logger } from '../Logger.js';
 
 export type { RolledBonusDamage };
 
@@ -37,8 +38,12 @@ export function rollOneInitiative(
   modifier: number,
   surprised: boolean,
   invisible: boolean,
+  /** Extra Advantage source beyond Invisible — Champion's Remarkable
+   *  Athlete (Fighter L3) is the SRD case. ORs with `invisible`; the
+   *  Adv/Dis cancellation rule still applies if `surprised` is also true. */
+  extraAdvantage = false,
 ): { roll: number; total: number; rollStr: string } {
-  const wantAdv = invisible;
+  const wantAdv = invisible || extraAdvantage;
   const wantDis = surprised;
   const effAdv = wantAdv && !wantDis;
   const effDis = wantDis && !wantAdv;
@@ -77,7 +82,10 @@ function resolvePlayerAttack(
   sneakAttackAllowed = false,
 ): { damage: number; isHit: boolean; isCrit: boolean; attackTotal: number; naturalRoll: number; logs: LogEntry[]; vexApplied: boolean; slowApplied: boolean; bonusComponents: RolledBonusDamage[]; sneakAttackFired: boolean } {
   const statMod = attack.statKey === 'str' ? mod(player.str) : mod(player.dex);
-  const attackBonus = statMod + profBonus;
+  // SRD Magic Weapon spell — flat bonus to attack rolls (consumed below
+  // when damage is rolled).
+  const magicWeaponBonus = attack.magicWeaponBonus ?? 0;
+  const attackBonus = statMod + profBonus + magicWeaponBonus;
   const logs: LogEntry[] = [];
 
   const effAdv = withAdvantage && !withDisadvantage;
@@ -132,9 +140,10 @@ function resolvePlayerAttack(
       sneakTot = s.total; sneakRolls = s.rolls;
       sneakAttackFired = true;
     }
-    damage = diceTot + statMod + sneakTot;
+    damage = diceTot + statMod + magicWeaponBonus + sneakTot;
     const sneakPart = sneakTot > 0 ? ` + sneak[${sneakRolls.join(',')}]=${sneakTot}` : '';
-    const dicePart = `2×${attack.damageDice}d${attack.damageSides}[${diceRolls.join(',')}]+${statMod}${sneakPart}`;
+    const mwPart = magicWeaponBonus > 0 ? ` +${magicWeaponBonus}(magic)` : '';
+    const dicePart = `2×${attack.damageDice}d${attack.damageSides}[${diceRolls.join(',')}]+${statMod}${mwPart}${sneakPart}`;
     logs.push({ left: `⚡ Critical hit with ${attack.name} — ${damage} ${attack.damageType}`, right: `${atkPart} · ${dicePart}`, style: 'crit' });
     vexApplied = attack.vex || attack.sap;
     slowApplied = attack.slow;
@@ -156,11 +165,12 @@ function resolvePlayerAttack(
       sneakTot = s.total; sneakRolls = s.rolls;
       sneakAttackFired = true;
     }
-    damage = diceTotal + statMod + sneakTot;
+    damage = diceTotal + statMod + magicWeaponBonus + sneakTot;
     const sneakSuffix = sneakTot > 0 ? ` (+${sneakTot} sneak)` : '';
     const sneakRightPart = sneakTot > 0 ? ` + sneak[${sneakRolls.join(',')}]=${sneakTot}` : '';
     const savPart = attack.savageAttacker ? ' Savage' : '';
-    const dicePart = `${attack.damageDice}d${attack.damageSides}[${diceRolls.join(',')}]+${statMod}${savPart}${sneakRightPart}`;
+    const mwHitPart = magicWeaponBonus > 0 ? ` +${magicWeaponBonus}(magic)` : '';
+    const dicePart = `${attack.damageDice}d${attack.damageSides}[${diceRolls.join(',')}]+${statMod}${mwHitPart}${savPart}${sneakRightPart}`;
     logs.push({ left: `Hit with ${attack.name} — ${damage} ${attack.damageType}${sneakSuffix}`, right: `${atkPart} · ${dicePart}`, style: 'hit' });
     vexApplied = attack.vex || attack.sap;
     slowApplied = attack.slow;
@@ -184,6 +194,19 @@ function resolvePlayerAttack(
     ? rollAllBonusDamage(attack.bonusDamage, isCrit)
     : [];
 
+  Logger.log('combat.attack_roll', {
+    attacker: 'player',
+    weapon: attack.name,
+    statKey: attack.statKey,
+    statMod, profBonus, attackBonus,
+    naturalRoll, total,
+    adv: effAdv, dis: effDis,
+    targetAc: enemy.ac, coverAcBonus, effectiveAc,
+    critFloor, inCritRange,
+    isHit, isCrit,
+    sneakAttackAllowed, sneakAttackFired,
+    damage,
+  });
   return { damage, isHit, isCrit, attackTotal: total, naturalRoll, logs, vexApplied, slowApplied, bonusComponents, sneakAttackFired };
 }
 

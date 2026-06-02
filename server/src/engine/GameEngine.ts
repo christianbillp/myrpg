@@ -16,6 +16,8 @@ import { buildAIGMTools } from './AIGMTools.js';
 import { setRelation, getRelation, isHostileTo } from './FactionRelations.js';
 import { runOffCameraTick as runOffCameraTickImpl } from './WorldTick.js';
 import { PLAYER_FACTION_ID, INFLUENCE_SKILLS } from '../../../shared/types.js';
+import { SKILL_ABILITY } from './Leveling.js';
+import { Logger } from '../Logger.js';
 import * as Guard from './ActionGuards.js';
 import { clearHide, isDead } from './ConditionSystem.js';
 import type { GameContext } from './GameContext.js';
@@ -23,6 +25,7 @@ import {
   endCombat as cfEndCombat, autoEndCombatIfNoEnemies as cfAutoEndCombat,
   triggerCombat as cfTriggerCombat, doStartCombat as cfDoStartCombat,
   enterEnemyPhase as cfEnterEnemyPhase, doRollDeathSave as cfDoRollDeathSave,
+  endPlayerTurn as cfEndPlayerTurn,
   doResolveReaction as cfDoResolveReaction,
   advanceTurn as cfAdvanceTurn,
 } from './CombatFlow.js';
@@ -344,7 +347,7 @@ export class GameEngine {
           events.push(...caThrowItem(this.ctx, action.itemId, action.targetId));
         break;
       case 'castSpell':
-        spDoCastSpell(this.ctx, action.spellId, action.slotLevel, action.targetIds, action.tile, !!action.asRitual, events, action.damageTypeChoice);
+        spDoCastSpell(this.ctx, action.spellId, action.slotLevel, action.targetIds, action.tile, !!action.asRitual, events, action.damageTypeChoice, action.onFailChoice, action.abilityChoice);
         break;
       case 'releaseConcentration':
         endConcentration(this.ctx, 'released by caster');
@@ -361,7 +364,12 @@ export class GameEngine {
         if (s.phase === 'player_turn') {
           // SRD Mage Hand: vanishes if the caster ends a turn > 30 ft away.
           checkSummonTether(this.ctx);
-          cfEnterEnemyPhase(this.ctx, events);
+          // Route through `endPlayerTurn` so end-of-turn hooks fire:
+          // Flaming Sphere proximity saves, zone duration tick, Color Spray
+          // / spell-condition expiries, the `turn_ended` event. The legacy
+          // `enterEnemyPhase` skipped all of these — kept around only as a
+          // back-compat entry point for death-save resolution.
+          cfEndPlayerTurn(this.ctx, events);
         }
         break;
       case 'rollDeathSave': cfDoRollDeathSave(this.ctx, events); break;
@@ -435,12 +443,15 @@ export class GameEngine {
   }
 
   setExhaustionLevel(level: number): GameEvent[] {
+    const before = this.state.player.exhaustionLevel;
     const clamped = Math.max(0, Math.min(6, level));
     this.state.player.exhaustionLevel = clamped;
     const speedDrop = clamped * 5;
+    Logger.log('combat.exhaustion_changed', { entity: 'player', before, after: clamped, speedDropFt: speedDrop });
     this.addLog(`Exhaustion level: ${clamped} (−${clamped * 2} to all D20 Tests, −${speedDrop} ft Speed)`);
     if (clamped >= 6) {
       // SRD: Exhaustion level 6 is lethal.
+      Logger.log('combat.player_died', { reason: 'exhaustion_level_6' });
       this.addLog({ left: `${this.playerDef.name} succumbs to exhaustion.`, style: 'kill' });
       this.state.player.hp = 0;
       this.state.phase = 'defeat';
@@ -465,7 +476,10 @@ export class GameEngine {
   adjustNpcHp(entity: string, delta: number, damageType?: string): GameEvent[] {
     if (entity === 'player') return this.adjustPlayerHp(delta);
     const npc = this.resolveNpcByEntity(entity);
-    if (!npc) return [];
+    if (!npc) {
+      Logger.warn('anomaly.unknown_entity', { tool: 'adjust_npc_hp', entity });
+      return [];
+    }
     let finalDelta = delta;
     if (damageType && delta < 0) {
       const monsterDef = this.resolveMonsterDef(npc.defId);
@@ -759,10 +773,18 @@ export class GameEngine {
   }
 
   setDisposition(entity: string, disposition: string): GameEvent[] {
-    if (!['ally', 'neutral', 'enemy'].includes(disposition)) return [];
+    if (!['ally', 'neutral', 'enemy'].includes(disposition)) {
+      Logger.warn('anomaly.invalid_disposition', { entity, disposition });
+      return [];
+    }
     const npc = this.resolveNpcByEntity(entity);
+    if (!npc) {
+      Logger.warn('anomaly.unknown_entity', { tool: 'set_disposition', entity });
+    }
     if (npc) {
+      const before = npc.disposition;
       npc.disposition = disposition as Disposition;
+      Logger.log('combat.disposition_changed', { npcId: npc.id, defId: npc.defId, before, after: disposition });
       if ((disposition === 'ally' || disposition === 'enemy') && !npc.combatLabel) this.assignCombatLabel(npc);
       if (disposition === 'enemy') this.aggroFaction(npc);
       else this.autoEndCombatIfNoEnemies();
@@ -786,41 +808,71 @@ export class GameEngine {
    */
   setAttitude(entity: string, attitude: 'friendly' | 'indifferent' | 'hostile'): 'friendly' | 'indifferent' | 'hostile' | null {
     const npc = this.resolveNpcByEntity(entity);
-    if (!npc) return null;
+    if (!npc) {
+      Logger.warn('anomaly.unknown_entity', { tool: 'set_attitude', entity });
+      return null;
+    }
     const before = npc.attitude ?? 'indifferent';
     npc.attitude = attitude;
+    Logger.log('social.attitude_changed', { npcId: npc.id, defId: npc.defId, before, after: attitude });
     this.addLog({ left: `${npc.revealedName ?? npc.name}: attitude ${before} → ${attitude}`, style: 'status' });
     return before;
   }
 
-  applyCondition(entity: string, condition: string): GameEvent[] {
+  applyCondition(entity: string, condition: string, reason = 'aigm.apply_condition'): GameEvent[] {
     const s = this.state;
     if (entity === 'player') {
-      if (!s.player.conditions.includes(condition)) s.player.conditions.push(condition);
-      if (condition === 'unconscious' && !s.player.conditions.includes('prone')) s.player.conditions.push('prone');
+      if (!s.player.conditions.includes(condition)) {
+        s.player.conditions.push(condition);
+        Logger.log('combat.condition_added', { entity: 'player', condition, reason });
+      }
+      if (condition === 'unconscious' && !s.player.conditions.includes('prone')) {
+        s.player.conditions.push('prone');
+        Logger.log('combat.condition_added', { entity: 'player', condition: 'prone', reason: 'unconscious_implies_prone' });
+      }
     } else {
       const npc = this.resolveNpcByEntity(entity);
-      if (npc && !npc.conditions.includes(condition)) npc.conditions.push(condition);
-      if (condition === 'unconscious' && npc && !npc.conditions.includes('prone')) npc.conditions.push('prone');
+      if (!npc) {
+        Logger.warn('anomaly.unknown_entity', { tool: 'apply_condition', entity });
+      }
+      if (npc && !npc.conditions.includes(condition)) {
+        npc.conditions.push(condition);
+        Logger.log('combat.condition_added', { entity: npc.id, defId: npc.defId, condition, reason });
+      }
+      if (condition === 'unconscious' && npc && !npc.conditions.includes('prone')) {
+        npc.conditions.push('prone');
+        Logger.log('combat.condition_added', { entity: npc.id, defId: npc.defId, condition: 'prone', reason: 'unconscious_implies_prone' });
+      }
     }
     return [];
   }
 
-  removeCondition(entity: string, condition: string): GameEvent[] {
+  removeCondition(entity: string, condition: string, reason = 'aigm.remove_condition'): GameEvent[] {
     const s = this.state;
     if (entity === 'player') {
-      s.player.conditions = s.player.conditions.filter((c) => c !== condition);
+      if (s.player.conditions.includes(condition)) {
+        s.player.conditions = s.player.conditions.filter((c) => c !== condition);
+        Logger.log('combat.condition_removed', { entity: 'player', condition, reason });
+      }
     } else {
       const npc = this.resolveNpcByEntity(entity);
+      if (!npc) {
+        Logger.warn('anomaly.unknown_entity', { tool: 'remove_condition', entity });
+      }
       if (npc) {
-        npc.conditions = npc.conditions.filter((c) => c !== condition);
+        if (npc.conditions.includes(condition)) {
+          npc.conditions = npc.conditions.filter((c) => c !== condition);
+          Logger.log('combat.condition_removed', { entity: npc.id, defId: npc.defId, condition, reason });
+        }
         // US-092: when Charm Person's `charmed` condition ends, restore the
         // pre-cast social attitude. The condition might also be removed by
         // an explicit AIGM remove_condition or by the spell's duration; the
         // restore branch fires the same way in every path.
         if (condition === 'charmed' && npc.attitudePreCharm !== undefined) {
+          const before = npc.attitude;
           npc.attitude = npc.attitudePreCharm;
           npc.attitudePreCharm = undefined;
+          Logger.log('social.attitude_changed', { npcId: npc.id, defId: npc.defId, before, after: npc.attitude, reason: 'charm_ended' });
         }
       }
     }
@@ -836,7 +888,7 @@ export class GameEngine {
    * (e.g. "[Friendly: Advantage]") the caller appends to log lines.
    */
   rollAbilityCheck(skill: string, dc: number, targetNpcEntity?: string): { roll: number; total: number; success: boolean; attitudeNote: string } {
-    const { conditions, exhaustionLevel } = this.state.player;
+    const { conditions, exhaustionLevel, enhancedAbility } = this.state.player;
     const skillMod = (this.playerDef.skills[skill] ?? 0) - exhaustionLevel * 2;
     let withAdvantage = false;
     let withDisadvantage = conditions.includes('poisoned') || conditions.includes('frightened');
@@ -850,8 +902,25 @@ export class GameEngine {
         else attitudeNote = '[Indifferent]';
       }
     }
+    // SRD Enhance Ability — Advantage on ability checks whose underlying
+    // ability matches the chosen one. Stacks with the attitude-driven
+    // Advantage above (both are sources of Adv, which collapses to a
+    // single Adv per the SRD Advantage rules — see US-043).
+    let enhanceNote = '';
+    if (enhancedAbility && SKILL_ABILITY[skill] === enhancedAbility) {
+      withAdvantage = true;
+      enhanceNote = `[Enhance Ability ${enhancedAbility.toUpperCase()}: Adv]`;
+    }
     const result = rollSkillCheck(skillMod, dc, withAdvantage, withDisadvantage);
-    return { ...result, attitudeNote };
+    Logger.log('check.ability_check', {
+      skill, dc, skillMod, exhaustionPenalty: exhaustionLevel * 2,
+      adv: withAdvantage, dis: withDisadvantage,
+      targetNpcEntity: targetNpcEntity ?? null,
+      attitudeNote: attitudeNote || null,
+      enhanceNote: enhanceNote || null,
+      roll: result.roll, total: result.total, success: result.success,
+    });
+    return { ...result, attitudeNote: [attitudeNote, enhanceNote].filter(Boolean).join(' ') };
   }
 
   rollPlayerSavingThrow(ability: string, dc: number): { roll: number; total: number; success: boolean; autoFail: boolean } {
@@ -983,6 +1052,7 @@ export class GameEngine {
     // real HP takes any hit. The CON save (and the unconscious check) only
     // see the *leftover* damage that actually reached real HP.
     let effective = damage;
+    const tempHpBefore = s.player.tempHp;
     if (effective > 0 && s.player.tempHp > 0) {
       const absorbed = Math.min(s.player.tempHp, effective);
       s.player.tempHp -= absorbed;
@@ -991,6 +1061,15 @@ export class GameEngine {
     }
     const hpBefore = s.player.hp;
     s.player.hp = Math.max(0, hpBefore - effective);
+    Logger.log('combat.damage_dealt', {
+      target: 'player',
+      raw: damage,
+      tempAbsorbed: tempHpBefore - s.player.tempHp,
+      effective,
+      hpBefore,
+      hpAfter: s.player.hp,
+      maxHp: this.playerDef.maxHp,
+    });
     this.addLog({ left: `${this.playerDef.name} HP: ${s.player.hp}/${this.playerDef.maxHp}`, style: 'status' });
     this.bus.publish({ type: 'damage_dealt', target: 'player', amount: effective });
     publishHpThresholdCrossings(this.ctx, 'player', hpBefore, s.player.hp, this.playerDef.maxHp);
@@ -1025,10 +1104,12 @@ export class GameEngine {
     dying.isActive = false;
     clearHide(dying);
     // A dead source can't sustain its periodic effects — drop any attach
-    // effects it had on the player or other NPCs.
-    s.player.ongoingEffects = s.player.ongoingEffects.filter((oe) => oe.sourceNpcId !== id);
+    // effects it had on the player or other NPCs. Delayed-self-damage
+    // ongoing effects are spell-authored and don't reference an NPC source,
+    // so they survive the source's death.
+    s.player.ongoingEffects = s.player.ongoingEffects.filter((oe) => oe.kind !== 'attach' || oe.sourceNpcId !== id);
     for (const n of s.npcs) {
-      n.ongoingEffects = n.ongoingEffects.filter((oe) => oe.sourceNpcId !== id);
+      n.ongoingEffects = n.ongoingEffects.filter((oe) => oe.kind !== 'attach' || oe.sourceNpcId !== id);
     }
     // NOTE: do NOT remove from turnOrderIds. The advance loop in CombatFlow
     // skips any combatant whose hp <= 0; mutating the array mid-iteration
@@ -1319,16 +1400,24 @@ export class GameEngine {
     // current level rather than the L1 starting state.
     const history = req.resumeLevelUps ?? [];
     let defsForBuild = defs;
-    if (history.length > 0) {
-      const base = defs.playerDefs.find((p) => p.id === req.playerDefId);
-      if (base) {
-        const leveled = JSON.parse(JSON.stringify(base)) as PlayerDef;
+    const base = defs.playerDefs.find((p) => p.id === req.playerDefId);
+    if (base) {
+      // We always clone — even with no level-up history we need
+      // `syncCharacterTracks` to backfill the character's L1 class features
+      // (Wizard's Spellcasting / Ritual Adept / Arcane Recovery, Fighter's
+      // Fighting Style / Second Wind, …) which the source character JSON
+      // omits. Without this, the SessionBuilder resource-pool seeder and the
+      // Short Rest's "do I have Arcane Recovery?" check both miss those
+      // features entirely.
+      const leveled = JSON.parse(JSON.stringify(base)) as PlayerDef;
+      if (history.length > 0) {
         applyLevelUpHistory(leveled, history, defs.features, defs.spells, defs.classes, defs.subclasses, defs.feats);
-        defsForBuild = {
-          ...defs,
-          playerDefs: defs.playerDefs.map((p) => p.id === base.id ? leveled : p),
-        };
       }
+      syncCharacterTracks(leveled, defs.classes);
+      defsForBuild = {
+        ...defs,
+        playerDefs: defs.playerDefs.map((p) => p.id === base.id ? leveled : p),
+      };
     }
     const state = buildSessionState(sessionId, req, defsForBuild, savedMap);
     // Replay again inside the constructor so the engine's own clone is also

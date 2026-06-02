@@ -105,6 +105,15 @@ export function canUseFeature(ctx: GameContext, featureId: string): boolean {
     if (s.phase !== 'player_turn') return false;
     if (!s.player.actionUsed) return false;
   }
+  if (featureId === 'steady-aim') {
+    // SRD: only on the rogue's own combat turn, and only if they haven't
+    // moved this turn (tracked via `movedThisTurn`, reset at
+    // `enterPlayerTurn`). Already-active flag also greys the button so the
+    // player can't re-arm and waste the bonus action.
+    if (s.phase !== 'player_turn') return false;
+    if (s.player.movedThisTurn) return false;
+    if (s.player.steadyAim) return false;
+  }
 
   return true;
 }

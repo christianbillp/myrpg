@@ -3,16 +3,22 @@ import type { GameContext } from './GameContext.js';
 import { rollOneInitiative, rollDeathSave, type RolledBonusDamage } from './CombatSystem.js';
 import { chebyshev } from './EnemyAI.js';
 import { isIncapacitated, hasSpeedZero, proneStandCost, speedAfterExhaustion, TURN_CONDITIONS, clearHide } from './ConditionSystem.js';
+import { Logger } from '../Logger.js';
 import { applyEquipment } from './EquipmentSystem.js';
+import { runFlamingSphereEndOfTurnSaves } from './SummonSystem.js';
 import { runPerceptionSweep } from './Vision.js';
 import { mod, d20 as d20Local } from './Dice.js';
 import { runSingleEnemyTurn, runSingleAllyTurn } from './NpcTurnRunners.js';
 import { applyMonsterAttachToPlayer } from './OngoingEffectsSystem.js';
+import { tickActiveZones, tickZoneEnterSaves, runGustOfWindEndOfTurnSaves } from './SpellSystem.js';
+import { endConcentration } from './ConcentrationSystem.js';
 
 // ── Combat lifecycle ────────────────────────────────────────────────────────
 
 export function endCombat(ctx: GameContext): GameEvent[] {
   const s = ctx.state;
+  Logger.log('combat.phase_changed', { from: s.phase, to: 'exploring', reason: 'combat_ended' });
+  Logger.log('combat.combat_ended', { livingNpcs: s.npcs.filter((n) => n.hp > 0).length });
   s.phase = 'exploring';
   s.npcs = s.npcs.filter((n) => n.disposition !== 'enemy' || n.hp === 0);
   s.npcs.filter((n) => n.disposition === 'ally' && n.hp > 0).forEach((n) => { n.disposition = 'neutral'; });
@@ -54,6 +60,11 @@ export function doStartCombat(ctx: GameContext, events: GameEvent[]): void {
   const s = ctx.state;
   const enemies = s.npcs.filter((n) => n.disposition === 'enemy' && n.hp > 0);
   if (enemies.length === 0) return;
+  Logger.log('combat.phase_changed', { from: s.phase, to: 'player_turn', reason: 'combat_started' });
+  Logger.log('combat.combat_started', {
+    enemies: enemies.map((n) => ({ id: n.id, defId: n.defId, hp: n.hp })),
+    playerHidden: s.player.conditions.includes('hidden'),
+  });
 
   // Read playerWasHidden BUT keep the condition active. A hidden opener should
   // grant Advantage on the very first attack (which is what triggered combat
@@ -72,7 +83,11 @@ export function doStartCombat(ctx: GameContext, events: GameEvent[]): void {
   // ── Roll Initiative for every combatant ─────────────────────────────────
   const logs: LogEntry[] = [{ left: '⚔ Combat begins', style: 'header' }];
 
-  const playerInit = rollOneInitiative(mod(ctx.playerDef.dex), /*surprised*/false, /*invisible*/false);
+  // SRD Champion L3 Remarkable Athlete: Advantage on Initiative rolls.
+  // Future feature-driven Initiative-Adv sources (Alert feat) plug in here.
+  const features = ctx.playerDef.defaultFeatureIds ?? [];
+  const initAdvantage = features.includes('remarkable-athlete');
+  const playerInit = rollOneInitiative(mod(ctx.playerDef.dex), /*surprised*/false, /*invisible*/false, initAdvantage);
   s.player.initiativeRoll = playerInit.total;
   logs.push({
     left: `${ctx.playerDef.name} rolls Initiative`,
@@ -225,8 +240,12 @@ export function advanceTurn(ctx: GameContext, events: GameEvent[]): void {
 export function enterPlayerTurn(ctx: GameContext): void {
   const s = ctx.state;
   const wasPlayerTurn = s.phase === 'player_turn';
+  const fromPhase = s.phase;
   // If the player is unconscious, their "turn" is rolling a death save.
   s.phase = s.player.hp <= 0 ? 'death_saves' : 'player_turn';
+  if (fromPhase !== s.phase) {
+    Logger.log('combat.phase_changed', { from: fromPhase, to: s.phase, reason: 'enter_player_turn' });
+  }
   s.npcs.filter((n) => n.disposition !== 'neutral' && n.hp > 0).forEach((n) => {
     n.isActive = false;
     // NOTE: NPC reactions AND turn-scoped conditions (Dodge / Dash /
@@ -239,6 +258,12 @@ export function enterPlayerTurn(ctx: GameContext): void {
   s.player.bonusActionUsed = false;
   s.player.reactionUsed = false;
   s.player.freeObjectInteractionUsed = false;
+  // Per-turn flags reset at the start of every player turn. `movedThisTurn`
+  // gates Rogue Steady Aim; `steadyAim` is the one-shot Advantage flag the
+  // attack resolvers consume — clear it as a safety net so an unused
+  // Steady Aim doesn't leak into next turn.
+  s.player.movedThisTurn = false;
+  s.player.steadyAim = false;
   // SRD Sneak Attack — "Once per turn". Reset at the start of every player
   // turn so the next eligible hit can ride.
   s.player.sneakAttackUsedThisTurn = false;
@@ -268,8 +293,15 @@ export function enterPlayerTurn(ctx: GameContext): void {
     if (standCost > 0) s.player.conditions = s.player.conditions.filter((c) => c !== 'prone');
   }
   if (!wasPlayerTurn && s.phase === 'player_turn') {
+    Logger.log('combat.turn_started', { combatantId: 'player', hp: s.player.hp, movesLeft: s.player.movesLeft });
     ctx.addLog({ left: `── ${ctx.playerDef.name}'s turn — Action & Bonus refreshed ──`, style: 'header' });
     ctx.publish({ type: 'turn_started', combatantId: 'player' });
+    // Persistent AOE zones (Fog Cloud, Web, Darkness, Grease, …) age one
+    // round at the top of every player turn. Expired zones are removed
+    // and their conditions stripped from any creature still inside.
+    tickActiveZones(ctx);
+    // SRD Web: a creature starting its turn in the webs rolls the save.
+    tickZoneEnterSaves(ctx, 'player');
   }
 }
 
@@ -278,8 +310,38 @@ export function enterPlayerTurn(ctx: GameContext): void {
  * order via advanceTurn.
  */
 export function endPlayerTurn(ctx: GameContext, events: GameEvent[]): void {
+  // SRD Flaming Sphere — any creature ending its turn within 5 ft of the
+  // sphere makes a DEX save vs the spell's damage. Resolve before the
+  // turn-end event so log lines order naturally (the sphere acts at the
+  // very end of the player's turn).
+  runFlamingSphereEndOfTurnSaves(ctx, 'player');
+  // SRD Gust of Wind: any creature ending its turn in the Line re-rolls
+  // the STR save and is pushed 15 ft away on failure. Same trigger
+  // moment as Flaming Sphere.
+  runGustOfWindEndOfTurnSaves(ctx, 'player');
+  // Tick spell-imposed conditions whose duration is keyed to the caster's
+  // own turns (Color Spray's Blinded, future "until the start/end of your
+  // next turn" effects). Decrement `turnsRemaining`; when it hits 0 strip
+  // the condition from the NPC and drop the effect record.
+  tickSpellConditionExpiries(ctx);
   ctx.publish({ type: 'turn_ended', combatantId: 'player' });
   advanceTurn(ctx, events);
+}
+
+export function tickSpellConditionExpiries(ctx: GameContext): void {
+  const s = ctx.state;
+  for (const npc of s.npcs) {
+    if (!npc.ongoingEffects || npc.ongoingEffects.length === 0) continue;
+    const remaining: typeof npc.ongoingEffects = [];
+    for (const oe of npc.ongoingEffects) {
+      if (oe.kind !== 'spell-condition') { remaining.push(oe); continue; }
+      const next = oe.turnsRemaining - 1;
+      if (next > 0) { remaining.push({ ...oe, turnsRemaining: next }); continue; }
+      npc.conditions = npc.conditions.filter((c) => c !== oe.condition);
+      ctx.addLog({ left: `${combatantDisplayName(npc, s.npcs)} recovers from ${oe.spellId}`, style: 'status' });
+    }
+    npc.ongoingEffects = remaining;
+  }
 }
 
 /**
@@ -388,6 +450,36 @@ export function applyEnemyHitToPlayer(
   events: GameEvent[],
 ): void {
   const s = ctx.state;
+  // SRD Mirror Image — when a creature hits the caster with an attack roll,
+  // roll a d6 for each remaining image. If any rolls ≥ 3 the hit lands on
+  // an image instead, the image is destroyed, and the player takes no
+  // damage from the attack. Blindsight / Truesight / Blinded attackers
+  // ignore the spell per SRD (descriptive only — we don't model attacker
+  // sense types yet). When all three images are destroyed the spell ends.
+  if ((s.player.mirrorImages ?? 0) > 0) {
+    const count = s.player.mirrorImages!;
+    const rolls: number[] = [];
+    for (let i = 0; i < count; i++) rolls.push(Math.floor(Math.random() * 6) + 1);
+    const anyHit = rolls.some((r) => r >= 3);
+    if (anyHit) {
+      s.player.mirrorImages = count - 1;
+      ctx.addLog({
+        left: `↪ Mirror Image — one duplicate absorbs the hit (${s.player.mirrorImages} remaining)`,
+        right: `${count}d6[${rolls.join(',')}]`,
+        style: 'status',
+      });
+      if (s.player.mirrorImages === 0) {
+        ctx.addLog({ left: `Mirror Image fades — all duplicates destroyed`, style: 'status' });
+      }
+      // The hit is voided — no damage, no bonus damage, no on-hit riders.
+      return;
+    }
+    ctx.addLog({
+      left: `↪ Mirror Image — every duplicate dodges; the hit lands on ${ctx.playerDef.name}`,
+      right: `${count}d6[${rolls.join(',')}]`,
+      style: 'status',
+    });
+  }
   if (s.player.hp <= 0) {
     const adjacentToPlayer = chebyshev(result.finalTileX, result.finalTileY, s.player.tileX, s.player.tileY) <= 1;
     const effectivelyCrit = result.isCrit || adjacentToPlayer;
@@ -420,6 +512,14 @@ export function applyEnemyHitToPlayer(
 
 export function finalizeNpcTurn(ctx: GameContext, npc: NpcState): void {
   const s = ctx.state;
+  // SRD Flaming Sphere — any creature ending its turn within 5 ft of the
+  // sphere makes a DEX save vs the spell's damage. Resolve before the
+  // hide/perception sweep so the log reads in narrative order.
+  runFlamingSphereEndOfTurnSaves(ctx, npc.id);
+  // SRD Gust of Wind end-of-turn save for this NPC. Same shape as
+  // Flaming Sphere — a creature ending its turn on a zone tile rolls
+  // STR vs the spell's DC and is pushed 15 ft away on failure.
+  runGustOfWindEndOfTurnSaves(ctx, npc.id);
   // SRD: Hide / Invisible only ends when an enemy FINDS the hider — i.e. an
   // active Perception roll opposes their hideDC and wins. Run a sweep here
   // so the finishing NPC (and every other observer) gets one chance to spot
@@ -430,33 +530,91 @@ export function finalizeNpcTurn(ctx: GameContext, npc: NpcState): void {
     runPerceptionSweep(ctx, 'player');
   }
 
-  // Hideous Laughter re-save: per SRD, an affected creature repeats the Wis
-  // save at the end of each of its turns. Success ends the spell on that
-  // target; failure leaves them Prone + Incapacitated until the next
-  // opportunity. Mirrors Sleep's structure below. Creatures with Int ≤ 4 or
-  // no understood language can't be affected at all and are filtered out by
-  // the caster-side resolver, so we don't re-check immunity here.
-  if (s.player.concentratingOn === 'hideous-laughter'
-    && npc.conditions.includes('incapacitated')
-    && npc.conditions.includes('prone')) {
-    const def = ctx.resolveMonsterDef(npc.defId);
-    if (def) {
-      const dc = 8 + ctx.playerDef.proficiencyBonus + (
-        ctx.playerDef.spellcastingAbility ? mod(ctx.playerDef[ctx.playerDef.spellcastingAbility]) : 0
-      );
-      const saveMod = (def.savingThrows && def.savingThrows['wis'] !== undefined)
-        ? def.savingThrows['wis']
-        : mod(def.wis);
-      const roll = d20Local();
-      const total = roll + saveMod;
-      const success = total >= dc;
-      ctx.addLog({
-        left: `${combatantDisplayName(npc, s.npcs)} ${success ? 'stops laughing' : 'continues to convulse with laughter'}`,
-        right: `WIS d20(${roll})+${saveMod}=${total} vs DC ${dc}`,
-        style: success ? 'status' : 'miss',
-      });
-      if (success) {
-        npc.conditions = npc.conditions.filter((c) => c !== 'incapacitated' && c !== 'prone');
+  // Delayed-self-damage ongoing effects (Acid Arrow's lingering 2d4). The
+  // effect was scheduled with `turnsRemaining = 1` at cast time; at the end
+  // of the target's next turn (this hook) `turnsRemaining` decrements to 0
+  // and the damage fires. After firing, the effect is removed. We tick
+  // through a copy so an effect that fires can be filtered out cleanly.
+  const tickEffects = npc.ongoingEffects.filter((oe) => oe.kind === 'delayed-self-damage');
+  if (tickEffects.length > 0) {
+    const remaining: typeof npc.ongoingEffects = [];
+    for (const oe of npc.ongoingEffects) {
+      if (oe.kind !== 'delayed-self-damage') { remaining.push(oe); continue; }
+      const next = oe.turnsRemaining - 1;
+      if (next > 0) { remaining.push({ ...oe, turnsRemaining: next }); continue; }
+      // Fire the damage. Roll the dice + apply via resistMod path so resistance
+      // / vulnerability / immunity still apply correctly.
+      const rolls: number[] = [];
+      for (let i = 0; i < oe.dice; i++) rolls.push(Math.floor(Math.random() * oe.sides) + 1);
+      const rawTotal = rolls.reduce((a, b) => a + b, 0) + oe.bonus;
+      const def = ctx.resolveMonsterDef(npc.defId);
+      let finalDamage = rawTotal;
+      if (def) {
+        const { finalDamage: fd, log } = ctx.resistMod(rawTotal, oe.damageType, def, npc.name);
+        finalDamage = fd;
+        if (log) ctx.addLog(log);
+      }
+      if (npc.hp > 0 && finalDamage > 0) {
+        npc.hp = Math.max(0, npc.hp - finalDamage);
+        ctx.addLog({
+          left: `${npc.name} suffers lingering ${oe.spellId} — ${finalDamage} ${oe.damageType}`,
+          right: `${oe.dice}d${oe.sides}${oe.bonus ? `+${oe.bonus}` : ''}[${rolls.join(',')}]=${rawTotal}`,
+          style: 'hit',
+        });
+      }
+      // Effect removed regardless of outcome (one-shot).
+    }
+    npc.ongoingEffects = remaining;
+  }
+
+  // Generic concentration repeat-save (Hideous Laughter, Hold Person, future
+  // Eyebite / Otto's Irresistible Dance / etc.). At the end of each affected
+  // creature's turn, roll a save vs the spell's DC; on success, strip the
+  // conditions the spell applied so the creature returns to baseline. Sleep's
+  // bespoke Incapacitated→Unconscious transition is below — it can't fit
+  // this shape because failure progresses to a different condition.
+  if (s.player.concentratingOn) {
+    const spellId = s.player.concentratingOn;
+    const spell = ctx.defs.spells.find((sp) => sp.id === spellId);
+    if (spell?.repeatSave) {
+      const triggerConds = spell.repeatSave.removeOnSuccess;
+      const isAffected = triggerConds.every((c) => npc.conditions.includes(c));
+      const def = ctx.resolveMonsterDef(npc.defId);
+      if (isAffected && def) {
+        const dc = 8 + ctx.playerDef.proficiencyBonus + (
+          ctx.playerDef.spellcastingAbility ? mod(ctx.playerDef[ctx.playerDef.spellcastingAbility]) : 0
+        );
+        const ability = spell.repeatSave.ability;
+        const saveMod = (def.savingThrows && def.savingThrows[ability] !== undefined)
+          ? def.savingThrows[ability]
+          : mod(def[ability]);
+        const roll = d20Local();
+        const total = roll + saveMod;
+        const success = total >= dc;
+        const verb = success ? 'shakes off' : 'remains under';
+        ctx.addLog({
+          left: `${combatantDisplayName(npc, s.npcs)} ${verb} ${spell.name}`,
+          right: `${ability.toUpperCase()} d20(${roll})+${saveMod}=${total} vs DC ${dc}`,
+          style: success ? 'status' : 'miss',
+        });
+        if (success) {
+          const drop = new Set(triggerConds);
+          npc.conditions = npc.conditions.filter((c) => !drop.has(c));
+          // SRD: a concentration spell ends when nobody is still affected.
+          // For single-target shapes (Hold Person, Hideous Laughter) the
+          // one creature shaking off the effect leaves the spell with no
+          // referents — drop concentration so the slot isn't wasted on a
+          // ghost spell. The check scans the full NPC list so upcast
+          // multi-target Hold Person also auto-ends only when the last
+          // target frees themselves.
+          const someoneStillAffected = s.npcs.some((other) =>
+            other.hp > 0 && triggerConds.every((c) => other.conditions.includes(c))
+          );
+          const playerStillAffected = triggerConds.every((c) => s.player.conditions.includes(c));
+          if (!someoneStillAffected && !playerStillAffected) {
+            endConcentration(ctx, `${spell.name} has no remaining target`);
+          }
+        }
       }
     }
   }

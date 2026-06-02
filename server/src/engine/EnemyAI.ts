@@ -1,6 +1,6 @@
 import { NpcState, MonsterDef, GameEvent, LogEntry, AttackOnHitEffect } from './types.js';
 import { tryNimbleEscape, enemyAttack, type RolledBonusDamage } from './CombatSystem.js';
-import { isIncapacitated, hasAttackDisadvantage, hasAttackAdvantage, hasSpeedZero, proneStandCost } from './ConditionSystem.js';
+import { isIncapacitated, hasAttackDisadvantage, hasAttackAdvantage, hasSpeedZero, proneStandCost, grantsDisadvantageAgainst } from './ConditionSystem.js';
 
 /**
  * Snapshot of the creature an enemy NPC is about to engage. Generic over
@@ -21,6 +21,10 @@ export interface EnemyAttackTarget {
   hidden: boolean;
   dodging: boolean;
   invisible: boolean;
+  /** Full condition list — consulted by `grantsDisadvantageAgainst` so any
+   *  Disadv-imposing condition (blurred, heavily-obscured, …) lands on the
+   *  attacker without each one needing its own discrete flag here. */
+  conditions: string[];
   passivePerception: number;
 }
 
@@ -39,6 +43,12 @@ export interface EnemyTurnConfig {
   traitAdvantage?: boolean;
   /** Trait-derived attack-roll modifier (set by the caller — see CombatFlow.collectTraitModifiers). */
   traitDisadvantage?: boolean;
+  /** Called after the NPC commits to a movement step. Returns the step's
+   *  effective cost (1 for ordinary terrain, 2 for Difficult Terrain) and
+   *  may apply zone-entry side effects (Web save + Restrained). When the
+   *  side effect zeroes the NPC's speed, the movement loop breaks on the
+   *  next iteration via `hasSpeedZero`. */
+  onStep?: (tx: number, ty: number) => number;
 }
 
 export interface EnemyTurnResult {
@@ -137,7 +147,14 @@ export function runEnemyTurn(
     tileX = next[0];
     tileY = next[1];
     events.push({ type: 'entity_move', entityId: enemy.id, toX: tileX, toY: tileY });
-    stepsLeft--;
+    // SRD zone interactions: stepping into a Web / Grease tile triggers the
+    // enter-save (Web) and the Difficult Terrain cost (Web / Grease). The
+    // hook runs after the tile commit so a failed Web save with
+    // `condition: 'restrained'` will be observed by the next iteration's
+    // `hasSpeedZero` check and break the loop.
+    const cost = config.onStep?.(tileX, tileY) ?? 1;
+    stepsLeft -= cost;
+    if (hasSpeedZero(enemy.conditions)) break;
   }
 
   const dist = chebyshev(tileX, tileY, target.tileX, target.tileY);
@@ -154,7 +171,11 @@ export function runEnemyTurn(
 
   const targetUnconscious = target.hp <= 0;
   const withAdvantage = enemyHidden || targetUnconscious || hasAttackAdvantage(enemy.conditions) || !!config.traitAdvantage;
-  const withDisadvantage = target.hidden || target.invisible || hasAttackDisadvantage(enemy.conditions) || target.dodging || !!config.traitDisadvantage;
+  // `grantsDisadvantageAgainst` consolidates the per-condition Disadv sources
+  // (blurred, heavily-obscured, invisible, prone-at-distance) so adding a new
+  // one is a single edit in ConditionSystem, not every attack resolver.
+  const targetGrantsDisadv = grantsDisadvantageAgainst(target.conditions, dist);
+  const withDisadvantage = target.hidden || targetGrantsDisadv || hasAttackDisadvantage(enemy.conditions) || target.dodging || !!config.traitDisadvantage;
   const { damage, isHit, isCrit, attackTotal, logs: attackLogs, bonusComponents } = enemyAttack(meleeAttack, target.ac, withAdvantage, withDisadvantage);
   logs.push(...attackLogs);
 

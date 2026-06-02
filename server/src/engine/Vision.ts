@@ -32,6 +32,7 @@ import type { GameContext } from './GameContext.js';
 import type { GameMap, GameState, NpcState, Senses } from './types.js';
 import { d20 } from './Dice.js';
 import { clearHide, isDead } from './ConditionSystem.js';
+import { Logger } from '../Logger.js';
 
 const TILE_FT = 5;
 
@@ -206,11 +207,22 @@ export function runPassivePerceptionSweep(ctx: GameContext): string[] {
     if (!vision.sees) continue;
 
     const ePP = effectivePerception(passivePP, vision);
+    const distance = chebyshevTiles({ tileX: px, tileY: py }, { tileX: npc.tileX, tileY: npc.tileY });
     if (ePP >= npc.hideDC) {
       const label = npc.revealedName ?? npc.name;
+      Logger.log('vision.hidden_revealed', {
+        observer: 'player', hider: npc.id, defId: npc.defId,
+        basePP: passivePP, effectivePP: ePP, hideDC: npc.hideDC, distance,
+        visionVia: vision.via ?? null,
+      });
       ctx.addLog({ left: `${ctx.playerDef.name} notices ${label}`, right: `PP ${ePP} ≥ DC ${npc.hideDC}`, style: 'status' });
       clearHide(npc);
       revealed.push(npc.id);
+    } else {
+      Logger.debug('vision.passive_sweep_miss', {
+        observer: 'player', hider: npc.id, defId: npc.defId,
+        basePP: passivePP, effectivePP: ePP, hideDC: npc.hideDC, distance,
+      });
     }
   }
   return revealed;

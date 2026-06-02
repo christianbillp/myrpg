@@ -48,11 +48,11 @@ export interface BiomePalette {
 }
 
 const GRASS = 8;
+const TERRAIN_BUMPY = 99;
 const STONE_FLOOR = 15;
 const STONE_FLOOR_DIAMOND = 43;
 const STONE_FLOOR_INLAY = 57;
 const STONE_FLOOR_CRACKED = 71;
-const TERRAIN_BUMPY = 99;
 
 const FLOWERS_TRANSPARENT = 96;
 const TREE_TRANSPARENT = 110;
@@ -82,15 +82,18 @@ export const BIOME_PALETTES: Record<BiomeId, BiomePalette> = {
   },
   dungeon: {
     id: 'dungeon',
-    // Dungeon floors are stone-only. Ground variation gives subtle wear.
+    // Stone floors with rare accents (cracked / diamond / inlay) for visual
+    // variation cell-to-cell. The composer's dungeon carver samples from this
+    // pool to texture every floor tile inside a room or corridor.
     groundPool: [
-      { gid: STONE_FLOOR,         weight: 70 },
-      { gid: STONE_FLOOR_CRACKED, weight: 20 },
+      { gid: STONE_FLOOR,         weight: 75 },
+      { gid: STONE_FLOOR_CRACKED, weight: 15 },
       { gid: STONE_FLOOR_DIAMOND, weight: 7  },
       { gid: STONE_FLOOR_INLAY,   weight: 3  },
     ],
-    // Object decoration is left to feature placers (furniture, braziers, etc.)
-    // — sprinkling random objects through corridors would obstruct play.
+    // Decoration objects are placed by feature placers (campfires, furniture,
+    // etc.) — not by the per-cell decoration pass, which would clutter
+    // corridors.
     objectPool: [],
   },
 };

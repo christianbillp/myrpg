@@ -27,7 +27,7 @@
   "progression": [
     { "level":  1, "features": ["fighting-style", "second-wind", "weapon-mastery"], "choices": [{ "kind": "fighting-style-pick" }] },
     { "level":  2, "features": ["action-surge", "tactical-mind"] },
-    { "level":  3, "choices": [{ "kind": "subclass-choice" }] },
+    { "level":  3, "subclass": true, "choices": [{ "kind": "subclass-choice" }] },
     { "level":  4, "choices": [{ "kind": "asi-or-feat" }] },
     { "level":  5, "features": ["extra-attack", "tactical-shift"] },
     { "level":  6, "choices": [{ "kind": "asi-or-feat" }] },

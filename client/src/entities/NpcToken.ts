@@ -1,7 +1,7 @@
 import Phaser from 'phaser';
 import { TILE_SIZE, DEFAULT_TOKEN_COLOR_HEX } from '../constants';
-import { MonsterDef } from '../data/monsters';
-import { Disposition } from '../net/types';
+import { MonsterDef } from '../../../shared/types';
+import { Disposition } from '../../../shared/types';
 
 const MOVE_DURATION = 130;
 const DPR = window.devicePixelRatio;

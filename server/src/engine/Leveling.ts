@@ -273,6 +273,19 @@ export function syncCharacterTracks(playerDef: PlayerDef, classes: ClassDef[]): 
   syncTracks(playerDef, classDef, playerDef.level);
   const sad = playerDef.tracks?.['sneak-attack-dice'];
   if (typeof sad === 'number') playerDef.sneakAttackDice = sad;
+  // Backfill L1 class features. The level-up replay starts at L1+1=L2 (it
+  // only applies features for levels strictly above the character's source
+  // level), so a character whose JSON sits at L1 with no `defaultFeatureIds`
+  // would never pick up its own L1 features (Wizard's Spellcasting / Ritual
+  // Adept / Arcane Recovery, Fighter's Fighting Style / Second Wind, …).
+  // Re-add the L1 features here every session boot so they're always
+  // present without each character JSON having to enumerate them.
+  const l1Features = cpFeaturesAt(classDef, 1);
+  if (l1Features.length > 0) {
+    const known = new Set(playerDef.defaultFeatureIds ?? []);
+    for (const id of l1Features) known.add(id);
+    playerDef.defaultFeatureIds = Array.from(known);
+  }
 }
 
 // ── Choice template expansion ───────────────────────────────────────────────
@@ -414,10 +427,10 @@ function expandChoices(
   return out;
 }
 
-/** Skill id → owning ability. Mirrors the SRD skill table; kept local so
- *  Leveling.ts doesn't have to import the larger SKILLS table from the
- *  client. */
-const SKILL_ABILITY: Record<string, AbilityKey | undefined> = {
+/** Skill id → owning ability. Mirrors the SRD skill table; exported so
+ *  other engine modules (rollAbilityCheck, Enhance Ability) can consult
+ *  the same map without duplicating it. */
+export const SKILL_ABILITY: Record<string, AbilityKey | undefined> = {
   acrobatics: 'dex', animalHandling: 'wis', arcana: 'int', athletics: 'str',
   deception: 'cha', history: 'int', insight: 'wis', intimidation: 'cha',
   investigation: 'int', medicine: 'wis', nature: 'int', perception: 'wis',

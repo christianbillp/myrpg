@@ -7,6 +7,7 @@ import { MapItem } from "../entities/MapItem";
 import { PlayerPanel, PlayerPanelActionState } from "../ui/PlayerPanel";
 import { buildPlayerStatusChips } from "../ui/PlayerStatus";
 import { TargetPanel } from "../ui/TargetPanel";
+import { DevToolsPanel } from "../ui/DevToolsPanel";
 import { HUD, HUDState } from "../ui/HUD";
 import { LevelUpOverlay } from "../ui/LevelUpOverlay";
 import { LongRestOverlay } from "../ui/LongRestOverlay";
@@ -26,13 +27,15 @@ import {
   TILE_SIZE, GRID_COLS, GRID_ROWS, HUD_HEIGHT,
   PLAYER_PANEL_WIDTH, TARGET_PANEL_WIDTH,
 } from "../constants";
-import { PlayerDef } from "../data/player";
-import { MonsterDef, NPCDef } from "../data/monsters";
+import { PlayerDef } from "../../../shared/types";
+import { MonsterDef, NPCDef } from "../../../shared/types";
 import type { FactionDef } from "../../../shared/types";
-import { ItemDef } from "../data/equipment";
+import { ItemDef } from "../../../shared/types";
 import { gameClient } from "../net/GameClient";
 import { WorldPause } from "../net/WorldPause";
-import type { GameState, GameEvent, GameMap, SpellDef, FeatureDef, ClassDef, SubclassDef } from "../net/types";
+import { DefRegistry } from "../data/defRegistry";
+import { AIGMController } from "./gameScene/aigmController";
+import type { GameState, GameEvent, GameMap, SpellDef, FeatureDef, ClassDef, SubclassDef } from "../../../shared/types";
 import type { ChatMessage } from "../ui/AIGMOverlay";
 import { DevMode } from "../devMode";
 import { decodeTileGid, TILE_VOID_GID } from "../../../shared/tileGid";
@@ -42,6 +45,10 @@ const GAME_H = GRID_ROWS * TILE_SIZE + HUD_HEIGHT;
 const API_URL = "http://localhost:3000";
 
 export class GameScene extends Phaser.Scene {
+  /** Typed view over the Phaser registry. Use `this.defs.spells()` etc.
+   *  instead of `registry.get('spells') as SpellDef[]`. See
+   *  [data/defRegistry.ts](../data/defRegistry.ts). */
+  private defs = new DefRegistry(this);
   private playerDef!: PlayerDef;
 
   private gameState!: GameState;
@@ -79,7 +86,14 @@ export class GameScene extends Phaser.Scene {
   private uiScale!: UIScale;
   private playerPanel!: PlayerPanel;
   private targetPanel!: TargetPanel;
+  private devToolsPanel: DevToolsPanel | null = null;
   private hud!: HUD;
+  /** Captured `CreateSessionRequest` payload — stored so the DevTools panel's
+   *  Reload Encounter button can recreate the same session without bouncing
+   *  through the Encounter Setup scene. Null when the scene is entered via
+   *  resume / chapter-advance, where we don't currently have the original
+   *  payload (the reload button is disabled in that case). */
+  private lastCreateRequest: import("../../../shared/types").CreateSessionRequest | null = null;
   private speechBubbles!: SpeechBubbles;
   private screenEffects!: ScreenEffects;
   private cinematic!: Cinematic;
@@ -94,6 +108,21 @@ export class GameScene extends Phaser.Scene {
   private spellAuraLayer!: Phaser.GameObjects.Graphics;
   /** Cursor-following AOE preview during spell-targeting mode. Cleared on exit. */
   private spellAoeLayer!: Phaser.GameObjects.Graphics;
+  /** Persistent in-play AOE zones (Fog Cloud, Web, Darkness, …) rendered as
+   *  tinted tile overlays with a label. Re-drawn from `state.activeZones`
+   *  on every state tick. */
+  private activeZoneLayer!: Phaser.GameObjects.Graphics;
+  /** Labels rendered above each active zone, recreated on every tick.
+   *  Kept separately from the graphics layer so we can destroy/recreate
+   *  per zone without touching the rest of the map. */
+  private activeZoneLabels: Phaser.GameObjects.Text[] = [];
+  /** Floating HUD panel surfaced during `multi-projectile` spell-target
+   *  mode (Magic Missile, Scorching Ray). Null when no such mode is
+   *  active. Mirrors `state.spellTargetMode.assignments` on every click. */
+  private multiProjectilePanel: HTMLDivElement | null = null;
+  /** Per-target count badges drawn over each NPC token while the player
+   *  is distributing projectiles. Cleared when the cast resolves. */
+  private multiProjectileBadges: Phaser.GameObjects.Text[] = [];
   private moveMode = false;
   private moveDist: number[][] = [];
   private movePrev: Array<Array<[number, number] | null>> = [];
@@ -105,14 +134,28 @@ export class GameScene extends Phaser.Scene {
    *                         shape "sphere"/"cube" + selfAnchored — disc on player tile.
    *                         shape "sphere"/"cube" otherwise        — disc on cursor tile. */
   private spellTargetMode:
-    | { kind: "creature"; spellId: string; spellName: string; asRitual: boolean; damageTypeChoice?: string }
+    | { kind: "creature"; spellId: string; spellName: string; asRitual: boolean; damageTypeChoice?: string; abilityChoice?: 'str' | 'dex' | 'con' | 'int' | 'wis' | 'cha' }
+    | {
+        kind: "multi-projectile"; spellId: string; spellName: string; asRitual: boolean;
+        slotLevel: number;
+        /** Total projectiles the player must distribute (Magic Missile darts, Scorching Ray rays). */
+        total: number;
+        /** Per-target assignment count, keyed by NPC id. */
+        assignments: Map<string, number>;
+        /** Display word — "dart" / "ray". */
+        projectileNoun: string;
+        damageTypeChoice?: string;
+      }
     | {
         kind: "aoe"; spellId: string; spellName: string; asRitual: boolean;
-        /** For cone: the cone's max reach in tiles. For sphere/cube: the side length of the area in tiles. */
+        /** For cone: the cone's max reach in tiles. For sphere/cube/line: the long-axis length of the area in tiles. */
         sideTiles: number;
+        /** Width of the area perpendicular to the axis (Gust of Wind: 2 tiles for a 10-ft-wide line). Only consulted for `shape: 'line'`. */
+        widthTiles?: number;
         selfAnchored: boolean;
         shape: "cone" | "sphere" | "cube" | "line";
         damageTypeChoice?: string;
+        abilityChoice?: 'str' | 'dex' | 'con' | 'int' | 'wis' | 'cha';
       }
     | {
         kind: "summon-direct"; summonNpcId: string; summonName: string;
@@ -148,9 +191,10 @@ export class GameScene extends Phaser.Scene {
   /** Open inline TALK input bubble pinned to the player token. Null when no
    *  bubble is in flight. Replaced (not stacked) by subsequent TALK clicks. */
   private speechInputBubble: SpeechInputBubble | null = null;
-  /** Active typing indicator (animated dots) pinned over an NPC token while
-   *  the GM is generating a sayto reply. Calling the function clears it. */
-  private gmTypingIndicatorClear: (() => void) | null = null;
+  /** Controller for the AIGM streaming + speech-bubble surface. Built once
+   *  the HUD + SpeechBubbles exist; provides HUD-shaped callbacks and the
+   *  stream-handler installer. See `scenes/gameScene/aigmController.ts`. */
+  private aigm!: AIGMController;
   /** First `state_update` from the server hasn't arrived yet. While true the
    *  scene parks at full black so the UI panels never flash before any
    *  encounter-start cinematic events get to run. Cleared on the first
@@ -170,12 +214,17 @@ export class GameScene extends Phaser.Scene {
     super({ key: "GameScene" });
   }
 
-  init(data: { sessionId: string; playerDef: PlayerDef; gmHistory?: ChatMessage[]; isResume?: boolean; fadeInOnStart?: boolean; fadeInDurationMs?: number }): void {
+  init(data: { sessionId: string; playerDef: PlayerDef; gmHistory?: ChatMessage[]; isResume?: boolean; fadeInOnStart?: boolean; fadeInDurationMs?: number; createRequest?: import("../../../shared/types").CreateSessionRequest }): void {
     this.playerDef = data.playerDef;
     this.pendingIsResume = data.isResume ?? false;
     this.pendingGmHistory = data.isResume ? (data.gmHistory ?? []) : [];
     this.pendingFadeInOnStart = data.fadeInOnStart ?? false;
     this.pendingFadeInDurationMs = data.fadeInDurationMs ?? 1200;
+    // DevTools Reload Encounter needs the original create-session payload
+    // to recreate the same encounter without bouncing through setup.
+    // Resume / chapter-advance entries don't carry one — Reload is disabled
+    // in that case (see DevToolsPanel wiring).
+    this.lastCreateRequest = data.createRequest ?? null;
     this.player = null;
     this.eventQueue = [];
     this.animating = false;
@@ -193,7 +242,6 @@ export class GameScene extends Phaser.Scene {
     this.animatingEntityId = null;
     this.preserveSessionOnShutdown = false;
     this.speechInputBubble = null;
-    this.gmTypingIndicatorClear = null;
     this.moveMode = false;
     this.moveDist = [];
     this.movePrev = [];
@@ -208,12 +256,14 @@ export class GameScene extends Phaser.Scene {
     this.movePathLayer  = this.add.graphics();
     this.spellAuraLayer = this.add.graphics();
     this.spellAoeLayer  = this.add.graphics();
+    this.activeZoneLayer = this.add.graphics();
     // VisionMask: fog-of-war veil + sound-ring overlay.
     this.visionMask = new VisionMask(this);
     this.gridView.container.add(this.highlightLayer);
     this.gridView.container.add(this.movePathLayer);
     this.gridView.container.add(this.spellAuraLayer);
     this.gridView.container.add(this.spellAoeLayer);
+    this.gridView.container.add(this.activeZoneLayer);
     this.gridView.container.add(this.visionMask.fogLayer);
     this.gridView.container.add(this.visionMask.soundLayer);
 
@@ -228,11 +278,11 @@ export class GameScene extends Phaser.Scene {
       onAdvanceChapter:  () => this.advanceChapter(),
       onLeaveEncounter:  () => this.leaveEncounter(),
       onIntroClosed:     (intro) => this.hud.addGmAssistantMessage(intro),
-      getItems:    () => this.registry.get("equipment") as ItemDef[],
-      getSpells:   () => (this.registry.get("spells") ?? []) as SpellDef[],
-      getFeatures: () => (this.registry.get("features") ?? []) as FeatureDef[],
-      getClasses:  () => (this.registry.get("classes") ?? []) as ClassDef[],
-      getSubclasses: () => (this.registry.get("subclasses") ?? []) as SubclassDef[],
+      getItems:    () => this.defs.equipment(),
+      getSpells:   () => this.defs.spells(),
+      getFeatures: () => this.defs.features(),
+      getClasses:  () => this.defs.classes(),
+      getSubclasses: () => this.defs.subclasses(),
       // Conversation system wiring — the overlay ships choice / end actions
       // through the same `sendAction` path every other interactive surface
       // uses. The state-update tick refreshes the overlay against the
@@ -242,7 +292,7 @@ export class GameScene extends Phaser.Scene {
       onConversationOpenAigm: () => this.hud.openGmInput(),
       resolveSpeakerName: (ref) => this.resolveConversationSpeakerName(ref),
       resolveSpeakerToken: (ref) => this.resolveConversationSpeakerToken(ref),
-      getConversations: () => (this.registry.get("conversations") ?? []) as import("../net/types").ConversationDef[],
+      getConversations: () => this.defs.conversations(),
     });
     if (this.pendingIsResume) this.overlays.markResumed();
 
@@ -312,12 +362,13 @@ export class GameScene extends Phaser.Scene {
       gameClient.disconnect();
     }
     if (this.speechInputBubble) { this.speechInputBubble.destroy(); this.speechInputBubble = null; }
-    if (this.gmTypingIndicatorClear) { this.gmTypingIndicatorClear(); this.gmTypingIndicatorClear = null; }
+    this.aigm?.dispose();
     if (!this.uiDestroyed) {
       this.uiDestroyed = true;
       this.hud.destroy();
       this.playerPanel.destroy();
       this.targetPanel.destroy();
+      this.devToolsPanel?.destroy();
       this.speechBubbles.destroy();
       this.screenEffects.destroy();
       this.uiScale.destroy();
@@ -685,6 +736,26 @@ export class GameScene extends Phaser.Scene {
         this.finishSummonDirectClick(tileX, tileY);
         return;
       }
+      if (this.spellTargetMode.kind === "multi-projectile") {
+        // Click on an in-range hostile/neutral creature → assign one more
+        // projectile to it. Click anywhere else → ignored (the panel's
+        // CANCEL button is the way out). Clicking past the cap is a no-op
+        // so the player can't over-commit.
+        const stm = this.spellTargetMode;
+        if (!nState || nState.hp <= 0 || nState.disposition === 'ally') return;
+        const allSpells = this.defs.spells();
+        const spell = allSpells.find((sp) => sp.id === stm.spellId);
+        if (!spell) return;
+        const rangeTiles = Math.max(1, Math.ceil(spell.rangeFeet / 5));
+        const dist = Math.max(Math.abs(nState.tileX - ps.tileX), Math.abs(nState.tileY - ps.tileY));
+        if (dist > rangeTiles) return;
+        const used = [...stm.assignments.values()].reduce((a, b) => a + b, 0);
+        if (used >= stm.total) return;
+        stm.assignments.set(nState.id, (stm.assignments.get(nState.id) ?? 0) + 1);
+        this.refreshMultiProjectilePanel();
+        this.refreshMultiProjectileBadges();
+        return;
+      }
       if (this.spellTargetMode.kind === "creature") {
         // Self-click during creature-target mode resolves as self-target so
         // touch-range buff spells (Longstrider, Jump, …) work via the
@@ -806,18 +877,26 @@ export class GameScene extends Phaser.Scene {
       onLeaveEncounter: () => this.leaveEncounter(),
     });
     this.targetPanel = new TargetPanel(this.uiScale);
+    if (DevMode.showDevToolsPanel) {
+      this.devToolsPanel = new DevToolsPanel(this.uiScale, {
+        onReloadEncounter:    () => void this.reloadEncounter(),
+        onCompleteObjective:  () => gameClient.sendAction({ type: "devCompleteEncounter" }),
+      }, { showCompleteObjective: DevMode.completePrimaryObjective });
+    }
+    // AIGM streaming + speech-bubble surface — extracted into a controller
+    // so the HUD callbacks and stream-handler installer share one home. The
+    // controller exposes `onSendAIGM` / `onPlayerSays` lambdas the HUD ctor
+    // takes; the HUD reference itself is read lazily via `getHud()` because
+    // `this.hud` doesn't exist yet at this point. See
+    // `scenes/gameScene/aigmController.ts`.
+    this.aigm = new AIGMController({
+      getHud:              () => this.hud,
+      speechBubbles:       this.speechBubbles,
+      client:              gameClient,
+      getSelectedTargetId: () => this.selectedEntityId,
+    });
     this.hud = new HUD(this.uiScale, {
-      // When the GM is disabled (DevMode.disableAIGM), short-circuit with a
-      // canned silent reply instead of hitting the server. The encounter still
-      // plays end-to-end on the deterministic layer alone (US-068 criterion).
-      onSendAIGM: (msg, persona) => {
-        if (DevMode.disableAIGM) {
-          this.hud.aigmStart();
-          this.hud.aigmDone('(The Game Master is silent. The world responds only to your actions.)', []);
-          return Promise.resolve({ reply: '', rollResults: [] });
-        }
-        return gameClient.sendAIGMMessage(msg, persona);
-      },
+      onSendAIGM:        (msg, persona) => this.aigm.onSendAIGM(msg, persona),
       onDisableKeyboard: () => this.input.keyboard?.disableGlobalCapture(),
       onEnableKeyboard:  () => this.input.keyboard?.enableGlobalCapture(),
       // Fan the LABELS chip out to every live NpcToken. Captured into a
@@ -827,39 +906,9 @@ export class GameScene extends Phaser.Scene {
         this.labelsVisible = visible;
         for (const token of this.npcTokens.values()) token.setNameVisible(visible);
       },
-      // Player said something to the selected target — spawn the line as a
-      // speech bubble above the player token, instructing the bubble manager
-      // to flip below the player if the bubble would overlap the target.
-      // Also drop an animated typing indicator above the target so the
-      // player sees the NPC "thinking" while the GM generates a reply.
-      onPlayerSays: (text) => {
-        const targetId = this.selectedEntityId ?? undefined;
-        this.speechBubbles.spawn('player', text, { avoidEntityId: targetId });
-        if (this.gmTypingIndicatorClear) {
-          this.gmTypingIndicatorClear();
-          this.gmTypingIndicatorClear = null;
-        }
-        if (targetId) {
-          this.gmTypingIndicatorClear = this.speechBubbles.spawnTypingIndicator(targetId);
-        }
-      },
+      onPlayerSays: (text) => this.aigm.onPlayerSays(text),
     });
-    // E. Hook the AIGM streaming protocol into the HUD's chat panel. The
-    // `onDone` hook also clears any active sayto typing indicator that was
-    // spawned by `onPlayerSays` so the dots vanish when the GM's reply lands.
-    gameClient.setAIGMStreamHandlers({
-      onStart:              () => this.hud.aigmStart(),
-      onChunk:              (text) => this.hud.aigmChunk(text),
-      onCheckpoint:         () => this.hud.aigmCheckpoint(),
-      onSpeculativeDiscard: () => this.hud.aigmSpeculativeDiscard(),
-      onDone:               (reply, rollResults) => {
-        this.hud.aigmDone(reply, rollResults);
-        if (this.gmTypingIndicatorClear) {
-          this.gmTypingIndicatorClear();
-          this.gmTypingIndicatorClear = null;
-        }
-      },
-    });
+    this.aigm.installStreamHandlers();
   }
 
   private buildHUDState(state: GameState): HUDState {
@@ -925,8 +974,8 @@ export class GameScene extends Phaser.Scene {
   }
 
   private buildActionState(state: GameState): PlayerPanelActionState {
-    const allItems = this.registry.get('equipment') as ItemDef[];
-    const allSpells = (this.registry.get('spells') ?? []) as SpellDef[];
+    const allItems = this.defs.equipment();
+    const allSpells = this.defs.spells();
     const weaponId = state.player.equippedSlots.weaponId;
     const weapon = weaponId ? allItems.find(i => i.id === weaponId) : undefined;
     const mainAttackName = weapon?.name ?? 'Unarmed Strike';
@@ -938,7 +987,7 @@ export class GameScene extends Phaser.Scene {
 
     // Class features the character knows — map each to a panel-ready display
     // record. Hides features without a button (passive / attack-time).
-    const allFeatures = (this.registry.get('features') ?? []) as FeatureDef[];
+    const allFeatures = this.defs.features();
     const knownFeatureIds = this.playerDef.defaultFeatureIds ?? [];
     const features = knownFeatureIds
       .map((id) => allFeatures.find((f) => f.id === id))
@@ -986,6 +1035,10 @@ export class GameScene extends Phaser.Scene {
           id: n.id,
           name: n.name,
           spellName: (allSpells.find((sp) => sp.id === n.summonSpellId)?.name) ?? n.name,
+          // SRD Flaming Sphere is moved as a Bonus Action (its summon
+          // command consumes `bonusActionUsed` server-side). Other
+          // shipped summons (Mage Hand, Unseen Servant) cost an Action.
+          costsBonusAction: n.summonSpellId === 'flaming-sphere',
         })),
       hasSelectedTarget: !!state.selectedTargetId,
       statusChips: buildPlayerStatusChips(state.player, concSpell?.name ?? null),
@@ -999,7 +1052,7 @@ export class GameScene extends Phaser.Scene {
    * against the player tile.
    */
   private beginSpellCast(spellId: string, asRitual: boolean): void {
-    const allSpells = (this.registry.get('spells') ?? []) as SpellDef[];
+    const allSpells = this.defs.spells();
     const spell = allSpells.find(sp => sp.id === spellId);
     if (!spell) return;
 
@@ -1019,14 +1072,66 @@ export class GameScene extends Phaser.Scene {
       return;
     }
 
+    // SRD Enhance Ability — pick the ability score whose checks gain
+    // Advantage for the duration. We render the SRD's flavour names
+    // ("Bull's Strength" etc.) for the player but route the chosen ability
+    // through `abilityChoice` so the engine sets `enhancedAbility` directly.
+    if (spell.abilityChoices && spell.abilityChoices.length > 0) {
+      const variantLabels: Record<string, string> = {
+        str: "Bull's Strength (STR)",
+        dex: "Cat's Grace (DEX)",
+        con: "Bear's Endurance (CON)",
+        int: "Fox's Cunning (INT)",
+        wis: "Owl's Wisdom (WIS)",
+        cha: "Eagle's Splendor (CHA)",
+      };
+      const options = spell.abilityChoices.map((a) => variantLabels[a] ?? a.toUpperCase());
+      new SpellOptionPicker(
+        this.uiScale,
+        `${spell.name} — variant`,
+        "Choose the ability whose checks gain Advantage for the duration.",
+        options,
+        (label) => {
+          const idx = options.indexOf(label);
+          const ability = (spell.abilityChoices?.[idx] ?? spell.abilityChoices?.[0]) as 'str' | 'dex' | 'con' | 'int' | 'wis' | 'cha';
+          this.continueSpellCast(spell, asRitual, undefined, ability);
+        },
+        () => { /* cancelled — no further action */ },
+      );
+      return;
+    }
+
     this.continueSpellCast(spell, asRitual, undefined);
   }
 
   /** Pulled out of `beginSpellCast` so the damage-type picker can resume the
    *  cast with the player's choice. */
-  private continueSpellCast(spell: SpellDef, asRitual: boolean, damageTypeChoice: string | undefined): void {
+  private continueSpellCast(spell: SpellDef, asRitual: boolean, damageTypeChoice: string | undefined, abilityChoice?: 'str' | 'dex' | 'con' | 'int' | 'wis' | 'cha'): void {
     const spellId = spell.id;
     const slotLevel = spell.level === 0 ? 0 : spell.level;
+
+    // SRD Magic Missile (3 darts at L1, +1 per upcast) and Scorching Ray
+    // (3 rays at L2, +1 per upcast) let the caster distribute projectiles
+    // across one or several targets. Enter `multi-projectile` mode — each
+    // creature click adds one projectile to that creature's assignment;
+    // a small HUD panel shows the running tally and a FIRE button. The
+    // cast sends the expanded `targetIds` array (one id per projectile).
+    const baseProjectiles = spell.darts ?? spell.attackCount ?? 0;
+    const isMultiProjectile = baseProjectiles >= 2 && (spell.attack === 'auto-hit' || spell.attack === 'ranged-spell' || spell.attack === 'melee-spell');
+    if (isMultiProjectile) {
+      const upcast = spell.level > 0 ? Math.max(0, slotLevel - spell.level) : 0;
+      const total = baseProjectiles + upcast;
+      const projectileNoun = spell.attack === 'auto-hit' ? 'dart' : 'ray';
+      this.spellTargetMode = {
+        kind: 'multi-projectile', spellId, spellName: spell.name, asRitual,
+        slotLevel, total, assignments: new Map(), projectileNoun,
+        damageTypeChoice,
+      };
+      this.openMultiProjectilePanel();
+      if (this.gameState) this.playerPanel.refreshActions(this.buildActionState(this.gameState));
+      this.refreshMultiProjectileBadges();
+      return;
+    }
 
     // Single-target save spells (Hideous Laughter, Charm Person) — no `area`,
     // no `attack` field, but `save` is set — also need the target-selector
@@ -1039,12 +1144,29 @@ export class GameScene extends Phaser.Scene {
       spell.attack === 'ranged-spell' || spell.attack === 'melee-spell' || spell.attack === 'auto-hit'
       || !!spell.weaponAttack
       || (!!spell.save && !spell.area);
-    const isTouchBuff = spell.range === 'touch' &&
+    // Touch buffs with an actual reach (rangeFeet > 0 — e.g. Longstrider on
+    // an ally) prompt for a target. Touch buffs whose reach is 0 are
+    // self-only (Mage Armor's `rangeFeet: 0`) — those skip the picker and
+    // resolve immediately on the caster. Lets the player avoid the
+    // confused "click yourself" extra step for an obviously-self-targeted
+    // buff.
+    const isTouchBuff = spell.range === 'touch' && spell.rangeFeet > 0 &&
       !spell.attack && !spell.save && !spell.area && !spell.summon && !spell.darts;
     const isAoe = !!spell.area;
+    const isSelfTeleport = !!spell.selfTeleport;
 
     if (needsCreatureTarget || isTouchBuff) {
-      this.spellTargetMode = { kind: "creature", spellId, spellName: spell.name, asRitual, damageTypeChoice };
+      this.spellTargetMode = { kind: "creature", spellId, spellName: spell.name, asRitual, damageTypeChoice, abilityChoice };
+    } else if (isSelfTeleport) {
+      // Misty Step — caster picks a destination tile within `selfTeleport.rangeFeet`.
+      // Reuse the AOE targeting machinery with a synthetic 1-tile sphere so the
+      // cursor paints a small disc on the chosen tile. The server validates
+      // the actual range; this preview is just a visual cue. The spell-resolver
+      // case routes the click tile into `s.player.tileX/tileY`.
+      this.spellTargetMode = {
+        kind: "aoe", spellId, spellName: spell.name, asRitual,
+        sideTiles: 1, selfAnchored: false, shape: "sphere", damageTypeChoice, abilityChoice,
+      };
     } else if (isAoe) {
       // Mirror server `tilesInArea`: sphere uses a chebyshev-disc radius
       // (`ceil(sizeFeet / 5)`), cube uses a tile-side length, cone uses a
@@ -1052,12 +1174,20 @@ export class GameScene extends Phaser.Scene {
       // to paint the matching footprint as the cursor moves.
       const sizeFeet = spell.area?.sizeFeet ?? 5;
       const shape = (spell.area?.shape ?? "sphere") as "cone" | "sphere" | "cube" | "line";
-      const sideTiles = Math.max(1, Math.ceil(sizeFeet / 5));
+      // Sphere with `sizeFeet: 0` is the engine's single-tile marker
+      // (Flaming Sphere — 5-ft diameter == 1 tile). We pass `sideTiles: 0`
+      // so the preview branch knows to paint just the cursor tile rather
+      // than a 2×2 grid-intersection square.
+      const sideTiles = shape === 'sphere' && sizeFeet === 0
+        ? 0
+        : Math.max(1, Math.ceil(sizeFeet / 5));
+      const widthTiles = Math.max(1, Math.ceil((spell.area?.widthFeet ?? 5) / 5));
       const selfAnchored = spell.range === 'self' || spell.rangeFeet === 0;
-      this.spellTargetMode = { kind: "aoe", spellId, spellName: spell.name, asRitual, sideTiles, selfAnchored, shape, damageTypeChoice };
+      this.spellTargetMode = { kind: "aoe", spellId, spellName: spell.name, asRitual, sideTiles, widthTiles, selfAnchored, shape, damageTypeChoice, abilityChoice };
     } else {
-      // Self / utility: fire immediately.
-      gameClient.sendAction({ type: "castSpell", spellId, slotLevel, asRitual, damageTypeChoice });
+      // Self / utility: fire immediately. `abilityChoice` rides along when
+      // the spell offered an Enhance-Ability-style picker.
+      gameClient.sendAction({ type: "castSpell", spellId, slotLevel, asRitual, damageTypeChoice, abilityChoice });
       return;
     }
 
@@ -1068,14 +1198,169 @@ export class GameScene extends Phaser.Scene {
     if (!this.spellTargetMode) return;
     this.spellTargetMode = null;
     this.spellAoeLayer.clear();
+    this.closeMultiProjectilePanel();
+    this.clearMultiProjectileBadges();
     if (this.gameState) this.playerPanel.refreshActions(this.buildActionState(this.gameState));
+  }
+
+  /** Build the floating "Select Targets" HUD shown during
+   *  `multi-projectile` spell-target mode. Lists the per-target assignment
+   *  counts plus a running "X / N" tally; FIRE submits the cast and
+   *  CANCEL aborts without consuming the slot. */
+  private openMultiProjectilePanel(): void {
+    this.closeMultiProjectilePanel();
+    const root = document.createElement('div');
+    root.style.cssText = `
+      position: fixed; left: 50%; top: 14px; transform: translateX(-50%);
+      background: #1a1a22; border: 2px solid #ffaa66; color: #ffe4b3;
+      font-family: monospace; font-size: 12px; padding: 10px 14px;
+      display: flex; flex-direction: column; gap: 6px; z-index: 9050;
+      min-width: 280px;
+    `;
+    document.body.appendChild(root);
+    this.multiProjectilePanel = root;
+    this.refreshMultiProjectilePanel();
+  }
+
+  private refreshMultiProjectilePanel(): void {
+    const root = this.multiProjectilePanel;
+    const stm = this.spellTargetMode;
+    if (!root || !stm || stm.kind !== 'multi-projectile') return;
+    const used = [...stm.assignments.values()].reduce((a, b) => a + b, 0);
+    const ready = used === stm.total;
+    root.replaceChildren();
+
+    const header = document.createElement('div');
+    header.textContent = `${stm.spellName.toUpperCase()} — select targets`;
+    header.style.cssText = 'font-size: 12px; letter-spacing: 2px;';
+    root.appendChild(header);
+
+    const help = document.createElement('div');
+    help.textContent = `Click a creature to add a ${stm.projectileNoun}. ESC or CANCEL aborts.`;
+    help.style.cssText = 'font-size: 10px; color: #cc9966; line-height: 1.5;';
+    root.appendChild(help);
+
+    const tally = document.createElement('div');
+    tally.textContent = `${used} / ${stm.total} ${stm.projectileNoun}${stm.total === 1 ? '' : 's'} assigned`;
+    tally.style.cssText = `font-size: 11px; color: ${ready ? '#aaff99' : '#cc9966'};`;
+    root.appendChild(tally);
+
+    // Per-target rows — only show creatures that have at least one
+    // projectile assigned, sorted by id for a stable layout.
+    if (stm.assignments.size > 0) {
+      const list = document.createElement('div');
+      list.style.cssText = 'display: flex; flex-direction: column; gap: 2px; max-height: 120px; overflow-y: auto;';
+      const ids = [...stm.assignments.keys()].sort();
+      for (const id of ids) {
+        const count = stm.assignments.get(id) ?? 0;
+        if (count === 0) continue;
+        const npc = this.gameState?.npcs.find((n) => n.id === id);
+        if (!npc) continue;
+        const label = (npc.combatLabel ? `${npc.revealedName ?? npc.name} (${npc.combatLabel})` : (npc.revealedName ?? npc.name));
+        const row = document.createElement('div');
+        row.style.cssText = 'display: flex; justify-content: space-between; align-items: center; gap: 8px; font-size: 11px;';
+        const name = document.createElement('span');
+        name.textContent = label;
+        name.style.color = '#cce4ff';
+        row.appendChild(name);
+        const right = document.createElement('span');
+        right.style.cssText = 'display: flex; align-items: center; gap: 6px;';
+        const countEl = document.createElement('span');
+        countEl.textContent = `×${count}`;
+        countEl.style.color = '#ffd699';
+        right.appendChild(countEl);
+        const minus = document.createElement('button');
+        minus.textContent = '−';
+        minus.style.cssText = 'width: 22px; height: 20px; background: #2a1a1a; border: 1px solid #aa5533; color: #ffd699; cursor: pointer; font-family: monospace;';
+        minus.addEventListener('click', () => {
+          const cur = stm.assignments.get(id) ?? 0;
+          if (cur <= 1) stm.assignments.delete(id);
+          else stm.assignments.set(id, cur - 1);
+          this.refreshMultiProjectilePanel();
+          this.refreshMultiProjectileBadges();
+        });
+        right.appendChild(minus);
+        row.appendChild(right);
+        list.appendChild(row);
+      }
+      root.appendChild(list);
+    }
+
+    const actions = document.createElement('div');
+    actions.style.cssText = 'display: flex; justify-content: flex-end; gap: 6px; margin-top: 4px;';
+    const cancel = document.createElement('button');
+    cancel.textContent = 'CANCEL';
+    cancel.style.cssText = 'background: #222233; border: 2px solid #556677; color: #aabbcc; font-family: monospace; font-size: 11px; padding: 5px 10px; cursor: pointer;';
+    cancel.addEventListener('click', () => this.exitSpellTargetMode());
+    actions.appendChild(cancel);
+    const fire = document.createElement('button');
+    fire.textContent = 'FIRE';
+    fire.disabled = !ready;
+    fire.style.cssText = `background: #3a1a1a; border: 2px solid #aa5533; color: #ffd699; font-family: monospace; font-size: 11px; padding: 5px 10px; cursor: ${ready ? 'pointer' : 'not-allowed'}; opacity: ${ready ? '1' : '0.45'};`;
+    fire.addEventListener('click', () => {
+      if (!ready) return;
+      this.fireMultiProjectile();
+    });
+    actions.appendChild(fire);
+    root.appendChild(actions);
+  }
+
+  private closeMultiProjectilePanel(): void {
+    if (this.multiProjectilePanel) {
+      this.multiProjectilePanel.remove();
+      this.multiProjectilePanel = null;
+    }
+  }
+
+  /** Stamp a small "×N" badge next to each targeted creature's token,
+   *  re-drawn on every assignment change. */
+  private refreshMultiProjectileBadges(): void {
+    this.clearMultiProjectileBadges();
+    const stm = this.spellTargetMode;
+    if (!stm || stm.kind !== 'multi-projectile') return;
+    for (const [id, count] of stm.assignments.entries()) {
+      if (count === 0) continue;
+      const npc = this.gameState?.npcs.find((n) => n.id === id);
+      if (!npc) continue;
+      const text = this.add.text(
+        npc.tileX * TILE_SIZE + TILE_SIZE - 4,
+        npc.tileY * TILE_SIZE + 2,
+        `×${count}`,
+        { fontFamily: 'monospace', fontSize: '12px', color: '#ffd699', backgroundColor: '#3a1a1aee', padding: { x: 3, y: 1 } },
+      ).setOrigin(1, 0);
+      this.gridView.container.add(text);
+      this.multiProjectileBadges.push(text);
+    }
+  }
+
+  private clearMultiProjectileBadges(): void {
+    for (const b of this.multiProjectileBadges) b.destroy();
+    this.multiProjectileBadges = [];
+  }
+
+  private fireMultiProjectile(): void {
+    const stm = this.spellTargetMode;
+    if (!stm || stm.kind !== 'multi-projectile') return;
+    const ids: string[] = [];
+    for (const [id, n] of stm.assignments.entries()) {
+      for (let i = 0; i < n; i++) ids.push(id);
+    }
+    gameClient.sendAction({
+      type: 'castSpell',
+      spellId: stm.spellId,
+      slotLevel: stm.slotLevel,
+      asRitual: stm.asRitual,
+      targetIds: ids,
+      damageTypeChoice: stm.damageTypeChoice,
+    });
+    this.exitSpellTargetMode();
   }
 
   /** Resolve a click while in spell-target mode. Single-target spells take a creature id; AOE spells take a tile. Any other click cancels. */
   private finishSpellTargetClick(targetNpcId: string | null, tileX: number, tileY: number): void {
     const stm = this.spellTargetMode;
     if (!stm || stm.kind === "summon-direct") return;
-    const allSpells = (this.registry.get('spells') ?? []) as SpellDef[];
+    const allSpells = this.defs.spells();
     const spell = allSpells.find(sp => sp.id === stm.spellId);
     if (!spell) { this.exitSpellTargetMode(); return; }
     const slotLevel = spell.level === 0 ? 0 : spell.level;
@@ -1091,11 +1376,11 @@ export class GameScene extends Phaser.Scene {
         const isTouchBuff = spell.range === 'touch' &&
           !spell.attack && !spell.save && !spell.area && !spell.summon && !spell.darts;
         if (!isTouchBuff) { this.exitSpellTargetMode(); return; }
-        gameClient.sendAction({ type: "castSpell", spellId: stm.spellId, slotLevel, asRitual: stm.asRitual, damageTypeChoice: stm.damageTypeChoice });
+        gameClient.sendAction({ type: "castSpell", spellId: stm.spellId, slotLevel, asRitual: stm.asRitual, damageTypeChoice: stm.damageTypeChoice, abilityChoice: stm.abilityChoice });
         this.exitSpellTargetMode();
         return;
       }
-      gameClient.sendAction({ type: "castSpell", spellId: stm.spellId, slotLevel, targetIds: [targetNpcId], asRitual: stm.asRitual, damageTypeChoice: stm.damageTypeChoice });
+      gameClient.sendAction({ type: "castSpell", spellId: stm.spellId, slotLevel, targetIds: [targetNpcId], asRitual: stm.asRitual, damageTypeChoice: stm.damageTypeChoice, abilityChoice: stm.abilityChoice });
       this.exitSpellTargetMode();
       return;
     }
@@ -1132,7 +1417,10 @@ export class GameScene extends Phaser.Scene {
       return;
     }
 
-    gameClient.sendAction({ type: "castSpell", spellId: stm.spellId, slotLevel, tile, asRitual: stm.asRitual, damageTypeChoice: stm.damageTypeChoice });
+    // `multi-projectile` mode handles its own dispatch via FIRE in the HUD
+    // panel — it has no `abilityChoice`/AOE flow to fall through to.
+    if (stm.kind === "multi-projectile") return;
+    gameClient.sendAction({ type: "castSpell", spellId: stm.spellId, slotLevel, tile, asRitual: stm.asRitual, damageTypeChoice: stm.damageTypeChoice, abilityChoice: stm.abilityChoice });
     this.exitSpellTargetMode();
   }
 
@@ -1152,8 +1440,15 @@ export class GameScene extends Phaser.Scene {
     const r = Math.max(1, Math.ceil(sizeFeet / 5));
     let xMin: number, xMax: number, yMin: number, yMax: number;
     if (spell.area?.shape === 'sphere') {
+      // Match `placedSphereTiles` on the server: 2r-wide square centered on
+      // the cursor (`r` tiles on each side of the click). The pre-centering
+      // version of this code anchored the square top-left at the cursor,
+      // which made the picker miss creatures that the server-side AOE
+      // actually covered.
       const sideTiles = 2 * r;
-      xMin = tile.x; xMax = tile.x + sideTiles - 1; yMin = tile.y; yMax = tile.y + sideTiles - 1;
+      const halfLow = r;
+      xMin = tile.x - halfLow; xMax = tile.x + (sideTiles - halfLow) - 1;
+      yMin = tile.y - halfLow; yMax = tile.y + (sideTiles - halfLow) - 1;
     } else {
       const side = r;
       if (side % 2 === 1) {
@@ -1185,7 +1480,7 @@ export class GameScene extends Phaser.Scene {
     if (!this.gameState) return;
     const summon = this.gameState.npcs.find((n) => n.id === summonNpcId);
     if (!summon || !summon.summonSpellId) return;
-    const allSpells = (this.registry.get('spells') ?? []) as SpellDef[];
+    const allSpells = this.defs.spells();
     const spell = allSpells.find((sp) => sp.id === summon.summonSpellId);
     const rangeFeet = spell?.summon?.moveRangeFeet ?? 30;
     const moveRangeTiles = Math.max(1, Math.ceil(rangeFeet / 5));
@@ -1318,11 +1613,48 @@ export class GameScene extends Phaser.Scene {
     this.uiDestroyed = true;
     this.playerPanel.destroy();
     this.targetPanel.destroy();
+    this.devToolsPanel?.destroy();
     this.hud.destroy();
     this.speechBubbles.destroy();
     this.screenEffects.destroy();
     this.uiScale.destroy();
     void gameClient.disconnect().then(() => this.scene.start("EncounterSetupScene"));
+  }
+
+  /** DevTools: re-create the current session from the captured payload
+   *  without bouncing through Encounter Setup. Mirrors the chapter-advance
+   *  pattern: tear down the current session (DELETE), create the next one,
+   *  set `preserveSessionOnShutdown = true` so the SHUTDOWN handler on
+   *  scene.restart doesn't disconnect (and delete) the newly-created
+   *  session before `create()` can open a fresh WebSocket. No-op if the
+   *  scene was entered without a captured payload (resume / chapter-
+   *  advance entries don't currently carry one). */
+  private async reloadEncounter(): Promise<void> {
+    if (!this.lastCreateRequest) {
+      console.warn("[DevTools] Reload Encounter unavailable — no captured CreateSessionRequest (resume / chapter-advance entry).");
+      return;
+    }
+    const request = this.lastCreateRequest;
+    // `disconnect` closes the current WS AND deletes the current session on
+    // the server. We want both — there's no reason to keep the old session
+    // around once we've decided to reload.
+    await gameClient.disconnect();
+    try {
+      const { state, playerDef } = await gameClient.createSession(request);
+      // Critical — without this, the SHUTDOWN handler that fires on
+      // scene.restart would call `gameClient.disconnect()` again and DELETE
+      // the session we just created. The new scene's `create()` would then
+      // open a WS against a dead session → ConnectionLost overlay.
+      this.preserveSessionOnShutdown = true;
+      this.scene.restart({
+        sessionId: state.sessionId,
+        playerDef,
+        createRequest: request,
+      });
+    } catch (err) {
+      console.error("[DevTools] Reload Encounter failed:", err);
+      this.scene.start("EncounterSetupScene");
+    }
   }
 
   private async advanceChapter(): Promise<void> {
@@ -1360,7 +1692,7 @@ export class GameScene extends Phaser.Scene {
    *  encounters registry. Returns null when the encounter isn't in the
    *  registry (e.g. the user navigated past the boot stage offline). */
   private resolveEncounterTitle(encounterId: string): string | null {
-    const encs = this.registry.get('encounters') as Array<{ id: string; encounterTitle?: string }> | undefined;
+    const encs = this.defs.encounters();
     return encs?.find((e) => e.id === encounterId)?.encounterTitle ?? null;
   }
 
@@ -1455,6 +1787,7 @@ export class GameScene extends Phaser.Scene {
     this.hud.refresh(this.buildHUDState(state));
     this.drawHighlights(state);
     this.drawSpellAura(state);
+    this.drawActiveZones(state);
   }
 
   // ── Map drawing ───────────────────────────────────────────────────────────
@@ -1602,6 +1935,56 @@ export class GameScene extends Phaser.Scene {
   }
 
   /**
+   * Paint every persistent AOE zone from `state.activeZones`. The server
+   * computed the tile-set at cast time and stamped it on each zone record;
+   * we just colour them in and stamp a label. Rendered on its own graphics
+   * layer below the fog-of-war veil so an in-fog zone is still hidden, but
+   * a visible zone sits clearly above the map tiles. Re-runs on every
+   * state tick — Phaser's `clear()` discards previous tris cheaply.
+   */
+  private drawActiveZones(state: GameState): void {
+    this.activeZoneLayer.clear();
+    for (const t of this.activeZoneLabels) t.destroy();
+    this.activeZoneLabels = [];
+    const zones = state.activeZones ?? [];
+    if (zones.length === 0) return;
+
+    for (const z of zones) {
+      const tint = z.tintHex ? parseInt(z.tintHex.replace('#', ''), 16) : 0xc8d0d6;
+      // Fill the zone tiles with a translucent tint. A small inset keeps the
+      // grid lines visible underneath so the player can still see the tile
+      // shape.
+      this.activeZoneLayer.fillStyle(tint, 0.32);
+      for (const [x, y] of z.tiles) {
+        this.activeZoneLayer.fillRect(x * TILE_SIZE + 1, y * TILE_SIZE + 1, TILE_SIZE - 2, TILE_SIZE - 2);
+      }
+      // Thin border along the zone perimeter (per-tile, not a true outline —
+      // cheap and reads as a defined shape).
+      this.activeZoneLayer.lineStyle(1.5, tint, 0.85);
+      for (const [x, y] of z.tiles) {
+        this.activeZoneLayer.strokeRect(x * TILE_SIZE + 1, y * TILE_SIZE + 1, TILE_SIZE - 2, TILE_SIZE - 2);
+      }
+      // Label rendered at the zone's geometric centre. `Phaser.GameObjects.Text`
+      // sits on the gridView container so it scrolls with the map.
+      const minX = Math.min(...z.tiles.map(([x]) => x));
+      const maxX = Math.max(...z.tiles.map(([x]) => x));
+      const minY = Math.min(...z.tiles.map(([, y]) => y));
+      const maxY = Math.max(...z.tiles.map(([, y]) => y));
+      const cx = ((minX + maxX) / 2 + 0.5) * TILE_SIZE;
+      const cy = ((minY + maxY) / 2 + 0.5) * TILE_SIZE;
+      const label = this.add.text(cx, cy, z.name, {
+        fontFamily: 'monospace',
+        fontSize: '11px',
+        color: '#ffffff',
+        backgroundColor: '#00000088',
+        padding: { x: 4, y: 2 },
+      }).setOrigin(0.5, 0.5);
+      this.gridView.container.add(label);
+      this.activeZoneLabels.push(label);
+    }
+  }
+
+  /**
    * AOE preview during spell-targeting mode. The shape of the highlight
    * matches the spell's `area.shape` and the same tile-set logic the server
    * uses to find affected creatures, so what you see is what gets hit.
@@ -1641,7 +2024,7 @@ export class GameScene extends Phaser.Scene {
     // Range underlay: every tile within the spell's range from the caster,
     // painted before the AOE shape so AOE colour wins on overlap. Cool teal
     // tint (distinct from move highlight + AOE orange + summon blue).
-    const allSpells = (this.registry.get('spells') ?? []) as SpellDef[];
+    const allSpells = this.defs.spells();
     const spell = allSpells.find((sp) => sp.id === stm.spellId);
     if (spell && spell.rangeFeet > 0) {
       const rangeTiles = Math.max(1, Math.ceil(spell.rangeFeet / 5));
@@ -1680,12 +2063,44 @@ export class GameScene extends Phaser.Scene {
           paintTile(ox + rx, oy + ry);
         }
       }
+    } else if (stm.shape === "line") {
+      // Line preview — mirrors the continuous-direction
+      // `lineFromCasterTiles` on the server. Any angle around the caster
+      // works; the line follows the exact cursor direction with a
+      // perpendicular width band.
+      const length = side;
+      const width = Math.max(1, stm.widthTiles ?? 1);
+      const ox = this.player.tileX, oy = this.player.tileY;
+      const dirX = tileX - ox;
+      const dirY = tileY - oy;
+      const len = Math.hypot(dirX, dirY);
+      if (len > 0) {
+        const ux = dirX / len;
+        const uy = dirY / len;
+        const perpX = -uy;
+        const perpY = ux;
+        const halfLow = Math.floor((width - 1) / 2);
+        const halfHigh = Math.ceil((width - 1) / 2);
+        for (let step = 1; step <= length; step++) {
+          for (let off = -halfLow; off <= halfHigh; off++) {
+            const fx = ox + ux * step + perpX * off;
+            const fy = oy + uy * step + perpY * off;
+            paintTile(Math.round(fx), Math.round(fy));
+          }
+        }
+      }
     } else if (stm.shape === "sphere") {
       // Sphere preview:
-      //   self-anchored → chebyshev disc on the caster's tile centre.
-      //   placed       → SRD grid-intersection rule: 2*r tiles per side
-      //                   anchored at the clicked tile (top-left).
+      //   single-tile (r=0) → just the cursor tile (Flaming Sphere).
+      //   self-anchored     → chebyshev disc on the caster's tile centre.
+      //   placed            → SRD grid-intersection rule: 2*r tiles per
+      //                       side, centered on the cursor (matches
+      //                       `placedSphereTiles` in SpellSystem).
       const r = side;
+      if (r === 0) {
+        paintTile(tileX, tileY);
+        return;
+      }
       if (stm.selfAnchored) {
         const cx = this.player.tileX, cy = this.player.tileY;
         for (let dy = -r; dy <= r; dy++) {
@@ -1693,8 +2108,9 @@ export class GameScene extends Phaser.Scene {
         }
       } else {
         const sideTiles = 2 * r;
-        for (let dy = 0; dy < sideTiles; dy++) {
-          for (let dx = 0; dx < sideTiles; dx++) paintTile(tileX + dx, tileY + dy);
+        const halfLow = r;
+        for (let dy = -halfLow; dy < sideTiles - halfLow; dy++) {
+          for (let dx = -halfLow; dx < sideTiles - halfLow; dx++) paintTile(tileX + dx, tileY + dy);
         }
       }
     } else {
@@ -1781,7 +2197,7 @@ export class GameScene extends Phaser.Scene {
   // ── Def lookups ───────────────────────────────────────────────────────────
 
   private getFactions(): FactionDef[] {
-    return (this.registry.get("factions") as FactionDef[] | undefined) ?? [];
+    return this.defs.factions();
   }
 
   /** Resolve a conversation speaker ref (`"player"` or `"npc_<id>"`) to a
@@ -1808,10 +2224,10 @@ export class GameScene extends Phaser.Scene {
   }
 
   private resolveMonsterDef(defId: string): MonsterDef {
-    const monsters = this.registry.get("monsters") as MonsterDef[];
+    const monsters = this.defs.monsters();
     const monster = monsters.find(m => m.id === defId);
     if (monster) return monster;
-    const npcs = this.registry.get("npcs") as NPCDef[];
+    const npcs = this.defs.npcs();
     const npcDef = npcs.find(n => n.id === defId);
     if (npcDef) {
       // NPCs inherit stats from their monsterClass but can override id, name,
@@ -1831,7 +2247,7 @@ export class GameScene extends Phaser.Scene {
   }
 
   private findItemDef(defId: string): ItemDef {
-    const items = this.registry.get("equipment") as ItemDef[];
+    const items = this.defs.equipment();
     return items.find(i => i.id === defId) ?? items[0];
   }
 
@@ -1852,7 +2268,7 @@ export class GameScene extends Phaser.Scene {
     // scripted conversation.
     const target = this.gameState.npcs.find((n) => n.id === this.selectedEntityId);
     if (target && this.gameState.phase === "exploring") {
-      const npcDefs = (this.registry.get("npcs") ?? []) as NPCDef[];
+      const npcDefs = this.defs.npcs();
       const def = npcDefs.find((n) => n.id === target.defId);
       if (def?.conversationId) {
         gameClient.sendAction({ type: "startConversation", npcRef: `npc_${target.id}`, conversationId: def.conversationId });

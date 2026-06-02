@@ -7,6 +7,8 @@
     "unlimitedActions": true,
     "showDeleteSaveButton": true,
     "allowRetryChecks": true,
-    "completePrimaryObjective": true
-  }
+    "completePrimaryObjective": true,
+    "showDevToolsPanel": true
+  },
+  "disabledTiles": {}
 }

@@ -1,0 +1,20 @@
+{
+  "id": "blindness-deafness",
+  "name": "Blindness/Deafness",
+  "level": 2,
+  "school": "transmutation",
+  "classes": ["bard", "cleric", "sorcerer", "wizard"],
+  "castingTime": "action",
+  "range": "120 feet",
+  "rangeFeet": 120,
+  "components": { "verbal": true, "somatic": false, "material": null },
+  "duration": "1 minute",
+  "durationRounds": 10,
+  "concentration": false,
+  "ritual": false,
+  "save": { "ability": "con", "halfOnSuccess": false },
+  "onFailChoice": ["blinded", "deafened"],
+  "description": "One creature that you can see within range must succeed on a Constitution saving throw, or it has the Blinded or Deafened condition (your choice) for the duration. At the end of each of its turns, the target repeats the save, ending the spell on itself on a success. Engine: the caster picks Blinded or Deafened at cast time via `onFailChoice`; defaults to Blinded if no pick is supplied. Deafened currently has no mechanical effect per US-058 (the engine flags it but no rule consumes it yet).",
+  "repeatSave": { "ability": "con", "removeOnSuccess": ["blinded", "deafened"] },
+  "scaling": "You can target one additional creature for each spell slot level above 2."
+}

@@ -1,0 +1,15 @@
+{
+  "id": "see-invisibility",
+  "name": "See Invisibility",
+  "level": 2,
+  "school": "divination",
+  "classes": ["bard", "sorcerer", "wizard"],
+  "castingTime": "action",
+  "range": "self",
+  "rangeFeet": 0,
+  "components": { "verbal": true, "somatic": true, "material": "a pinch of talc" },
+  "duration": "1 hour",
+  "concentration": false,
+  "ritual": false,
+  "description": "For the duration, you see creatures and objects that have the Invisible condition as if they were visible, and you can see into the Ethereal Plane. Creatures and objects there appear ghostly. While the spell is active, your attacks against Invisible creatures no longer suffer Disadvantage from the Invisible condition (other Disadvantage sources still apply)."
+}

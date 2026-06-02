@@ -8,6 +8,7 @@ import { isIncapacitated, isVisible, clearHide } from './ConditionSystem.js';
 import { d, d20, mod } from './Dice.js';
 import { runPerceptionSweep, runPassivePerceptionSweep } from './Vision.js';
 import { canShortRest as guardCanShortRest, canSearch as guardCanSearch } from './ActionGuards.js';
+import { tickZoneEnterSaves } from './SpellSystem.js';
 import { formatCoins } from '../../../shared/currency.js';
 
 export function doMove(ctx: GameContext, dx: number, dy: number, events: GameEvent[]): void {
@@ -50,7 +51,15 @@ export function doMove(ctx: GameContext, dx: number, dy: number, events: GameEve
   const oldY = s.player.tileY;
   s.player.tileX = nx;
   s.player.tileY = ny;
+  s.player.movedThisTurn = true;
   events.push({ type: 'entity_move', entityId: 'player', toX: nx, toY: ny });
+
+  // SRD enter-zone save: any active zone with an `enterSave` (Web, Grease)
+  // rolls a fresh save the moment the player steps onto one of its tiles.
+  // `tickZoneEnterSaves` is idempotent on creatures already carrying the
+  // zone's condition, so re-entering the same zone after a successful
+  // save does NOT re-roll on the same step.
+  tickZoneEnterSaves(ctx, 'player');
 
   if (s.phase === 'player_turn') {
     s.player.movesLeft--;

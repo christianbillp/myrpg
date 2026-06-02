@@ -1,0 +1,16 @@
+{
+  "id": "spider-climb",
+  "name": "Spider Climb",
+  "level": 2,
+  "school": "transmutation",
+  "classes": ["sorcerer", "warlock", "wizard"],
+  "castingTime": "action",
+  "range": "touch",
+  "rangeFeet": 5,
+  "components": { "verbal": true, "somatic": true, "material": "a drop of bitumen and a spider" },
+  "duration": "concentration, up to 1 hour",
+  "durationRounds": 600,
+  "concentration": true,
+  "ritual": false,
+  "description": "Until the spell ends, one willing creature you touch gains the ability to move up, down, and across vertical surfaces and along ceilings, while leaving its hands free. The target also gains a Climb Speed equal to its Speed. Using a Higher-Level Spell Slot: You can target one additional creature for each spell slot level above 2. Engine: descriptive-only — the engine doesn't yet model climbable surfaces or a distinct climb speed (US-044's Difficult Terrain has the same blocker for vertical movement). The cast lands as a self-buff; the AIGM narrates the climb."
+}

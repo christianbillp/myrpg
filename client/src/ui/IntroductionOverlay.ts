@@ -1,6 +1,6 @@
 import { marked } from "marked";
 import { BaseOverlay } from "./BaseOverlay";
-import { PlayerDef } from "../data/player";
+import { PlayerDef } from "../../../shared/types";
 import { UIScale } from "./UIScale";
 
 const ACCENT = "#e2b96f";

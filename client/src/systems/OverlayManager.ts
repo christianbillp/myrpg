@@ -1,12 +1,12 @@
-import { PlayerDef } from "../data/player";
-import { ItemDef, EquipmentDef } from "../data/equipment";
+import { PlayerDef } from "../../../shared/types";
+import { ItemDef, EquipmentDef } from "../../../shared/types";
 import { CharacterSheetOverlay, CharacterSheetInputs } from "../ui/CharacterSheetOverlay";
 import { IntroductionOverlay } from "../ui/IntroductionOverlay";
 import { ReactionPromptOverlay } from "../ui/ReactionPromptOverlay";
 import { EncounterCompleteOverlay } from "../ui/EncounterCompleteOverlay";
 import { NextChapterButton } from "../ui/NextChapterButton";
 import { ConversationOverlay } from "../ui/ConversationOverlay";
-import type { GameState, SpellDef, PendingReaction, ConversationDef, FeatureDef, ClassDef, SubclassDef } from "../net/types";
+import type { GameState, SpellDef, PendingReaction, ConversationDef, FeatureDef, ClassDef, SubclassDef } from "../../../shared/types";
 import { UIScale } from "../ui/UIScale";
 import { WorldPause } from "../net/WorldPause";
 import { DevMode } from "../devMode";

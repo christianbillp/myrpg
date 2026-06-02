@@ -1,0 +1,17 @@
+{
+  "id": "web",
+  "name": "Web",
+  "level": 2,
+  "school": "conjuration",
+  "classes": ["sorcerer", "wizard"],
+  "castingTime": "action",
+  "range": "60 feet",
+  "rangeFeet": 60,
+  "components": { "verbal": true, "somatic": true, "material": "a bit of spiderweb" },
+  "duration": "concentration, up to 1 hour",
+  "durationRounds": 600,
+  "concentration": true,
+  "ritual": false,
+  "area": { "shape": "cube", "sizeFeet": 20 },
+  "description": "You conjure a mass of sticky webbing at a point within range. The webs fill a 20-foot Cube there for the duration. The webs are Difficult Terrain (descriptive — Difficult Terrain not yet modelled per US-044), and the area within them is Lightly Obscured. The first time a creature enters the webs on a turn or starts its turn there, it must succeed on a Dexterity saving throw or have the Restrained condition while in the webs or until it breaks free. A creature Restrained by the webs can take an action to make a Strength (Athletics) check against your spell save DC — on success it is no longer Restrained. Engine simplification: the save is rolled only for creatures in the area at cast time; entering mid-spell does not re-roll. The 'unanchored web collapses' and 'flammable' rules are descriptive only."
+}

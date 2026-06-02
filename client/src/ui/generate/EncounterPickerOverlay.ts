@@ -1,6 +1,6 @@
 import Phaser from "phaser";
 import { tilesetTextureKey } from "../../scenes/BootScene";
-import type { EncounterDef, SavedMapDef } from "../../net/types";
+import type { EncounterDef, SavedMapDef } from "../../../../shared/types";
 import { decodeTileGid, TILE_VOID_GID } from "../../../../shared/tileGid";
 
 /**

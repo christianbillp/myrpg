@@ -14,7 +14,7 @@
 import { BaseOverlay } from "./BaseOverlay";
 import { UIScale } from "./UIScale";
 import { DevMode } from "../devMode";
-import type { ActiveConversation, ConversationDef, ConversationNode, ConversationChoice, ConversationExchange } from "../net/types";
+import type { ActiveConversation, ConversationDef, ConversationNode, ConversationChoice, ConversationExchange } from "../../../shared/types";
 
 const ACCENT = "#e2b96f";
 const ACCENT_DIM = "#7a6440";

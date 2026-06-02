@@ -15,8 +15,8 @@
  * index needs to shift, instead of the roster prune dropping them.
  */
 import Phaser from "phaser";
-import type { MonsterDef } from "../../data/monsters";
-import type { NPCDef } from "../../net/types";
+import type { MonsterDef } from "../../../../shared/types";
+import type { NPCDef } from "../../../../shared/types";
 
 export type RosterRole = "ally" | "neutral" | "enemy";
 

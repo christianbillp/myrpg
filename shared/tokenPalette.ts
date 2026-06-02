@@ -10,7 +10,7 @@
  * impossible — either composer pulls the same constants.
  */
 
-import type { TokenSpec } from "./types";
+import type { TokenSpec } from "./types.js";
 
 /** Z-order — bottom (drawn first) to top. Fragments are stitched in this
  *  exact order, so face details land over the body coin, beard sits between

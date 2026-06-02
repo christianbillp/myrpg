@@ -1,0 +1,17 @@
+{
+  "id": "invisibility",
+  "name": "Invisibility",
+  "level": 2,
+  "school": "illusion",
+  "classes": ["bard", "sorcerer", "warlock", "wizard"],
+  "castingTime": "action",
+  "range": "touch",
+  "rangeFeet": 5,
+  "components": { "verbal": true, "somatic": true, "material": "an eyelash in gum arabic" },
+  "duration": "concentration, up to 1 hour",
+  "durationRounds": 600,
+  "concentration": true,
+  "ritual": false,
+  "description": "A creature you touch has the Invisible condition until the spell ends. The spell ends early immediately after the target makes an attack roll, deals damage, or casts a spell. Engine: ends on the target's first attack (via end-on-attack hooks in `runSingleEnemyTurn` / `runSingleAllyTurn` for NPC targets, and `doAttack` for self-cast); 'deals damage' and 'casts a spell' triggers are descriptive only for now. Click yourself to self-cast, or click any creature within reach.",
+  "scaling": "You can target one additional creature for each spell slot level above 2 (engine: not yet wired — single-target only)."
+}

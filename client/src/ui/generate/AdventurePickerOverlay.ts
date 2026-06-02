@@ -1,4 +1,4 @@
-import type { AdventureDef } from "../../net/types";
+import type { AdventureDef } from "../../../../shared/types";
 
 /**
  * AdventurePickerOverlay — HTML modal listing every authored adventure.

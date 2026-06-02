@@ -8,6 +8,7 @@ import { PLAYER_FACTION_ID } from '../../shared/types.js';
 import type { NpcState } from '../../shared/types.js';
 import type { AigmMessage } from './sessions.js';
 import { getActiveSetting, settingPromptBlock } from './settings.js';
+import { Logger } from './Logger.js';
 import { formatCoins } from '../../shared/currency.js';
 
 export interface AIGMChatRequest {
@@ -484,6 +485,8 @@ export async function processAIGMChat(
 
     iteration++;
     const overBudget = iteration >= MAX_TOOL_ITERATIONS;
+    Logger.log('aigm.loop_iteration', { iteration, overBudget, maxIterations: MAX_TOOL_ITERATIONS });
+    if (overBudget) Logger.warn('anomaly.aigm_budget_exhausted', { iteration, maxIterations: MAX_TOOL_ITERATIONS });
 
     const toolResults: { type: 'tool_result'; tool_use_id: string; content: string; cache_control?: { type: 'ephemeral' } }[] = [];
     for (const block of response.content) {
@@ -693,9 +696,19 @@ async function callClaudeWithRetry(
     return await runOnce();
   } catch (err) {
     const status = (err as { status?: number }).status;
+    const message = (err as { message?: string }).message;
     const isTransient = status !== undefined && TRANSIENT_STATUSES.has(status);
-    if (!isTransient) throw err;
+    if (!isTransient) {
+      Logger.error('aigm.api_error', { status, message, retryable: false });
+      throw err;
+    }
+    Logger.warn('aigm.api_retry', { status, message, retryDelayMs: RETRY_DELAY_MS });
     await new Promise((r) => setTimeout(r, RETRY_DELAY_MS));
-    return await runOnce();
+    try {
+      return await runOnce();
+    } catch (err2) {
+      Logger.error('aigm.api_error', { status: (err2 as { status?: number }).status, message: (err2 as { message?: string }).message, retryable: false, afterRetry: true });
+      throw err2;
+    }
   }
 }

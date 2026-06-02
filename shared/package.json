@@ -1,0 +1,5 @@
+{
+  "name": "myrpg-shared",
+  "private": true,
+  "type": "module"
+}

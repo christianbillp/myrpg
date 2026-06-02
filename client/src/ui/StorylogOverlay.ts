@@ -1,4 +1,4 @@
-import type { StorylogEntry, EncounterRecord } from '../net/types';
+import type { StorylogEntry, EncounterRecord } from '../../../shared/types';
 import { DevMode } from '../devMode';
 
 const ACCENT = '#e2b96f';

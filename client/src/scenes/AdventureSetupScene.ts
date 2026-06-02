@@ -1,8 +1,8 @@
 import Phaser from "phaser";
-import { PlayerDef } from "../data/player";
-import { ItemDef } from "../data/equipment";
+import { PlayerDef } from "../../../shared/types";
+import { ItemDef } from "../../../shared/types";
 import { gameClient } from "../net/GameClient";
-import type { GameState, AdventureDef, AdventureSave, EquipmentSlots, EncounterRecord, StorylogEntry } from "../net/types";
+import type { GameState, AdventureDef, AdventureSave, EquipmentSlots, EncounterRecord, StorylogEntry } from "../../../shared/types";
 import { StorylogOverlay } from "../ui/StorylogOverlay";
 import { createHtmlButton, createHtmlText, type HtmlButtonHandle, type HtmlTextHandle } from "../ui/htmlButtons";
 import { CharacterCarousel } from "../ui/setup/CharacterCarousel";
@@ -137,7 +137,7 @@ export class AdventureSetupScene extends Phaser.Scene {
     const DETAIL_Y = CAROUSEL_Y + CAROUSEL_H + 12;
     const DETAIL_H = H - 100 - DETAIL_Y;
     const items = this.registry.get("equipment") as ItemDef[];
-    const spells = this.registry.get("spells") as import("../net/types").SpellDef[];
+    const spells = this.registry.get("spells") as import("../../../shared/types").SpellDef[];
     this.characterDetail = new CharacterDetail({
       scene: this, sceneWidth: W,
       x: CHAR_COL_X, y: DETAIL_Y, width: CHAR_COL_W, height: DETAIL_H,

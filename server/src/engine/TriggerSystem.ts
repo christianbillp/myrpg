@@ -8,6 +8,7 @@ import { d20 as d20Local } from './Dice.js';
 import { setRelation, adjustRelation } from './FactionRelations.js';
 import { PLAYER_FACTION_ID } from '../../../shared/types.js';
 import { formatCoins as formatCoinsTrigger } from '../../../shared/currency.js';
+import { Logger } from '../Logger.js';
 import {
   startConversation, endConversation, setConversationNode,
   applyNpcRemember, applyNpcForget, applyNpcAdjustRelationship,
@@ -42,7 +43,10 @@ export function registerTriggers(ctx: GameContext): void {
  * authors get a console warning at session start instead of silent no-ops.
  */
 function validateTrigger(trigger: EncounterTrigger, ctx: GameContext): void {
-  const warn = (msg: string) => console.warn(`[TriggerSystem] trigger '${trigger.id}': ${msg}`);
+  const warn = (msg: string) => {
+    console.warn(`[TriggerSystem] trigger '${trigger.id}': ${msg}`);
+    Logger.warn('anomaly.trigger_validation', { triggerId: trigger.id, message: msg });
+  };
 
   const validEvents: WhenClause['event'][] = [
     'player_moved', 'npc_killed', 'item_picked_up',
@@ -119,6 +123,12 @@ function evaluateOne(ctx: GameContext, trigger: EncounterTrigger, event: EngineE
   if (once && ctx.state.firedTriggerIds.includes(trigger.id)) return;
   if (!whenMatches(trigger.when, event)) return;
   if (trigger.if && !trigger.if.every((g) => guardHolds(ctx, g))) return;
+
+  Logger.log('trigger.fired', {
+    triggerId: trigger.id,
+    eventType: event.type,
+    actions: trigger.then.map((a) => a.type),
+  });
 
   for (const action of trigger.then) fireAction(ctx, action);
 

@@ -2,7 +2,7 @@ import Phaser from "phaser";
 import { gameClient } from "../net/GameClient";
 import { EmbeddedMapPreview, type MapPreviewData } from "../ui/EmbeddedMapPreview";
 import { MapSelectorOverlay } from "../ui/generate/MapSelectorOverlay";
-import type { SavedMapDef } from "../net/types";
+import type { SavedMapDef } from "../../../shared/types";
 import { DevMode } from "../devMode";
 import {
   createHtmlButton,
@@ -50,8 +50,8 @@ const PANEL_PAD = 32;
 const COL_GAP = 24;
 const LEFT_FRACTION = 2 / 3;
 
-type Tab = "deterministic" | "generative" | "edit";
-type BucketName = "always" | "det" | "gen" | "edit";
+type Tab = "deterministic" | "generative" | "edit" | "zones";
+type BucketName = "always" | "det" | "gen" | "edit" | "zones";
 type Disposable = HtmlButtonHandle | HtmlTextHandle | EditTabHandle;
 /** Generic disposable used by the EDIT-tab bucket — MapPalette and the
  *  palette's scrollable thumbnail div both expose this shape. */
@@ -60,32 +60,46 @@ interface EditTabHandle {
   dispose(): void;
 }
 
-type Terrain = "grassland" | "forest" | "dungeon";
-type Feature =
-  | "ruins" | "buildings" | "campsites" | "path"
-  | "coastline"
-  | "3-room" | "5-room";
+type Terrain = "grassland" | "forest" | "dungeon" | "tavern";
+type Feature = "campsites" | "coastline" | "path" | "intersection" | "buildings" | "3-room" | "5-room";
 
 const OUTSIDE_TERRAINS: Terrain[] = ["grassland", "forest"];
-const INSIDE_TERRAINS:  Terrain[] = ["dungeon"];
-const OUTSIDE_FEATURES: Feature[] = ["ruins", "buildings", "campsites", "path", "coastline"];
+const INSIDE_TERRAINS:  Terrain[] = ["dungeon", "tavern"];
+const OUTSIDE_FEATURES: Feature[] = ["campsites", "coastline", "path", "intersection", "buildings"];
 const INSIDE_FEATURES:  Feature[] = ["3-room", "5-room"];
+
+/** Per-terrain whitelist of features the composer actually consumes. The
+ *  Map Editor's feature chips enable / disable themselves against this
+ *  table — outdoor features only fire on `grassland` / `forest`, the
+ *  room-count features only fire on `dungeon`, and tavern accepts no
+ *  features today (the composer generates a fixed-layout single room). */
+const TERRAIN_COMPATIBLE_FEATURES: Record<Terrain, Feature[]> = {
+  grassland: OUTSIDE_FEATURES,
+  forest:    OUTSIDE_FEATURES,
+  dungeon:   INSIDE_FEATURES,
+  tavern:    [],
+};
 
 const TERRAIN_LABEL: Record<Terrain, string> = {
   grassland: "GRASSLAND",
   forest: "FOREST",
   dungeon: "DUNGEON",
+  tavern: "TAVERN",
 };
 const FEATURE_LABEL: Record<Feature, string> = {
-  ruins: "RUINS", buildings: "BUILDINGS", campsites: "CAMPSITES", path: "PATH",
+  campsites: "CAMPSITES",
   coastline: "COASTLINE",
-  "3-room": "3 ROOMS", "5-room": "5 ROOMS",
+  path: "PATH",
+  intersection: "INTERSECTION",
+  buildings: "BUILDINGS",
+  "3-room": "3 ROOMS",
+  "5-room": "5 ROOMS",
 };
-function featureColumn(f: Feature): "outside" | "inside" {
-  return (INSIDE_FEATURES as Feature[]).includes(f) ? "inside" : "outside";
+function featureColumn(_f: Feature): "outside" | "inside" {
+  return "outside";
 }
-function terrainColumn(t: Terrain): "outside" | "inside" {
-  return (INSIDE_TERRAINS as Terrain[]).includes(t) ? "inside" : "outside";
+function terrainColumn(_t: Terrain): "outside" | "inside" {
+  return "outside";
 }
 
 interface PromptExample { title: string; body: string; }
@@ -110,18 +124,32 @@ export class MapEditorScene extends Phaser.Scene {
   private tabDetBtn: HtmlButtonHandle | null = null;
   private tabGenBtn: HtmlButtonHandle | null = null;
   private tabEditBtn: HtmlButtonHandle | null = null;
-  private buckets: Record<BucketName, Disposable[]> = { always: [], det: [], gen: [], edit: [] };
+  private tabZonesBtn: HtmlButtonHandle | null = null;
+  private buckets: Record<BucketName, Disposable[]> = { always: [], det: [], gen: [], edit: [], zones: [] };
 
   // EDIT tab — the entire palette / paint controller lives in MapPalette.
   // Constructed lazily by `buildEditPanel` so the registry-backed legend
   // payloads are guaranteed to be loaded at first use.
   private mapPalette: MapPalette | null = null;
 
+  // ZONES tab — manager for author-time named tile regions. Same lazy
+  // construction pattern as MapPalette.
+  private zonePalette: import("../ui/edit/ZonePalette").ZonePalette | null = null;
+
+  // LAYERS dropdown — toggles per-layer visibility on the preview. The
+  // button sits over the preview; the panel slides down from it.
+  private layersBtn: HtmlButtonHandle | null = null;
+  private layersPanel: HTMLDivElement | null = null;
+
   // Deterministic tab state.
   private selectedTerrain: Terrain | null = "grassland";
   private selectedFeatures: Set<Feature> = new Set();
   private terrainChips: Map<Terrain, HtmlButtonHandle> = new Map();
   private featureChips: Map<Feature, HtmlButtonHandle> = new Map();
+  /** Live count for the `buildings` feature. 0 = off (chip un-selected),
+   *  1..5 = chip selected, label reads "BUILDINGS: N". Click cycles
+   *  0 → 1 → 2 → 3 → 4 → 5 → 0. */
+  private buildingsCount: number = 0;
 
   // Generative AI tab state.
   private genPromptInput: HTMLTextAreaElement | null = null;
@@ -155,9 +183,10 @@ export class MapEditorScene extends Phaser.Scene {
     this.tab = "deterministic";
     this.selectedTerrain = "grassland";
     this.selectedFeatures.clear();
+    this.buildingsCount = 0;
     this.terrainChips.clear();
     this.featureChips.clear();
-    this.buckets = { always: [], det: [], gen: [], edit: [] };
+    this.buckets = { always: [], det: [], gen: [], edit: [], zones: [] };
     this.previewedMap = null;
     this.savedMapId = null;
     this.editingMapId = null;
@@ -253,6 +282,95 @@ export class MapEditorScene extends Phaser.Scene {
     this.preview = new EmbeddedMapPreview(this, {
       x: colX, y: previewY, width: colW, height: previewH,
     }, { busyText: "Generating map…" });
+
+    // LAYERS toggle — small chip in the top-right corner of the preview
+    // viewport. Clicking it pops the per-layer checkboxes panel.
+    this.buildLayersToggle(colX + colW - 90, previewY + 8);
+  }
+
+  /** Floating LAYERS button + dropdown overlay anchored to the preview
+   *  viewport. Toggles per-layer visibility on the embedded preview without
+   *  mutating the map data. */
+  private buildLayersToggle(x: number, y: number): void {
+    const btn = createHtmlButton({
+      scene: this, sceneWidth: W,
+      x, y, w: 80, h: 24,
+      label: "LAYERS ▾", variant: "secondary", fontSize: 10,
+      onClick: () => this.toggleLayersPanel(),
+    });
+    this.layersBtn = btn;
+    this.addToBucket("always", btn);
+  }
+
+  private toggleLayersPanel(): void {
+    if (this.layersPanel) {
+      // Run the per-panel cleanup hook installed at open time so the
+      // window resize listener doesn't leak after the panel is dropped.
+      const c = (this.layersPanel as HTMLElement & { __cleanup?: () => void }).__cleanup;
+      if (c) c();
+      this.layersPanel.remove();
+      this.layersPanel = null;
+      return;
+    }
+    if (!this.preview || !this.layersBtn) return;
+    const panel = document.createElement("div");
+    panel.style.cssText = `
+      position: absolute;
+      background: #0f1320; border: 1px solid #334455;
+      color: #cce4ff; font-family: monospace; font-size: 11px;
+      padding: 10px 12px; z-index: 60;
+      display: flex; flex-direction: column; gap: 8px;
+      pointer-events: auto;
+    `;
+    // Swallow all pointer events on the panel so they don't reach the
+    // Phaser canvas underneath. Without this, click + drag inside the
+    // panel can still drag the embedded preview's pan / fire stray cell
+    // clicks. The panel stays open until the LAYERS button is clicked
+    // again — no outside-click auto-close.
+    const swallow = (e: Event): void => e.stopPropagation();
+    panel.addEventListener("mousedown", swallow);
+    panel.addEventListener("mouseup", swallow);
+    panel.addEventListener("click", swallow);
+    panel.addEventListener("wheel", swallow);
+    document.body.appendChild(panel);
+
+    // Anchor the panel directly under the LAYERS button.
+    const place = (): void => {
+      const r = (this.layersBtn!.el as HTMLElement).getBoundingClientRect();
+      panel.style.left = `${r.left}px`;
+      panel.style.top  = `${r.bottom + 4}px`;
+      panel.style.minWidth = `${Math.max(160, r.width + 80)}px`;
+    };
+    place();
+    const onResize = (): void => place();
+    window.addEventListener("resize", onResize);
+    // Cleanup hook so we can drop the resize listener when the panel is
+    // removed via the LAYERS toggle button.
+    (panel as HTMLElement & { __cleanup?: () => void }).__cleanup = () => {
+      window.removeEventListener("resize", onResize);
+    };
+
+    const initial = this.preview.getLayerVisibility();
+    const addRow = (key: 'terrain' | 'object' | 'zones', label: string): void => {
+      const row = document.createElement("label");
+      row.style.cssText = "display:flex; gap:10px; align-items:center; cursor:pointer; padding:2px 0;";
+      const cb = document.createElement("input");
+      cb.type = "checkbox";
+      cb.checked = initial[key];
+      cb.addEventListener("change", () => {
+        this.preview?.setLayerVisible(key, cb.checked);
+      });
+      const txt = document.createElement("span");
+      txt.textContent = label;
+      row.appendChild(cb);
+      row.appendChild(txt);
+      panel.appendChild(row);
+    };
+    addRow("terrain", "Terrain");
+    addRow("object",  "Objects");
+    addRow("zones",   "Zones");
+
+    this.layersPanel = panel;
   }
 
   /** Single-line cousin of `buildTextarea`. Used by the editable map title. */
@@ -290,34 +408,43 @@ export class MapEditorScene extends Phaser.Scene {
     this.buildDeterministicPanel(colX, innerTop, colW, innerH);
     this.buildGenerativePanel(colX, innerTop, colW, innerH);
     this.buildEditPanel(colX, innerTop, colW, innerH);
+    this.buildZonesPanel(colX, innerTop, colW, innerH);
   }
 
   private buildOuterTabBar(x: number, y: number, w: number, h: number): void {
-    const thirdW = Math.floor(w / 3);
+    const slotW = Math.floor(w / 4);
     this.tabDetBtn = createHtmlButton({
       scene: this, sceneWidth: W,
-      x, y, w: thirdW, h,
+      x, y, w: slotW, h,
       label: "DETERMINISTIC", variant: "secondary", fontSize: 11,
       onClick: () => this.activateTab("deterministic"),
     });
     this.tabGenBtn = createHtmlButton({
       scene: this, sceneWidth: W,
-      x: x + thirdW, y, w: thirdW, h,
+      x: x + slotW, y, w: slotW, h,
       label: "GENERATIVE AI", variant: "secondary", fontSize: 11,
       onClick: () => this.activateTab("generative"),
     });
     this.tabEditBtn = createHtmlButton({
       scene: this, sceneWidth: W,
-      x: x + 2 * thirdW, y, w: w - 2 * thirdW, h,
+      x: x + 2 * slotW, y, w: slotW, h,
       label: "EDIT", variant: "secondary", fontSize: 11,
       onClick: () => this.activateTab("edit"),
+    });
+    this.tabZonesBtn = createHtmlButton({
+      scene: this, sceneWidth: W,
+      x: x + 3 * slotW, y, w: w - 3 * slotW, h,
+      label: "ZONES", variant: "secondary", fontSize: 11,
+      onClick: () => this.activateTab("zones"),
     });
     this.styleChipTab(this.tabDetBtn, this.tab === "deterministic");
     this.styleChipTab(this.tabGenBtn, this.tab === "generative");
     this.styleChipTab(this.tabEditBtn, this.tab === "edit");
+    this.styleChipTab(this.tabZonesBtn, this.tab === "zones");
     this.addToBucket("always", this.tabDetBtn);
     this.addToBucket("always", this.tabGenBtn);
     this.addToBucket("always", this.tabEditBtn);
+    this.addToBucket("always", this.tabZonesBtn);
   }
 
   /** Style the tab button as a transparent chip with an accent underline
@@ -332,18 +459,26 @@ export class MapEditorScene extends Phaser.Scene {
 
   private activateTab(tab: Tab): void {
     this.tab = tab;
-    if (this.tabDetBtn)  this.styleChipTab(this.tabDetBtn,  tab === "deterministic");
-    if (this.tabGenBtn)  this.styleChipTab(this.tabGenBtn,  tab === "generative");
-    if (this.tabEditBtn) this.styleChipTab(this.tabEditBtn, tab === "edit");
-    this.setBucketVisible("det",  tab === "deterministic");
-    this.setBucketVisible("gen",  tab === "generative");
-    this.setBucketVisible("edit", tab === "edit");
+    if (this.tabDetBtn)   this.styleChipTab(this.tabDetBtn,   tab === "deterministic");
+    if (this.tabGenBtn)   this.styleChipTab(this.tabGenBtn,   tab === "generative");
+    if (this.tabEditBtn)  this.styleChipTab(this.tabEditBtn,  tab === "edit");
+    if (this.tabZonesBtn) this.styleChipTab(this.tabZonesBtn, tab === "zones");
+    this.setBucketVisible("det",   tab === "deterministic");
+    this.setBucketVisible("gen",   tab === "generative");
+    this.setBucketVisible("edit",  tab === "edit");
+    this.setBucketVisible("zones", tab === "zones");
     if (this.genPromptInput) this.genPromptInput.style.display = tab === "generative" ? "" : "none";
-    // EDIT tab wires click-to-paint on the preview. Other tabs strip it so a
-    // stray click doesn't mutate the map (the GenAI/Deterministic tabs are
-    // pure view-state on the preview).
+    // Preview cell-click handler: EDIT paints tiles; ZONES toggles tiles
+    // in the active zone; the other tabs strip the handler entirely so a
+    // stray click doesn't mutate the map.
     if (this.preview) {
-      this.preview.setOnCellClick(tab === "edit" ? (col, row) => this.paintCell(col, row) : null);
+      if (tab === "edit") {
+        this.preview.setOnCellClick((col, row) => this.paintCell(col, row));
+      } else if (tab === "zones") {
+        this.preview.setOnCellClick((col, row) => this.zonePalette?.paintCell(col, row));
+      } else {
+        this.preview.setOnCellClick(null);
+      }
     }
     this.refreshButtons();
   }
@@ -496,6 +631,28 @@ export class MapEditorScene extends Phaser.Scene {
     this.mapPalette?.paintCell(col, row);
   }
 
+  /** Build the ZONES tab — author-time named tile regions. Lazy
+   *  construction mirrors `buildEditPanel`. */
+  private async buildZonesPanel(x: number, y: number, w: number, h: number): Promise<void> {
+    // Dynamic import keeps the ZonePalette out of the initial scene bundle
+    // until the user actually visits the ZONES tab the first time.
+    const { ZonePalette } = await import("../ui/edit/ZonePalette");
+    if (this.zonePalette) this.zonePalette.dispose();
+    this.zonePalette = new ZonePalette({
+      scene: this,
+      sceneWidth: W,
+      getMap: () => this.previewedMap,
+      repaintPreview: () => { this.preview?.repaintInPlace(); },
+      setStatus: (text) => { if (this.statusEl) this.statusEl.textContent = text; },
+      markMapDirty: () => { this.savedMapId = null; this.refreshButtons(); },
+    });
+    for (const handle of this.zonePalette.build(x, y, w, h)) {
+      this.addToBucket("zones", handle);
+    }
+    // Hidden by default — only shown when the user picks the ZONES tab.
+    this.setBucketVisible("zones", this.tab === "zones");
+  }
+
   // ── Bucket / chip helpers ───────────────────────────────────────────────
 
   private addToBucket(bucket: BucketName, handle: Disposable): void {
@@ -537,7 +694,15 @@ export class MapEditorScene extends Phaser.Scene {
       label: FEATURE_LABEL[f], variant: "secondary", fontSize: 10,
       onClick: () => {
         if (!this.featureChipEnabled(f)) return;
-        if (featureColumn(f) === "inside") {
+        if (f === "buildings") {
+          // BUILDINGS is a counter chip: click cycles 0 → 1 → 2 → ... → 5 → 0.
+          // The selectedFeatures set tracks the on/off; buildingsCount tracks
+          // the amount. Both flip together so the chip label can read off
+          // either source and stay consistent.
+          this.buildingsCount = (this.buildingsCount + 1) % 6;
+          if (this.buildingsCount === 0) this.selectedFeatures.delete(f);
+          else this.selectedFeatures.add(f);
+        } else if (featureColumn(f) === "inside") {
           const wasOn = this.selectedFeatures.has(f);
           this.selectedFeatures.clear();
           if (!wasOn) this.selectedFeatures.add(f);
@@ -556,7 +721,7 @@ export class MapEditorScene extends Phaser.Scene {
 
   private featureChipEnabled(f: Feature): boolean {
     if (this.selectedTerrain === null) return false;
-    return featureColumn(f) === terrainColumn(this.selectedTerrain);
+    return TERRAIN_COMPATIBLE_FEATURES[this.selectedTerrain].includes(f);
   }
 
   private refreshTerrainChips(): void {
@@ -573,6 +738,9 @@ export class MapEditorScene extends Phaser.Scene {
     for (const [f, btn] of this.featureChips) {
       const enabled = this.featureChipEnabled(f);
       const on = enabled && this.selectedFeatures.has(f);
+      if (f === "buildings") {
+        btn.setLabel(this.buildingsCount > 0 ? `BUILDINGS: ${this.buildingsCount}` : "BUILDINGS");
+      }
       if (!enabled) {
         btn.el.style.background = "#14141e";
         btn.el.style.borderColor = "#2a3340";
@@ -757,6 +925,7 @@ export class MapEditorScene extends Phaser.Scene {
       const data = await gameClient.composeMap({
         terrain: this.selectedTerrain,
         features: Array.from(this.selectedFeatures),
+        buildingsCount: this.buildingsCount > 0 ? this.buildingsCount : undefined,
       });
       if (this.statusEl) this.statusEl.textContent = "";
       this.applyPreviewData(data as MapPreviewData);
@@ -797,6 +966,9 @@ export class MapEditorScene extends Phaser.Scene {
     this.savedMapId = null;
     this.editingMapId = null;
     if (this.preview) this.preview.setData(data);
+    // Refresh the ZONES tab list against the new map's zones — without this
+    // the user has to switch tabs to see them after a generate / load.
+    this.zonePalette?.refresh();
     // Seed the editable inputs from the freshly-generated map. The user can
     // then refine before SAVE MAP commits.
     if (this.nameInput) this.nameInput.value = data.name || "";
@@ -818,6 +990,7 @@ export class MapEditorScene extends Phaser.Scene {
         terrainData: data.terrainData,
         objectData: data.objectData,
         tilesets: data.tilesets,
+        zones: data.zones,
         existingMapId: this.editingMapId ?? undefined,
       });
       this.savedMapId = mapId;
@@ -874,6 +1047,9 @@ export class MapEditorScene extends Phaser.Scene {
     if (this.nameInput) this.nameInput.value = map.name || "";
     if (this.descInput) this.descInput.value = map.description || "";
     if (this.statusEl) this.statusEl.textContent = `Editing ${map.mapId}. SAVE MAP overwrites it; GENERATE MAP starts fresh.`;
+    // Same refresh as in `applyPreviewData` — the user must see the loaded
+    // map's existing zones in the ZONES tab without having to switch tabs.
+    this.zonePalette?.refresh();
     this.refreshButtons();
   }
 
@@ -891,6 +1067,12 @@ export class MapEditorScene extends Phaser.Scene {
     if (this.statusEl)       { this.statusEl.remove();       this.statusEl       = null; }
     if (this.preview)        { this.preview.destroy();       this.preview        = null; }
     if (this.mapSelector)    { this.mapSelector.destroy();   this.mapSelector    = null; }
+    if (this.layersPanel) {
+      const c = (this.layersPanel as HTMLElement & { __cleanup?: () => void }).__cleanup;
+      if (c) c();
+      this.layersPanel.remove();
+      this.layersPanel = null;
+    }
     for (const bucket of Object.keys(this.buckets) as BucketName[]) this.disposeBucket(bucket);
     this.terrainChips.clear();
     this.featureChips.clear();

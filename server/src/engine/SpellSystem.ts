@@ -16,12 +16,17 @@ import type { GameEvent, NpcState, SpellDef, LogEntry, MonsterDef } from './type
 import { d, d20, mod } from './Dice.js';
 import { chebyshev } from './EnemyAI.js';
 import { canCastSpell } from './ActionGuards.js';
-import { startConcentration } from './ConcentrationSystem.js';
+import { startConcentration, endConcentration } from './ConcentrationSystem.js';
 import { applyEquipment } from './EquipmentSystem.js';
 import { publishNpcDamage } from './ThresholdPublisher.js';
 import { combatantDisplayName } from './CombatFlow.js';
 import { emitNoise, NOISE_SPELL_VERBAL } from './Sound.js';
+import { Logger } from '../Logger.js';
 import { canSee as visCanSee } from './Vision.js';
+import {
+  tilesInArea, playerInArea, creaturesInArea,
+  cubeSideTiles, sphereRadiusTiles, chebyshevDiscTiles,
+} from './SpellGeometry.js';
 
 /** Cover the target benefits from against the player's spell attack. */
 function visCanSeeTargetCover(ctx: GameContext, target: NpcState): 'none' | 'half' | 'three-quarters' | 'total' {
@@ -95,8 +100,22 @@ function applyDamageToNpc(
   if (resistLog) ctx.addLog(resistLog);
   const hpBefore = target.hp;
   target.hp = Math.max(0, target.hp - finalDamage);
+  Logger.log('combat.damage_dealt', {
+    target: target.id,
+    defId: target.defId,
+    raw: amount,
+    damageType,
+    effective: finalDamage,
+    hpBefore,
+    hpAfter: target.hp,
+    maxHp: target.maxHp,
+    source: 'spell',
+  });
   publishNpcDamage(ctx, target, hpBefore, target.hp);
-  if (target.hp <= 0) ctx.killWithReward(target, def, `☠ ${combatantDisplayName(target, ctx.state.npcs)} is slain!`);
+  if (target.hp <= 0) {
+    Logger.log('combat.npc_killed', { npcId: target.id, defId: target.defId, source: 'spell' });
+    ctx.killWithReward(target, def, `☠ ${combatantDisplayName(target, ctx.state.npcs)} is slain!`);
+  }
 }
 
 // ── Action-economy + slot consumption ────────────────────────────────────────
@@ -108,7 +127,10 @@ function consumeCastingResources(ctx: GameContext, spell: SpellDef, slotLevel: n
   // action — they're a fictional time cost, only legal out of combat.
   if (asRitual) return;
   if (spell.level > 0) {
-    s.player.spellSlots[spell.level - 1] = Math.max(0, (s.player.spellSlots[spell.level - 1] ?? 0) - 1);
+    const slotIdx = spell.level - 1;
+    const before = s.player.spellSlots[slotIdx] ?? 0;
+    s.player.spellSlots[slotIdx] = Math.max(0, before - 1);
+    Logger.log('spell.slot_consumed', { spellId: spell.id, level: spell.level, before, after: s.player.spellSlots[slotIdx] });
   }
   // We don't gate by slotLevel here — the picker passes spell.level by default;
   // upcast support is wired in but not yet exposed by the UI.
@@ -197,6 +219,22 @@ function resolveAttackRollSpell(
         applyDamageToNpc(ctx, target, halfDmg, spell.damage.type);
       }
     }
+    // SRD half-damage-on-miss rider (Acid Arrow). Distinct from Potent
+    // Cantrip: this is spell-authored (not feature-gated) and applies to
+    // leveled spells too. Suppresses the delayedSelfDamage rider per RAW.
+    if (spell.halfDamageOnMiss && spell.damage) {
+      const upcast = Math.max(0, slotLevel - spell.level);
+      const dice = spell.damage.dice + upcast;
+      const { total: rawDmg } = rollDamage(dice, spell.damage.sides, spell.damage.bonus ?? 0);
+      const halfDmg = Math.floor(rawDmg / 2);
+      if (halfDmg > 0) {
+        ctx.addLog({
+          left: `↪ ${spell.name} splashes — ${combatantDisplayName(target, ctx.state.npcs)} still takes ${halfDmg} ${spell.damage.type}`,
+          style: 'status',
+        });
+        applyDamageToNpc(ctx, target, halfDmg, spell.damage.type);
+      }
+    }
     return { hit: false, damageRolls: [] };
   }
 
@@ -230,6 +268,27 @@ function resolveAttackRollSpell(
     } else if (spell.id === 'shocking-grasp') {
       if (!target.conditions.includes('no-reactions')) target.conditions.push('no-reactions');
       ctx.addLog({ left: `${combatantDisplayName(target, ctx.state.npcs)} can't take Reactions until the start of its next turn`, style: 'status' });
+    }
+    // Delayed-self-damage rider (Acid Arrow). Scheduled at the end of the
+    // target's NEXT turn — `turnsRemaining = 1` so the first end-of-turn
+    // tick (in finalizeNpcTurn) decrements to 0 and fires.
+    if (spell.delayedSelfDamage && target.hp > 0) {
+      const upcast = Math.max(0, slotLevel - spell.level);
+      const damageType = spell.damage.type;
+      target.ongoingEffects.push({
+        id: `${spell.id}-${target.id}-${Date.now()}`,
+        kind: 'delayed-self-damage',
+        spellId: spell.id,
+        damageType,
+        dice: spell.delayedSelfDamage.dice + upcast,
+        sides: spell.delayedSelfDamage.sides,
+        bonus: 0,
+        turnsRemaining: 1,
+      });
+      ctx.addLog({
+        left: `${combatantDisplayName(target, ctx.state.npcs)} is coated in lingering ${damageType} (${spell.delayedSelfDamage.dice + upcast}d${spell.delayedSelfDamage.sides} at end of its next turn)`,
+        style: 'status',
+      });
     }
   }
   return { hit: true, damageRolls: rolls };
@@ -535,214 +594,365 @@ function resolveAutoHitSpell(
   return true;
 }
 
-/**
- * Compute the set of tile coordinates affected by a cone of `lengthTiles`
- * originating at `(ox, oy)` pointing toward `(targetX, targetY)`. Models a
- * SRD 5.2.1 cone (length = base diameter, ~53° total angle): at distance d along
- * the cone's axis, tiles within perpendicular distance ≤ d/2 + 0.5 are in.
- * Returns "x,y" strings for O(1) membership lookup.
- */
-function coneTileSet(
-  ox: number, oy: number,
-  targetX: number, targetY: number,
-  lengthTiles: number,
-): Set<string> {
-  let dx = targetX - ox;
-  let dy = targetY - oy;
-  const len = Math.hypot(dx, dy);
-  if (len === 0) { dx = 1; dy = 0; } else { dx /= len; dy /= len; }
-  const out = new Set<string>();
-  for (let ry = -lengthTiles; ry <= lengthTiles; ry++) {
-    for (let rx = -lengthTiles; rx <= lengthTiles; rx++) {
-      if (rx === 0 && ry === 0) continue;                      // skip origin
-      const along = rx * dx + ry * dy;                         // signed scalar projection
-      if (along <= 0 || along > lengthTiles + 0.5) continue;
-      const perp = Math.abs(-rx * dy + ry * dx);               // perpendicular distance
-      if (perp > along * 0.5 + 0.5) continue;                  // cone half-angle ~27°
-      out.add(`${ox + rx},${oy + ry}`);
-    }
-  }
-  return out;
-}
 
 /**
- * Tile-side count for a cube area whose anchor is the clicked tile (i.e. a
- * Grease-style ground-placed cube). `sizeFeet` is the cube's side length;
- * each 5 ft → 1 tile. Exported only so other helpers can derive the bounds.
- */
-function cubeSideTiles(spell: SpellDef): number {
-  const sizeFeet = spell.area?.sizeFeet ?? 5;
-  return Math.max(1, Math.ceil(sizeFeet / 5));
-}
-
-/**
- * Tile-radius for a sphere area. SRD spheres are specified by radius in
- * feet; the engine treats `sizeFeet` as the radius and rounds up to the
- * nearest 5 ft → 1 tile (5 ft = 1, 20 ft = 4). The full footprint is a
- * chebyshev disc of `2*radius + 1` tiles per side, centred on the anchor.
- */
-function sphereRadiusTiles(spell: SpellDef): number {
-  const sizeFeet = spell.area?.sizeFeet ?? 5;
-  return Math.max(1, Math.ceil(sizeFeet / 5));
-}
-
-/**
- * 3×3-style cube originating from the caster, extending in the cursor
- * direction (Thunderwave). The caster's tile is **not** in the cube. For a
- * cardinal direction the perpendicular axis spans `sideTiles` tiles centred
- * on the caster; for a diagonal direction the cube is a `sideTiles ×
- * sideTiles` block in that quadrant. With `sideTiles = 3` and direction east
- * this gives the canonical 3×3 grid touching the caster's east face.
- */
-function cubeFromCasterTiles(
-  casterX: number, casterY: number,
-  cursorX: number, cursorY: number,
-  sideTiles: number,
-): Set<string> {
-  let dx = Math.sign(cursorX - casterX);
-  let dy = Math.sign(cursorY - casterY);
-  if (dx === 0 && dy === 0) dx = 1;
-  const halfLow  = Math.floor((sideTiles - 1) / 2);
-  const halfHigh = Math.ceil((sideTiles - 1) / 2);
-  let xMin: number, xMax: number;
-  if (dx === 0)      { xMin = casterX - halfLow; xMax = casterX + halfHigh; }
-  else if (dx > 0)   { xMin = casterX + 1;       xMax = casterX + sideTiles; }
-  else               { xMin = casterX - sideTiles; xMax = casterX - 1; }
-  let yMin: number, yMax: number;
-  if (dy === 0)      { yMin = casterY - halfLow; yMax = casterY + halfHigh; }
-  else if (dy > 0)   { yMin = casterY + 1;       yMax = casterY + sideTiles; }
-  else               { yMin = casterY - sideTiles; yMax = casterY - 1; }
-  const out = new Set<string>();
-  for (let y = yMin; y <= yMax; y++) {
-    for (let x = xMin; x <= xMax; x++) out.add(`${x},${y}`);
-  }
-  return out;
-}
-
-/**
- * Chebyshev disc of `radiusTiles` around a tile centre. Used for proximity
- * checks ("within X ft of this creature") — distinct from the placed-sphere
- * rule below because the origin is a tile centre, not a grid intersection.
- */
-function chebyshevDiscTiles(centerX: number, centerY: number, radiusTiles: number): Set<string> {
-  const out = new Set<string>();
-  for (let dy = -radiusTiles; dy <= radiusTiles; dy++) {
-    for (let dx = -radiusTiles; dx <= radiusTiles; dx++) {
-      out.add(`${centerX + dx},${centerY + dy}`);
-    }
-  }
-  return out;
-}
-
-/**
- * SRD 5.2.1 placed-sphere rule: the sphere's origin is a grid-line
- * intersection (the corner shared by four tiles), and the radius extends
- * from there. On a tile grid this produces a `2 * radius` tile square
- * (5 ft sphere → 2×2 = 4 tiles, 10 ft → 4×4, 20 ft → 8×8). Convention: the
- * clicked tile is the top-left of the square, mirroring how cones and even-
- * sided cubes anchor at the click — moving the cursor one tile shifts the
- * area one tile, with no surprise mirroring across an axis.
- */
-function placedSphereTiles(intersectionX: number, intersectionY: number, radiusTiles: number): Set<string> {
-  const out = new Set<string>();
-  const side = 2 * radiusTiles;
-  for (let dy = 0; dy < side; dy++) {
-    for (let dx = 0; dx < side; dx++) {
-      out.add(`${intersectionX + dx},${intersectionY + dy}`);
-    }
-  }
-  return out;
-}
-
-/**
- * Full set of tile coordinates a spell's area covers. Single source of truth
- * for placement of "what's in the AOE" — used by the saved-creature sweep
- * and the player-in-area check. Proximity-based AOEs (Ice Knife "within
- * 5 ft of target") build their tile set inline via `chebyshevDiscTiles`
- * because the origin is a tile centre, not a grid intersection. Shapes:
+ * Persistent-zone helper: tag every creature standing in the spell's AOE at
+ * cast time with `condition`, and push a long-lived `ActiveZone` record onto
+ * `state.activeZones` so the cloud stays visible on the map until its
+ * duration expires.
  *
- *   - cone: 53° expanding triangle from caster toward `click`.
- *   - sphere + self-range: chebyshev disc centred on the caster's tile —
- *     the caster occupies a tile, so the origin is the tile centre.
- *   - sphere + placed: SRD grid-intersection rule — 2*r tiles per side,
- *     anchored at the clicked tile (top-left).
- *   - cube + self-range: `cubeFromCasterTiles` (Thunderwave — caster NOT
- *     in area).
- *   - cube + placed: anchored at the clicked tile, extends right + down
- *     for even sides (Grease) or centres for odd sides.
+ * Lifetime is decoupled from concentration — the visible zone is driven by
+ * `spell.durationRounds`, ticked down at end of round in `GameEngine`. The
+ * caster losing concentration is no longer enough to strip the cloud; that
+ * matches what players expect when they look at a Fog Cloud on the map and
+ * is the right primitive for the upcoming Spirit Guardians / Cloudkill /
+ * Wall spells, none of which want their geometry to vanish on a downstream
+ * status change.
  */
-function tilesInArea(
-  ctx: GameContext,
-  spell: SpellDef,
-  click: { x: number; y: number } | undefined,
-): Set<string> {
-  const s = ctx.state;
-  const out = new Set<string>();
-  if (!spell.area) return out;
-
-  if (spell.area.shape === 'cone') {
-    const radiusTiles = Math.max(1, Math.ceil(spell.area.sizeFeet / 5));
-    const tx = click?.x ?? s.player.tileX + 1;
-    const ty = click?.y ?? s.player.tileY;
-    return coneTileSet(s.player.tileX, s.player.tileY, tx, ty, radiusTiles);
-  }
-
-  if (spell.area.shape === 'sphere') {
-    const r = sphereRadiusTiles(spell);
-    if (spell.range === 'self') {
-      return chebyshevDiscTiles(s.player.tileX, s.player.tileY, r);
-    }
-    return placedSphereTiles(click?.x ?? s.player.tileX, click?.y ?? s.player.tileY, r);
-  }
-
-  // Cube.
-  const side = cubeSideTiles(spell);
-  if (spell.range === 'self') {
-    const tx = click?.x ?? s.player.tileX + 1;
-    const ty = click?.y ?? s.player.tileY;
-    return cubeFromCasterTiles(s.player.tileX, s.player.tileY, tx, ty, side);
-  }
-  // Click-anchored cube — Grease-style. Even sides extend right+down from
-  // the clicked tile; odd sides centre on it.
-  const cx = click?.x ?? s.player.tileX;
-  const cy = click?.y ?? s.player.tileY;
-  let xMin: number, xMax: number, yMin: number, yMax: number;
-  if (side % 2 === 1) {
-    const r = (side - 1) / 2;
-    xMin = cx - r; xMax = cx + r; yMin = cy - r; yMax = cy + r;
-  } else {
-    const offset = side - 1;
-    xMin = cx; xMax = cx + offset; yMin = cy; yMax = cy + offset;
-  }
-  for (let y = yMin; y <= yMax; y++) {
-    for (let x = xMin; x <= xMax; x++) out.add(`${x},${y}`);
-  }
-  return out;
-}
-
-/** True when the player's tile sits inside the spell's AOE. */
-function playerInArea(
-  ctx: GameContext,
-  spell: SpellDef,
-  click: { x: number; y: number } | undefined,
-): boolean {
-  const s = ctx.state;
-  const tiles = tilesInArea(ctx, spell, click);
-  return tiles.has(`${s.player.tileX},${s.player.tileY}`);
-}
-
-/**
- * Living NPCs in a spell's area. Routes through `tilesInArea` so every
- * AOE-shape rule lives in one place. Includes allies — AOE spells like
- * Burning Hands are indiscriminate per SRD.
- */
-function creaturesInArea(
+function applyZoneCondition(
   ctx: GameContext,
   spell: SpellDef,
   tile: { x: number; y: number } | undefined,
-): NpcState[] {
-  const tiles = tilesInArea(ctx, spell, tile);
-  return ctx.state.npcs.filter((n) => n.hp > 0 && tiles.has(`${n.tileX},${n.tileY}`));
+  condition: string,
+  effectLabel: string,
+  tintHex?: string,
+): void {
+  const s = ctx.state;
+  if (!tile) {
+    ctx.addLog({ left: `${spell.name}: no target tile`, style: 'miss' });
+    return;
+  }
+  const inArea = creaturesInArea(ctx, spell, tile);
+  for (const t of inArea) {
+    if (!t.conditions.includes(condition)) t.conditions.push(condition);
+  }
+  const casterIn = playerInArea(ctx, spell, tile);
+  if (casterIn && !s.player.conditions.includes(condition)) {
+    s.player.conditions.push(condition);
+  }
+  registerActiveZone(ctx, spell, tile, condition, tintHex);
+  // Mark the zone with every creature it just tagged, so the end-of-zone
+  // cleanup can strip the condition even from creatures that have since
+  // been pushed / teleported outside the original tile set.
+  const z = s.activeZones?.[s.activeZones.length - 1];
+  if (z) {
+    for (const t of inArea) if (!z.affectedNpcIds.includes(t.id)) z.affectedNpcIds.push(t.id);
+    if (casterIn) z.affectedPlayer = true;
+  }
+  const total = inArea.length + (casterIn ? 1 : 0);
+  ctx.addLog({
+    left: `${ctx.playerDef.name} casts ${spell.name} — ${total} creature(s) ${effectLabel}`,
+    style: 'status',
+  });
+}
+
+/**
+ * Persistent-zone helper with a save (Web). Each creature in the area rolls
+ * `saveAbility` vs the spell save DC; on failure, `condition` is applied
+ * AND the zone is registered on `state.activeZones` so the visual stays up
+ * until the duration expires. See `applyZoneCondition` for the lifetime
+ * model. SRD "first time entering on a turn" re-tagging is still TBD;
+ * creatures present at cast time get the save today.
+ */
+function applyZoneSave(
+  ctx: GameContext,
+  spell: SpellDef,
+  tile: { x: number; y: number } | undefined,
+  saveAbility: 'str' | 'dex' | 'con' | 'int' | 'wis' | 'cha',
+  condition: string,
+  effectLabel: string,
+): void {
+  const s = ctx.state;
+  if (!tile) {
+    ctx.addLog({ left: `${spell.name}: no target tile`, style: 'miss' });
+    return;
+  }
+  const inArea = creaturesInArea(ctx, spell, tile);
+  const dc = spellSaveDC(ctx);
+  ctx.addLog({
+    left: `${ctx.playerDef.name} casts ${spell.name} (${saveAbility.toUpperCase()} save DC ${dc})`,
+    style: 'header',
+  });
+  let affected = 0;
+  for (const t of inArea) {
+    const def = ctx.resolveMonsterDef(t.defId);
+    if (!def) continue;
+    const saveBonus = npcSaveMod(t, def, saveAbility);
+    const roll = d20();
+    const total = roll + saveBonus;
+    const success = total >= dc;
+    if (!success && !t.conditions.includes(condition)) {
+      t.conditions.push(condition);
+      affected++;
+    }
+    ctx.addLog({
+      left: `${combatantDisplayName(t, ctx.state.npcs)} ${success ? 'breaks free' : effectLabel}`,
+      right: `${saveAbility.toUpperCase()} d20(${roll})+${saveBonus}=${total} vs DC ${dc}`,
+      style: success ? 'normal' : 'status',
+    });
+  }
+  // Player in area too — roll the save inline (no damage, so we don't
+  // route through rollPlayerSaveAndDamage which requires a damage type).
+  if (playerInArea(ctx, spell, tile)) {
+    const dc = spellSaveDC(ctx);
+    const abMod = mod(ctx.playerDef[saveAbility]);
+    const profBonus = ctx.playerDef.savingThrowProficiencies.includes(saveAbility)
+      ? ctx.playerDef.proficiencyBonus
+      : 0;
+    const saveBonus = abMod + profBonus;
+    const roll = d20();
+    const total = roll + saveBonus;
+    const success = total >= dc;
+    if (!success && !s.player.conditions.includes(condition)) {
+      s.player.conditions.push(condition);
+      affected++;
+    }
+    ctx.addLog({
+      left: `${ctx.playerDef.name} ${success ? 'breaks free' : effectLabel}`,
+      right: `${saveAbility.toUpperCase()} d20(${roll})+${saveBonus}=${total} vs DC ${dc}`,
+      style: success ? 'normal' : 'status',
+    });
+  }
+  registerActiveZone(ctx, spell, tile, condition);
+  // Same affected-id tracking as `applyZoneCondition` — see comment there.
+  const zoneAdded = s.activeZones?.[s.activeZones.length - 1];
+  if (zoneAdded) {
+    for (const t of inArea) {
+      if (t.conditions.includes(condition) && !zoneAdded.affectedNpcIds.includes(t.id)) {
+        zoneAdded.affectedNpcIds.push(t.id);
+      }
+    }
+    if (s.player.conditions.includes(condition) && playerInArea(ctx, spell, tile)) {
+      zoneAdded.affectedPlayer = true;
+    }
+  }
+  void affected;
+}
+
+/**
+ * Push an `ActiveZone` record onto the session state. Idempotent on
+ * (`spellId`, `casterId`) — recasting the same spell replaces the prior
+ * entry. The zone outlives the caster's concentration (per the user's
+ * explicit ruling); lifetime is whatever the spell's `durationRounds`
+ * dictates, and the engine's end-of-round tick decrements it.
+ */
+function registerActiveZone(
+  ctx: GameContext,
+  spell: SpellDef,
+  tile: { x: number; y: number },
+  condition: string | undefined,
+  tintHex?: string,
+  enterSave?: { ability: 'str' | 'dex' | 'con' | 'int' | 'wis' | 'cha'; dc: number },
+): void {
+  if (!spell.area) return;
+  const s = ctx.state;
+  s.activeZones = s.activeZones ?? [];
+  const tilesSet = tilesInArea(ctx, spell, tile);
+  const tiles: Array<[number, number]> = Array.from(tilesSet).map((k) => {
+    const [x, y] = k.split(',').map(Number);
+    return [x, y] as [number, number];
+  });
+  const isSelfAnchored = spell.range === 'self';
+  const origin = isSelfAnchored
+    ? { x: s.player.tileX, y: s.player.tileY }
+    : { x: tile.x, y: tile.y };
+  const target = (spell.area.shape === 'cone' || spell.area.shape === 'line') && !isSelfAnchored
+    ? { x: tile.x, y: tile.y }
+    : isSelfAnchored
+      ? { x: tile.x, y: tile.y }
+      : undefined;
+  const zone = {
+    id: ctx.uid(),
+    spellId: spell.id,
+    name: spell.name,
+    shape: spell.area.shape,
+    sizeFeet: spell.area.sizeFeet,
+    originX: origin.x,
+    originY: origin.y,
+    targetX: target?.x,
+    targetY: target?.y,
+    tiles,
+    condition,
+    enterSave,
+    difficultTerrain: spell.id === 'web' || spell.id === 'grease',
+    affectedNpcIds: [] as string[],
+    affectedPlayer: false,
+    roundsRemaining: Math.max(1, spell.durationRounds ?? 10),
+    casterId: 'player',
+    tintHex,
+  };
+  // Concentration spells (Fog Cloud, Web, Darkness, Silent Image) sustain
+  // only one instance at a time — recasting drops the prior. Non-
+  // concentration ground zones (Grease, Minor Illusion) stack: each cast
+  // pushes a new zone with its own duration timer and tile-set, so the
+  // player can lay multiple patches of Grease across the map.
+  if (spell.concentration) {
+    s.activeZones = s.activeZones.filter((z) => !(z.spellId === spell.id && z.casterId === 'player'));
+  }
+  s.activeZones.push(zone);
+}
+
+/**
+ * SRD Web-style enter-save: roll the zone's `enterSave` against a creature
+ * that is standing in a zone tile and doesn't already carry the zone's
+ * condition. Fires at the start of an NPC's turn (so "starts its turn there"
+ * is covered) and after the player moves into a new tile. Caller is
+ * responsible for skipping creatures that have already been checked this
+ * turn (we lean on the "doesn't already carry" gate as a cheap idempotency
+ * check — once Restrained you stay Restrained until you break free).
+ */
+export function tickZoneEnterSaves(ctx: GameContext, subjectId: 'player' | string): void {
+  const s = ctx.state;
+  if (!s.activeZones || s.activeZones.length === 0) return;
+  const subject = subjectId === 'player'
+    ? { tileX: s.player.tileX, tileY: s.player.tileY, conditions: s.player.conditions, displayName: ctx.playerDef.name, def: null as null, isPlayer: true as const }
+    : (() => {
+        const npc = s.npcs.find((n) => n.id === subjectId && n.hp > 0);
+        if (!npc) return null;
+        const def = ctx.resolveMonsterDef(npc.defId);
+        return { tileX: npc.tileX, tileY: npc.tileY, conditions: npc.conditions, displayName: combatantDisplayName(npc, s.npcs), def, isPlayer: false as const, npc };
+      })();
+  if (!subject) return;
+  for (const z of s.activeZones) {
+    if (!z.enterSave || !z.condition) continue;
+    const inside = new Set(z.tiles.map(([x, y]) => `${x},${y}`));
+    if (!inside.has(`${subject.tileX},${subject.tileY}`)) continue;
+    if (subject.conditions.includes(z.condition)) continue;
+    const ability = z.enterSave.ability;
+    const dc = z.enterSave.dc;
+    let saveBonus: number;
+    if (subject.isPlayer) {
+      const abMod = mod(ctx.playerDef[ability]);
+      const profBonus = ctx.playerDef.savingThrowProficiencies.includes(ability) ? ctx.playerDef.proficiencyBonus : 0;
+      saveBonus = abMod + profBonus;
+    } else {
+      const def = subject.def;
+      if (!def) continue;
+      saveBonus = (def.savingThrows && def.savingThrows[ability] !== undefined) ? def.savingThrows[ability] : mod(def[ability]);
+    }
+    const roll = d20();
+    const total = roll + saveBonus;
+    const success = total >= dc;
+    ctx.addLog({
+      left: `${subject.displayName} ${success ? 'avoids' : 'is caught by'} ${z.name}`,
+      right: `${ability.toUpperCase()} d20(${roll})+${saveBonus}=${total} vs DC ${dc}`,
+      style: success ? 'normal' : 'status',
+    });
+    if (!success) {
+      if (subject.isPlayer) {
+        if (!s.player.conditions.includes(z.condition)) s.player.conditions.push(z.condition);
+        z.affectedPlayer = true;
+      } else {
+        if (!subject.npc.conditions.includes(z.condition)) subject.npc.conditions.push(z.condition);
+        if (!z.affectedNpcIds.includes(subject.npc.id)) z.affectedNpcIds.push(subject.npc.id);
+      }
+    }
+  }
+}
+
+/** Pure helper: strip every condition this zone applied from the creatures
+ *  it touched (regardless of where they're now standing). Used by the zone-
+ *  expiry, concentration-end, and Gust-of-Wind dispersal paths so a creature
+ *  that was Restrained by Web doesn't carry the condition forever just
+ *  because the engine couldn't observe a current overlap. */
+function stripZoneAffectedConditions(ctx: GameContext, zone: { condition?: string; affectedNpcIds: string[]; affectedPlayer: boolean }): void {
+  if (!zone.condition) return;
+  const s = ctx.state;
+  for (const id of zone.affectedNpcIds) {
+    const npc = s.npcs.find((n) => n.id === id);
+    if (!npc) continue;
+    npc.conditions = npc.conditions.filter((c) => c !== zone.condition);
+  }
+  if (zone.affectedPlayer) {
+    s.player.conditions = s.player.conditions.filter((c) => c !== zone.condition);
+  }
+}
+
+/**
+ * SRD Gust of Wind end-of-turn save. Walk every Gust zone the player is
+ * sustaining; any creature ending its turn on a zone tile rolls a fresh
+ * STR save against the original DC and is pushed 15 ft away from the
+ * caster on a failure. The caster's `spellSaveDC` at cast time is the
+ * authoritative DC; we recompute here to keep the function self-contained.
+ *
+ * Caller passes the subject id (`'player'` or an NPC id). Idempotent — a
+ * creature pushed clear of the zone in this tick won't keep re-rolling.
+ */
+export function runGustOfWindEndOfTurnSaves(ctx: GameContext, subjectId: 'player' | string): void {
+  const s = ctx.state;
+  if (!s.activeZones || s.activeZones.length === 0) return;
+  const gustZones = s.activeZones.filter((z) => z.spellId === 'gust-of-wind');
+  if (gustZones.length === 0) return;
+  const dc = spellSaveDC(ctx);
+  if (subjectId === 'player') {
+    for (const z of gustZones) {
+      const inside = new Set(z.tiles.map(([x, y]) => `${x},${y}`));
+      if (!inside.has(`${s.player.tileX},${s.player.tileY}`)) continue;
+      const abMod = mod(ctx.playerDef.str);
+      const profBonus = ctx.playerDef.savingThrowProficiencies.includes('str') ? ctx.playerDef.proficiencyBonus : 0;
+      const saveBonus = abMod + profBonus;
+      const roll = d20();
+      const total = roll + saveBonus;
+      const success = total >= dc;
+      ctx.addLog({
+        left: `${ctx.playerDef.name} ${success ? 'braces against' : 'is shoved by'} the Gust of Wind`,
+        right: `STR d20(${roll})+${saveBonus}=${total} vs DC ${dc}`,
+        style: success ? 'normal' : 'status',
+      });
+      // No engine pushPlayerAway helper today — the SRD direction is "away
+      // from caster", but the caster IS the player here, so any push is a
+      // no-op. Log only.
+    }
+    return;
+  }
+  const npc = s.npcs.find((n) => n.id === subjectId && n.hp > 0);
+  if (!npc) return;
+  const def = ctx.resolveMonsterDef(npc.defId);
+  if (!def) return;
+  for (const z of gustZones) {
+    const inside = new Set(z.tiles.map(([x, y]) => `${x},${y}`));
+    if (!inside.has(`${npc.tileX},${npc.tileY}`)) continue;
+    const saveBonus = (def.savingThrows && def.savingThrows['str'] !== undefined)
+      ? def.savingThrows['str']
+      : mod(def.str);
+    const roll = d20();
+    const total = roll + saveBonus;
+    const success = total >= dc;
+    ctx.addLog({
+      left: `${combatantDisplayName(npc, s.npcs)} ${success ? 'braces against' : 'is shoved by'} the Gust of Wind`,
+      right: `STR d20(${roll})+${saveBonus}=${total} vs DC ${dc}`,
+      style: success ? 'normal' : 'status',
+    });
+    if (!success) pushNpcAway(ctx, npc, 15);
+  }
+}
+
+/**
+ * End-of-round tick. Decrement `roundsRemaining` on every active zone and
+ * remove expired ones. When a zone expires, strip its `condition` from any
+ * creature still standing inside its tile set — that's the only condition
+ * source the zone owns, so creatures outside the cloud are unaffected.
+ *
+ * Called from `enterPlayerTurn` (one tick per combat round) and from
+ * `WorldTick.runOffCameraTick` (one tick per 6-second real-time interval
+ * during exploration). Both paths are idempotent under no-zones.
+ */
+export function tickActiveZones(ctx: GameContext): void {
+  const s = ctx.state;
+  if (!s.activeZones || s.activeZones.length === 0) return;
+  const expired: typeof s.activeZones = [];
+  const survived: typeof s.activeZones = [];
+  for (const z of s.activeZones) {
+    z.roundsRemaining -= 1;
+    if (z.roundsRemaining <= 0) expired.push(z);
+    else survived.push(z);
+  }
+  if (expired.length === 0) return;
+  s.activeZones = survived;
+  for (const z of expired) {
+    stripZoneAffectedConditions(ctx, z);
+    ctx.addLog({ left: `${z.name} fades`, style: 'status' });
+  }
 }
 
 /**
@@ -846,6 +1056,22 @@ function resolveHpPoolSpell(
     for (const c of conds) {
       if (!t.conditions.includes(c)) t.conditions.push(c);
     }
+    // SRD Color Spray: "until the end of your next turn". Schedule the
+    // condition strip via the existing ongoingEffects pipeline so the
+    // end-of-player-turn tick in CombatFlow lifts it after two end-of-turn
+    // hooks fire (this turn's end → 2→1, next turn's end → 1→0 → strip).
+    if (spell.durationRounds === 1 && conds.length > 0) {
+      t.ongoingEffects = t.ongoingEffects ?? [];
+      for (const c of conds) {
+        t.ongoingEffects.push({
+          id: ctx.uid(),
+          kind: 'spell-condition',
+          spellId: spell.id,
+          condition: c,
+          turnsRemaining: 2,
+        });
+      }
+    }
     ctx.addLog({
       left: `${combatantDisplayName(t, ctx.state.npcs)} ${conditionLogText(spell, conds)}`,
       right: `pool ${remaining + t.hp} − ${t.hp} = ${remaining}`,
@@ -908,6 +1134,16 @@ function resolveSaveSpell(
   }
 
   if (targets.length === 0 && !playerHit) {
+    // Ground-zone spells (Grease, Silent Image, …) succeed even on empty
+    // terrain — the zone is the point, and creatures who step in later
+    // trigger the save during movement. `doCastSpell` auto-registers the
+    // zone in its tail block; we just need to return success here so the
+    // slot consumes and concentration starts.
+    const isGroundZone = !!spell.area && (spell.id === 'grease' || spell.id === 'silent-image' || spell.id === 'minor-illusion');
+    if (isGroundZone) {
+      ctx.addLog({ left: `${ctx.playerDef.name} casts ${spell.name}`, style: 'header' });
+      return true;
+    }
     ctx.addLog({ left: `${ctx.playerDef.name} casts ${spell.name} — no creatures in area`, style: 'miss' });
     return false;
   }
@@ -959,6 +1195,23 @@ function resolveSaveSpell(
       for (const c of conds) {
         if (!target.conditions.includes(c)) target.conditions.push(c);
       }
+      // Bounded-duration condition spells (Color Spray "until end of your
+      // next turn") schedule an ongoingEffect so the end-of-player-turn
+      // tick strips the condition. Long-duration spells (Sleep
+      // concentration) don't fall into this branch — their `durationRounds`
+      // is well above 1.
+      if (!success && spell.durationRounds === 1 && conds.length > 0) {
+        target.ongoingEffects = target.ongoingEffects ?? [];
+        for (const c of conds) {
+          target.ongoingEffects.push({
+            id: ctx.uid(),
+            kind: 'spell-condition',
+            spellId: spell.id,
+            condition: c,
+            turnsRemaining: 2,
+          });
+        }
+      }
       // US-092: Charm Person additionally flips the target's social Attitude
       // to Friendly while charmed, satisfying the SRD Charmed condition's
       // "Social Advantage" branch (the charmer has Advantage on Influence-type
@@ -974,6 +1227,17 @@ function resolveSaveSpell(
         style: success ? 'normal' : 'status',
       });
       if (!success && conds.length > 0) anyAffected = true;
+    } else if (spell.push) {
+      // Save vs. push only — no damage, no condition (Gust of Wind).
+      ctx.addLog({
+        left: `${combatantDisplayName(target, ctx.state.npcs)} ${success ? 'resists' : 'is pushed by ' + spell.name}`,
+        right: `d20(${roll})+${saveBonus}=${total} vs DC ${dc}`,
+        style: success ? 'normal' : 'status',
+      });
+      if (!success && target.hp > 0) {
+        pushNpcAway(ctx, target, spell.push.feet);
+        anyAffected = true;
+      }
     }
   }
   // Player in the AOE — roll the save, apply damage through the central
@@ -1036,6 +1300,14 @@ function resolveSingleTargetSaveSpell(
     for (const c of conds) {
       if (!target.conditions.includes(c)) target.conditions.push(c);
     }
+    // SRD Ray of Enfeeblement: on a successful save, the target still has
+    // Disadvantage on its next attack roll until the start of the caster's
+    // next turn. The engine's existing `vexed` condition covers this exact
+    // semantic (one-shot attack-roll Disadvantage that expires at end of
+    // the affected creature's own turn).
+    if (success && spell.id === 'ray-of-enfeeblement') {
+      if (!target.conditions.includes('vexed')) target.conditions.push('vexed');
+    }
     ctx.addLog({
       left: `${combatantDisplayName(target, ctx.state.npcs)} ${success ? 'resists' : conditionLogText(spell, conds)}`,
       right: `d20(${roll})+${saveBonus}=${total} vs DC ${dc}`,
@@ -1055,7 +1327,7 @@ function resolveSingleTargetSaveSpell(
   }
 }
 
-function resolveUtilitySpell(ctx: GameContext, spell: SpellDef, tile?: { x: number; y: number }): void {
+function resolveUtilitySpell(ctx: GameContext, spell: SpellDef, slotLevel: number, tile?: { x: number; y: number }, targetIds?: string[], abilityChoice?: 'str' | 'dex' | 'con' | 'int' | 'wis' | 'cha'): void {
   // No roll; just narrate. Specific lasting effects (Mage Armor, Shield as
   // reaction) handled by spell-id switch — kept here, not as separate files,
   // since each is one-line semantic flag flips.
@@ -1133,36 +1405,171 @@ function resolveUtilitySpell(ctx: GameContext, spell: SpellDef, tile?: { x: numb
       s.player.jumpMultiplier = 3;
       ctx.addLog({ left: `${ctx.playerDef.name} casts Jump — jump distance ×3 for 1 minute`, style: 'status' });
       break;
-    case 'fog-cloud': {
-      // SRD: 20-ft-radius Sphere of Heavily Obscured fog at the chosen point.
-      // We don't model persistent vision-zone geometry yet, so apply the
-      // `heavily-obscured` condition to every creature standing in the
-      // sphere at cast time. `endConcentration` strips it when the spell
-      // ends. Mobile creatures stepping in/out are not updated — a known
-      // limitation until per-tile obscurance zones land.
-      if (!tile) {
-        ctx.addLog({ left: `${spell.name}: no target tile`, style: 'miss' });
+    case 'magic-weapon': {
+      // SRD: +1 to attack and damage with a touched nonmagical weapon for
+      // 1 hour. Higher-level upcasts grant +2 (L3-5) or +3 (L6+). The
+      // bonus rides on PlayerAttack via applyEquipment.
+      const bonus = slotLevel >= 6 ? 3 : slotLevel >= 3 ? 2 : 1;
+      s.player.magicWeaponBonus = bonus;
+      applyEquipment(ctx.playerDef, s.player.equippedSlots, ctx.defs.equipment, s.player.mageArmor, s.player.shieldActive, bonus);
+      ctx.addLog({ left: `${ctx.playerDef.name} casts Magic Weapon — +${bonus} to attack and damage for 1 hour`, style: 'status' });
+      break;
+    }
+    case 'see-invisibility':
+      // SRD: see invisible creatures and the Ethereal Plane for 1 hour.
+      s.player.seeInvisible = true;
+      ctx.addLog({ left: `${ctx.playerDef.name} casts See Invisibility — sees Invisible creatures for 1 hour`, style: 'status' });
+      break;
+    case 'darkvision':
+      // SRD: target gains Darkvision 150 ft for 8 hours. Touch-self in our
+      // single-character implementation. Writes to playerDef.senses so the
+      // Vision module's effective-PP calculations factor it in.
+      if (!ctx.playerDef.senses) ctx.playerDef.senses = {};
+      ctx.playerDef.senses.darkvision = Math.max(ctx.playerDef.senses.darkvision ?? 0, 150);
+      ctx.addLog({ left: `${ctx.playerDef.name} casts Darkvision — Darkvision 150 ft for 8 hours`, style: 'status' });
+      break;
+    case 'blur':
+      // SRD: attackers have Disadvantage on attack rolls against you
+      // (Concentration). Apply the `blurred` condition to the caster;
+      // endConcentration strips it when the spell ends.
+      if (!s.player.conditions.includes('blurred')) s.player.conditions.push('blurred');
+      ctx.addLog({ left: `${ctx.playerDef.name} casts Blur — attackers have Disadvantage`, style: 'status' });
+      break;
+    case 'mirror-image': {
+      // SRD: three illusory duplicates appear in your space. Set the counter
+      // to 3; the damage path (applyEnemyHitToPlayer) handles the per-hit
+      // d6-per-duplicate roll and decrements on absorb. Re-casting refreshes
+      // back to 3 even if some images remain.
+      s.player.mirrorImages = 3;
+      ctx.addLog({ left: `${ctx.playerDef.name} casts Mirror Image — three duplicates shimmer into being`, style: 'status' });
+      break;
+    }
+    case 'invisibility': {
+      // SRD: a creature you touch has the Invisible condition until the
+      // spell ends. Ends early when the target makes an attack roll, deals
+      // damage, or casts a spell. Concentration up to 1 hour.
+      // Target is `targetIds[0]` (NPC) or the caster (self-cast → empty
+      // targetIds). The caster's `invisibilityTargetId` is set so the
+      // attack-resolution paths know which creature to watch for the
+      // end-on-attack trigger; concentration end strips the condition and
+      // clears the field.
+      const tid = targetIds?.[0];
+      if (tid) {
+        const target = s.npcs.find((n) => n.id === tid && n.hp > 0);
+        if (!target) { ctx.addLog({ left: `${spell.name}: invalid target`, style: 'miss' }); break; }
+        if (!target.conditions.includes('invisible')) target.conditions.push('invisible');
+        s.player.invisibilityTargetId = target.id;
+        ctx.addLog({ left: `${ctx.playerDef.name} casts Invisibility on ${target.revealedName ?? target.name}`, style: 'status' });
+      } else {
+        if (!s.player.conditions.includes('invisible')) s.player.conditions.push('invisible');
+        s.player.invisibilityTargetId = 'player';
+        ctx.addLog({ left: `${ctx.playerDef.name} casts Invisibility on themselves — they vanish`, style: 'status' });
+      }
+      break;
+    }
+    case 'misty-step': {
+      // SRD: bonus action, teleport up to 30 ft to an unoccupied tile you
+      // can see. We validate range (Chebyshev distance ≤ rangeFeet/5),
+      // passability (the target tile must be passable), and that the tile
+      // is not occupied by another creature. Failures abort the cast
+      // BEFORE consumeCastingResources has returned — but at this point the
+      // bonus action is already spent. We log the failure and return; the
+      // bonus action remains spent as the SRD penalty for an aborted cast.
+      if (!spell.selfTeleport) { ctx.addLog({ left: `${spell.name} is missing selfTeleport metadata`, style: 'miss' }); break; }
+      if (!tile) { ctx.addLog({ left: `${spell.name}: no target tile`, style: 'miss' }); break; }
+      const rangeTiles = Math.max(1, Math.ceil(spell.selfTeleport.rangeFeet / 5));
+      const dx = Math.abs(tile.x - s.player.tileX);
+      const dy = Math.abs(tile.y - s.player.tileY);
+      if (Math.max(dx, dy) > rangeTiles) {
+        ctx.addLog({ left: `${spell.name} — destination is out of range (${spell.selfTeleport.rangeFeet} ft)`, style: 'miss' });
         break;
       }
-      const inArea = creaturesInArea(ctx, spell, tile);
-      for (const t of inArea) {
-        if (!t.conditions.includes('heavily-obscured')) t.conditions.push('heavily-obscured');
+      const { cols, rows, passable } = s.map;
+      if (tile.x < 0 || tile.x >= cols || tile.y < 0 || tile.y >= rows || !passable[tile.y][tile.x]) {
+        ctx.addLog({ left: `${spell.name} — destination is impassable`, style: 'miss' });
+        break;
       }
-      const casterIn = playerInArea(ctx, spell, tile);
-      if (casterIn && !s.player.conditions.includes('heavily-obscured')) {
-        s.player.conditions.push('heavily-obscured');
+      const occupied = s.npcs.some((n) => n.hp > 0 && n.tileX === tile.x && n.tileY === tile.y);
+      if (occupied) {
+        ctx.addLog({ left: `${spell.name} — destination is occupied`, style: 'miss' });
+        break;
       }
-      const total = inArea.length + (casterIn ? 1 : 0);
+      const fromX = s.player.tileX;
+      const fromY = s.player.tileY;
+      s.player.tileX = tile.x;
+      s.player.tileY = tile.y;
       ctx.addLog({
-        left: `${ctx.playerDef.name} casts Fog Cloud — ${total} creature(s) Heavily Obscured`,
+        left: `${ctx.playerDef.name} teleports — (${fromX},${fromY}) → (${tile.x},${tile.y})`,
         style: 'status',
       });
+      break;
+    }
+    case 'fog-cloud': {
+      // SRD: 20-ft-radius Sphere of Heavily Obscured fog at the chosen point.
+      // `applyZoneCondition` tags every creature in the sphere at cast time
+      // AND pushes an `ActiveZone` onto the state so the cloud is visible
+      // on the map and persists for the spell's duration — independent of
+      // the caster's concentration, per the project ruling on AOE
+      // persistence. Mobile creatures stepping in/out mid-spell are still
+      // a known gap until the re-tag-on-enter hook lands.
+      applyZoneCondition(ctx, spell, tile, 'heavily-obscured', 'Heavily Obscured', '#c8d0d6');
+      break;
+    }
+    case 'darkness': {
+      // SRD: 15-ft-radius Sphere of magical Darkness for the duration.
+      // Same shape as Fog Cloud (heavily-obscured) but rendered in near-black
+      // so the player can tell the two clouds apart at a glance. Persists
+      // for the spell's duration regardless of concentration.
+      applyZoneCondition(ctx, spell, tile, 'heavily-obscured', 'Heavily Obscured (Darkness)', '#1a1a22');
+      break;
+    }
+    case 'web': {
+      // SRD: 20-ft Cube of webs. Each creature in the area at cast time
+      // (and the first time it enters / starts its turn there) makes a
+      // DEX save vs spell save DC; on failure it is Restrained. The
+      // cast-time save is rolled inline by `applyZoneSave`; the enter
+      // check is driven by `tickZoneEnterSaves` below, called from the
+      // NPC-turn-start hook so a creature wading into the web mid-spell
+      // also rolls.
+      applyZoneSave(ctx, spell, tile, 'dex', 'restrained', 'Restrained (Web)');
+      // Stamp the enter-save info onto the just-pushed zone so
+      // `tickZoneEnterSaves` knows what to roll. The zone is the last
+      // entry in `state.activeZones`.
+      const z = ctx.state.activeZones?.[ctx.state.activeZones.length - 1];
+      if (z && z.spellId === 'web') {
+        z.enterSave = { ability: 'dex', dc: spellSaveDC(ctx) };
+      }
+      break;
+    }
+    case 'enhance-ability': {
+      // SRD: touch a willing creature, choose Bear's Endurance / Bull's
+      // Strength / Cat's Grace / Eagle's Splendor / Fox's Cunning /
+      // Owl's Wisdom. The chosen creature gains Advantage on ability
+      // checks of the corresponding ability score for the duration.
+      // Single-character implementation: self-target only. Engine reads
+      // `s.player.enhancedAbility` when rolling ability checks; cleanup
+      // on concentration-end clears the flag. The ability pick rides on
+      // the cast action's `abilityChoice`; defaults to STR if missing.
+      const pick = abilityChoice ?? spell.abilityChoices?.[0] ?? 'str';
+      s.player.enhancedAbility = pick;
+      const variant = ENHANCE_ABILITY_VARIANTS[pick] ?? pick.toUpperCase();
+      ctx.addLog({ left: `${ctx.playerDef.name} casts Enhance Ability (${variant}) — Advantage on ${pick.toUpperCase()} ability checks`, style: 'status' });
       break;
     }
     default:
       ctx.addLog({ left: `${ctx.playerDef.name} casts ${spell.name}`, style: 'status' });
   }
 }
+
+/** SRD Enhance Ability — per-ability flavour names for the log line. */
+const ENHANCE_ABILITY_VARIANTS: Record<string, string> = {
+  str: "Bull's Strength",
+  dex: "Cat's Grace",
+  con: "Bear's Endurance",
+  int: "Fox's Cunning",
+  wis: "Owl's Wisdom",
+  cha: "Eagle's Splendor",
+};
 
 // ── Entry point ─────────────────────────────────────────────────────────────
 
@@ -1232,6 +1639,8 @@ export function doCastSpell(
   asRitual: boolean,
   events: GameEvent[],
   damageTypeChoice?: string,
+  onFailChoice?: string,
+  abilityChoice?: 'str' | 'dex' | 'con' | 'int' | 'wis' | 'cha',
 ): void {
   const baseSpell = ctx.defs.spells.find((sp) => sp.id === spellId);
   if (!baseSpell) return;
@@ -1247,6 +1656,16 @@ export function doCastSpell(
       ? damageTypeChoice
       : fallback;
     spell = { ...baseSpell, damage: { ...baseSpell.damage, type: picked } };
+  }
+  // SRD onFailChoice (Blindness/Deafness — caster picks Blinded or Deafened).
+  // The cast can pass a `onFailChoice` from the cast action; the engine
+  // narrows `effect.onFail` to the chosen condition before resolution. If
+  // the pick is missing or invalid, default to the first option.
+  if (baseSpell.onFailChoice && baseSpell.onFailChoice.length > 0) {
+    const picked = onFailChoice && baseSpell.onFailChoice.includes(onFailChoice)
+      ? onFailChoice
+      : baseSpell.onFailChoice[0];
+    spell = { ...spell, effect: { ...(spell.effect ?? {}), onFail: picked } };
   }
 
   // Ritual casting has its own eligibility rules: spell must have the Ritual
@@ -1351,6 +1770,10 @@ export function doCastSpell(
       return;
     }
     ctx.addLog({ left: `${ctx.playerDef.name} casts ${spell.name} — ${summoned.name} appears`, style: 'status' });
+    // Concentration-bound summons (Flaming Sphere) need to start
+    // concentration here — the bottom-of-function check is skipped
+    // because the summon branch returns early.
+    if (spell.concentration) startConcentration(ctx, spell.id);
     return;
   }
 
@@ -1367,18 +1790,39 @@ export function doCastSpell(
     }
   } else if (spell.attack === 'ranged-spell' || spell.attack === 'melee-spell') {
     if (preResolvedTarget) {
-      const result = resolveAttackRollSpell(ctx, spell, preResolvedTarget, slotLevel);
-      anyEffect = result.hit;
-      // On-hit save (Ray of Sickness): rolls a save against the same target
-      // when the attack landed and the spell carries `save + effect` but no
-      // area. Independent of the secondary-AOE path below.
-      if (result.hit && spell.save && spell.effect && !spell.area) {
-        if (resolveOnHitSave(ctx, spell, preResolvedTarget)) anyEffect = true;
+      // SRD Scorching Ray and similar multi-roll attack spells (`attackCount`)
+      // make N independent ranged spell attacks. Each ray rolls its own
+      // d20 + damage. Per-ray re-targeting: when the client sends a
+      // `targetIds` array of length ≥ 2, each ray fires at the matching
+      // index (Ray 1 → targetIds[0], Ray 2 → targetIds[1], …); extras pile
+      // onto the last entry. With no array (or length 1) every ray hits
+      // `preResolvedTarget` — the legacy single-target behaviour. Upcasting
+      // adds one ray per slot level above the spell's base level per SRD.
+      const baseCount = spell.attackCount ?? 1;
+      const totalCount = baseCount + (spell.attackCount ? Math.max(0, slotLevel - spell.level) : 0);
+      let hitsAny = false;
+      const resolveRayTarget = (i: number): NpcState | null => {
+        if (!targetIds || targetIds.length <= 1) return preResolvedTarget;
+        const id = targetIds[Math.min(i, targetIds.length - 1)];
+        const t = ctx.state.npcs.find((n) => n.id === id && n.hp > 0 && n.disposition !== 'ally');
+        return t ?? preResolvedTarget;
+      };
+      for (let i = 0; i < totalCount; i++) {
+        const rayTarget = resolveRayTarget(i);
+        if (!rayTarget || rayTarget.hp <= 0) continue;
+        if (totalCount > 1) ctx.addLog({ left: `── Ray ${i + 1} of ${totalCount} → ${combatantDisplayName(rayTarget, ctx.state.npcs)} ──`, style: 'normal' });
+        const result = resolveAttackRollSpell(ctx, spell, rayTarget, slotLevel);
+        if (result.hit) hitsAny = true;
+        // Per-ray riders only fire on hits — same as the single-attack path.
+        if (result.hit && spell.save && spell.effect && !spell.area) {
+          if (resolveOnHitSave(ctx, spell, rayTarget)) hitsAny = true;
+        }
+        if (result.hit) maybeChainOnDoubles(ctx, spell, rayTarget, result.damageRolls, slotLevel);
       }
-      // Chromatic Orb chain: matching dice → leap to a nearby second target.
-      if (result.hit) maybeChainOnDoubles(ctx, spell, preResolvedTarget, result.damageRolls, slotLevel);
-      // Ice Knife's "hit or miss, the shard explodes" — runs regardless of
-      // the primary attack's outcome.
+      anyEffect = hitsAny;
+      // Ice Knife's "hit or miss, the shard explodes" — runs once regardless
+      // of the volley's outcome. Single-ray spells skip the loop above
+      // for `i = 0` and reach this branch normally.
       if (spell.secondaryDamage && spell.area && spell.save) {
         if (resolveSecondaryAoe(ctx, spell, preResolvedTarget, slotLevel, events)) anyEffect = true;
       }
@@ -1400,14 +1844,82 @@ export function doCastSpell(
     // Utility / self spells (Mage Armor, Detect Magic, …) always produce
     // their effect by definition — they don't roll for it. Tile is passed
     // through so AOE-shaped utility spells (Fog Cloud) can read it.
-    resolveUtilitySpell(ctx, spell, tile);
+    resolveUtilitySpell(ctx, spell, slotLevel, tile, targetIds, abilityChoice);
     anyEffect = true;
+  }
+
+  // SRD Gust of Wind: "The gust disperses gas or vapor". Walk the active
+  // zones and drop any Fog Cloud whose tile-set overlaps the gust's line —
+  // the visible cloud is blown away, conditions on creatures still standing
+  // in those tiles are stripped (mirrors zone-expiry behaviour). Other
+  // dispersible clouds plug in here by listing their spell id.
+  if (spell.id === 'gust-of-wind' && spell.area && tile) {
+    const gustTiles = tilesInArea(ctx, spell, tile);
+    const DISPERSIBLE = new Set(['fog-cloud']);
+    if (ctx.state.activeZones && ctx.state.activeZones.length > 0) {
+      const survivors: typeof ctx.state.activeZones = [];
+      const dispersedSpellIds: string[] = [];
+      for (const z of ctx.state.activeZones) {
+        if (!DISPERSIBLE.has(z.spellId)) { survivors.push(z); continue; }
+        const overlap = z.tiles.some(([x, y]) => gustTiles.has(`${x},${y}`));
+        if (!overlap) { survivors.push(z); continue; }
+        stripZoneAffectedConditions(ctx, z);
+        ctx.addLog({ left: `Gust of Wind disperses ${z.name}`, style: 'status' });
+        if (z.casterId === 'player') dispersedSpellIds.push(z.spellId);
+      }
+      ctx.state.activeZones = survivors;
+      // SRD: a concentration spell ends when its area is destroyed. End
+      // concentration on any dispersed cloud the caster was sustaining so
+      // the slot isn't wasted on a ghost spell. `endConcentration` will
+      // also no-op on the zone strip since we just dropped the zone.
+      for (const sid of dispersedSpellIds) {
+        if (ctx.state.player.concentratingOn === sid) {
+          endConcentration(ctx, `${sid} dispersed by Gust of Wind`);
+        }
+      }
+    }
   }
 
   // Concentration only kicks in after a real effect lands — every target
   // saved or the spell missed → no ongoing effect → no concentration cost.
   // A new concentration spell drops any previous one first.
   if (spell.concentration && anyEffect) startConcentration(ctx, spell.id);
+
+  // Persistent-zone auto-registration for non-condition AOEs that occupy
+  // ground for the duration (Grease, Silent Image, Minor Illusion,
+  // Gust of Wind). Fog Cloud / Darkness / Web go through the zone helpers
+  // which already register. Spells whose area is just a cast-time picker
+  // (Sleep — `creaturesOfYourChoice` snapshots targets and is done) are
+  // NOT zones; the SRD's "sphere" wording for Sleep is selection geometry,
+  // not an occupied space. The `ZONE_SPELL_IDS` whitelist keeps the
+  // auto-register honest — adding a new ground-occupying AOE is one entry.
+  // Ground-occupying AOEs (Grease, Silent Image, Minor Illusion, Gust of
+  // Wind) drop the `anyEffect` gate — they're the point even when no
+  // creature is in the area at cast time. The zone itself IS the spell;
+  // creatures who later enter trigger their save / push during movement
+  // (and, for Gust, at end of turn via `runGustOfWindEndOfTurnSaves`).
+  // Recasting a non-concentration variant replaces nothing (multiple
+  // Grease patches stack); recasting a concentration variant drops the
+  // prior instance inside `registerActiveZone`.
+  const ZONE_SPELL_IDS = new Set(['grease', 'silent-image', 'minor-illusion', 'gust-of-wind']);
+  if (spell.area && ZONE_SPELL_IDS.has(spell.id) && tile) {
+    const tintByShape: Record<string, string> = {
+      grease: '#5a4a2a',
+      'silent-image': '#a08adf',
+      'minor-illusion': '#a08adf',
+      'gust-of-wind': '#aedfff',
+    };
+    // Per-spell enter-save configuration. Grease's SRD rider: every
+    // creature that enters or ends its turn in the area must succeed on
+    // a DEX save or fall Prone. Silent Image / Minor Illusion are visual
+    // — no enter-save. Adding a new ground-zone with a rider is one entry.
+    const ENTER_SAVE_BY_SPELL: Record<string, { ability: 'str' | 'dex' | 'con' | 'int' | 'wis' | 'cha'; condition: string } | undefined> = {
+      grease: { ability: 'dex', condition: 'prone' },
+    };
+    const cfg = ENTER_SAVE_BY_SPELL[spell.id];
+    const enterSave = cfg ? { ability: cfg.ability, dc: spellSaveDC(ctx) } : undefined;
+    registerActiveZone(ctx, spell, tile, cfg?.condition, tintByShape[spell.id], enterSave);
+  }
 }
 
 // Export labels useful for the UI.

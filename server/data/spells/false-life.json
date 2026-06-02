@@ -12,7 +12,7 @@
   "durationRounds": 600,
   "concentration": false,
   "ritual": false,
-  "tempHpRoll": { "dice": 1, "sides": 4, "bonus": 4 },
-  "description": "Bolstering yourself with a necromantic facsimile of life, you gain 1d4+4 Temporary Hit Points for the duration.",
+  "tempHpRoll": { "dice": 2, "sides": 4, "bonus": 4 },
+  "description": "Bolstering yourself with a necromantic facsimile of life, you gain 2d4+4 Temporary Hit Points for the duration.",
   "scaling": "You gain 5 additional Temporary Hit Points for each spell slot level above 1."
 }

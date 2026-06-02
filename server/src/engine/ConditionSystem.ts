@@ -21,8 +21,12 @@ export const ADVANTAGE_AGAINST_CONDITIONS = ['blinded', 'paralyzed', 'restrained
 
 /** Conditions that impose Disadvantage on the creature's own attack rolls.
  *  `heavily-obscured` is included because a creature standing in fog can't
- *  see out, treated as Blinded for attack purposes. */
-export const ATTACK_DISADVANTAGE_CONDITIONS = ['blinded', 'frightened', 'grappled', 'poisoned', 'restrained', 'prone', 'vexed', 'heavily-obscured'];
+ *  see out, treated as Blinded for attack purposes. `enfeebled` (Ray of
+ *  Enfeeblement) — SRD specifies Disadvantage on STR-based D20 Tests only;
+ *  the engine applies it as a blanket Disadvantage on all attack rolls
+ *  because MonsterAttack does not carry a stat-key field (only PlayerAttack
+ *  does). Future per-attack stat tagging would let us restrict to STR. */
+export const ATTACK_DISADVANTAGE_CONDITIONS = ['blinded', 'frightened', 'grappled', 'poisoned', 'restrained', 'prone', 'vexed', 'heavily-obscured', 'enfeebled'];
 
 /** Conditions that reduce the creature's speed to 0. */
 export const SPEED_ZERO_CONDITIONS = ['grappled', 'paralyzed', 'restrained', 'unconscious'];
@@ -31,8 +35,10 @@ export const SPEED_ZERO_CONDITIONS = ['grappled', 'paralyzed', 'restrained', 'un
  *  SRD 5.2.1: a creature in a Heavily Obscured area is functionally Blinded
  *  to anyone trying to see into it, so attackers targeting them effectively
  *  attack a creature they can't see — Disadvantage. Listed alongside
- *  Invisible since the engine treatment is identical. */
-export const GRANTS_ATTACKER_DISADVANTAGE_CONDITIONS = ['invisible', 'heavily-obscured'];
+ *  Invisible since the engine treatment is identical. `blurred` (Blur spell):
+ *  the caster's image is indistinct so any creature has Disadvantage on
+ *  attack rolls against the blurred creature. */
+export const GRANTS_ATTACKER_DISADVANTAGE_CONDITIONS = ['invisible', 'heavily-obscured', 'blurred'];
 
 /** Conditions where a hit from within 1 tile is an automatic Critical Hit. */
 export const AUTO_CRIT_CONDITIONS = ['paralyzed', 'unconscious'];
@@ -66,9 +72,17 @@ export function grantsAdvantageAgainst(conditions: string[], dist: number): bool
 /**
  * True when attackers targeting this creature have Disadvantage.
  * Invisible targets impose Disadvantage at any range; prone targets impose it beyond 1 tile.
+ *
+ * `attackerSeesInvisible` (SRD See Invisibility): when true, the Invisible
+ * condition does NOT impose Disadvantage on this attacker — they see the
+ * target normally. Other Disadvantage sources (heavily-obscured, blurred,
+ * prone-at-distance) still apply.
  */
-export function grantsDisadvantageAgainst(conditions: string[], dist: number): boolean {
-  return GRANTS_ATTACKER_DISADVANTAGE_CONDITIONS.some((c) => conditions.includes(c))
+export function grantsDisadvantageAgainst(conditions: string[], dist: number, attackerSeesInvisible = false): boolean {
+  const conditionSources = GRANTS_ATTACKER_DISADVANTAGE_CONDITIONS.filter(
+    (c) => !(attackerSeesInvisible && c === 'invisible'),
+  );
+  return conditionSources.some((c) => conditions.includes(c))
     || (conditions.includes('prone') && dist > 1);
 }
 

@@ -2,6 +2,7 @@ import { GameEngine } from './GameEngine.js';
 import { GameEvent } from './types.js';
 import { getActiveSetting, lookupSettingSection, lookupWorldbookEntry } from '../settings.js';
 import { purseToCp, formatCoins } from '../../../shared/currency.js';
+import { Logger } from '../Logger.js';
 
 export interface AIGMToolResult {
   // GameEvent[] only carries client-facing animation signals (e.g. entity_move).
@@ -252,6 +253,7 @@ export function applyAIGMTool(
   input: Record<string, unknown>,
   ctx: AIGMToolContext = {},
 ): AIGMToolResult {
+  Logger.log('aigm.tool_dispatch', { tool: name, input });
   let events: GameEvent[] = [];
   let toolResultContent = 'Applied.';
   let rollResult: string | undefined;
@@ -776,5 +778,6 @@ export function applyAIGMTool(
       break;
     }
   }
+  Logger.log('aigm.tool_result', { tool: name, result: toolResultContent, rollResult: rollResult ?? null, events: events.length });
   return { events, toolResultContent, rollResult };
 }

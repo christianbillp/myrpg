@@ -11,7 +11,7 @@
  */
 import { BaseOverlay } from "./BaseOverlay";
 import { UIScale } from "./UIScale";
-import type { LevelUpPreview, LevelUpChoices, LevelUpChoicePrompt } from "../net/types";
+import type { LevelUpPreview, LevelUpChoices, LevelUpChoicePrompt } from "../../../shared/types";
 
 const ACCENT = "#e2b96f";
 const PANEL_W = 640;

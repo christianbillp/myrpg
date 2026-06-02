@@ -6,6 +6,7 @@ loadEnv({
 import Fastify from "fastify";
 import cors from "@fastify/cors";
 import websocket from "@fastify/websocket";
+import { z } from "zod";
 import Anthropic from "@anthropic-ai/sdk";
 import { readFile, readdir, writeFile, mkdir, unlink, access } from "fs/promises";
 import { join, dirname } from "path";
@@ -25,6 +26,7 @@ import {
 import { GameEngine } from "./engine/GameEngine.js";
 import { GameDefs } from "./engine/types.js";
 import { isHostileTo } from "./engine/FactionRelations.js";
+import { Logger } from "./Logger.js";
 import { PLAYER_FACTION_ID } from "../../shared/types.js";
 import {
   applyEquipment,
@@ -78,6 +80,13 @@ const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const DATA_DIR = join(__dirname, "../data");
+
+// In-memory mirror of `server_config.disabledTiles`. Loaded once at startup
+// and refreshed inside the PUT /server-config handler so the generate routes
+// (composeMap, AI map prompt) can read it synchronously per request without
+// re-hitting disk. Kept here so any future consumer that also wants a live
+// view of the disable list can share the same source.
+let cachedDisabledTiles: Record<string, number[]> = {};
 
 /**
  * Resolve the effective Development Mode flags for a session-create call.
@@ -288,6 +297,9 @@ interface TiledMapFile {
   height: number;
   tilesets: TiledTileset[];
   layers: TiledLayer[];
+  /** Author-time named tile regions. Sibling field, NOT a Tiled object-
+   *  group. The map editor reads / writes these via the SavedMapDef. */
+  zones?: Array<{ id: string; name: string; color: string; cells: string[] }>;
 }
 
 // Tileset metadata surfaced to the client so it can preload the image and
@@ -393,6 +405,7 @@ async function loadTiledMap(file: TiledMapFile) {
     gidGrid,
     objectGidGrid,
     tilesets: tilesetInfo,
+    zones: file.zones,
   };
 }
 
@@ -402,28 +415,22 @@ const server = Fastify({ logger: false });
 await server.register(cors, { origin: "http://localhost:5173" });
 await server.register(websocket);
 
-// ── Static data routes (unchanged) ────────────────────────────────────────────
+// ── Static data routes — see routes/defs.ts ───────────────────────────────────
+//
+// `/characters`, `/monsters`, `/npcs`, …, `/maps`, `/health` plus the
+// dir-backed `/encounters` + `/adventures` live in their own module so this
+// file stays focused on bootstrap + closure setup.
 
-server.get("/characters", async () => defs.playerDefs);
-server.get("/monsters", async () => defs.monsters);
-server.get("/npcs", async () => defs.npcs);
-server.get("/factions", async () => defs.factions);
-server.get("/conversations", async () => defs.conversations);
-server.get("/equipment", async () => defs.equipment);
-server.get("/feats", async () => defs.feats);
-server.get("/backgrounds", async () => defs.backgrounds);
-server.get("/species", async () => defs.species);
-server.get("/spells", async () => defs.spells);
-server.get("/features", async () => defs.features);
-server.get("/classes", async () => defs.classes);
-server.get("/subclasses", async () => defs.subclasses);
-server.get("/encounters", async () => {
-  const dir = settingSubDir("encounters");
-  return dir ? readDir(dir) : [];
-});
-server.get("/adventures", async () => {
-  const dir = settingSubDir("adventures");
-  return dir ? readDir(dir) : [];
+import { registerDefsRoutes } from "./routes/defs.js";
+registerDefsRoutes(server, {
+  anthropic,
+  dataDir: DATA_DIR,
+  getDefs: () => defs,
+  loadDefs,
+  getDisabledTiles: () => cachedDisabledTiles,
+  setDisabledTiles: (v) => { cachedDisabledTiles = v; },
+  settingSubDir,
+  resolveDevFlags,
 });
 
 /**
@@ -629,6 +636,7 @@ server.get("/server-config", async () => {
   return {
     activeSettingId: defs.activeSetting?.id ?? null,
     devFlags: config.devFlags ?? {},
+    disabledTiles: config.disabledTiles ?? {},
     settings: defs.settings.map((s) => ({ id: s.id, name: s.name, version: s.version, ruleset: s.ruleset, summary: s.summary, sections: s.sections })),
   };
 });
@@ -641,7 +649,7 @@ server.get("/server-config", async () => {
  * active setting changes. Returns the updated config + settings list so the
  * client renders without an extra GET.
  */
-server.put<{ Body: { activeSettingId?: string | null; devFlags?: import("../../shared/types.js").DevFlags } }>("/server-config", async (req, reply) => {
+server.put<{ Body: { activeSettingId?: string | null; devFlags?: import("../../shared/types.js").DevFlags; disabledTiles?: Record<string, number[]> } }>("/server-config", async (req, reply) => {
   const body = req.body ?? {};
 
   // Validate activeSettingId if the caller is changing it.
@@ -670,10 +678,27 @@ server.put<{ Body: { activeSettingId?: string | null; devFlags?: import("../../s
     if (body.devFlags.showDeleteSaveButton) sanitised.showDeleteSaveButton = true;
     if (body.devFlags.allowRetryChecks)     sanitised.allowRetryChecks = true;
     if (body.devFlags.completePrimaryObjective) sanitised.completePrimaryObjective = true;
+    if (body.devFlags.showDevToolsPanel)    sanitised.showDevToolsPanel = true;
     next.devFlags = sanitised;
+  }
+  if (body.disabledTiles !== undefined) {
+    // Validate shape — Record<tilesetName, number[]>. Reject anything else
+    // so a malformed PUT can't corrupt the config file. Empty arrays are
+    // fine (nothing disabled in that tileset).
+    const sanitised: Record<string, number[]> = {};
+    for (const [tileset, ids] of Object.entries(body.disabledTiles ?? {})) {
+      if (typeof tileset !== 'string' || !Array.isArray(ids)) continue;
+      const cleanIds: number[] = [];
+      for (const id of ids) {
+        if (typeof id === 'number' && Number.isInteger(id) && id > 0) cleanIds.push(id);
+      }
+      if (cleanIds.length > 0) sanitised[tileset] = cleanIds;
+    }
+    next.disabledTiles = sanitised;
   }
 
   await saveServerConfig(DATA_DIR, next);
+  cachedDisabledTiles = next.disabledTiles ?? {};
 
   // Reload all defs only when the active setting actually changed —
   // characters, NPCs, factions, adventures, encounters, maps re-source from
@@ -684,6 +709,7 @@ server.put<{ Body: { activeSettingId?: string | null; devFlags?: import("../../s
   return reply.send({
     activeSettingId: defs.activeSetting?.id ?? null,
     devFlags: next.devFlags ?? {},
+    disabledTiles: next.disabledTiles ?? {},
     settings: defs.settings.map((s) => ({ id: s.id, name: s.name, version: s.version, ruleset: s.ruleset, summary: s.summary, sections: s.sections })),
   });
 });
@@ -697,6 +723,7 @@ registerGenerateRoutes(server, {
     if (!defs.activeSetting) throw new Error("Cannot generate content — no active setting.");
     return join(DATA_DIR, "settings", defs.activeSetting.id);
   },
+  getDisabledTiles: () => cachedDisabledTiles,
 });
 
 
@@ -867,8 +894,7 @@ server.post<{ Params: { characterId: string }; Body: { devFlags?: import("../../
   },
 );
 
-server.get("/maps", async () => defs.maps);
-server.get("/health", async () => ({ ok: true }));
+// `/maps` and `/health` were moved into routes/defs.ts above.
 
 // Directory listing — returns image metadata for every .tsj in the tilesets
 // dir so the client can preload every spritesheet at boot (including ones
@@ -1221,7 +1247,15 @@ async function saveWorldState(
   } = state.player;
   const worldSave: WorldSave = { ...state, player: sessionPlayer, aigmHistory };
   await mkdir(savesDir(), { recursive: true });
-  await writeFile(worldSavePath(), JSON.stringify(worldSave));
+  const path = worldSavePath();
+  await writeFile(path, JSON.stringify(worldSave));
+  Logger.log('persist.save_written', {
+    kind: 'world',
+    path,
+    npcs: state.npcs.length,
+    phase: state.phase,
+    eventLogLength: (state.eventLog ?? []).length,
+  });
 }
 
 async function loadWorldState(): Promise<{
@@ -1229,6 +1263,7 @@ async function loadWorldState(): Promise<{
   aigmHistory: AigmMessage[];
 } | null> {
   let worldSave: WorldSave;
+  const migrationsApplied: string[] = [];
   try {
     const rawJson = JSON.parse(
       await readFile(worldSavePath(), "utf-8"),
@@ -1239,13 +1274,40 @@ async function loadWorldState(): Promise<{
     if ("combatLog" in rawJson && !("eventLog" in rawJson)) {
       rawJson.eventLog = rawJson.combatLog;
       delete rawJson.combatLog;
+      migrationsApplied.push('combatLog→eventLog');
     }
-    worldSave = rawJson as unknown as WorldSave;
+    // Shape-light runtime check — a corrupt save shouldn't crash with a
+    // mysterious "Cannot read X of undefined" at use time. The full type is
+    // a 100+ field GameState; we validate only the fields the loader path
+    // actually touches before handing the rest off to downstream code.
+    const SaveShape = z.object({
+      eventLog:    z.array(z.unknown()).optional(),
+      phase:       z.string(),
+      npcs:        z.array(z.unknown()),
+      playerDefId: z.string().optional(),
+      aigmHistory: z.array(z.unknown()).optional(),
+    }).passthrough();
+    const parsed = SaveShape.safeParse(rawJson);
+    if (!parsed.success) {
+      Logger.log('persist.save_load_failed', { kind: 'world', reason: 'shape_mismatch', issues: parsed.error.issues }, 'error');
+      return null;
+    }
+    worldSave = parsed.data as WorldSave;
   } catch {
+    Logger.log('persist.save_load_failed', { kind: 'world', path: worldSavePath(), reason: 'parse_or_missing' });
     return null;
   }
   // Reject pre-disposition saves that still carry a separate 'enemies' array
-  if ("enemies" in worldSave) return null;
+  if ("enemies" in worldSave) {
+    Logger.warn('persist.save_load_rejected', { kind: 'world', reason: 'pre_disposition_format' });
+    return null;
+  }
+  Logger.log('persist.save_loaded', {
+    kind: 'world',
+    path: worldSavePath(),
+    migrationsApplied,
+    npcs: (worldSave.npcs ?? []).length,
+  });
 
   const charSave = (await readSave(worldSave.player.defId)) as CharSave;
   const fullPlayer: PlayerState = {
@@ -1280,6 +1342,8 @@ async function loadWorldState(): Promise<{
     speedBonus: 0,
     expeditiousRetreat: false,
     jumpMultiplier: 1,
+    magicWeaponBonus: 0,
+    seeInvisible: false,
     ongoingEffects: [],
   };
   const aigmHistory = worldSave.aigmHistory ?? [];
@@ -1295,6 +1359,7 @@ async function loadWorldState(): Promise<{
     pendingAigmEvents: worldSave.pendingAigmEvents ?? [],
     worldFlags: worldSave.worldFlags ?? {},
     narrationLastUsed: worldSave.narrationLastUsed ?? {},
+    activeZones: worldSave.activeZones ?? [],
     factionStandings: worldSave.factionStandings ?? {},
     // New in Pass 1 — older saves migrate by projecting the legacy `factionStandings`
     // into the party row of an otherwise-empty matrix. Pass 2 will use this matrix
@@ -1371,7 +1436,14 @@ async function defaultSave(characterId: string): Promise<unknown> {
 
 async function writeSave(characterId: string, data: unknown): Promise<void> {
   await mkdir(savesDir(), { recursive: true });
-  await writeFile(saveFilePath(characterId), JSON.stringify(data, null, 2));
+  const path = saveFilePath(characterId);
+  await writeFile(path, JSON.stringify(data, null, 2));
+  Logger.log('persist.save_written', {
+    kind: 'character',
+    characterId,
+    path,
+    fields: data && typeof data === 'object' ? Object.keys(data as Record<string, unknown>) : [],
+  });
 }
 
 async function ensureSaveExists(characterId: string): Promise<void> {
@@ -2333,5 +2405,6 @@ server.get("/game/session/:id/ws", { websocket: true }, (socket, req) => {
 // ── Start ──────────────────────────────────────────────────────────────────────
 
 await loadDefs();
+cachedDisabledTiles = (await loadServerConfig(DATA_DIR)).disabledTiles ?? {};
 await server.listen({ port: 3000, host: "0.0.0.0" });
 console.log("Server listening on http://localhost:3000");

@@ -1,6 +1,6 @@
 import Phaser from "phaser";
 import { tilesetTextureKey } from "../../scenes/BootScene";
-import type { SavedMapDef } from "../../net/types";
+import type { SavedMapDef } from "../../../../shared/types";
 import type { MapPreviewData } from "../EmbeddedMapPreview";
 import { decodeTileGid, TILE_VOID_GID } from "../../../../shared/tileGid";
 
@@ -339,6 +339,9 @@ function savedMapToPreview(saved: SavedMapDef): MapPreviewData {
       firstgid: t.firstgid,
       source: `../tilesets/${(t.imageUrl.split("/").pop() ?? "").replace(/\.png$/i, ".tsj")}`,
     })),
+    // Author-time named regions ride along untouched so an editor round-trip
+    // (LOAD MAP → tweak → SAVE MAP) preserves them.
+    zones: saved.zones ? saved.zones.map((z) => ({ id: z.id, name: z.name, color: z.color, cells: [...z.cells] })) : undefined,
   };
 }
 

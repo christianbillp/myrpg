@@ -8,10 +8,10 @@
 // reads the same way before and during a session.
 
 import { BaseOverlay } from "./BaseOverlay";
-import { PlayerDef, PlayerAttack } from "../data/player";
-import { ItemDef, ArmorDef, WeaponDef, ShieldDef, EquipmentDef } from "../data/equipment";
+import { PlayerDef, PlayerAttack } from "../../../shared/types";
+import { ItemDef, ArmorDef, WeaponDef, ShieldDef, EquipmentDef } from "../../../shared/types";
 import { UIScale } from "./UIScale";
-import type { PlayerState, SpellDef, FeatureDef, ClassDef, SubclassDef } from "../net/types";
+import type { PlayerState, SpellDef, FeatureDef, ClassDef, SubclassDef } from "../../../shared/types";
 import { featuresAt as cpFeaturesAt, subclassFeaturesAt, subclassGrantedSpellsAt, subclassGrantedCantripsAt } from "../../../shared/classProgression";
 import { buildPlayerStatusChips, STATUS_TONE_COLOR } from "./PlayerStatus";
 import { formatCoins } from "../../../shared/currency";
@@ -720,7 +720,7 @@ export class CharacterSheetOverlay extends BaseOverlay {
 
       return `
         <div style="display:flex;align-items:center;justify-content:space-between;padding:3px 4px;border-bottom:1px solid #1a2030;">
-          <span style="font-size:11px;color:${opts.prepared ? "#c8dae8" : "#778899"};min-width:120px;">${escHtml(sp.name)}</span>
+          <span title="${escHtml(sp.description)}" style="font-size:11px;color:${opts.prepared ? "#c8dae8" : "#778899"};min-width:120px;cursor:help;">${escHtml(sp.name)}</span>
           <span style="font-size:9px;color:#556677;text-align:right;flex:1;margin-left:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escHtml(bits.join(" · "))}</span>
           <span style="font-size:9px;color:${tagColor};margin-left:10px;min-width:42px;text-align:right;">${escHtml(tag)}</span>
           ${castBtn}

@@ -1,6 +1,6 @@
 import Phaser from "phaser";
 import { gameClient, TokenExistsError } from "../net/GameClient";
-import type { TokenSpec } from "../net/types";
+import type { TokenSpec } from "../../../shared/types";
 import { createHtmlButton, createHtmlText, type HtmlButtonHandle, type HtmlTextHandle } from "../ui/htmlButtons";
 import { TokenPickerOverlay } from "../ui/generate/TokenPickerOverlay";
 import { composeTokenSvg, composePartThumbnail, TOKEN_SLOTS, type TokenSlot } from "../ui/tokenComposer";

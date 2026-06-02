@@ -1,6 +1,6 @@
 import Phaser from "phaser";
 import { gameClient } from "../net/GameClient";
-import type { AdventureDef, AdventureChapter, EncounterDef, SavedMapDef } from "../net/types";
+import type { AdventureDef, AdventureChapter, EncounterDef, SavedMapDef } from "../../../shared/types";
 import type { AdventureRefineProposed, AdventureRefineChapter } from "../net/GameClient";
 import { createHtmlButton, createHtmlText, type HtmlButtonHandle, type HtmlTextHandle } from "../ui/htmlButtons";
 import { EncounterPickerOverlay } from "../ui/generate/EncounterPickerOverlay";

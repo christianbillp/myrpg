@@ -12,5 +12,5 @@
   "durationRounds": 10,
   "concentration": false,
   "ritual": false,
-  "description": "You touch a willing creature. Until the spell ends, the target's jump distance is tripled."
+  "description": "You touch a willing creature. Once on each of its turns until the spell ends, that creature can jump up to 30 feet by spending 10 feet of movement. Using a Higher-Level Spell Slot: You can target one additional creature for each spell slot level above 1. Engine: jumping isn't modelled by the movement system; the `jumpMultiplier` PlayerState field is a legacy stub from the 5e 2014 rule (\"jump distance tripled\") and has no current mechanical effect."
 }

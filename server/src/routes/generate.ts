@@ -18,6 +18,7 @@ import type { FastifyInstance } from "fastify";
 import type Anthropic from "@anthropic-ai/sdk";
 import { mkdir, writeFile, readFile, readdir, unlink } from "fs/promises";
 import { join } from "path";
+import { Logger } from "../Logger.js";
 import { composeMap, type Terrain, type Feature } from "../engine/MapComposer.js";
 import { writeMapJson, isGeneratedId } from "../engine/MapPersistence.js";
 import { generateEncounter, generateMap } from "../encounterGenerator.js";
@@ -226,10 +227,18 @@ export interface GenerateRoutesCtx {
    * the output is persisted under that setting's `maps/` + `encounters/`.
    */
   getSettingDataDir: () => string;
+  /**
+   * Live reader for the Configure Tiles list. Returns the `disabledTiles`
+   * map from `server_config.json` so the deterministic composer and AI map
+   * generator can both filter their tile pools on every request — toggling
+   * a tile in the Configure Tiles page takes effect on the next generate
+   * call without a server restart. Empty object = nothing disabled.
+   */
+  getDisabledTiles: () => Record<string, number[]>;
 }
 
 export function registerGenerateRoutes(server: FastifyInstance, ctx: GenerateRoutesCtx): void {
-  const { anthropic, getDefs, loadDefs, getSettingDataDir } = ctx;
+  const { anthropic, getDefs, loadDefs, getSettingDataDir, getDisabledTiles } = ctx;
   const dataDir = (): string => getSettingDataDir();
 
   /**
@@ -239,14 +248,14 @@ export function registerGenerateRoutes(server: FastifyInstance, ctx: GenerateRou
    * preview to disk and assign it a stable id.
    */
   server.post<{
-    Body: { terrain: Terrain; features: Feature[]; width?: number; height?: number; seed?: number };
+    Body: { terrain: Terrain; features: Feature[]; width?: number; height?: number; seed?: number; buildingsCount?: number };
   }>("/generate/map/composed", async (req, reply) => {
-    const { terrain, features, width = 30, height = 22, seed } = req.body;
-    if (!terrain || (terrain !== 'grassland' && terrain !== 'forest' && terrain !== 'dungeon')) {
-      return reply.code(400).send({ error: "terrain must be 'grassland', 'forest', or 'dungeon'" });
+    const { terrain, features, width = 30, height = 22, seed, buildingsCount } = req.body;
+    if (!terrain || (terrain !== 'grassland' && terrain !== 'forest' && terrain !== 'dungeon' && terrain !== 'tavern')) {
+      return reply.code(400).send({ error: "terrain must be 'grassland', 'forest', 'dungeon', or 'tavern'" });
     }
     try {
-      const composed = composeMap({ width, height, terrain, features: features ?? [], seed });
+      const composed = composeMap({ width, height, terrain, features: features ?? [], seed, buildingsCount, disabledTiles: getDisabledTiles() });
       return reply.send({
         mapId: null,
         width: composed.width,
@@ -257,10 +266,11 @@ export function registerGenerateRoutes(server: FastifyInstance, ctx: GenerateRou
         description: composed.description,
         tilesets: composed.tilesets,
         anchors: composed.anchors,
+        zones: composed.zones ?? [],
       });
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      console.error('[generate/map/composed] failed', msg);
+      Logger.log("anomaly.generate_map_composed_failed", { error: msg }, "error");
       return reply.code(400).send({ error: msg });
     }
   });
@@ -279,13 +289,15 @@ export function registerGenerateRoutes(server: FastifyInstance, ctx: GenerateRou
       terrainData: number[];
       objectData: number[];
       tilesets?: Array<{ firstgid: number; source: string }>;
+      /** Author-time named tile regions — see `MapZoneJson`. */
+      zones?: Array<{ id: string; name: string; color: string; cells: string[] }>;
       /** When set, overwrite an existing map instead of allocating a fresh
        *  `gen_<stamp>_<slug>` id. Used by the Map Editor's LOAD MAP → edit
        *  → SAVE MAP flow. */
       existingMapId?: string;
     };
   }>("/generate/map/save", async (req, reply) => {
-    const { name, description, width, height, terrainData, objectData, tilesets, existingMapId } = req.body;
+    const { name, description, width, height, terrainData, objectData, tilesets, zones, existingMapId } = req.body;
     if (!Array.isArray(terrainData) || terrainData.length !== width * height) {
       return reply.code(400).send({ error: `terrainData length ${terrainData?.length} ≠ width*height (${width * height})` });
     }
@@ -307,12 +319,13 @@ export function registerGenerateRoutes(server: FastifyInstance, ctx: GenerateRou
         terrainData,
         objectData,
         tilesets,
+        zones,
       });
       await loadDefs();
       return reply.send({ mapId });
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      console.error('[generate/map/save] failed', msg);
+      Logger.log("anomaly.generate_map_save_failed", { error: msg }, "error");
       return reply.code(400).send({ error: msg });
     }
   });
@@ -377,7 +390,7 @@ export function registerGenerateRoutes(server: FastifyInstance, ctx: GenerateRou
       return reply.send({ encounterId: encSlug, mapId: newMapId });
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      console.error('[generate/encounter/promote] failed', msg);
+      Logger.log("anomaly.generate_encounter_promote_failed", { error: msg }, "error");
       return reply.code(400).send({ error: msg });
     }
   });
@@ -397,6 +410,7 @@ export function registerGenerateRoutes(server: FastifyInstance, ctx: GenerateRou
       width?: number;
       height?: number;
       seed?: number;
+      buildingsCount?: number;
       /** Player-facing card summary (writes to the encounter's `description`). */
       description?: string;
       /** Long-form AIGM scene context (writes to `customContext`). */
@@ -422,7 +436,7 @@ export function registerGenerateRoutes(server: FastifyInstance, ctx: GenerateRou
       triggers?: EditorComposedTrigger[];
     };
   }>("/generate/encounter/composed", async (req, reply) => {
-    const { existingMapId, terrain, features, width = 30, height = 22, seed, description, aigmContext, startingZonesData, placementMode, placements, allyIds, enemyIds, neutralIds, customTitle, customIntroduction, customObjective, completionFlag, triggers: composedTriggers } = req.body;
+    const { existingMapId, terrain, features, width = 30, height = 22, seed, buildingsCount, description, aigmContext, startingZonesData, placementMode, placements, allyIds, enemyIds, neutralIds, customTitle, customIntroduction, customObjective, completionFlag, triggers: composedTriggers } = req.body;
     const defs = getDefs();
     const hasEnemies = (enemyIds ?? []).length > 0;
     try {
@@ -449,10 +463,10 @@ export function registerGenerateRoutes(server: FastifyInstance, ctx: GenerateRou
         mapDescription = existing.mapdescription ?? "";
         slug = mapId.replace(/^gen_\d+_/, '').slice(0, 32) || 'scene';
       } else {
-        if (!terrain || (terrain !== 'grassland' && terrain !== 'forest' && terrain !== 'dungeon')) {
-          return reply.code(400).send({ error: "terrain must be 'grassland', 'forest', or 'dungeon'" });
+        if (!terrain || (terrain !== 'grassland' && terrain !== 'forest')) {
+          return reply.code(400).send({ error: "terrain must be 'grassland' or 'forest'" });
         }
-        const composed = composeMap({ width, height, terrain, features: features ?? [], seed });
+        const composed = composeMap({ width, height, terrain, features: features ?? [], seed, buildingsCount, disabledTiles: getDisabledTiles() });
         const stamp = Date.now();
         slug = composed.name.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 32) || 'scene';
         mapId = `gen_${stamp}_${slug}`;
@@ -471,6 +485,7 @@ export function registerGenerateRoutes(server: FastifyInstance, ctx: GenerateRou
           terrainData: composed.terrainData,
           objectData: composed.objectData,
           tilesets: composed.tilesets,
+          zones: composed.zones,
         });
       }
 
@@ -563,7 +578,7 @@ export function registerGenerateRoutes(server: FastifyInstance, ctx: GenerateRou
       });
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      console.error('[generate/encounter/composed] failed', msg);
+      Logger.log("anomaly.generate_encounter_composed_failed", { error: msg }, "error");
       return reply.code(400).send({ error: msg });
     }
   });
@@ -736,7 +751,7 @@ export function registerGenerateRoutes(server: FastifyInstance, ctx: GenerateRou
       return reply.send({ encounterId, mapId });
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      console.error('[generate/encounter/update] failed', msg);
+      Logger.log("anomaly.generate_encounter_update_failed", { error: msg }, "error");
       return reply.code(400).send({ error: msg });
     }
   });
@@ -753,12 +768,12 @@ export function registerGenerateRoutes(server: FastifyInstance, ctx: GenerateRou
       return reply.code(400).send({ error: "prompt must be at least 8 characters" });
     }
     try {
-      const result = await generateMap(anthropic, getDefs(), { prompt });
+      const result = await generateMap(anthropic, getDefs(), { prompt }, getDisabledTiles());
       await loadDefs();
       return reply.send(result);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      console.error("[generate/map] failed", msg);
+      Logger.log("anomaly.generate_map_failed", { error: msg }, "error");
       return reply.code(400).send({ error: msg });
     }
   });
@@ -776,12 +791,12 @@ export function registerGenerateRoutes(server: FastifyInstance, ctx: GenerateRou
       return reply.code(400).send({ error: "prompt must be at least 8 characters" });
     }
     try {
-      const result = await generateEncounter(anthropic, getDefs(), { prompt, playerName, playerClassName });
+      const result = await generateEncounter(anthropic, getDefs(), { prompt, playerName, playerClassName }, getDisabledTiles());
       await loadDefs();
       return reply.send(result);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      console.error("[generate/encounter] failed", msg);
+      Logger.log("anomaly.generate_encounter_failed", { error: msg }, "error");
       return reply.code(400).send({ error: msg });
     }
   });
@@ -807,7 +822,7 @@ export function registerGenerateRoutes(server: FastifyInstance, ctx: GenerateRou
       return reply.send(result);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      console.error("[generate/encounter/refine] failed", msg);
+      Logger.log("anomaly.generate_encounter_refine_failed", { error: msg }, "error");
       return reply.code(400).send({ error: msg });
     }
   });
@@ -835,7 +850,7 @@ export function registerGenerateRoutes(server: FastifyInstance, ctx: GenerateRou
       return reply.send(result);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      console.error("[generate/adventure/refine] failed", msg);
+      Logger.log("anomaly.generate_adventure_refine_failed", { error: msg }, "error");
       return reply.code(400).send({ error: msg });
     }
   });
@@ -877,7 +892,7 @@ export function registerGenerateRoutes(server: FastifyInstance, ctx: GenerateRou
       return reply.send(result);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      console.error("[generate/npc/refine] failed", msg);
+      Logger.log("anomaly.generate_npc_refine_failed", { error: msg }, "error");
       return reply.code(400).send({ error: msg });
     }
   });
@@ -942,7 +957,7 @@ export function registerGenerateRoutes(server: FastifyInstance, ctx: GenerateRou
       return reply.send({ mapsDeleted, encountersDeleted });
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      console.error("[generate/maps/all] failed", msg);
+      Logger.log("anomaly.generate_maps_all_failed", { error: msg }, "error");
       return reply.code(500).send({ error: msg });
     }
   });

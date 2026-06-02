@@ -1,0 +1,16 @@
+{
+  "id": "alter-self",
+  "name": "Alter Self",
+  "level": 2,
+  "school": "transmutation",
+  "classes": ["sorcerer", "wizard"],
+  "castingTime": "action",
+  "range": "self",
+  "rangeFeet": 0,
+  "components": { "verbal": true, "somatic": true, "material": null },
+  "duration": "concentration, up to 1 hour",
+  "durationRounds": 600,
+  "concentration": true,
+  "ritual": false,
+  "description": "You alter your physical form. Choose one of the following options: (1) Aquatic Adaptation — gills + swim speed equal to walk speed; (2) Change Appearance — disguise yourself as another humanoid of your size; (3) Natural Weapons — grow claws / horns / hooves / fangs that count as natural weapons (1d6 + STR mod magical damage). On later turns, take the Magic action to swap option. Effects are narrative — the AIGM is the source of truth for any ability check or combat consequence."
+}

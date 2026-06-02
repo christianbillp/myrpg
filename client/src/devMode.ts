@@ -19,6 +19,7 @@ const KEY_UNLIMITED_ACTIONS = 'myrpg_dev_unlimited_actions';
 const KEY_SHOW_DELETE_SAVE  = 'myrpg_dev_show_delete_save';
 const KEY_ALLOW_RETRY_CHECKS = 'myrpg_dev_allow_retry_checks';
 const KEY_COMPLETE_PRIMARY_OBJECTIVE = 'myrpg_dev_complete_primary_objective';
+const KEY_SHOW_DEVTOOLS_PANEL = 'myrpg_dev_show_devtools_panel';
 
 function readUrlParam(name: string): boolean | null {
   const param = new URLSearchParams(window.location.search).get(name);
@@ -71,6 +72,8 @@ export const DevMode = {
   set allowRetryChecks(v: boolean)      { writeBoolStorage(KEY_ALLOW_RETRY_CHECKS, v); },
   get completePrimaryObjective(): boolean   { return readBoolStorage(KEY_COMPLETE_PRIMARY_OBJECTIVE); },
   set completePrimaryObjective(v: boolean)  { writeBoolStorage(KEY_COMPLETE_PRIMARY_OBJECTIVE, v); },
+  get showDevToolsPanel(): boolean          { return readBoolStorage(KEY_SHOW_DEVTOOLS_PANEL); },
+  set showDevToolsPanel(v: boolean)         { writeBoolStorage(KEY_SHOW_DEVTOOLS_PANEL, v); },
 
   /** Snapshot the current flags for inclusion in a `CreateSessionRequest`.
    *  Only set fields that are TRUE so the request stays lean. Returns
@@ -85,6 +88,7 @@ export const DevMode = {
     if (this.showDeleteSaveButton) flags.showDeleteSaveButton = true;
     if (this.allowRetryChecks)     flags.allowRetryChecks = true;
     if (this.completePrimaryObjective) flags.completePrimaryObjective = true;
+    if (this.showDevToolsPanel)    flags.showDevToolsPanel = true;
     return Object.keys(flags).length === 0 ? undefined : flags;
   },
 };

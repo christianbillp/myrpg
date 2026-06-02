@@ -203,8 +203,12 @@ Defined in `client/src/ui/StorylogOverlay.ts`. Standalone HTML overlay (no `Base
 
 | Component | Description |
 | --------- | ----------- |
-| **TERRAIN chips** | `GRASSLAND` / `FOREST` / `DUNGEON` radio chips. Exactly one is active; Grassland is selected by default. Picks which `MapComposer` terrain primitive runs. |
-| **FEATURES chips** | Outside features (`RUINS` / `BUILDINGS` / `CAMPSITES` / `PATH` / `COASTLINE`) and inside features (`3 ROOMS` / `5 ROOMS`) multi-select. Feature set auto-filters to the chosen terrain's column (outside vs inside). |
+| **TERRAIN chips** | `GRASSLAND` / `FOREST` / `DUNGEON` / `TAVERN` radio chips. Exactly one is active; Grassland is selected by default. Picks which per-terrain composer module under [server/src/engine/maps/](server/src/engine/maps/) runs. |
+| **FEATURES chips** | Outside features (`CAMPSITES` / `COASTLINE` / `PATH` / `INTERSECTION` / `BUILDINGS`) and inside features (`3 ROOMS` / `5 ROOMS`) multi-select. Compatibility is gated per terrain via `TERRAIN_COMPATIBLE_FEATURES`: outdoor terrains take the outside set; Dungeon takes 3 / 5 Rooms; Tavern takes none. |
+| **BUILDINGS counter chip** | Click cycles `BUILDINGS` → `BUILDINGS: 1` → `BUILDINGS: 2` → … → `BUILDINGS: 5` → off. The composer stamps that many varied-size rectangular stone-floor buildings (4–7 × 4–6) with transparent-twin walls on the object layer and a single doorway per building. Footprints never overlap each other, path cells, or water. Each placed building emits a `building <n>` zone covering its full footprint. |
+| **PATH + INTERSECTION** | The Path feature paints a dirt path on the object layer over the unchanged biome ground (terrain stays grass / forest). Adding Intersection turns it into two crossing paths. Adding Coastline as well bends the intersection into a T-junction whose spine runs along the dry inland side and stem terminates at the waterline. The composer emits a `path` zone (every painted path cell) and, when intersecting, a 1-tile `intersection` zone at the crossing. |
+| **DUNGEON terrain** | Picks 3 or 5 non-overlapping rectangular rooms (4–7 × 4–6), connects each successive pair with an L-shaped 1-cell corridor, and punches a south entry corridor from the southernmost room. Floor cells AND wall cells carry stone floor on the terrain layer; walls go on the object layer with transparent-twin tiles (10 corners, 11 straights, 66 partial corners) at the correct rotation per cell. Outside the dungeon both layers stay at gid 0. |
+| **TAVERN terrain** | One wood-floored single-room building set in a grass surround. Wall ring on the object layer with a centred south doorway; a bar counter (row of `wooden_plank_transparent` cells) two cells below the north wall, bookended by 3-barrel stacks; 2–4 small tables (single plank cells) with 1–2 chairs each in the lower half. Emits `tavern`, `bar`, and `tables` zones. |
 
 #### Generative AI tab
 
@@ -221,7 +225,7 @@ Loaded after a map exists in the preview. Lets the user replace individual tiles
 | --------- | ----------- |
 | **Layer chips** | `TERRAIN` / `OBJECT` toggle picking which layer the next paint affects. Auto-switches to match the selected tile's native layer when the legend has one. |
 | **Rotation + mirror chips** | `↻ 0° / 90° / 180° / 270°`, `MIRROR H`, `MIRROR V` — applied to the tile at paint time. Stored as Tiled GID flip bits (H = 0x80000000, V = 0x40000000, D = 0x20000000) so the encoded transform survives save → load. |
-| **Tile palette** | Scrollable thumbnail grid of every tile in the active tilesets (scribble + water + dungeon), grouped by tileset and ordered by `tileProperties` legend. Clicking a thumbnail selects it as the active brush; clicking the **ERASER** chip clears the tile under the next paint. |
+| **Tile palette** | Scrollable thumbnail grid of every tile in the active tilesets (scribble + water), grouped by tileset and ordered by `tileProperties` legend. Clicking a thumbnail selects it as the active brush; clicking the **ERASER** chip clears the tile under the next paint. |
 | **Paint** | Clicking any cell in the embedded preview stamps the selected tile + transform into the chosen layer; the preview refreshes in place. |
 
 #### Bottom bar

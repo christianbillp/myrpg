@@ -4,5 +4,11 @@
   "classId": "rogue",
   "minLevel": 3,
   "description": "As a Bonus Action, you can give yourself Advantage on your next attack roll on the current turn. You can use this Bonus Action only if you haven't moved during this turn, and after you use it your Speed is 0 until the end of the current turn.",
-  "cost": { "kind": "bonus-action" }
+  "cost": { "kind": "bonus-action" },
+  "ui": {
+    "buttonLabel": "STEADY AIM",
+    "buttonColor": "#1a3a5a",
+    "resourceLabel": ""
+  },
+  "handler": "steady-aim"
 }

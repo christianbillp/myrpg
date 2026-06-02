@@ -1,0 +1,19 @@
+{
+  "id": "gust-of-wind",
+  "name": "Gust of Wind",
+  "level": 2,
+  "school": "evocation",
+  "classes": ["druid", "ranger", "sorcerer", "wizard"],
+  "castingTime": "action",
+  "range": "self",
+  "rangeFeet": 0,
+  "components": { "verbal": true, "somatic": true, "material": "a legume seed" },
+  "duration": "concentration, up to 1 minute",
+  "durationRounds": 10,
+  "concentration": true,
+  "ritual": false,
+  "save": { "ability": "str", "halfOnSuccess": false },
+  "push": { "feet": 15 },
+  "area": { "shape": "line", "sizeFeet": 60, "widthFeet": 10 },
+  "description": "A Line of strong wind 60 feet long and 10 feet wide blasts from you in a direction you choose for the duration. Each creature in the Line must succeed on a Strength saving throw or be pushed 15 feet away from you in a direction following the Line. A creature that ends its turn in the Line must make the same save (engine: end-of-turn save handler walks any creature ending its turn on a Gust line tile). The gust disperses gas or vapor, and it extinguishes candles and similar unprotected flames in the area. Engine notes: the SRD 'movement closer costs 2 ft per 1 ft' directional Difficult Terrain is descriptive only; the 'Bonus Action on later turns to change direction' is descriptive only (the line direction is fixed at cast time)."
+}

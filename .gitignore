@@ -24,6 +24,9 @@ client/.vite/
 *.log
 npm-debug.log*
 
+# Structured session logs (US-093)
+server/data/logs/
+
 # OS
 .DS_Store
 Thumbs.db
@@ -38,7 +41,15 @@ server/data/saves/*
 server/data/settings/the_sundered_reach/saves/*
 !server/data/settings/the_sundered_reach/saves/.gitkeep
 server/data/maps/gen_*
-.gitignore
 server/data/encounters/gen_*
 
 dnd.srd.5.2.1/
+
+# Planning docs (local, not part of the codebase)
+plans/
+
+# Claude Code local settings (personal allow/deny rules)
+.claude/settings.local.json
+
+server/data/settings/the_sundered_reach/encounters/gen_*
+server/data/settings/the_sundered_reach/maps/gen_*

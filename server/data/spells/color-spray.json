@@ -8,13 +8,12 @@
   "range": "self",
   "rangeFeet": 0,
   "components": { "verbal": true, "somatic": true, "material": "a pinch of colorful sand" },
-  "duration": "1 round",
+  "duration": "instantaneous",
   "durationRounds": 1,
   "concentration": false,
   "ritual": false,
-  "hpPool": { "dice": 6, "sides": 10 },
+  "save": { "ability": "con", "halfOnSuccess": false },
   "effect": { "onFail": "blinded" },
   "area": { "shape": "cone", "sizeFeet": 15 },
-  "description": "You unleash a dazzling array of flashing lights in a 15-foot Cone. Roll 6d10; the total is how many Hit Points of creatures this spell can affect. Starting with the creature that has the lowest current HP, each creature in the area is affected (with the Blinded condition) until the end of your next turn, skipping any whose HP exceeds the remaining total. Creatures with Immunity to the Blinded condition aren't counted.",
-  "scaling": "Roll an additional 2d10 for each spell slot level above 1."
+  "description": "You launch a dazzling array of flashing, colorful light. Each creature in a 15-foot Cone originating from you must succeed on a Constitution saving throw or have the Blinded condition until the end of your next turn."
 }

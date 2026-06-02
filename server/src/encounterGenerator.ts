@@ -2,9 +2,43 @@ import Anthropic from "@anthropic-ai/sdk";
 import { writeFile, mkdir } from "fs/promises";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
+import { z } from "zod";
 import type { GameDefs } from "./engine/types.js";
 import { buildMapJson as sharedBuildMapJson } from "./engine/MapPersistence.js";
 import { settingPromptBlock } from "./settings.js";
+
+/** zod schemas for the two tool-output payload shapes Claude returns. The
+ *  parsed result is narrowed back to the inferred interface so the rest of
+ *  the file keeps using the same name. A schema mismatch surfaces as a
+ *  clear `ZodError` at the call site instead of a downstream undefined-field
+ *  crash during validation. */
+const GeneratedMapPayloadSchema = z.object({
+  name:        z.string(),
+  description: z.string(),
+  width:       z.number().int(),
+  height:      z.number().int(),
+  terrainData: z.array(z.number()),
+  objectData:  z.array(z.number()),
+});
+
+const GeneratedPayloadSchema = z.object({
+  encounterTitle:     z.string(),
+  description:        z.string(),
+  mapName:            z.string(),
+  mapdescription:     z.string(),
+  objective:          z.string(),
+  customIntroduction: z.string(),
+  customContext:      z.string(),
+  completionFlag:     z.string().optional(),
+  npcIds:             z.array(z.string()).optional(),
+  allyIds:            z.array(z.string()).optional(),
+  enemyIds:           z.array(z.string()).optional(),
+  width:              z.number().int(),
+  height:             z.number().int(),
+  terrainData:        z.array(z.number()),
+  objectData:         z.array(z.number()),
+  startingZonesData:  z.array(z.number()),
+});
 
 /**
  * Encounter Generator — given a free-text prompt, asks Claude Sonnet to
@@ -54,14 +88,23 @@ export async function generateEncounter(
   anthropic: Anthropic,
   defs: GameDefs,
   req: GenerateRequest,
+  disabledTiles: Record<string, number[]> = {},
 ): Promise<GeneratedScenario> {
   const validMonsterIds = new Set(defs.monsters.map((m) => m.id));
   const validNpcIds = new Set(defs.npcs.map((n) => n.id));
-  const validTileGids = new Set(Object.keys(defs.tileLegend.tiles).map((k) => parseInt(k, 10)));
+  const disabledGids = new Set<number>();
+  for (const ids of Object.values(disabledTiles)) for (const id of ids) disabledGids.add(id);
+  const validTileGids = new Set<number>();
+  for (const k of Object.keys(defs.tileLegend.tiles)) {
+    const gid = parseInt(k, 10);
+    if (disabledGids.has(gid)) continue;
+    validTileGids.add(gid);
+  }
   const groundLayerGids = layerGidSet(defs, 'ground');
   const objectLayerGids = layerGidSet(defs, 'object');
+  for (const gid of disabledGids) { groundLayerGids.delete(gid); objectLayerGids.delete(gid); }
 
-  const system = buildSystemPrompt(defs);
+  const system = buildSystemPrompt(defs, disabledGids);
   const user = buildUserPrompt(req);
   const tool = buildResponseTool();
 
@@ -78,7 +121,7 @@ export async function generateEncounter(
   if (!block || block.type !== "tool_use") {
     throw new Error("Model did not return a tool_use block.");
   }
-  const payload = block.input as unknown as GeneratedPayload;
+  const payload = GeneratedPayloadSchema.parse(block.input) as GeneratedPayload;
   validate(payload, validMonsterIds, validNpcIds, validTileGids, groundLayerGids, objectLayerGids);
 
   const stamp = Date.now();
@@ -107,12 +150,22 @@ export async function generateMap(
   anthropic: Anthropic,
   defs: GameDefs,
   req: GenerateRequest,
+  disabledTiles: Record<string, number[]> = {},
 ): Promise<GeneratedMap> {
-  const validTileGids = new Set(Object.keys(defs.tileLegend.tiles).map((k) => parseInt(k, 10)));
+  const disabledGids = new Set<number>();
+  for (const ids of Object.values(disabledTiles)) for (const id of ids) disabledGids.add(id);
+
+  const validTileGids = new Set<number>();
+  for (const k of Object.keys(defs.tileLegend.tiles)) {
+    const gid = parseInt(k, 10);
+    if (disabledGids.has(gid)) continue;
+    validTileGids.add(gid);
+  }
   const groundLayerGids = layerGidSet(defs, 'ground');
   const objectLayerGids = layerGidSet(defs, 'object');
+  for (const gid of disabledGids) { groundLayerGids.delete(gid); objectLayerGids.delete(gid); }
 
-  const system = buildMapSystemPrompt(defs);
+  const system = buildMapSystemPrompt(defs, disabledGids);
   const user = buildUserPrompt(req);
   const tool = buildMapResponseTool();
 
@@ -127,7 +180,7 @@ export async function generateMap(
 
   const block = resp.content.find((b) => b.type === "tool_use");
   if (!block || block.type !== "tool_use") throw new Error("Model did not return a tool_use block.");
-  const payload = block.input as unknown as GeneratedMapPayload;
+  const payload = GeneratedMapPayloadSchema.parse(block.input) as GeneratedMapPayload;
   validateMapPayload(payload, validTileGids, groundLayerGids, objectLayerGids);
 
   const stamp = Date.now();
@@ -172,10 +225,12 @@ interface GeneratedMapPayload {
   objectData: number[];
 }
 
-function buildMapSystemPrompt(defs: GameDefs): string {
-  const legendLines = Object.entries(defs.tileLegend.tiles).map(([gid, t]) => {
-    return `  GID ${gid} (${t.name}, ${t.layer}, ${t.passable ? "passable" : "impassable"}): ${t.description}`;
-  }).join("\n");
+function buildMapSystemPrompt(defs: GameDefs, disabledGids: Set<number> = new Set()): string {
+  const legendLines = Object.entries(defs.tileLegend.tiles)
+    .filter(([gid]) => !disabledGids.has(parseInt(gid, 10)))
+    .map(([gid, t]) => {
+      return `  GID ${gid} (${t.name}, ${t.layer}, ${t.passable ? "passable" : "impassable"}): ${t.description}`;
+    }).join("\n");
   const setting = settingPromptBlock(defs.activeSetting, 'full');
 
   return `${setting ? setting + '\n\n' : ''}You are a TILE MAP author for a 2D tile-based RPG. Given a player's free-text description of a PLACE, you produce a Tiled-compatible tile layout. Submit the result via the submit_map tool — no plain-text reply.
@@ -263,10 +318,12 @@ function validateMapPayload(
 
 // ── System prompt + user prompt ─────────────────────────────────────────────
 
-function buildSystemPrompt(defs: GameDefs): string {
-  const legendLines = Object.entries(defs.tileLegend.tiles).map(([gid, t]) => {
-    return `  GID ${gid} (${t.name}, ${t.layer}, ${t.passable ? "passable" : "impassable"}): ${t.description}`;
-  }).join("\n");
+function buildSystemPrompt(defs: GameDefs, disabledGids: Set<number> = new Set()): string {
+  const legendLines = Object.entries(defs.tileLegend.tiles)
+    .filter(([gid]) => !disabledGids.has(parseInt(gid, 10)))
+    .map(([gid, t]) => {
+      return `  GID ${gid} (${t.name}, ${t.layer}, ${t.passable ? "passable" : "impassable"}): ${t.description}`;
+    }).join("\n");
 
   const monsterLines = defs.monsters.map((m) => `  ${m.id} — ${m.name} (CR ${m.cr})`).join("\n");
   const npcLines = defs.npcs.map((n) => `  ${n.id} — ${n.name}`).join("\n");

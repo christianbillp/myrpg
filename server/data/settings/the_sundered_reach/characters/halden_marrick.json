@@ -45,7 +45,7 @@
   "xp": 0,
   "defaultEquipment": {
     "armorId": "chain_mail",
-    "weaponId": "longsword",
+    "weaponId": "battleaxe",
     "shieldId": "shield"
   },
   "defaultInventoryIds": [
@@ -57,6 +57,6 @@
     "health_potion"
   ],
   "defaultCp": 1400,
-  "shortDescription": "Mustered-out Bureau corporal carrying a question he can't quite answer.",
-  "description": "Twelve years a corporal in the Bureau of Adjustment, posted to a frontier garrison at the edge of the Reach. He kept the road open against the things that crawled out of the old empire's ruins, watched men he'd trained get sent home in boxes, and signed off on more lawful corrections than he wants to count. Mustered out three months ago with a small pension and a quiet question he can't answer about whether what he served was worth what it cost. Speaks plainly, drinks little, sleeps with his sword in arm's reach."
+  "shortDescription": "Hold-trained soldier on his first frontier posting, carrying more certainty than he's earned.",
+  "description": "Six years in the gate-guard of Karn Doral, drilled with axe and shield since he was old enough to hold a haft. He topped every muster, took the cohort bouts two seasons running, and wears the marks to prove it — but the mountain stayed at peace the whole while, and not one of those bouts ever drew real blood. He mustered out the day his term ended and came straight down to the Reach, certain his name was about to start meaning something. He talks like a man who's seen things he hasn't, keeps his armour mirror-bright, and has yet to learn that the frontier doesn't grade on form. Brave to a fault, quick to stand for a stranger, and privately terrified that the first real fight will show him what the drills never could."
 }

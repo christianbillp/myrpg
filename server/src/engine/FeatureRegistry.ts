@@ -89,3 +89,21 @@ registerFeatureHandler('action-surge', (ctx, featureId) => {
     style: 'status',
   });
 });
+
+/**
+ * Steady Aim (Rogue L3). Spends a Bonus Action to grant the rogue
+ * Advantage on their next attack this turn; afterwards their Speed is
+ * 0 until end of turn. The "haven't moved" prerequisite is checked by
+ * `canUseFeature` (gates the button); this handler just sets the
+ * one-shot flag the attack resolver consults and zeroes `movesLeft`.
+ */
+registerFeatureHandler('steady-aim', (ctx) => {
+  const s = ctx.state;
+  s.player.steadyAim = true;
+  s.player.bonusActionUsed = true;
+  s.player.movesLeft = 0;
+  ctx.addLog({
+    left: `${ctx.playerDef.name} steadies their aim — Advantage on the next attack this turn`,
+    style: 'status',
+  });
+});

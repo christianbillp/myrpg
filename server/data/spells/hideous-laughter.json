@@ -14,5 +14,6 @@
   "ritual": false,
   "save": { "ability": "wis", "halfOnSuccess": false },
   "effect": { "onFail": ["prone", "incapacitated"] },
+  "repeatSave": { "ability": "wis", "removeOnSuccess": ["prone", "incapacitated"] },
   "description": "A creature of your choice that you can see within range perceives everything as hilarious and falls into fits of laughter. The target must succeed on a Wisdom save or be Prone and Incapacitated, unable to stand up, for the duration. At the end of each of its turns, and each time it takes damage, the target can make another Wisdom save (with Advantage if the save is triggered by damage). The spell ends on a successful save. A creature with Intelligence 4 or lower or that doesn't understand any language is immune."
 }

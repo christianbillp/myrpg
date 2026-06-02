@@ -199,7 +199,18 @@ export function buildSessionState(
     conditions: [] as string[],
     equippedSlotLabels: { armor: null, weapon: null, shield: null },
     ac: playerDef.ac,
-    spellSlots: req.resumeSpellSlots ?? [...(playerDef.defaultSpellSlots ?? [])],
+    // Dev mode `unlockAllSpells` also widens the slot pool — without slots
+    // of the right level the L2 (and higher) prepared spells below would
+    // appear in the spellbook but stay uncastable. Pool size: 4 slots per
+    // level for every level represented in the shipped roster, capped at
+    // L9. Combine with `unlimitedSpellSlots` to keep the pool topped off
+    // between casts; the two flags are independent and stack cleanly.
+    spellSlots: req.devFlags?.unlockAllSpells
+      ? (() => {
+          const maxLevel = Math.min(9, Math.max(0, ...defs.spells.map((sp) => sp.level)));
+          return Array.from({ length: maxLevel }, () => 4);
+        })()
+      : (req.resumeSpellSlots ?? [...(playerDef.defaultSpellSlots ?? [])]),
     // Dev mode `unlockAllSpells`: seed every L1+ spell from the caster's
     // class as prepared so the tester can invoke any spell without a
     // level-up rebuild. Cantrips are intentionally excluded — they are
@@ -218,6 +229,8 @@ export function buildSessionState(
     speedBonus: 0,
     expeditiousRetreat: false,
     jumpMultiplier: 1,
+    magicWeaponBonus: 0,
+    seeInvisible: false,
     ongoingEffects: [],
   };
 
@@ -329,6 +342,7 @@ export function buildSessionState(
     pendingAigmEvents: [],
     worldFlags: req.adventureSeed?.seedWorldFlags ?? {},
     narrationLastUsed: {},
+    activeZones: [],
     factionRelations,
     // Legacy projection kept in sync with the matrix at boot. Pass 2 will
     // re-project after every mutation so existing readers stay correct.

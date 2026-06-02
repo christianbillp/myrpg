@@ -19,6 +19,7 @@ import {
 } from './ActionGuards.js';
 import { publishNpcDamage } from './ThresholdPublisher.js';
 import { canSee as visCanSee } from './Vision.js';
+import { endConcentration } from './ConcentrationSystem.js';
 import type { PlayerDef } from '../../../shared/types.js';
 import { d20, mod } from './Dice.js';
 import { combatantDisplayName } from './CombatFlow.js';
@@ -233,8 +234,12 @@ export function doAttack(ctx: GameContext, targetId: string | undefined, events:
     if (ammoIdx !== -1) s.player.inventoryIds.splice(ammoIdx, 1);
   }
 
-  const withAdvantage = playerHidden || hasAttackAdvantage(s.player.conditions) || grantsAdvantageAgainst(target.conditions, dist);
-  const withDisadvantage = hasAttackDisadvantage(s.player.conditions) || grantsDisadvantageAgainst(target.conditions, dist) || rangedDisadvantage;
+  // SRD Steady Aim (Rogue L3): one-shot Advantage on the next attack;
+  // consumed here so a follow-up miss-then-attack doesn't keep the buff.
+  const steadyAimAdv = !!s.player.steadyAim;
+  if (steadyAimAdv) s.player.steadyAim = false;
+  const withAdvantage = playerHidden || hasAttackAdvantage(s.player.conditions) || grantsAdvantageAgainst(target.conditions, dist) || steadyAimAdv;
+  const withDisadvantage = hasAttackDisadvantage(s.player.conditions) || grantsDisadvantageAgainst(target.conditions, dist, s.player.seeInvisible) || rangedDisadvantage;
   const autoCrit = isAutoCrit(target.conditions, dist);
   const { bonus: coverBonus, untargetable } = coverBonusVsTarget(ctx, target);
   if (untargetable) {
@@ -299,6 +304,13 @@ export function doAttack(ctx: GameContext, targetId: string | undefined, events:
   if (target.hp <= 0) ctx.killWithReward(target, targetDef, `☠ ${target.name} is slain!`);
 
   s.player.actionUsed = true;
+
+  // SRD Invisibility — if the caster invisibilised themselves and then made
+  // this attack roll, the spell ends. Concentration cleanup strips the
+  // condition and clears `invisibilityTargetId`.
+  if (s.player.concentratingOn === 'invisibility' && s.player.invisibilityTargetId === 'player') {
+    endConcentration(ctx, `${ctx.playerDef.name} broke Invisibility by attacking`);
+  }
 }
 
 export function throwItem(ctx: GameContext, itemId: string, targetId?: string): GameEvent[] {
@@ -379,8 +391,12 @@ function executeThrowOnTarget(
     n.disposition === 'enemy' && n.hp > 0 &&
     chebyshev(s.player.tileX, s.player.tileY, n.tileX, n.tileY) <= 1);
   const playerHidden = s.player.conditions.includes('hidden');
-  const withAdvantage = playerHidden || grantsAdvantageAgainst(target.conditions, dist);
-  const withDisadvantage = dist > normalRange || grantsDisadvantageAgainst(target.conditions, dist)
+  // Steady Aim (Rogue L3) also rides a thrown attack — same one-shot
+  // consume semantics as the main attack path.
+  const steadyAimAdv = !!s.player.steadyAim;
+  if (steadyAimAdv) s.player.steadyAim = false;
+  const withAdvantage = playerHidden || grantsAdvantageAgainst(target.conditions, dist) || steadyAimAdv;
+  const withDisadvantage = dist > normalRange || grantsDisadvantageAgainst(target.conditions, dist, s.player.seeInvisible)
     || hasAttackDisadvantage(s.player.conditions) || adjacentEnemy;
   const autoCrit = isAutoCrit(target.conditions, dist);
   ctx.addLog({ left: `${ctx.playerDef.name} throws ${itemDef.name}`, style: 'normal' });
@@ -554,9 +570,13 @@ export function doEnemyOpportunityAttack(ctx: GameContext, npc: NpcState, events
   const meleeAtk = def.attacks.find((a) => a.attackType === 'melee' || a.attackType === 'both');
   if (!meleeAtk) return;
   npc.reactionUsed = true;
-  const withDisadvantage = s.player.conditions.includes('dodging');
+  // The OA inherits the same Advantage/Disadvantage sources as a normal
+  // attack — Blinded, Poisoned, Frightened, etc. on the attacker impose
+  // Disadvantage; player Dodging stacks on top.
+  const withDisadvantage = s.player.conditions.includes('dodging') || hasAttackDisadvantage(npc.conditions);
+  const withAdvantage = hasAttackAdvantage(npc.conditions);
   const playerCoverAc = playerCoverAcVsNpc(ctx, npc);
-  const { damage, isHit, isCrit, logs, bonusComponents } = enemyAttack(meleeAtk, ctx.playerDef.ac, false, withDisadvantage, playerCoverAc);
+  const { damage, isHit, isCrit, logs, bonusComponents } = enemyAttack(meleeAtk, ctx.playerDef.ac, withAdvantage, withDisadvantage, playerCoverAc);
   ctx.addLogs([{ left: `⚡ ${npc.name} makes an Opportunity Attack!`, style: 'header' }, ...logs]);
   emitPhysicalAttackSound(ctx, isHit);
   if (isHit) {
@@ -579,7 +599,13 @@ export function doPlayerOpportunityAttack(ctx: GameContext, npc: NpcState): void
   const dist = chebyshev(s.player.tileX, s.player.tileY, npc.tileX, npc.tileY);
   const oaAutoCrit = isAutoCrit(npc.conditions, dist);
   const { bonus: oaCoverBonus } = coverBonusVsTarget(ctx, npc);
-  const { damage, isHit: oaIsHit, logs, vexApplied, slowApplied, bonusComponents } = playerMeleeAttack(ctx.playerDef, targetDef, false, false, oaAutoCrit, false, oaCoverBonus);
+  // Player OA picks up the same Adv/Disadv sources as a normal attack —
+  // Blinded / Poisoned / Frightened impose Disadvantage on the attacker;
+  // grants-Advantage target conditions (Prone-at-melee-range etc.) bring
+  // Advantage.
+  const oaWithAdvantage = hasAttackAdvantage(s.player.conditions);
+  const oaWithDisadvantage = hasAttackDisadvantage(s.player.conditions);
+  const { damage, isHit: oaIsHit, logs, vexApplied, slowApplied, bonusComponents } = playerMeleeAttack(ctx.playerDef, targetDef, oaWithAdvantage, oaWithDisadvantage, oaAutoCrit, false, oaCoverBonus);
   ctx.addLogs([{ left: `⚡ ${ctx.playerDef.name} makes an Opportunity Attack!`, style: 'header' }, ...logs]);
   emitPhysicalAttackSound(ctx, oaIsHit);
   const { finalDamage, log: oaResistLog } = ctx.resistMod(damage, ctx.playerDef.mainAttack.damageType, targetDef, npc.name);
@@ -622,8 +648,11 @@ export function doNpcOpportunityAttack(
 
   const dist = chebyshev(attacker.tileX, attacker.tileY, target.tileX, target.tileY);
   const targetDodging = target.conditions.includes('dodging');
-  const withDisadvantage = targetDodging || (target.conditions.includes('prone') && dist > 1);
-  const withAdvantage = target.conditions.includes('prone') && dist <= 1;
+  const withDisadvantage = targetDodging
+    || (target.conditions.includes('prone') && dist > 1)
+    || hasAttackDisadvantage(attacker.conditions);
+  const withAdvantage = (target.conditions.includes('prone') && dist <= 1)
+    || hasAttackAdvantage(attacker.conditions);
   const { damage, isHit, isCrit, logs, bonusComponents } = enemyAttack(meleeAtk, targetDef.ac, withAdvantage, withDisadvantage);
   ctx.addLogs([{ left: `⚡ ${attackerDisplayName} makes an Opportunity Attack on ${targetDisplayName}!`, style: 'header' }, ...logs]);
   if (isHit) {

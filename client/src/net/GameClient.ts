@@ -2,7 +2,7 @@ import type {
   GameState, GameEvent, PlayerAction, ServerWSMessage, CreateSessionRequest, StorylogEntry, AdventureSave,
   LevelUpPreview, LevelUpChoices, PlayerDef,
   LongRestPreview, LongRestChoices,
-} from './types';
+} from '../../../shared/types';
 import { DevMode } from '../devMode';
 
 const API_URL = 'http://localhost:3000';
@@ -15,14 +15,22 @@ const WS_URL  = 'ws://localhost:3000';
  * Mirrors the server-side `MapAnchors` shape.
  */
 export interface ComposedMapAnchors {
-  rooms?: Array<{ x: number; y: number; w: number; h: number; cx: number; cy: number }>;
-  entrance?: { x: number; y: number };
-  vault?: { x: number; y: number };
   campfires?: Array<{ x: number; y: number }>;
-  buildings?: Array<{ x: number; y: number; w: number; h: number }>;
-  ruins?: Array<{ x: number; y: number; w: number; h: number }>;
-  pathEndpoints?: Array<{ x: number; y: number }>;
   inlandBand?: Array<{ x: number; y: number }>;
+  /** Cells where a path emerges at the map edge (2 for a straight, 3 for an
+   *  intersection or T-junction). */
+  pathEndpoints?: Array<{ x: number; y: number }>;
+  /** The crossing cell of two paths, populated only when the `intersection`
+   *  feature is on. */
+  pathIntersection?: { x: number; y: number };
+  /** Building footprints (full rectangle, stone-floor interior). */
+  buildings?: Array<{ x: number; y: number; w: number; h: number }>;
+  /** Dungeon rooms (rect + centre). Populated when terrain is `dungeon`. */
+  rooms?: Array<{ x: number; y: number; w: number; h: number; cx: number; cy: number }>;
+  /** Centre of the southernmost dungeon room — the entry corridor lands here. */
+  entrance?: { x: number; y: number };
+  /** Centre of the dungeon room farthest from the entrance. */
+  vault?: { x: number; y: number };
 }
 
 /** Compact exact-tile spawn shape used in both the refine request (current
@@ -574,9 +582,12 @@ export class GameClient {
    * by the rule-based composer in `engine/MapComposer.ts`.
    */
   async composeMap(args: {
-    terrain: 'grassland' | 'forest' | 'dungeon';
-    features: Array<'ruins' | 'buildings' | 'campsites' | 'path' | 'coastline' | '3-room' | '5-room'>;
+    terrain: 'grassland' | 'forest' | 'dungeon' | 'tavern';
+    features: Array<'campsites' | 'coastline' | 'path' | 'intersection' | 'buildings' | '3-room' | '5-room'>;
     seed?: number;
+    /** When `features` includes `'buildings'`, this controls the count
+     *  (1..5). Clamped server-side; defaults to 1 when omitted. */
+    buildingsCount?: number;
   }): Promise<{
     /** Always null for /generate/map/composed — the preview is not persisted. Call `saveMap` to persist. */
     mapId: null;
@@ -587,8 +598,11 @@ export class GameClient {
     name: string;
     description: string;
     tilesets: Array<{ firstgid: number; source: string }>;
-    /** Story-suitable spawn anchors found / stamped by the composer (entrance, vault, campfires, etc). */
+    /** Story-suitable spawn anchors found / stamped by the composer (campfires, inlandBand, pathEndpoints, etc). */
     anchors: ComposedMapAnchors;
+    /** Named tile regions emitted by feature placers (currently `path` and
+     *  `intersection`). Empty array when the chosen features produced none. */
+    zones: Array<{ id: string; name: string; color: string; cells: string[] }>;
   }> {
     const res = await fetch(`${API_URL}/generate/map/composed`, {
       method: 'POST',
@@ -605,6 +619,7 @@ export class GameClient {
       name: string; description: string;
       tilesets: Array<{ firstgid: number; source: string }>;
       anchors: ComposedMapAnchors;
+      zones: Array<{ id: string; name: string; color: string; cells: string[] }>;
     }>;
   }
 
@@ -622,6 +637,9 @@ export class GameClient {
     terrainData: number[];
     objectData: number[];
     tilesets?: Array<{ firstgid: number; source: string }>;
+    /** Author-time named tile regions. Persists alongside the map; optional
+     *  — omit if the map has none. */
+    zones?: Array<{ id: string; name: string; color: string; cells: string[] }>;
     existingMapId?: string;
   }): Promise<{ mapId: string }> {
     const res = await fetch(`${API_URL}/generate/map/save`, {
@@ -652,8 +670,9 @@ export class GameClient {
    */
   async composeEncounter(args: {
     existingMapId?: string;
-    terrain?: 'grassland' | 'forest' | 'dungeon';
-    features?: Array<'ruins' | 'buildings' | 'campsites' | 'path' | 'coastline' | '3-room' | '5-room'>;
+    terrain?: 'grassland' | 'forest' | 'dungeon' | 'tavern';
+    features?: Array<'campsites' | 'coastline' | 'path' | 'intersection' | 'buildings' | '3-room' | '5-room'>;
+    buildingsCount?: number;
     /** Long-form AIGM scene context (writes to the encounter's `customContext`). */
     aigmContext?: string;
     /** Player-facing card summary (writes to the encounter's `description`). */
@@ -720,7 +739,7 @@ export class GameClient {
   /** Upsert an authored adventure. Body is an `AdventureDef`; the server
    *  writes `<active-setting>/adventures/<id>.json` and reloads defs.
    *  Returns the persisted id. */
-  async saveAdventure(adventure: import("./types").AdventureDef): Promise<{ adventureId: string }> {
+  async saveAdventure(adventure: import("../../../shared/types").AdventureDef): Promise<{ adventureId: string }> {
     const res = await fetch(`${API_URL}/adventure`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -775,11 +794,11 @@ export class GameClient {
   /** Fetch a saved spec by id for re-editing in the Token Creator. Returns
    *  null when no spec exists for that id (the SVG may still exist as a
    *  legacy hand-authored token). */
-  async loadTokenSpec(id: string): Promise<import("./types").TokenSpec | null> {
+  async loadTokenSpec(id: string): Promise<import("../../../shared/types").TokenSpec | null> {
     const res = await fetch(`${API_URL}/token-specs/${encodeURIComponent(id)}`);
     if (res.status === 404) return null;
     if (!res.ok) throw new Error(`Load token spec failed: ${res.status}`);
-    return res.json() as Promise<import("./types").TokenSpec>;
+    return res.json() as Promise<import("../../../shared/types").TokenSpec>;
   }
 
   /** Save a token. Server composes the SVG + writes both `data/tokens/<id>.svg`
@@ -788,7 +807,7 @@ export class GameClient {
    *  token with the same id already exists; the caller catches `TokenExistsError`
    *  to prompt the user, then retries with `overwrite: true`. */
   async saveToken(
-    spec: import("./types").TokenSpec,
+    spec: import("../../../shared/types").TokenSpec,
     opts: { overwrite?: boolean } = {},
   ): Promise<{ id: string; tokenAsset: string }> {
     const query = opts.overwrite ? "?overwrite=true" : "";
@@ -811,7 +830,7 @@ export class GameClient {
   /** Upsert an authored NPC. Server validates the `monsterClass` against the
    *  monster roster (the engine resolves an NPC's stats by looking up its
    *  monsterClass) and writes `<active-setting>/npcs/<id>.json`. */
-  async saveNpc(npc: import("./types").NPCDef): Promise<{ npcId: string }> {
+  async saveNpc(npc: import("../../../shared/types").NPCDef): Promise<{ npcId: string }> {
     const res = await fetch(`${API_URL}/npc`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },

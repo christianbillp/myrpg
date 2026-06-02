@@ -1,7 +1,7 @@
 import Phaser from "phaser";
-import { PlayerDef } from "../data/player";
-import { SavedMapDef } from "../net/types";
-import type { MonsterDef, NPCDef } from "../data/monsters";
+import { PlayerDef } from "../../../shared/types";
+import { SavedMapDef } from "../../../shared/types";
+import type { MonsterDef, NPCDef } from "../../../shared/types";
 import { gameClient } from "../net/GameClient";
 import { ConnectionMonitor } from "../net/ConnectionMonitor";
 import { TILE_SIZE } from "../constants";
@@ -51,6 +51,7 @@ export class BootScene extends Phaser.Scene {
     this.load.json("tileLegend",          `${API_URL}/tilesets/legends`);
     this.load.json("factions",            `${API_URL}/factions`);
     this.load.json("conversations",       `${API_URL}/conversations`);
+    this.load.json("serverConfig",        `${API_URL}/server-config`);
   }
 
   async create(): Promise<void> {
@@ -89,6 +90,12 @@ export class BootScene extends Phaser.Scene {
       // tile dimensions) used to render thumbnails.
       this.registry.set("tileLegend",         this.cache.json.get("tileLegend") ?? { tilesets: [] });
       this.registry.set("tilesetMeta",        this.cache.json.get("tilesets") ?? []);
+      // disabledTiles is the per-tileset disable list set from the Configuration
+      // scene's "Configure Tiles" page. Consumers — MapPalette (Map Editor) and
+      // the AI map-generator legend — read from the registry so the same
+      // single source of truth gates every place tiles can be selected from.
+      const serverConfig = this.cache.json.get("serverConfig") as { disabledTiles?: Record<string, number[]> } | null;
+      this.registry.set("disabledTiles",      serverConfig?.disabledTiles ?? {});
 
       // Preload every spritesheet on the server (from /tilesets) so the map
       // preview overlay can render any composed map immediately — including
@@ -132,7 +139,8 @@ export class BootScene extends Phaser.Scene {
       // `setDisplaySize` at render time scales the rasterised bitmap down to
       // the in-game token diameter.
       const tokenSize = TILE_SIZE * 2;
-      const queueToken = (asset: string) => {
+      const queueToken = (asset: string | undefined) => {
+        if (!asset) return;
         const key = tokenTextureKey(asset);
         if (queued.has(key)) return;
         queued.add(key);
@@ -140,17 +148,20 @@ export class BootScene extends Phaser.Scene {
       };
       for (const c of characters)                                              queueToken(tokenAssetForPlayer(c));
       for (const m of (this.cache.json.get("monsters") as MonsterDef[]) ?? []) queueToken(tokenAssetForMonster(m));
-      for (const n of (this.cache.json.get("npcs")     as NPCDef[])     ?? []) {
-        const asset = tokenAssetForNpc(n);
-        if (asset) queueToken(asset);
-      }
+      for (const n of (this.cache.json.get("npcs")     as NPCDef[])     ?? []) queueToken(tokenAssetForNpc(n));
 
       if (queued.size > 0) {
-        await new Promise<void>((resolve, reject) => {
+        await new Promise<void>((resolve) => {
           this.load.once("complete", resolve);
-          this.load.once("loaderror", (file: { key: string; url: string }) =>
-            reject(new Error(`Failed to load tileset ${file.key} (${file.url})`)),
-          );
+          // A single missing asset (e.g. a monster JSON that ships without its
+          // SVG yet) used to reject this promise, drop into the outer catch,
+          // and trigger the CONNECTION LOST overlay — even though the server
+          // was fine. Phaser raises its own "loaderror" warning per missing
+          // file; the boot still completes once `complete` fires for the
+          // remaining assets, so we just let the loader carry on.
+          this.load.on("loaderror", (file: { key: string; url: string }) => {
+            console.warn(`[BootScene] asset failed to load: ${file.key} (${file.url})`);
+          });
           this.load.start();
         });
       }

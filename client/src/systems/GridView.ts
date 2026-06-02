@@ -1,6 +1,6 @@
 import Phaser from "phaser";
 import { TILE_SIZE, GRID_COLS, GRID_ROWS, PLAYER_PANEL_WIDTH } from "../constants";
-import { GameMap } from "../net/types";
+import { GameMap } from "../../../shared/types";
 
 const GRID_W = GRID_COLS * TILE_SIZE;
 const GRID_H = GRID_ROWS * TILE_SIZE;

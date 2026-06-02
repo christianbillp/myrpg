@@ -1,0 +1,20 @@
+{
+  "id": "hold-person",
+  "name": "Hold Person",
+  "level": 2,
+  "school": "enchantment",
+  "classes": ["bard", "cleric", "druid", "sorcerer", "warlock", "wizard"],
+  "castingTime": "action",
+  "range": "60 feet",
+  "rangeFeet": 60,
+  "components": { "verbal": true, "somatic": true, "material": "a straight piece of iron" },
+  "duration": "concentration, up to 1 minute",
+  "durationRounds": 10,
+  "concentration": true,
+  "ritual": false,
+  "save": { "ability": "wis", "halfOnSuccess": false },
+  "effect": { "onFail": "paralyzed" },
+  "repeatSave": { "ability": "wis", "removeOnSuccess": ["paralyzed"] },
+  "description": "Choose a Humanoid that you can see within range. The target must succeed on a Wisdom saving throw or have the Paralyzed condition for the duration. At the end of each of its turns, the target repeats the save, ending the spell on itself on a success.",
+  "scaling": "You can target one additional Humanoid for each spell slot level above 2."
+}

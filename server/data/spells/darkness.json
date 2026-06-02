@@ -1,0 +1,17 @@
+{
+  "id": "darkness",
+  "name": "Darkness",
+  "level": 2,
+  "school": "evocation",
+  "classes": ["sorcerer", "warlock", "wizard"],
+  "castingTime": "action",
+  "range": "60 feet",
+  "rangeFeet": 60,
+  "components": { "verbal": true, "somatic": false, "material": "bat fur and a piece of coal" },
+  "duration": "concentration, up to 10 minutes",
+  "durationRounds": 100,
+  "concentration": true,
+  "ritual": false,
+  "area": { "shape": "sphere", "sizeFeet": 15 },
+  "description": "For the duration, magical Darkness spreads from a point within range and fills a 15-foot-radius Sphere. Darkvision can't see through it, and nonmagical light can't illuminate it. Engine treatment: each creature in the sphere at cast time gains the Heavily Obscured condition (identical to Fog Cloud). Concentration ends → condition stripped. The 'dispels other light spells of L2 or lower' rule is descriptive only."
+}

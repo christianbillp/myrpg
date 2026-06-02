@@ -1,0 +1,18 @@
+{
+  "id": "enhance-ability",
+  "name": "Enhance Ability",
+  "level": 2,
+  "school": "transmutation",
+  "classes": ["bard", "cleric", "druid", "ranger", "sorcerer", "wizard"],
+  "castingTime": "action",
+  "range": "touch",
+  "rangeFeet": 5,
+  "components": { "verbal": true, "somatic": true, "material": null },
+  "duration": "concentration, up to 1 hour",
+  "durationRounds": 600,
+  "concentration": true,
+  "ritual": false,
+  "abilityChoices": ["str", "dex", "int", "wis", "cha"],
+  "description": "Touch a willing creature (engine: self-target only) and choose Strength, Dexterity, Intelligence, Wisdom, or Charisma. For the duration the target rolls ability checks of the chosen ability score with Advantage. The picker lists the five SRD 5.2.1 options (Constitution is NOT one of them in the 2024 ruleset — the legacy 2014 Bear's Endurance variant was dropped); the engine stores the chosen ability key on `PlayerState.enhancedAbility` and the ability-check resolver consults `SKILL_ABILITY` to decide whether each skill rides the boost. Concentration end clears the flag.",
+  "scaling": "You can target one additional creature for each spell slot level above 2 (engine: single-target only)."
+}

@@ -1,6 +1,6 @@
 import Phaser from "phaser";
 import { tilesetTextureKey } from "../scenes/BootScene";
-import type { SavedMapDef } from "../net/types";
+import type { SavedMapDef } from "../../../shared/types";
 import { decodeTileGid, TILE_VOID_GID } from "../../../shared/tileGid";
 
 /**
@@ -19,6 +19,24 @@ import { decodeTileGid, TILE_VOID_GID } from "../../../shared/tileGid";
  *   • `destroy()` — tears down all Phaser objects + input handlers.
  */
 
+/**
+ * Author-time named zone — a free-form set of tiles the map editor user has
+ * tagged with a label (e.g. "guardtower", "altar", "road"). Zones are not
+ * gameplay objects; they're semantic annotations carried along with the map
+ * so future encounter-generation passes can read "the altar is at (12,4)"
+ * and place narrative content accordingly. Tiles in `cells` are stored as
+ * `"x,y"` strings so set-membership tests stay O(1).
+ */
+export interface MapZone {
+  id: string;
+  name: string;
+  /** CSS hex string assigned at creation time. Used for the translucent fill
+   *  + the chip-coloured pill rendered with the zone label. */
+  color: string;
+  /** Tile coordinates belonging to this zone, as `"x,y"` strings. */
+  cells: string[];
+}
+
 export interface MapPreviewData {
   /** Set only when the map has been persisted. Null/undefined for unsaved previews. */
   mapId?: string | null;
@@ -29,6 +47,18 @@ export interface MapPreviewData {
   name: string;
   description: string;
   tilesets?: Array<{ firstgid: number; source: string }>;
+  /** Optional author-time zones — see `MapZone`. The renderer paints them as
+   *  translucent tile overlays with a centered label when the `zones` layer
+   *  visibility flag is on. */
+  zones?: MapZone[];
+}
+
+/** Per-layer visibility toggle. Defaults to all-on. The editor's LAYERS
+ *  dropdown writes these flags to switch what the preview paints. */
+export interface MapPreviewLayerVisibility {
+  terrain: boolean;
+  object: boolean;
+  zones: boolean;
 }
 
 export interface MapPreviewZones {
@@ -115,6 +145,19 @@ export class EmbeddedMapPreview {
    *  treated as a drag-to-pan only. */
   private static readonly CLICK_PIXEL_THRESHOLD = 4;
   private onCellClick: ((col: number, row: number) => void) | null;
+  /** Per-layer visibility. All-on by default; the editor's LAYERS dropdown
+   *  flips these via `setLayerVisible`. The renderer skips a layer when its
+   *  flag is false, which is cheaper than re-rendering an empty data array. */
+  private layerVisibility: MapPreviewLayerVisibility = { terrain: true, object: true, zones: true };
+  /** HTML label badges floated over the canvas — one per visible zone.
+   *  Stored as DOM divs (not Phaser text) so the labels sit ABOVE the
+   *  game canvas in the page's stacking order and can use proper CSS
+   *  typography. Repositioned on every pan/zoom + every grid re-render. */
+  private zoneLabelEls: HTMLDivElement[] = [];
+  /** Geometry computed by `renderGrid` so the HTML-label positioner has
+   *  access to each label's centroid (in local container-space) and color.
+   *  Cleared at the top of every `renderGrid` pass. */
+  private zoneLabelLayouts: Array<{ zone: MapZone; localCx: number; localCy: number; colorNum: number }> = [];
 
   constructor(scene: Phaser.Scene, viewport: PreviewViewport, options: EmbeddedMapPreviewOptions = {}) {
     this.scene = scene;
@@ -257,6 +300,20 @@ export class EmbeddedMapPreview {
     this.onCellClick = cb;
   }
 
+  /** Toggle one layer's visibility. Triggers an in-place re-render so the
+   *  user sees the change immediately. Default state is all-true. */
+  setLayerVisible(layer: keyof MapPreviewLayerVisibility, visible: boolean): void {
+    if (this.layerVisibility[layer] === visible) return;
+    this.layerVisibility[layer] = visible;
+    this.renderGrid();
+  }
+
+  /** Snapshot of the current per-layer visibility — used by the editor's
+   *  LAYERS dropdown to render the checkbox state. */
+  getLayerVisibility(): MapPreviewLayerVisibility {
+    return { ...this.layerVisibility };
+  }
+
   /** Set the map currently displayed. Also resets pan/zoom and recomputes
    *  the tileset routing for the new map. */
   setData(data: MapPreviewData): void {
@@ -326,6 +383,8 @@ export class EmbeddedMapPreview {
     this.container.destroy();
     this.busyTextEl.remove();
     this.emptyTextEl.remove();
+    for (const el of this.zoneLabelEls) el.remove();
+    this.zoneLabelEls = [];
   }
 
   // ── Internal ────────────────────────────────────────────────────────────
@@ -348,6 +407,10 @@ export class EmbeddedMapPreview {
       this.viewport.x + (this.viewport.width - bw) / 2,
       this.viewport.y + (this.viewport.height - bh) / 2,
       bw, bh);
+    // Window-resize → re-place every zone label too, since the canvas's
+    // bounding rect (and therefore the page-space conversion) may have
+    // changed without any pan/zoom delta.
+    this.positionZoneLabels();
   }
 
   private pointerInViewport(pointer: Phaser.Input.Pointer): boolean {
@@ -362,6 +425,77 @@ export class EmbeddedMapPreview {
   private applyTransform(): void {
     this.gridContainer.setScale(this.zoom);
     this.gridContainer.setPosition(this.viewportCenterX + this.panX, this.viewportCenterY + this.panY);
+    this.positionZoneLabels();
+  }
+
+  /** Build (or refresh) one HTML div per zone-label layout entry. The divs
+   *  are appended to <body> with `position: absolute` and are positioned
+   *  by `positionZoneLabels`. Called once per `renderGrid` pass; the per-
+   *  label position then updates on every pan/zoom via `applyTransform`. */
+  private renderZoneLabels(): void {
+    // Recycle existing divs when the layout count matches — avoids a
+    // flicker on minor edits. Otherwise rebuild from scratch.
+    if (this.zoneLabelEls.length !== this.zoneLabelLayouts.length) {
+      for (const el of this.zoneLabelEls) el.remove();
+      this.zoneLabelEls = [];
+      for (let i = 0; i < this.zoneLabelLayouts.length; i++) {
+        const el = document.createElement('div');
+        el.style.cssText = `
+          position: absolute; z-index: 11;
+          font-family: monospace; font-size: 11px;
+          letter-spacing: 1px;
+          padding: 3px 8px;
+          border-radius: 3px;
+          pointer-events: none;
+          transform: translate(-50%, -50%);
+          white-space: nowrap;
+          box-shadow: 0 1px 4px rgba(0,0,0,0.5);
+          border: 1px solid rgba(0,0,0,0.4);
+        `;
+        document.body.appendChild(el);
+        this.zoneLabelEls.push(el);
+      }
+    }
+    for (let i = 0; i < this.zoneLabelLayouts.length; i++) {
+      const el = this.zoneLabelEls[i];
+      const { zone, colorNum } = this.zoneLabelLayouts[i];
+      el.textContent = zone.name;
+      el.style.background = zone.color;
+      el.style.color = textColorForBg(colorNum);
+    }
+    this.positionZoneLabels();
+  }
+
+  /** Update every zone-label div's screen position from its local centroid,
+   *  honoring the current pan/zoom and the canvas scaling factor that maps
+   *  scene-space to page pixels. Clips labels that fall outside the
+   *  viewport rect by hiding them — preserves the masked-grid aesthetic. */
+  private positionZoneLabels(): void {
+    if (this.zoneLabelLayouts.length === 0) return;
+    const rect = this.scene.sys.game.canvas.getBoundingClientRect();
+    const s = rect.width / this.scene.scale.width;
+    const vxMin = rect.left + this.viewport.x * s;
+    const vyMin = rect.top  + this.viewport.y * s;
+    const vxMax = vxMin + this.viewport.width * s;
+    const vyMax = vyMin + this.viewport.height * s;
+    for (let i = 0; i < this.zoneLabelLayouts.length; i++) {
+      const { localCx, localCy } = this.zoneLabelLayouts[i];
+      // gridContainer transform: child at local (lx, ly) lands at
+      //   sceneX = viewportCenterX + panX + lx * zoom
+      // Convert to page-space by multiplying through the canvas scale.
+      const sceneX = this.viewportCenterX + this.panX + localCx * this.zoom;
+      const sceneY = this.viewportCenterY + this.panY + localCy * this.zoom;
+      const pageX = rect.left + sceneX * s;
+      const pageY = rect.top  + sceneY * s;
+      const el = this.zoneLabelEls[i];
+      if (pageX < vxMin || pageX > vxMax || pageY < vyMin || pageY > vyMax) {
+        el.style.display = 'none';
+      } else {
+        el.style.display = '';
+        el.style.left = `${pageX}px`;
+        el.style.top  = `${pageY}px`;
+      }
+    }
   }
 
   private refreshTilesetRouting(data: MapPreviewData): void {
@@ -377,7 +511,13 @@ export class EmbeddedMapPreview {
   private renderGrid(): void {
     const data = this.data;
     this.gridContainer.removeAll(true);
-    if (!data) return;
+    for (const lbl of this.zoneLabelEls) lbl.remove();
+    this.zoneLabelEls = [];
+    this.zoneLabelLayouts = [];
+    if (!data) {
+      this.renderZoneLabels();
+      return;
+    }
 
     const totalW = data.width * TILE_PX;
     const totalH = data.height * TILE_PX;
@@ -388,22 +528,34 @@ export class EmbeddedMapPreview {
       .setStrokeStyle(1, 0x334455);
     this.gridContainer.add(back);
 
+    const showTerrain = this.layerVisibility.terrain;
+    const showObject  = this.layerVisibility.object;
+    const showZones   = this.layerVisibility.zones;
+
     for (let y = 0; y < data.height; y++) {
       for (let x = 0; x < data.width; x++) {
         const i = y * data.width + x;
         const tx = startX + x * TILE_PX + TILE_PX / 2;
         const ty = startY + y * TILE_PX + TILE_PX / 2;
         const groundGid = data.terrainData[i];
-        // `!== 0` instead of `> 0`: rotated/flipped GIDs are negative signed
-        // int32s (Tiled's H/V/D flag bits set on the high end). Filtering
-        // them out as "empty" was hiding every rotated wall in the preview.
-        if (groundGid !== 0) {
-          this.drawTile(tx, ty, groundGid);
+        if (showTerrain) {
+          // `!== 0` instead of `> 0`: rotated/flipped GIDs are negative
+          // signed int32s (Tiled's H/V/D flag bits set on the high end).
+          // Filtering them out as "empty" was hiding every rotated wall.
+          if (groundGid !== 0) {
+            this.drawTile(tx, ty, groundGid);
+          } else {
+            this.gridContainer.add(this.scene.add.rectangle(tx, ty, TILE_PX, TILE_PX, 0x556677));
+          }
         } else {
-          this.gridContainer.add(this.scene.add.rectangle(tx, ty, TILE_PX, TILE_PX, 0x556677));
+          // Off-state placeholder so the grid still has visible cells when
+          // the user just wants to inspect objects / zones in isolation.
+          this.gridContainer.add(this.scene.add.rectangle(tx, ty, TILE_PX, TILE_PX, 0x10141c));
         }
-        const objectGid = data.objectData[i];
-        if (objectGid !== 0) this.drawTile(tx, ty, objectGid);
+        if (showObject) {
+          const objectGid = data.objectData[i];
+          if (objectGid !== 0) this.drawTile(tx, ty, objectGid);
+        }
 
         if (this.zones) {
           const key = `${x},${y}`;
@@ -417,6 +569,56 @@ export class EmbeddedMapPreview {
         }
       }
     }
+
+    // Author-time named zones — colored tile fill + perimeter outline
+    // (NO per-cell internal borders) + an HTML label badge floated over
+    // the canvas. Drawn AFTER tiles so the color overlay sits on top of
+    // the floor. The HTML labels are positioned in `placeZoneLabels`
+    // and re-positioned by `applyTransform` so they track pan/zoom.
+    if (showZones && data.zones && data.zones.length > 0) {
+      const zoneLayer = this.scene.add.graphics();
+      for (const z of data.zones) {
+        if (z.cells.length === 0) continue;
+        const colorNum = parseInt(z.color.replace('#', ''), 16);
+        // Solid-ish fill (alpha 0.55) so the zone's color is the dominant
+        // visual signal on its tiles.
+        zoneLayer.fillStyle(colorNum, 0.55);
+        const inSet = new Set(z.cells);
+        let sumX = 0, sumY = 0, count = 0;
+        for (const cell of z.cells) {
+          const [cx, cy] = cell.split(',').map(Number);
+          if (cx < 0 || cy < 0 || cx >= data.width || cy >= data.height) continue;
+          const rx = startX + cx * TILE_PX;
+          const ry = startY + cy * TILE_PX;
+          zoneLayer.fillRect(rx, ry, TILE_PX, TILE_PX);
+          sumX += cx;
+          sumY += cy;
+          count++;
+        }
+        // Perimeter outline only — for each cell in the zone, stroke the
+        // four edges whose neighbour is NOT also in the zone. Internal
+        // shared edges between two zone cells are skipped, so the user
+        // sees one continuous shape rather than a grid of bordered cells.
+        zoneLayer.lineStyle(2, colorNum, 1);
+        for (const cell of z.cells) {
+          const [cx, cy] = cell.split(',').map(Number);
+          if (cx < 0 || cy < 0 || cx >= data.width || cy >= data.height) continue;
+          const rx = startX + cx * TILE_PX;
+          const ry = startY + cy * TILE_PX;
+          if (!inSet.has(`${cx},${cy - 1}`)) zoneLayer.lineBetween(rx, ry, rx + TILE_PX, ry);                          // N
+          if (!inSet.has(`${cx},${cy + 1}`)) zoneLayer.lineBetween(rx, ry + TILE_PX, rx + TILE_PX, ry + TILE_PX);      // S
+          if (!inSet.has(`${cx - 1},${cy}`)) zoneLayer.lineBetween(rx, ry, rx, ry + TILE_PX);                          // W
+          if (!inSet.has(`${cx + 1},${cy}`)) zoneLayer.lineBetween(rx + TILE_PX, ry, rx + TILE_PX, ry + TILE_PX);      // E
+        }
+        if (count > 0) {
+          const localCx = startX + ((sumX / count) + 0.5) * TILE_PX;
+          const localCy = startY + ((sumY / count) + 0.5) * TILE_PX;
+          this.zoneLabelLayouts.push({ zone: z, localCx, localCy, colorNum });
+        }
+      }
+      this.gridContainer.add(zoneLayer);
+    }
+    this.renderZoneLabels();
 
     if (this.zones?.triggerRegions && this.zones.triggerRegions.length > 0) {
       const g = this.scene.add.graphics();
@@ -451,6 +653,17 @@ export class EmbeddedMapPreview {
     if (dec.flipY) img.setFlipY(true);
     this.gridContainer.add(img);
   }
+}
+
+/** Pick a label text color that stays legible on top of an arbitrary
+ *  zone-fill hex. Uses the standard luminance threshold (~0.6) — light
+ *  background → black text; dark background → white. */
+function textColorForBg(colorNum: number): string {
+  const r = (colorNum >> 16) & 0xff;
+  const g = (colorNum >>  8) & 0xff;
+  const b =  colorNum        & 0xff;
+  const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+  return luminance > 0.6 ? '#000000' : '#ffffff';
 }
 
 function tsetImageUrlFromSource(source: string): string {

@@ -12,7 +12,7 @@
  */
 import { BaseOverlay } from "./BaseOverlay";
 import { UIScale } from "./UIScale";
-import type { LongRestPreview, LongRestChoices } from "../net/types";
+import type { LongRestPreview, LongRestChoices } from "../../../shared/types";
 
 const ACCENT = "#7aaecc";
 const PANEL_W = 640;

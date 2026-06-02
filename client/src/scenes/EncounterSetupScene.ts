@@ -1,10 +1,10 @@
 import Phaser from "phaser";
-import { PlayerDef } from "../data/player";
-import { ItemDef } from "../data/equipment";
-import { EncounterDef } from "../data/encounterContext";
-import { SavedMapDef } from "../data/maps";
+import { PlayerDef } from "../../../shared/types";
+import { ItemDef } from "../../../shared/types";
+import { EncounterDef } from "../../../shared/types";
+import { SavedMapDef } from "../../../shared/types";
 import { gameClient } from "../net/GameClient";
-import type { GameState, EquipmentSlots, EncounterRecord, StorylogEntry } from "../net/types";
+import type { GameState, EquipmentSlots, EncounterRecord, StorylogEntry } from "../../../shared/types";
 import { StorylogOverlay } from "../ui/StorylogOverlay";
 import { createHtmlButton, createHtmlText, type HtmlButtonHandle, type HtmlTextHandle } from "../ui/htmlButtons";
 import { CharacterCarousel } from "../ui/setup/CharacterCarousel";
@@ -176,7 +176,7 @@ export class EncounterSetupScene extends Phaser.Scene {
     const DETAIL_Y = CAROUSEL_Y + CAROUSEL_H + 12;
     const DETAIL_H = H - 100 - DETAIL_Y;  // 100px reserved for the bottom button band
     const items = this.registry.get("equipment") as ItemDef[];
-    const spells = this.registry.get("spells") as import("../net/types").SpellDef[];
+    const spells = this.registry.get("spells") as import("../../../shared/types").SpellDef[];
     this.characterDetail = new CharacterDetail({
       scene: this, sceneWidth: W,
       x: CHAR_COL_X, y: DETAIL_Y, width: CHAR_COL_W, height: DETAIL_H,
@@ -193,10 +193,20 @@ export class EncounterSetupScene extends Phaser.Scene {
         onStorylog: (def) => this.openStorylogOverlay(def),
       },
     });
+    // Map each character to its effective (leveled) level so the carousel
+    // can display the actual playable level rather than the source JSON's
+    // L1. The detail panel already does this server-side via the save
+    // payload; the carousel needs the same projection.
+    const effectiveLevels = new Map<string, number>();
+    for (const c of this.characters) {
+      const save = this.allSaves.get(c.id);
+      effectiveLevels.set(c.id, c.level + (save?.levelUps?.length ?? 0));
+    }
     this.characterCarousel = new CharacterCarousel({
       scene: this, sceneWidth: W,
       x: CHAR_COL_X, y: CAROUSEL_Y, width: CHAR_COL_W, height: CAROUSEL_H,
       characters: this.characters,
+      effectiveLevels,
       onChange: (def) => this.selectChar(def),
     });
 
@@ -236,6 +246,11 @@ export class EncounterSetupScene extends Phaser.Scene {
         const save = data as LocalSave;
         localStorage.setItem(saveKey(char.id), JSON.stringify(save));
         this.allSaves.set(char.id, save);
+        // The carousel's subtitle (`Wizard 4`) needs to stay in sync with
+        // the detail panel — push the just-arrived level-up count into the
+        // carousel so its subtitle reflects the leveled total even on a
+        // fresh browser with no cached save.
+        this.characterCarousel?.setEffectiveLevel(char.id, char.level + (save.levelUps?.length ?? 0));
         // Detail panel + cached selection state refresh only when the save
         // we just received belongs to the character on display.
         if (this.selectedPlayer?.id === char.id) {
@@ -480,8 +495,8 @@ export class EncounterSetupScene extends Phaser.Scene {
         const savedMap = maps.find((m) => m.id === enc.mapId);
         const save = this.selectedSave;
 
-        gameClient.createSession({
-          mapType: "saved",
+        const createRequest = {
+          mapType: "saved" as const,
           playerDefId: player.id,
           savedMapId: enc.mapId,
           encounterTitle: enc.encounterTitle,
@@ -506,10 +521,13 @@ export class EncounterSetupScene extends Phaser.Scene {
           resumeInventoryIds:  save?.inventoryIds,
           resumeEquippedSlots: save?.equippedSlots,
           resumeResources:     save?.resources,
-        }).then(({ state, playerDef }) => {
+        };
+        gameClient.createSession(createRequest).then(({ state, playerDef }) => {
           // Use the server-returned PlayerDef rather than the registry's L1
           // copy — it already has the character's level-up history applied.
-          this.scene.start("GameScene", { sessionId: state.sessionId, playerDef });
+          // `createRequest` is threaded through so the DevTools panel's
+          // Reload Encounter button can recreate the same session.
+          this.scene.start("GameScene", { sessionId: state.sessionId, playerDef, createRequest });
         }).catch((err: unknown) => {
           console.error('Failed to create session:', err);
           this.beginBtn.setDisabled(false);

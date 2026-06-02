@@ -1,0 +1,16 @@
+{
+  "id": "misty-step",
+  "name": "Misty Step",
+  "level": 2,
+  "school": "conjuration",
+  "classes": ["sorcerer", "warlock", "wizard"],
+  "castingTime": "bonus-action",
+  "range": "self",
+  "rangeFeet": 0,
+  "components": { "verbal": true, "somatic": false, "material": null },
+  "duration": "instantaneous",
+  "concentration": false,
+  "ritual": false,
+  "selfTeleport": { "rangeFeet": 30 },
+  "description": "Briefly surrounded by silvery mist, you teleport up to 30 feet to an unoccupied space you can see. Teleportation does not provoke Opportunity Attacks (US-041). The client surfaces a tile picker after CAST; the server validates range, passability, and occupancy and aborts the move (but consumes the bonus action) on a bad pick."
+}

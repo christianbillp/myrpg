@@ -1,0 +1,16 @@
+{
+  "id": "mirror-image",
+  "name": "Mirror Image",
+  "level": 2,
+  "school": "illusion",
+  "classes": ["bard", "sorcerer", "warlock", "wizard"],
+  "castingTime": "action",
+  "range": "self",
+  "rangeFeet": 0,
+  "components": { "verbal": true, "somatic": true, "material": null },
+  "duration": "1 minute",
+  "durationRounds": 10,
+  "concentration": false,
+  "ritual": false,
+  "description": "Three illusory duplicates of yourself appear in your space. Until the spell ends, the duplicates move with you and mimic your actions. Each time a creature HITS you with an attack roll, roll a d6 for each remaining duplicate; if ANY rolls 3 or higher, one duplicate is hit instead and is destroyed (no damage, no on-hit riders apply to you). When all three duplicates are destroyed the spell ends. Engine: set `PlayerState.mirrorImages = 3`; the absorb check runs at the top of `applyEnemyHitToPlayer`. The 1-minute timer is descriptive — the buff persists until the images are spent. The SRD's 'Blinded / Blindsight / Truesight bypasses Mirror Image' rule is descriptive only — attacker sense types aren't yet modelled."
+}

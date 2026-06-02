@@ -12,7 +12,7 @@
 
 import { BaseOverlay } from "./BaseOverlay";
 import { UIScale } from "./UIScale";
-import type { PendingReaction } from "../net/types";
+import type { PendingReaction } from "../../../shared/types";
 
 const ACCENT = "#e2b96f";
 const DIM    = "#334455";

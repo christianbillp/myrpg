@@ -8,6 +8,15 @@
  */
 import { mkdir, writeFile } from "fs/promises";
 import { join } from "path";
+import type { MapZone } from "./mapTypes.js";
+
+/**
+ * Persisted shape for an author-time named tile region. The in-memory
+ * `MapZone` (in [mapTypes.ts](./mapTypes.ts)) round-trips through the saved
+ * JSON unchanged — re-exporting under the legacy `MapZoneJson` name so the
+ * existing call sites don't have to be rewritten in lock-step with consumers.
+ */
+export type MapZoneJson = MapZone;
 
 export interface MapJsonPayload {
   id: string;
@@ -20,6 +29,8 @@ export interface MapJsonPayload {
   objectData?: number[];
   /** Tileset references the data uses. Defaults to the scribble tileset at firstgid=1 when omitted. */
   tilesets?: Array<{ firstgid: number; source: string }>;
+  /** Author-time named tile regions — see `MapZone` in `mapTypes.ts`. */
+  zones?: MapZoneJson[];
 }
 
 /** Filename invariant: every generated map and encounter id starts with `gen_`.
@@ -40,7 +51,7 @@ export function buildMapJson(p: MapJsonPayload): Record<string, unknown> {
   if (hasObjects && p.objectData) {
     layers.push({ type: 'tilelayer', name: 'objects', width: p.width, height: p.height, data: p.objectData });
   }
-  return {
+  const out: Record<string, unknown> = {
     id: p.id,
     name: p.name,
     mapdescription: p.description,
@@ -49,6 +60,11 @@ export function buildMapJson(p: MapJsonPayload): Record<string, unknown> {
     tilesets: p.tilesets ?? [{ firstgid: 1, source: '../tilesets/scribble.tsj' }],
     layers,
   };
+  // Persist zones only when there is at least one. Keeping the field
+  // optional means hand-authored maps that pre-date this feature stay
+  // byte-identical on round-trip through this function.
+  if (p.zones && p.zones.length > 0) out.zones = p.zones;
+  return out;
 }
 
 /** Persist a map JSON under `server/data/maps/<id>.json`. Creates the dir if needed. */

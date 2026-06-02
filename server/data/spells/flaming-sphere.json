@@ -1,0 +1,21 @@
+{
+  "id": "flaming-sphere",
+  "name": "Flaming Sphere",
+  "level": 2,
+  "school": "conjuration",
+  "classes": ["druid", "sorcerer", "wizard"],
+  "castingTime": "action",
+  "range": "60 feet",
+  "rangeFeet": 60,
+  "components": { "verbal": true, "somatic": true, "material": "a ball of wax" },
+  "duration": "concentration, up to 1 minute",
+  "durationRounds": 10,
+  "concentration": true,
+  "ritual": false,
+  "summon": { "monsterId": "flaming_sphere", "moveRangeFeet": 30 },
+  "area": { "shape": "sphere", "sizeFeet": 0 },
+  "damage": { "dice": 2, "sides": 6, "type": "fire" },
+  "save": { "ability": "dex", "halfOnSuccess": true },
+  "description": "You create a 5-foot-diameter sphere of fire in an unoccupied space on the ground within range. It lasts for the duration. Any creature that ends its turn within 5 feet of the sphere makes a Dexterity saving throw, taking 2d6 Fire damage on a failed save or half as much damage on a successful one. As a Bonus Action, you can move the sphere up to 30 feet, rolling it along the ground. If you move the sphere into a creature's space, that creature makes the save against the sphere, and the sphere stops moving for the turn. Engine: the sphere is a summon NPC (HP 1000 / AC 99 / fire-immune) with `summonSpellId='flaming-sphere'`; click it on the map to enter the move-direct picker, which consumes a Bonus Action instead of an Action and resolves the on-collision save against the targeted occupant. The 5-ft / 10-ft barriers + flammable-objects + Bright/Dim Light flavour is descriptive only.",
+  "scaling": "The damage increases by 1d6 for each spell slot level above 2."
+}

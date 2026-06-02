@@ -10,9 +10,7 @@
  * (refreshes HP/XP/GP + button enable state) without rebuilding the rest.
  */
 import Phaser from "phaser";
-import type { PlayerDef } from "../../data/player";
-import type { ItemDef, ArmorDef, WeaponDef, ShieldDef } from "../../data/equipment";
-import type { EquipmentSlots, SpellDef } from "../../net/types";
+import type { PlayerDef, ItemDef, ArmorDef, WeaponDef, ShieldDef, EquipmentSlots, SpellDef } from "../../../../shared/types";
 import { tokenAssetForPlayer } from "../../data/tokens";
 import { fixedHpForClass } from "../../../../shared/xpTable";
 import { formatCoins } from "../../../../shared/currency";

@@ -1,0 +1,16 @@
+{
+  "id": "battleaxe",
+  "name": "Battleaxe",
+  "type": "weapon",
+  "statKey": "str",
+  "damageDice": 1,
+  "damageSides": 8,
+  "damageType": "slashing",
+  "mastery": "topple",
+  "finesse": false,
+  "twoHanded": false,
+  "thrown": false,
+  "throwNormal": 0,
+  "throwLong": 0,
+  "costCp": 1000
+}

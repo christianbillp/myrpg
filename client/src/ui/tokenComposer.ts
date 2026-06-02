@@ -1,4 +1,4 @@
-import type { TokenSpec } from "../net/types";
+import type { TokenSpec } from "../../../shared/types";
 import { TOKEN_SLOTS, type TokenSlot, resolvePaletteStamps } from "../../../shared/tokenPalette";
 
 /**

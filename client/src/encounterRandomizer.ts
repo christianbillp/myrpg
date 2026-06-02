@@ -137,9 +137,9 @@ function regionFromAnchor(
     return { x, y, w: x2 - x + 1, h: y2 - y + 1 };
   };
 
-  if (anchor === "entrance" && anchors.entrance) return point(anchors.entrance);
-  if (anchor === "vault"    && anchors.vault)    return point(anchors.vault);
   if (anchor === "campfire" && anchors.campfires?.[0]) return point(anchors.campfires[0]);
+  if (anchor === "entrance" && anchors.entrance)        return point(anchors.entrance);
+  if (anchor === "vault"    && anchors.vault)           return point(anchors.vault);
 
   if (anchor === "far_room" && anchors.rooms && anchors.entrance) {
     const ent = anchors.entrance;
@@ -151,20 +151,9 @@ function regionFromAnchor(
     }
     if (best) return point({ x: best.cx, y: best.cy });
   }
-
   if (anchor === "building" && anchors.buildings?.[0]) {
     const r = anchors.buildings[0];
     return { x: r.x, y: r.y, w: r.w, h: r.h };
-  }
-  if (anchor === "ruin" && anchors.ruins?.[0]) {
-    const r = anchors.ruins[0];
-    return { x: r.x, y: r.y, w: r.w, h: r.h };
-  }
-
-  if (anchor === "path_endpoint" && anchors.pathEndpoints && anchors.pathEndpoints.length > 0) {
-    // Pick the LAST endpoint so the trigger is at the far end of the trail
-    // (the player walks IN at the first endpoint per the placement logic).
-    return point(anchors.pathEndpoints[anchors.pathEndpoints.length - 1]);
   }
 
   if (anchor === "inland" && anchors.inlandBand && anchors.inlandBand.length > 0) {
@@ -284,11 +273,10 @@ function resolveOne(
   avoid?: number[],
 ): Array<[number, number]> {
   // Point anchors → 5×5 cluster around the point.
-  if (anchor === "entrance" && anchors.entrance) return cluster(anchors.entrance, CLUSTER_RADIUS);
-  if (anchor === "vault"    && anchors.vault)    return cluster(anchors.vault,    CLUSTER_RADIUS);
   if (anchor === "campfire" && anchors.campfires?.[0]) return cluster(anchors.campfires[0], CLUSTER_RADIUS);
+  if (anchor === "entrance" && anchors.entrance)        return cluster(anchors.entrance, CLUSTER_RADIUS);
+  if (anchor === "vault"    && anchors.vault)           return cluster(anchors.vault,    CLUSTER_RADIUS);
 
-  // far_room — first room that isn't the entrance.
   if (anchor === "far_room" && anchors.rooms && anchors.entrance) {
     const ent = anchors.entrance;
     let best: { cx: number; cy: number } | null = null;
@@ -299,17 +287,7 @@ function resolveOne(
     }
     if (best) return cluster({ x: best.cx, y: best.cy }, CLUSTER_RADIUS);
   }
-
-  // Rect anchors → entire interior of the first stamped feature.
   if (anchor === "building" && anchors.buildings?.[0]) return rect(anchors.buildings[0]);
-  if (anchor === "ruin"     && anchors.ruins?.[0])     return rect(anchors.ruins[0]);
-
-  // Path endpoint — prefer the one farthest from the avoid set (so player and
-  // enemy can each end up at a different endpoint).
-  if (anchor === "path_endpoint" && anchors.pathEndpoints && anchors.pathEndpoints.length > 0) {
-    const candidate = pickFarthestFrom(anchors.pathEndpoints, avoid, W);
-    return cluster(candidate, CLUSTER_RADIUS);
-  }
 
   // Inland band — pre-baked list of dry-side cells.
   if (anchor === "inland" && anchors.inlandBand) {
@@ -359,14 +337,12 @@ function edgeBand(W: number, H: number, side: "south" | "north" | "west" | "east
 
 function anchorCenter(anchors: ComposedMapAnchors, name: string): { x: number; y: number } | null {
   if (name === "campfire" && anchors.campfires?.[0]) return anchors.campfires[0];
-  if (name === "ruin"     && anchors.ruins?.[0])     return rectCenter(anchors.ruins[0]);
-  if (name === "building" && anchors.buildings?.[0]) return rectCenter(anchors.buildings[0]);
-  if (name === "entrance" && anchors.entrance)       return anchors.entrance;
+  if (name === "entrance" && anchors.entrance)        return anchors.entrance;
+  if (name === "building" && anchors.buildings?.[0]) {
+    const b = anchors.buildings[0];
+    return { x: b.x + Math.floor(b.w / 2), y: b.y + Math.floor(b.h / 2) };
+  }
   return null;
-}
-
-function rectCenter(r: { x: number; y: number; w: number; h: number }): { x: number; y: number } {
-  return { x: r.x + Math.floor(r.w / 2), y: r.y + Math.floor(r.h / 2) };
 }
 
 /** Pick the endpoint whose center is farthest from any cell currently in `avoid`. */

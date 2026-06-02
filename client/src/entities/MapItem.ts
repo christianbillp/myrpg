@@ -1,6 +1,6 @@
 import Phaser from 'phaser';
 import { TILE_SIZE } from '../constants';
-import { ItemDef } from '../data/equipment';
+import { ItemDef } from '../../../shared/types';
 
 export class MapItem {
   readonly def: ItemDef;

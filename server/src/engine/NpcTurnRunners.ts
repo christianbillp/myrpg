@@ -27,7 +27,10 @@ import { isIncapacitated, isVisible, TURN_CONDITIONS } from './ConditionSystem.j
 import { doNpcOpportunityAttack } from './CombatActions.js';
 import { applyNpcAttackHit } from './NpcDamage.js';
 import { chooseNpcBehavior, fleeFromThreat, isMapEdge } from './NpcBrain.js';
+import { Logger } from '../Logger.js';
+import { endConcentration } from './ConcentrationSystem.js';
 import { applyTurnStartPeriodicDamage, isAttacker } from './OngoingEffectsSystem.js';
+import { tickZoneEnterSaves } from './SpellSystem.js';
 
 /**
  * Sum the trait-derived attack-roll modifiers an enemy receives this turn.
@@ -44,6 +47,49 @@ import { applyTurnStartPeriodicDamage, isAttacker } from './OngoingEffectsSystem
  * paralyzed > prone + incapacitated → Hideous Laughter flavor > plain
  * incapacitated).
  */
+/**
+ * Apply zone-step side effects after an NPC commits to a movement tile.
+ * Returns the step's effective cost (1 for ordinary terrain, 2 for
+ * Difficult Terrain). Rolls the enter-save for any zone whose condition
+ * the NPC doesn't already carry (Web's DEX vs Restrained); on failure the
+ * condition lands and `affectedNpcIds` is updated so the eventual
+ * zone-end cleanup will find the creature. Side effects use the engine's
+ * d20 + log path, not a pure function, so this lives in NpcTurnRunners
+ * where `ctx` is available.
+ */
+function applyZoneStepEffects(ctx: GameContext, npc: NpcState, tx: number, ty: number): number {
+  const s = ctx.state;
+  if (!s.activeZones || s.activeZones.length === 0) return 1;
+  let cost = 1;
+  for (const z of s.activeZones) {
+    const inside = z.tiles.some(([x, y]) => x === tx && y === ty);
+    if (!inside) continue;
+    if (z.difficultTerrain) cost = 2;
+    if (!z.enterSave || !z.condition) continue;
+    if (npc.conditions.includes(z.condition)) continue;
+    const def = ctx.resolveMonsterDef(npc.defId);
+    if (!def) continue;
+    const ability = z.enterSave.ability;
+    const dc = z.enterSave.dc;
+    const saveMod = (def.savingThrows && def.savingThrows[ability] !== undefined)
+      ? def.savingThrows[ability]
+      : Math.floor((def[ability] - 10) / 2);
+    const roll = Math.floor(Math.random() * 20) + 1;
+    const total = roll + saveMod;
+    const success = total >= dc;
+    ctx.addLog({
+      left: `${combatantDisplayName(npc, s.npcs)} ${success ? 'pushes through' : 'is caught by'} ${z.name}`,
+      right: `${ability.toUpperCase()} d20(${roll})+${saveMod}=${total} vs DC ${dc}`,
+      style: success ? 'normal' : 'status',
+    });
+    if (!success) {
+      npc.conditions.push(z.condition);
+      if (!z.affectedNpcIds.includes(npc.id)) z.affectedNpcIds.push(npc.id);
+    }
+  }
+  return cost;
+}
+
 function incapacitatedFlavor(conditions: string[]): string {
   if (conditions.includes('unconscious'))  return 'lies unconscious';
   if (conditions.includes('stunned'))      return 'is stunned — cannot act';
@@ -116,6 +162,7 @@ function pickEnemyAttackTarget(ctx: GameContext, attacker: NpcState): EnemyAttac
         hidden: s.player.conditions.includes('hidden'),
         dodging: s.player.conditions.includes('dodging'),
         invisible: s.player.conditions.includes('invisible'),
+        conditions: s.player.conditions,
         passivePerception: 10 + (ctx.playerDef.skills['perception'] ?? 0),
       },
       dist: chebyshev(attacker.tileX, attacker.tileY, s.player.tileX, s.player.tileY),
@@ -137,6 +184,7 @@ function pickEnemyAttackTarget(ctx: GameContext, attacker: NpcState): EnemyAttac
         hidden: other.conditions.includes('hidden'),
         dodging: other.conditions.includes('dodging'),
         invisible: other.conditions.includes('invisible'),
+        conditions: other.conditions,
         passivePerception: 10,
       },
       dist: chebyshev(attacker.tileX, attacker.tileY, other.tileX, other.tileY),
@@ -147,6 +195,13 @@ function pickEnemyAttackTarget(ctx: GameContext, attacker: NpcState): EnemyAttac
   // "out of reach" / log message still fires. Damage application paths
   // already guard on `result.attacked` so this is harmless.
   if (candidates.length === 0) {
+    Logger.log('ai.target_pick', {
+      attacker: attacker.id, attackerDefId: attacker.defId,
+      charmedByPlayer,
+      candidates: [],
+      chosen: 'player_fallback',
+      reason: 'no_hostile_targets',
+    });
     return {
       id: 'player',
       displayName: ctx.playerDef.name,
@@ -155,10 +210,17 @@ function pickEnemyAttackTarget(ctx: GameContext, attacker: NpcState): EnemyAttac
       hidden: s.player.conditions.includes('hidden'),
       dodging: s.player.conditions.includes('dodging'),
       invisible: s.player.conditions.includes('invisible'),
+      conditions: s.player.conditions,
       passivePerception: 10 + (ctx.playerDef.skills['perception'] ?? 0),
     };
   }
   candidates.sort((a, b) => (a.dist - b.dist) || (a.isPlayer ? -1 : b.isPlayer ? 1 : 0));
+  Logger.log('ai.target_pick', {
+    attacker: attacker.id, attackerDefId: attacker.defId,
+    charmedByPlayer,
+    candidates: candidates.map((c) => ({ id: c.target.id, dist: c.dist, hp: c.target.hp, isPlayer: c.isPlayer })),
+    chosen: candidates[0].target.id,
+  });
   return candidates[0].target;
 }
 
@@ -171,14 +233,23 @@ function pickEnemyAttackTarget(ctx: GameContext, attacker: NpcState): EnemyAttac
 export function runSingleEnemyTurn(ctx: GameContext, npc: NpcState, events: GameEvent[]): void {
   const s = ctx.state;
   const def = ctx.resolveMonsterDef(npc.defId);
-  if (!def) { npc.isActive = false; return; }
+  if (!def) {
+    Logger.warn('anomaly.missing_monster_def', { npcId: npc.id, defId: npc.defId });
+    npc.isActive = false;
+    return;
+  }
   // Per SRD: a creature's Reaction refreshes at the start of its own turn,
   // and turn-scoped conditions (Dodge / Dash / Disengage / Slowed) expire
   // at the start of that creature's next turn — clear them here so they
   // actually protect the NPC against incoming attacks during the round.
   npc.reactionUsed = false;
   npc.conditions = npc.conditions.filter((c) => !TURN_CONDITIONS.includes(c));
+  Logger.log('combat.turn_started', { combatantId: npc.id, defId: npc.defId, kind: 'enemy', hp: npc.hp });
   ctx.publish({ type: 'turn_started', combatantId: npc.id });
+
+  // SRD Web (and any future enter-save zone): a creature standing in the
+  // zone's tile set at the start of its turn re-rolls the enter save.
+  tickZoneEnterSaves(ctx, npc.id);
 
   // Periodic damage authored by this NPC (e.g. stirge attach DoT) fires now.
   applyTurnStartPeriodicDamage(ctx, npc.id, events);
@@ -248,7 +319,33 @@ export function runSingleEnemyTurn(ctx: GameContext, npc: NpcState, events: Game
     occupiedTiles: occupied,
     traitAdvantage,
     traitDisadvantage,
+    onStep: (tx, ty) => applyZoneStepEffects(ctx, npc, tx, ty),
   });
+
+  // SRD Invisibility — "the spell ends early immediately after the target
+  // makes an attack roll, deals damage, or casts a spell." This NPC just
+  // attacked (or attempted to); if they are the Invisibility recipient,
+  // end the caster's concentration which strips the `invisible` condition.
+  if (result.attacked
+      && s.player.concentratingOn === 'invisibility'
+      && s.player.invisibilityTargetId === npc.id) {
+    endConcentration(ctx, `${combatantDisplayName(npc, s.npcs)} broke Invisibility by attacking`);
+  }
+
+  // SRD Ray of Enfeeblement (fail branch): "subtracts 1d8 from all its
+  // damage rolls". Roll the deduction once per landed attack and clamp
+  // the result at 0 so a small hit reduced past zero just whiffs in
+  // damage terms (still counts as a hit for on-hit triggers). Runs
+  // before the Shield prompt so the player sees the reduced number.
+  if (result.attacked && result.isHit && result.damage > 0 && npc.conditions.includes('enfeebled')) {
+    const reduction = Math.floor(Math.random() * 8) + 1;
+    const before = result.damage;
+    result.damage = Math.max(0, result.damage - reduction);
+    ctx.addLog({
+      left: `↪ Ray of Enfeeblement — ${combatantDisplayName(npc, s.npcs)} bleeds off ${before - result.damage} damage (1d8=${reduction})`,
+      style: 'status',
+    });
+  }
 
   const endedAdjacentToPlayer = chebyshev(result.finalTileX, result.finalTileY, s.player.tileX, s.player.tileY) <= 1;
 
@@ -376,13 +473,22 @@ function applyEnemyHitToNpc(
  * the player with XP (the player commands the ally).
  */
 export function runSingleAllyTurn(ctx: GameContext, ally: NpcState, events: GameEvent[]): void {
-  if (ally.combatPassive) return;
+  if (ally.combatPassive) {
+    Logger.log('combat.ally_skipped', { combatantId: ally.id, reason: 'combat_passive' });
+    return;
+  }
   const s = ctx.state;
   const def = ctx.resolveMonsterDef(ally.defId);
-  if (!def) return;
+  if (!def) {
+    Logger.warn('anomaly.missing_monster_def', { npcId: ally.id, defId: ally.defId });
+    return;
+  }
   ally.reactionUsed = false;
   ally.conditions = ally.conditions.filter((c) => !TURN_CONDITIONS.includes(c));
+  Logger.log('combat.turn_started', { combatantId: ally.id, defId: ally.defId, kind: 'ally', hp: ally.hp });
   ctx.publish({ type: 'turn_started', combatantId: ally.id });
+
+  tickZoneEnterSaves(ctx, ally.id);
 
   const allyBehavior = chooseNpcBehavior(ctx, ally, def);
   if (allyBehavior === 'flee') {
@@ -453,6 +559,15 @@ export function runSingleAllyTurn(ctx: GameContext, ally: NpcState, events: Game
   ally.tileY = result.finalTileY;
   events.push(...result.events);
   ctx.addLogs(result.logs);
+
+  // SRD Invisibility — same as the enemy path: if this ally is the
+  // Invisibility recipient and they attacked, end the caster's
+  // concentration (which strips the `invisible` condition).
+  if (result.attacked
+      && s.player.concentratingOn === 'invisibility'
+      && s.player.invisibilityTargetId === ally.id) {
+    endConcentration(ctx, `${combatantDisplayName(ally, s.npcs)} broke Invisibility by attacking`);
+  }
 
   // ── Enemy OAs against this moving ally ─────────────────────────────────
   for (const enemy of enemyOAProvokers) {
