@@ -23,7 +23,8 @@ export type TriggerActionKind =
   | "perception" | "log" | "aigm" | "combat" | "xp"
   | "announcement" | "speech" | "fade" | "set_flag"
   | "enable_long_rest" | "disable_long_rest"
-  | "hide_npc" | "kill_npc" | "open_conversation";
+  | "hide_npc" | "kill_npc" | "open_conversation"
+  | "set_companion";
 
 export type TriggerWhenEvent =
   | "player_moved" | "encounter_started" | "encounter_completed" | "flag_set";
@@ -60,6 +61,10 @@ export interface ComposedAction {
   // open_conversation — start_conversation authoring slot.
   npcRef?: string;
   conversationId?: string;
+  // set_companion — set_npc_companion authoring slot.
+  isCompanion?: boolean;
+  followMode?: "tight" | "loose";
+  returnDisposition?: "neutral" | "ally" | "enemy";
 }
 
 export interface ComposedTrigger {
@@ -100,6 +105,10 @@ export interface ComposedTrigger {
   // open_conversation fields (start_conversation) — used when `kind === "open_conversation"`.
   npcRef?: string;
   conversationId?: string;
+  // set_companion fields (set_npc_companion) — used when `kind === "set_companion"`.
+  isCompanion?: boolean;
+  followMode?: "tight" | "loose";
+  returnDisposition?: "neutral" | "ally" | "enemy";
   /** Extra consequences appended to the trigger's `then` array after the
    *  primary action. Lets a single WHEN condition fan out into multiple
    *  effects without authoring N parallel triggers. Each entry rides the
@@ -127,7 +136,7 @@ export interface TriggerEditorOptions {
   initialTriggers?: ComposedTrigger[];
 }
 
-const KIND_LABEL: Record<TriggerActionKind, string> = {
+export const KIND_LABEL: Record<TriggerActionKind, string> = {
   perception: "PERCEPTION",
   log: "LOG",
   aigm: "AIGM CUE",
@@ -142,6 +151,7 @@ const KIND_LABEL: Record<TriggerActionKind, string> = {
   hide_npc: "HIDE NPC",
   kill_npc: "KILL NPC",
   open_conversation: "OPEN CONVERSATION",
+  set_companion: "SET COMPANION",
 };
 
 /** Per-kind swatch colour shown next to each trigger's summary so authors
@@ -162,9 +172,27 @@ export const KIND_SWATCH: Record<TriggerActionKind, string> = {
   hide_npc:          "#8888aa",
   kill_npc:          "#664422",
   open_conversation: "#5588cc",
+  set_companion:     "#66cc99",
 };
 
-const KIND_TOOLTIP: Record<TriggerActionKind, string> = {
+/**
+ * Master list of the action kinds the editor chip strip renders. Acts
+ * as the **single source of truth** for the strip's order and contents
+ * — every chip displayed in the UI is iterated from this list.
+ *
+ * **Add new actions HERE FIRST**, then add the matching entries to
+ * `KIND_LABEL`, `KIND_SWATCH`, and `KIND_TOOLTIP`. A test in
+ * `TriggerEditor.test.ts` confirms all four are in sync, so a forgotten
+ * label / swatch / tooltip fails CI rather than shipping silently. */
+export const ALL_KINDS: TriggerActionKind[] = [
+  "perception", "log", "aigm", "combat", "xp",
+  "announcement", "speech", "fade", "set_flag",
+  "enable_long_rest", "disable_long_rest",
+  "hide_npc", "kill_npc", "open_conversation",
+  "set_companion",
+];
+
+export const KIND_TOOLTIP: Record<TriggerActionKind, string> = {
   perception: "Roll a Perception check vs DC. On pass, show the log line.",
   log: "Write a line to the Event Log.",
   aigm: "Queue a cue for the AIGM's next reply.",
@@ -179,6 +207,7 @@ const KIND_TOOLTIP: Record<TriggerActionKind, string> = {
   hide_npc:          "Hide every NPC matching defId (set_npc_hidden). Toggle whether the reveal uses passive Perception (default) or only fires when an explicit reveal action runs.",
   kill_npc:          "Mark every NPC matching defId as a corpse (set_npc_dead). Optionally attach a one-shot SEARCH payload picked up when the player clicks SEARCH adjacent to the body.",
   open_conversation: "Open the named conversation tree on an NPC (start_conversation). Useful for auto-opening dialogue when the player approaches.",
+  set_companion:     "Promote (or demote) every NPC matching defId to a COMPANION (set_npc_companion). Promoted NPCs follow the player in exploration via the sim engine, gain the COMPANION chip in the Player Panel, and use ally combat AI. Set `isCompanion: false` to demote back to `returnDisposition` (default neutral).",
 };
 
 export class TriggerEditor {
@@ -431,6 +460,7 @@ export class TriggerEditor {
       ["hide_npc",          this.buildHideNpcBlock(action, onChange)],
       ["kill_npc",          this.buildKillNpcBlock(action, onChange)],
       ["open_conversation", this.buildOpenConversationBlock(action, onChange)],
+      ["set_companion",     this.buildSetCompanionBlock(action, onChange)],
     ]);
   }
 
@@ -509,12 +539,7 @@ export class TriggerEditor {
       // Chip row choosing the action's kind.
       const chipRow = document.createElement("div");
       chipRow.style.cssText = "display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 6px;";
-      const allKinds: TriggerActionKind[] = [
-        "perception", "log", "aigm", "combat", "xp",
-        "announcement", "speech", "fade", "set_flag",
-        "enable_long_rest", "disable_long_rest",
-        "hide_npc", "kill_npc", "open_conversation",
-      ];
+      const allKinds: TriggerActionKind[] = ALL_KINDS;
       const chips = new Map<TriggerActionKind, HTMLButtonElement>();
       const refreshChips = (active: TriggerActionKind): void => {
         for (const [k, b] of chips) {
@@ -655,6 +680,7 @@ export class TriggerEditor {
       "announcement", "speech", "fade", "set_flag",
       "enable_long_rest", "disable_long_rest",
       "hide_npc", "kill_npc", "open_conversation",
+      "set_companion",
     ];
     const chipBtns = new Map<TriggerActionKind, HTMLButtonElement>();
     for (const k of kinds) {
@@ -902,6 +928,36 @@ export class TriggerEditor {
     block.appendChild(this.makeTextInput(trig.npcRef ?? "", "e.g. npc_tavern_keeper", (val) => { trig.npcRef = val.trim(); onChange(); }));
     block.appendChild(this.makeLabel("CONVERSATION ID (blank → use the NPCDef's conversationId)"));
     block.appendChild(this.makeTextInput(trig.conversationId ?? "", "e.g. tavern_keeper_chat", (val) => { trig.conversationId = val.trim(); onChange(); }));
+    return block;
+  }
+
+  /** SET COMPANION block — `set_npc_companion`. Promotes (or demotes) every
+   *  living NPC matching `defId`. Promotion forces ally disposition and
+   *  spins up the NPC sim runner for the NPC; demotion clears the
+   *  CompanionState and resets disposition. */
+  private buildSetCompanionBlock(trig: ComposedTrigger | ComposedAction, onChange: () => void): HTMLElement {
+    const block = document.createElement("div");
+    block.style.cssText = "display: flex; flex-direction: column; gap: 4px;";
+    block.appendChild(this.makeLabel("DEF ID (the npc/monster id to promote or demote)"));
+    block.appendChild(this.makeTextInput(trig.defId ?? "", "e.g. wren_allowyn", (val) => { trig.defId = val.trim(); onChange(); }));
+    block.appendChild(this.buildModeToggleRow<"true" | "false">(
+      "MODE",
+      [["true", "PROMOTE"], ["false", "DEMOTE"]],
+      trig.isCompanion === false ? "false" : "true",
+      (mode) => { trig.isCompanion = mode === "true"; onChange(); },
+    ));
+    block.appendChild(this.buildModeToggleRow<"loose" | "tight">(
+      "FOLLOW MODE (promotion only)",
+      [["loose", "LOOSE (3–5 tiles)"], ["tight", "TIGHT (adjacent)"]],
+      trig.followMode ?? "loose",
+      (mode) => { trig.followMode = mode; onChange(); },
+    ));
+    block.appendChild(this.buildModeToggleRow<"neutral" | "ally" | "enemy">(
+      "DEMOTE → DISPOSITION",
+      [["neutral", "NEUTRAL (default)"], ["ally", "ALLY"], ["enemy", "ENEMY"]],
+      trig.returnDisposition ?? "neutral",
+      (mode) => { trig.returnDisposition = mode; onChange(); },
+    ));
     return block;
   }
 

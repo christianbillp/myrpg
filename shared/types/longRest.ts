@@ -130,6 +130,130 @@ export interface NpcState {
   initiativeRoll?: number;
   /** Currently active periodic effects (DoTs, attach bites, …). See OngoingEffectsSystem. */
   ongoingEffects: OngoingEffect[];
+  /** Companion state — present only on NPCs the player has explicit command
+   *  over. Drives the COMPANION chip in the Player Panel + opts this NPC
+   *  into the `NpcTickRunner` exploration loop. Absent on every other NPC. */
+  companion?: CompanionState;
+  /** Per-NPC daily routine — when present, the world tick consults this
+   *  to pick a task each phase. Authored on `NPCDef.routine` and seeded
+   *  onto every spawned instance at session create time. Companions ignore
+   *  their routine while a player override is active. */
+  routine?: RoutineEntry[];
+  /** Per-NPC sim-runner state. Used by routine-bearing AND companion NPCs
+   *  so the tick runner can resume an in-flight task across save/load.
+   *  Companions hold this on `companion.simState`; ambient NPCs hold it
+   *  here. Both paths feed the same runner. */
+  simState?: { activeTaskId: string | null; lastTickId: number };
+  /** Awareness state — sim NPCs read this each tick to decide whether
+   *  to override their routine with `InvestigateTask` / `AlertTask`.
+   *  Absent on NPCs the sim doesn't tick (combatants in combat phase,
+   *  summons, etc.). Defaults to `calm` when an NPC enters the sim
+   *  loop and they have no prior alert. */
+  alertness?: NpcAlertness;
+  /** Most-recent stimulus the NPC remembers. Drives the alertness chip
+   *  on the target panel and the InvestigateTask's walk target. */
+  memory?: NpcMemory;
+}
+
+/**
+ * Per-companion runtime state. Held on the `NpcState` so it persists
+ * naturally through the existing save layer. The fields here cover step
+ * 2 of the sim plan (exploration follower); combat + autoCast will
+ * extend this in step 3.
+ */
+export interface CompanionState {
+  /** Default follow mode when no other command is active. */
+  followMode: 'tight' | 'loose';
+  /** Player-issued override that takes priority over autonomous selection.
+   *  Cleared when the override's task finishes naturally; the next tick
+   *  falls back to the autonomous scorer. */
+  override?: CompanionCommand;
+  /** Persistent runtime state the tick runner owns across ticks. */
+  simState: { activeTaskId: string | null; lastTickId: number };
+}
+
+/** Player-issued command for a companion. Step 2 supports `follow` and
+ *  `wait`; `attack` and `cast` ship with step 3. */
+export type CompanionCommand =
+  | { kind: 'follow'; mode: 'tight' | 'loose' }
+  | { kind: 'wait' }
+  | { kind: 'attack'; targetId: string }
+  | { kind: 'cast'; spellId: string; targetId?: string };
+
+/** Coarse-grained day phase the world tick advances. Routine entries are
+ *  keyed by phase, so a tavern keeper's `morning` row activates when the
+ *  world rolls into morning and runs until noon. */
+export type DayPhase = 'morning' | 'noon' | 'evening' | 'night';
+
+/** NPC awareness state.
+ *
+ *   • `calm`       — default. Follows routine. Default-RAM 0.
+ *   • `suspicious` — heard / saw something out of place. Pauses routine to
+ *     glance toward last alert tile. Decays back to `calm` over a few
+ *     ticks unless re-alerted.
+ *   • `alert`      — something hostile is happening. Walks toward last
+ *     alert tile aggressively. Becomes combat-ready if a hostile is
+ *     visible. Decays to `suspicious` then `calm` unless renewed.
+ *
+ * Drives the InvestigateTask / AlertTask priority bands so an alerted NPC
+ * outranks their routine without code-level special-casing.
+ */
+export type NpcAlertness = 'calm' | 'suspicious' | 'alert';
+
+/** Decay schedule — ticks an NPC stays in each non-calm state before
+ *  dropping a level when no new alert renews it. Tuned in one place so
+ *  the worldtick decay loop and the awareness pass agree. */
+export const ALERT_DECAY_TICKS: Readonly<Record<Exclude<NpcAlertness, 'calm'>, number>> = {
+  alert: 15,        // ~90 sim-seconds of alertness before fading to suspicious
+  suspicious: 25,   // ~150 sim-seconds of looking around before going calm
+};
+
+/** Per-NPC memory of the most recent stimulus. Slim today — extends in
+ *  awareness step 6+ as we model "remembers seeing the player here on
+ *  tick X" and "knows faction Y attacked us last morning." */
+export interface NpcMemory {
+  /** Most recent tick when this NPC was alerted (any source). */
+  lastAlertTick?: number;
+  /** Tile the alert pointed at — combat origin, noise source, sight
+   *  contact. Drives the InvestigateTask's walk target. */
+  lastAlertTile?: { x: number; y: number };
+  /** Entity that triggered the alert: `'player'`, an `npc.id`, or
+   *  `'unknown'` for ambient sources (a Thunderwave with no clear
+   *  origin tile). Used by the target panel chip to say "noticed
+   *  Grim Cohort" etc. */
+  lastAlertSource?: string;
+  /** What kind of stimulus alerted them. Drives narration + decay rate.
+   *   • `combat`  — a fight kicked off nearby.
+   *   • `noise`   — a loud sound (spellcast, casted spell, breaking glass).
+   *   • `sight`   — they saw a hostile.
+   *   • `faction` — a same-faction member pinged them. */
+  lastAlertKind?: 'combat' | 'noise' | 'sight' | 'faction';
+}
+
+/** Ordered cycle the world tick advances through. */
+export const DAY_PHASE_CYCLE: readonly DayPhase[] = ['morning', 'noon', 'evening', 'night'] as const;
+
+/** How many world ticks fit in one day phase. 60 ticks × 6 sim-seconds per
+ *  tick ≈ 6 real minutes per phase ≈ 24 real minutes per day. Tune in one
+ *  place; every routine consumer reads from here. */
+export const TICKS_PER_DAY_PHASE = 60;
+
+/** One row in an NPC's routine. The first entry whose `phase` matches the
+ *  current day phase wins; the rest are evaluated each phase boundary as
+ *  the cycle advances. */
+export interface RoutineEntry {
+  phase: DayPhase;
+  /** What the NPC tries to do during this phase. Atomic task kinds for
+   *  step 5: `walk_to` (move to a tile and stay) and `idle` (stay put).
+   *  Larger vocabulary (`patrol`, `talk_to`, `use_object`) ships with
+   *  awareness in step 6. */
+  task:
+    | { kind: 'walk_to'; tileX: number; tileY: number }
+    | { kind: 'idle' };
+  /** Optional one-liner the NPC can drop into the log when this entry
+   *  activates ("the keeper sweeps the bar"). Off by default to avoid
+   *  spamming the event log every phase change. */
+  flavour?: string;
 }
 
 export interface MapItemState {
@@ -272,6 +396,19 @@ export interface GameState {
   worldFlags: Record<string, WorldFlagValue>;
   /** Last variant index picked per `narrationId`. Used by NarrationSystem to avoid back-to-back repeats. */
   narrationLastUsed: Record<string, number>;
+  /** Monotonic counter incremented once per off-camera `WorldTick`. Used as
+   *  the `tickId` for the NPC sim engine's seeded RNG — combined with each
+   *  NPC's id it produces a deterministic stream that reproduces across
+   *  runs (unlike `Date.now()`). Survives save/load so loading a saved
+   *  session mid-tick gives the same companion decisions on the next tick
+   *  it would have given pre-save. */
+  worldTickCount: number;
+  /** Coarse-grained time of day for NPC routines. Advances on a fixed tick
+   *  cadence (see TICKS_PER_DAY_PHASE) and wraps morning → noon → evening →
+   *  night → morning. Per-encounter scope: every encounter starts at
+   *  `morning` and the cycle runs while the player explores. Persistence
+   *  across encounters is part of the WorldState refactor (step 7). */
+  dayPhase: DayPhase;
   /**
    * Legacy player-relative view of standings. **Kept for backward compatibility**
    * with existing `faction_standing` guards, `adjust_faction_standing` AIGM

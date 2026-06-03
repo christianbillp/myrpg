@@ -135,15 +135,16 @@ export function spawnNpc(
     name = npcDef.name;
     const monsterDef = monsters.find((m) => m.id === npcDef.monsterClass);
     maxHp = monsterDef?.maxHp ?? 8;
-    // NPC's factionId wins; if absent, fall through to the monster def's
-    // factionId; finally fall back to the def id as a faction-of-one.
-    factionId = npcDef.factionId ?? monsterDef?.factionId ?? defId;
+    // NPC's factionId wins; if absent, fall back to the def id as a
+    // faction-of-one. (MonsterDef no longer carries factionId — monsters
+    // are pure stat blocks; faction membership lives on the NPC wrapper.)
+    factionId = npcDef.factionId ?? defId;
   } else {
     const monsterDef = monsters.find((m) => m.id === defId);
     if (!monsterDef) return;
     name = monsterDef.name;
     maxHp = monsterDef.maxHp;
-    factionId = monsterDef.factionId ?? defId;
+    factionId = defId;
   }
 
   // Per-def deterministic instance id + name suffix when the encounter
@@ -183,6 +184,7 @@ export function spawnNpc(
         hp: maxHp, maxHp,
         isActive: false,
         reactionUsed: false, conditions: [], inventoryIds: [], ongoingEffects: [],
+        ...(npcDef?.routine && npcDef.routine.length > 0 ? { routine: npcDef.routine } : {}),
       });
       return;
     }
@@ -227,6 +229,7 @@ export function spawnNpc(
     hp: maxHp, maxHp,
     isActive: false,
     reactionUsed: false, conditions: [], inventoryIds: [], ongoingEffects: [],
+    ...(npcDef?.routine && npcDef.routine.length > 0 ? { routine: npcDef.routine } : {}),
   });
 }
 

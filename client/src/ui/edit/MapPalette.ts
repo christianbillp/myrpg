@@ -125,6 +125,7 @@ export class MapPalette {
   private mirrorVChip: HtmlButtonHandle | null = null;
   private selectedTileEls: Map<string, HTMLDivElement> = new Map();
   private handles: PaletteHandle[] = [];
+  private paletteEl: HTMLDivElement | null = null;
 
   constructor(private readonly ctx: MapPaletteContext) {}
 
@@ -244,6 +245,7 @@ export class MapPalette {
       scrollbar-color: #445566 transparent;
     `;
     document.body.appendChild(palette);
+    this.paletteEl = palette;
     push(sharedAttachPlacement(palette, { scene, sceneWidth: W, x, y: paletteY, w, h: paletteH }));
     this.populatePalette(palette);
 
@@ -257,6 +259,8 @@ export class MapPalette {
   dispose(): void {
     for (const h of this.handles) h.dispose();
     this.handles = [];
+    this.paletteEl?.remove();
+    this.paletteEl = null;
     this.layerChips = { terrain: null, object: null };
     this.rotChips.clear();
     this.mirrorHChip = null;

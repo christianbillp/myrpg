@@ -50,6 +50,13 @@ export type PlayerAction =
   | { type: 'conversationChoice'; choiceIndex: number }
   /** Close the active conversation (cancel / × / "Goodbye"). */
   | { type: 'conversationEnd' }
+  // ── Companion commands (NPC sim, step 2) ─────────────────────────────
+  /** Issue a command to a companion NPC. The engine writes the override
+   *  onto the companion's `CompanionState`; the next world tick's sim
+   *  pass consumes it. Sent by the Player Panel's COMPANION chip. `npcId`
+   *  defaults to the player's first companion when the panel knows of
+   *  only one. */
+  | { type: 'companionCommand'; npcId: string; command: import('./longRest.js').CompanionCommand }
   /** Dev-mode shortcut — completes the current encounter so the tester can
    *  fast-forward through an adventure. Server-side this sets the
    *  encounter's `completionFlag` (when authored) AND clears every living

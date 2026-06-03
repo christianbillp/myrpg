@@ -342,6 +342,8 @@ export function buildSessionState(
     pendingAigmEvents: [],
     worldFlags: req.adventureSeed?.seedWorldFlags ?? {},
     narrationLastUsed: {},
+    worldTickCount: 0,
+    dayPhase: 'morning',
     activeZones: [],
     factionRelations,
     // Legacy projection kept in sync with the matrix at boot. Pass 2 will

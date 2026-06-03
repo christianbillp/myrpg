@@ -74,6 +74,10 @@ export class TargetPanel {
   private readonly conditionsLabelEl: HTMLElement;
   private readonly factionEl: HTMLElement;
   private readonly factionSepEl: HTMLElement;
+  private readonly alertnessEl: HTMLElement;
+  private readonly alertnessSepEl: HTMLElement;
+  private readonly companionEl: HTMLElement;
+  private readonly companionSepEl: HTMLElement;
   private readonly offResize: () => void;
   private readonly scale: UIScale;
   private panelHeight: number;
@@ -121,6 +125,10 @@ export class TargetPanel {
 
       <div class="gui-label" data-conditions-label style="display:none;">CONDITIONS</div>
       <div style="padding:4px 12px;font-size:10px;color:#cc8844;line-height:1.6;display:flex;flex-wrap:wrap;gap:4px;" data-conditions></div>
+      <div class="gui-sep" style="margin-top:2px;" data-companion-sep></div>
+      <div style="padding:4px 12px;font-size:10px;line-height:1.6;display:none;" data-companion></div>
+      <div class="gui-sep" style="margin-top:2px;" data-alertness-sep></div>
+      <div style="padding:4px 12px;font-size:10px;line-height:1.6;display:none;" data-alertness></div>
       <div class="gui-sep" style="margin-top:2px;" data-faction-sep></div>
       <div style="padding:4px 12px;font-size:10px;line-height:1.6;" data-faction></div>
     `;
@@ -137,6 +145,10 @@ export class TargetPanel {
     this.conditionsLabelEl = ref('conditions-label');
     this.factionEl    = ref('faction');
     this.factionSepEl = ref('faction-sep');
+    this.alertnessEl  = ref('alertness');
+    this.alertnessSepEl = ref('alertness-sep');
+    this.companionEl  = ref('companion');
+    this.companionSepEl = ref('companion-sep');
 
     // Right edge fixed at canvas right; left edge moves with width.
     const rightAnchor = GRID_X + TARGET_PANEL_WIDTH;
@@ -300,6 +312,61 @@ export class TargetPanel {
     // `reveal_faction` (AIGM tool or trigger) immediately flips the chip
     // from `???` to the faction name.
     this.renderFactionRow(npcState.factionId, factions, discoveredFactions);
+    this.renderAlertnessRow(npcState);
+    this.renderCompanionRow(npcState);
+  }
+
+  /**
+   * Render the COMPANION row when the selected NPC is bound as the
+   * player's companion (`NpcState.companion` set). Hidden otherwise. The
+   * binding is set via the `set_npc_companion` trigger action or AIGM
+   * tool; this row gives the player a clear at-a-glance signal that the
+   * selected creature is on their side — visible on the Target Panel
+   * the same way the COMPANION chip on the Player Panel signals the
+   * binding from the player's side.
+   *
+   * Shows the current follow mode (`TIGHT` / `LOOSE`) since the same NPC
+   * can be set to either, and a pending command tag (`HOLDING`,
+   * `ATTACKING`) if the player has issued an override that hasn't yet
+   * resolved.
+   */
+  private renderCompanionRow(npcState: NpcState): void {
+    const c = npcState.companion;
+    if (!c) {
+      this.companionEl.style.display = 'none';
+      this.companionSepEl.style.display = 'none';
+      return;
+    }
+    this.companionEl.style.display = 'block';
+    this.companionSepEl.style.display = 'block';
+    const modeText = c.followMode === 'tight' ? 'TIGHT' : 'LOOSE';
+    const override = c.override;
+    const overrideText = override?.kind === 'wait' ? ' · HOLDING'
+      : override?.kind === 'attack' ? ' · ATTACKING'
+      : override?.kind === 'cast' ? ' · CASTING'
+      : '';
+    this.companionEl.innerHTML = `<span style="color:#778899">COMPANION</span>  <span style="color:#5fb37a;text-transform:uppercase;letter-spacing:1px;">FOLLOW ${modeText}${overrideText}</span>`;
+  }
+
+  /**
+   * Render the ALERTNESS row for sim-layer NPCs (routine-bearing /
+   * ambient). `calm` hides the row so the panel doesn't carry dead space
+   * for trivial scenes. `suspicious` and `alert` show a coloured chip
+   * mirroring the engine's awareness ladder so the player can tell at a
+   * glance that this NPC has been pinged by a noise / faction alert and
+   * is heading somewhere.
+   */
+  private renderAlertnessRow(npcState: NpcState): void {
+    const state = npcState.alertness ?? 'calm';
+    if (state === 'calm') {
+      this.alertnessEl.style.display = 'none';
+      this.alertnessSepEl.style.display = 'none';
+      return;
+    }
+    this.alertnessEl.style.display = 'block';
+    this.alertnessSepEl.style.display = 'block';
+    const colour = state === 'alert' ? '#e74c3c' : '#f39c12';
+    this.alertnessEl.innerHTML = `<span style="color:#778899">ALERTNESS</span>  <span style="color:${colour};text-transform:uppercase;letter-spacing:1px;">${state}</span>`;
   }
 
   private buildWidthHandle(reposition: () => void): HTMLDivElement {

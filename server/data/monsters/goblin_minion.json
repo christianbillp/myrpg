@@ -1,7 +1,6 @@
 {
   "id": "goblin_minion",
   "name": "Goblin Minion",
-  "factionId": "monsters",
   "type": "Small Fey (Goblinoid), Chaotic Neutral",
   "maxHp": 7,
   "hpFormula": "2d6",

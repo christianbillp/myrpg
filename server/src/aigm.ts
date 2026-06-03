@@ -329,6 +329,26 @@ function buildStateMessage(engine: GameEngine): string {
     ? `\nRUMORS (world memory, newest first — reference when narratively apt):\n${[...s.rumors].sort((a, b) => b.recordedAt - a.recordedAt).slice(0, 8).map((r) => `  • [${r.id}] (sal ${r.salience}) ${r.text}`).join('\n')}\n`
     : '';
 
+  // World clock — surfaces the off-camera tick counter + current day phase
+  // from the NPC sim layer (US-094). Helps the GM let time-of-day inflect
+  // descriptions (morning crowd, late-evening hush) without having to
+  // calculate it from the event log.
+  const worldClockBlock = `\nWORLD: tick=${s.worldTickCount ?? 0}, dayPhase=${s.dayPhase ?? 'morning'}\n`;
+
+  // NPC alertness — any living NPC currently above `calm`. The GM should
+  // explain visible motion / pauses / changes in posture by referencing
+  // these states (e.g. an NPC walking across the map is probably heading
+  // toward a `lastAlertTile`).
+  const alertedNpcs = s.npcs.filter((n) => n.hp > 0 && (n.alertness ?? 'calm') !== 'calm');
+  const alertnessBlock = alertedNpcs.length > 0
+    ? `\nNPC ALERTNESS (sim-layer awareness, hidden from the player UI unless the Target Panel is open):\n${alertedNpcs.map((n) => {
+        const t = n.memory?.lastAlertTile;
+        const where = t ? `from (${t.x},${t.y})` : '';
+        const kind = n.memory?.lastAlertKind ?? '?';
+        return `  • ${n.revealedName ?? n.name} [npc_${n.id}] — ${n.alertness} · heard ${kind} ${where}`.replace(/\s+$/, '');
+      }).join('\n')}\n`
+    : '';
+
   // Adventure framing — when this session is a chapter of an adventure,
   // surface the chapter index and short summaries of prior chapters so the
   // GM can reference earlier scenes ("word of what you did at the bridge
@@ -338,7 +358,7 @@ function buildStateMessage(engine: GameEngine): string {
     : '';
 
   return `SETTING: ${s.mapName} | PHASE: ${s.phase}
-CONTEXT: ${s.encounterContext}${adventureBlock}${scriptedEvents}${factionsBlock}${rumorsBlock}
+CONTEXT: ${s.encounterContext}${adventureBlock}${scriptedEvents}${factionsBlock}${rumorsBlock}${worldClockBlock}${alertnessBlock}
 
 PLAYER: tile (${p.tileX},${p.tileY}) · HP ${p.hp} · ${formatCoins(p.balanceCp)} · ${flags || 'no flags'}
   ${classLine}

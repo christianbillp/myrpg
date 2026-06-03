@@ -43,6 +43,7 @@ import { doEquip as ivDoEquip, doUnequip as ivDoUnequip } from './InventoryActio
 import { doCastSpell as spDoCastSpell } from './SpellSystem.js';
 import { doCommandSummon, checkSummonTether, registerSummonHooks } from './SummonSystem.js';
 import { registerSoundHooks } from './Sound.js';
+import { registerAwarenessHooks, registerCompanionFollowHooks } from './npcSim/index.js';
 import { maybeBreakConcentration, endConcentration } from './ConcentrationSystem.js';
 import { doUseFeature } from './FeatureRegistry.js';
 import { buildSessionState, SavedMapRecord } from './SessionBuilder.js';
@@ -62,11 +63,32 @@ import { buildLevelUpPreview, applyLevelUp, applyLevelUpHistory, syncCharacterTr
 import { canLevelUp } from '../../../shared/xpTable.js';
 import type { LevelUpPreview, LevelUpChoices, LongRestPreview, LongRestChoices } from '../../../shared/types.js';
 import { buildLongRestPreview, applyLongRest } from './Resting.js';
+import { dispatchPlayerAction } from './playerActions/registry.js';
 
 export interface ActionResult {
   events: GameEvent[];
   state: GameState;
 }
+
+/**
+ * Engine-wide event subscribers, in registration order. Order matters
+ * only when two systems subscribe to the same event with the same
+ * priority — register-order wins. Otherwise priorities (set by each
+ * subscriber inline) sort the dispatch.
+ *
+ * Adding a new engine system = drop one `register*Hooks(ctx)` line
+ * here. The constructor wires the whole array in one loop.
+ */
+const ENGINE_HOOKS: Array<(ctx: GameContext) => void> = [
+  registerDirector,
+  registerEncounterProgress,
+  registerEncounterLifecycle,
+  registerTriggers,
+  registerSummonHooks,
+  registerSoundHooks,
+  registerAwarenessHooks,
+  registerCompanionFollowHooks,
+];
 
 let uidCounter = 0;
 
@@ -136,12 +158,7 @@ export class GameEngine {
     // publish further events during their handlers. Director runs at higher
     // priority than triggers (50 vs -10) so directorial decisions arrive
     // before authored reactions to the same event.
-    registerDirector(this.ctx);
-    registerEncounterProgress(this.ctx);
-    registerEncounterLifecycle(this.ctx);
-    registerTriggers(this.ctx);
-    registerSummonHooks(this.ctx);
-    registerSoundHooks(this.ctx);
+    for (const register of ENGINE_HOOKS) register(this.ctx);
 
     // Fire encounter_started AFTER every subscriber is registered. Triggers
     // listening on this event push their GameEvents into the startup buffer
@@ -329,7 +346,6 @@ export class GameEngine {
 
   processAction(action: PlayerAction): ActionResult {
     const events: GameEvent[] = [];
-    const s = this.state;
     this.computeAvailableActions();
     // Expose the events buffer to engine subsystems that don't receive it
     // explicitly (TriggerSystem actions, in particular). Cleared in finally
@@ -338,65 +354,7 @@ export class GameEngine {
     this.ctx.eventSink = events;
     try {
 
-    switch (action.type) {
-      case 'move':         exDoMove(this.ctx, action.dx, action.dy, events); break;
-      case 'moveTo':       exDoMoveTo(this.ctx, action.tileX, action.tileY, events); break;
-      case 'attack':       caDoAttack(this.ctx, action.targetId, events); break;
-      case 'throw':
-        if (s.phase === 'exploring' || s.phase === 'player_turn')
-          events.push(...caThrowItem(this.ctx, action.itemId, action.targetId));
-        break;
-      case 'castSpell':
-        spDoCastSpell(this.ctx, action.spellId, action.slotLevel, action.targetIds, action.tile, !!action.asRitual, events, action.damageTypeChoice, action.onFailChoice, action.abilityChoice);
-        break;
-      case 'releaseConcentration':
-        endConcentration(this.ctx, 'released by caster');
-        break;
-      case 'hide':         caDoHide(this.ctx); break;
-      case 'useFeature':   doUseFeature(this.ctx, action.featureId, { targetId: action.targetId, tile: action.tile }, events); break;
-      case 'resolveReaction': cfDoResolveReaction(this.ctx, action.accept, events); break;
-      case 'dash':         caDoDash(this.ctx); break;
-      case 'dodge':        caDoDodge(this.ctx); break;
-      case 'disengage':    caDoDisengage(this.ctx); break;
-      case 'detach':       caDoDetach(this.ctx); break;
-      case 'commandSummon': doCommandSummon(this.ctx, action.summonNpcId, action.tile, events); break;
-      case 'endTurn':
-        if (s.phase === 'player_turn') {
-          // SRD Mage Hand: vanishes if the caster ends a turn > 30 ft away.
-          checkSummonTether(this.ctx);
-          // Route through `endPlayerTurn` so end-of-turn hooks fire:
-          // Flaming Sphere proximity saves, zone duration tick, Color Spray
-          // / spell-condition expiries, the `turn_ended` event. The legacy
-          // `enterEnemyPhase` skipped all of these — kept around only as a
-          // back-compat entry point for death-save resolution.
-          cfEndPlayerTurn(this.ctx, events);
-        }
-        break;
-      case 'rollDeathSave': cfDoRollDeathSave(this.ctx, events); break;
-      case 'shortRest':    exDoShortRest(this.ctx); break;
-      case 'search':       exDoSearch(this.ctx); break;
-      case 'usePotion':    exDoUsePotion(this.ctx); break;
-      case 'equip':        ivDoEquip(this.ctx, action.slot, action.itemId); break;
-      case 'unequip':      ivDoUnequip(this.ctx, action.slot); break;
-      case 'selectTarget': s.selectedTargetId = action.entityId; break;
-      case 'scrollLog': {
-        const maxOffset = Math.max(0, s.eventLog.length - 6);
-        s.logScrollOffset = Math.max(0, Math.min(maxOffset, s.logScrollOffset + (action.delta > 0 ? -1 : 1)));
-        break;
-      }
-      case 'startConversation':
-        cnStartConversation(this.ctx, action.npcRef, action.conversationId);
-        break;
-      case 'conversationChoice':
-        cnAdvanceConversation(this.ctx, action.choiceIndex);
-        break;
-      case 'conversationEnd':
-        cnEndConversation(this.ctx);
-        break;
-      case 'devCompleteEncounter':
-        this.devCompleteEncounter(events);
-        break;
-    }
+    dispatchPlayerAction(this.ctx, action, events, this);
 
     // Route through getState() so dev-mode resource topups (unlimited
     // spell slots / unlimited actions) get applied to the state we hand
@@ -1001,7 +959,7 @@ export class GameEngine {
    * reach normally — wrap-up overlay, next-chapter button, the rest of the
    * adventure machinery all keep working.
    */
-  private devCompleteEncounter(_events: GameEvent[]): void {
+  devCompleteEncounter(_events: GameEvent[]): void {
     if (!this.state.devFlags?.completePrimaryObjective) return; // server-side gate
     this.addLog({ left: "[DEV] Completing primary objective…", style: 'header' });
     const flag = this.state.encounterCompletionFlag;

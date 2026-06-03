@@ -1,0 +1,16 @@
+{
+  "id": "renna_vask",
+  "slots": {
+    "body": "bordered",
+    "ears": "earring_hoops",
+    "face": "round_small",
+    "eyes": "normal",
+    "mouth": "neutral",
+    "hair": "ponytail"
+  },
+  "palette": {
+    "body": "#7050a0",
+    "skin": "#f1c9a5",
+    "hair": "#a04444"
+  }
+}

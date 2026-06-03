@@ -1,7 +1,6 @@
 {
   "id": "noble",
   "name": "Noble",
-  "factionId": "townsfolk",
   "type": "Medium or Small Humanoid, Neutral",
   "maxHp": 9,
   "hpFormula": "2d8",

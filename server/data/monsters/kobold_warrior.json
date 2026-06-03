@@ -1,7 +1,6 @@
 {
   "id": "kobold_warrior",
   "name": "Kobold Warrior",
-  "factionId": "monsters",
   "type": "Small Dragon, Neutral",
   "maxHp": 7,
   "hpFormula": "3d6-3",

@@ -3,6 +3,7 @@ import type { GameDefs } from "./engine/types.js";
 import { settingPromptBlock } from "./settings.js";
 import { stripTileFlipBits } from "../../shared/tileGid.js";
 import { instanceIdForSlot } from "../../shared/spawnInstanceIds.js";
+import { Logger } from "./Logger.js";
 
 /**
  * Encounter Refiner — Claude takes a draft encounter (+ the map it sits on)
@@ -147,35 +148,55 @@ export async function refineEncounter(
   const passability = buildPassabilityGrid(map, defs);
 
   const system = buildSystemPrompt(defs);
-  const user = buildUserPrompt(req, passability, map.cols, map.rows);
+  const baseUser = buildUserPrompt(req, passability, map.cols, map.rows);
   const tool = buildResponseTool();
 
-  const resp = await anthropic.messages.create({
-    model: "claude-sonnet-4-6",
-    max_tokens: 4096,
-    system,
-    tools: [tool],
-    tool_choice: { type: "tool", name: "submit_refinement" },
-    messages: [{ role: "user", content: user }],
-  });
-
-  const block = resp.content.find((b) => b.type === "tool_use");
-  if (!block || block.type !== "tool_use") {
-    throw new Error("Model did not return a tool_use block.");
+  // Retry loop. The model occasionally proposes a spawn on a `#` cell when
+  // the map's wall ring is dense (buildings / dungeons with walls on the
+  // object layer). On a validation error we re-send the prompt with the
+  // failure appended as a correction note — usually the second attempt
+  // lands on a legal `.` cell. Capped at 2 attempts so a stuck case still
+  // surfaces a clear error to the caller.
+  const MAX_ATTEMPTS = 2;
+  let payload: RefinerPayload | null = null;
+  let lastError: string | null = null;
+  const effectiveAllyIds = (p: RefinerPayload):    string[] => p.allyIds    ?? req.draft.allyIds;
+  const effectiveEnemyIds = (p: RefinerPayload):   string[] => p.enemyIds   ?? req.draft.enemyIds;
+  const effectiveNeutralIds = (p: RefinerPayload): string[] => p.neutralIds ?? req.draft.neutralIds;
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    const userPrompt = lastError === null
+      ? baseUser
+      : `${baseUser}\n\nPREVIOUS ATTEMPT REJECTED — your last proposal failed validation: ${lastError}\nRe-submit the FULL refinement (all the fields you intended to change), this time picking only '.' tiles that fit the same intent.`;
+    const resp = await anthropic.messages.create({
+      model: "claude-sonnet-4-6",
+      max_tokens: 4096,
+      system,
+      tools: [tool],
+      tool_choice: { type: "tool", name: "submit_refinement" },
+      messages: [{ role: "user", content: userPrompt }],
+    });
+    const block = resp.content.find((b) => b.type === "tool_use");
+    if (!block || block.type !== "tool_use") {
+      throw new Error("Model did not return a tool_use block.");
+    }
+    const candidate = block.input as RefinerPayload;
+    try {
+      validateRefinement(
+        candidate,
+        validMonsterIds, validNpcIds,
+        map.cols, map.rows, passability,
+        effectiveAllyIds(candidate), effectiveEnemyIds(candidate), effectiveNeutralIds(candidate),
+      );
+      payload = candidate;
+      if (attempt > 1) Logger.log('aigm.refine_retry_recovered', { attempts: attempt }, 'info');
+      break;
+    } catch (err) {
+      lastError = err instanceof Error ? err.message : String(err);
+      if (attempt === MAX_ATTEMPTS) throw err;
+      Logger.log('aigm.refine_retry', { attempt, error: lastError }, 'warn');
+    }
   }
-  const payload = block.input as RefinerPayload;
-  // Use the proposed roster (if any) as the validation baseline so the AI
-  // can add a monster and place it in the same response. Fall back to the
-  // current draft roster for fields the AI didn't touch.
-  const effectiveAllyIds:    string[] = payload.allyIds    ?? req.draft.allyIds;
-  const effectiveEnemyIds:   string[] = payload.enemyIds   ?? req.draft.enemyIds;
-  const effectiveNeutralIds: string[] = payload.neutralIds ?? req.draft.neutralIds;
-  validateRefinement(
-    payload,
-    validMonsterIds, validNpcIds,
-    map.cols, map.rows, passability,
-    effectiveAllyIds, effectiveEnemyIds, effectiveNeutralIds,
-  );
+  if (!payload) throw new Error("Refinement failed after retries.");
 
   const proposed: RefineResponse['proposed'] = {};
   if (payload.title          !== undefined) proposed.title          = payload.title;
@@ -270,6 +291,7 @@ SPATIAL PLACEMENT — when the user asks for a full encounter ("set everything u
 
 PLACEMENT RULES:
 - Every spawn coordinate MUST point at a '.' tile. Never spawn on '#'.
+- BUILDINGS AND DUNGEONS render their walls as a CONTINUOUS RING of '#' around each room. The interior of every room is '.' — that's where creatures can stand. Picking a cell INSIDE a building means picking a '.' cell within the wall ring, NOT a wall cell itself. Read the grid carefully: a 6×4 building shows up as a 6-wide '#' ring with a 4×2 block of '.' inside it. Spawn on the interior '.' cells, never on the ring.
 - Coordinates must be within bounds: 0 ≤ x < width, 0 ≤ y < height.
 - The player spawn is a single tile. Each monster spawn must reference a roster slot by \`index\` (0-based into the array you're proposing or, if you're not changing the roster, the CURRENT roster).
 - Do NOT stack two creatures on the same tile (the player and every monster slot need unique tiles).

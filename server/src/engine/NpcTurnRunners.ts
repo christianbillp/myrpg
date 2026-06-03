@@ -256,7 +256,7 @@ export function runSingleEnemyTurn(ctx: GameContext, npc: NpcState, events: Game
   if (s.player.hp <= 0) {
     // The DoT downed the player — let the normal flow handle the unconscious
     // state at the next turn boundary; for this NPC's turn we still finalise.
-    finalizeNpcTurn(ctx, npc);
+    finalizeNpcTurn(ctx, npc, events);
     ctx.publish({ type: 'turn_ended', combatantId: npc.id });
     return;
   }
@@ -264,7 +264,7 @@ export function runSingleEnemyTurn(ctx: GameContext, npc: NpcState, events: Game
   // Proboscis-style attack — skip the attack phase entirely. The DoT fired
   // above is the only thing it accomplishes this turn.
   if (isAttacker(npc, ctx)) {
-    finalizeNpcTurn(ctx, npc);
+    finalizeNpcTurn(ctx, npc, events);
     ctx.publish({ type: 'turn_ended', combatantId: npc.id });
     return;
   }
@@ -278,7 +278,7 @@ export function runSingleEnemyTurn(ctx: GameContext, npc: NpcState, events: Game
     } else {
       ctx.addLog({ left: `${combatantDisplayName(npc, s.npcs)} ${incapacitatedFlavor(npc.conditions)}`, style: 'status' });
     }
-    finalizeNpcTurn(ctx, npc);
+    finalizeNpcTurn(ctx, npc, events);
     ctx.publish({ type: 'turn_ended', combatantId: npc.id });
     return;
   }
@@ -288,7 +288,7 @@ export function runSingleEnemyTurn(ctx: GameContext, npc: NpcState, events: Game
     npc.tileX = flee.finalTileX;
     npc.tileY = flee.finalTileY;
     ctx.addLog({ left: `${combatantDisplayName(npc, s.npcs)} breaks and flees!`, style: 'status' });
-    finalizeNpcTurn(ctx, npc);
+    finalizeNpcTurn(ctx, npc, events);
     ctx.publish({ type: 'turn_ended', combatantId: npc.id });
     // Escape off the map edge — the creature leaves the encounter entirely.
     if (isMapEdge(ctx, npc.tileX, npc.tileY)) {
@@ -379,7 +379,7 @@ export function runSingleEnemyTurn(ctx: GameContext, npc: NpcState, events: Game
     );
     if (npc.hp <= 0) {
       ctx.addLogs(result.logs);
-      finalizeNpcTurn(ctx, npc);
+      finalizeNpcTurn(ctx, npc, events);
       return;
     }
   }
@@ -439,7 +439,7 @@ export function runSingleEnemyTurn(ctx: GameContext, npc: NpcState, events: Game
       applyEnemyHitToNpc(ctx, npc, result.attackedTargetId, result);
     }
   }
-  finalizeNpcTurn(ctx, npc);
+  finalizeNpcTurn(ctx, npc, events);
   ctx.publish({ type: 'turn_ended', combatantId: npc.id });
 }
 
@@ -526,9 +526,24 @@ export function runSingleAllyTurn(ctx: GameContext, ally: NpcState, events: Game
   // fallback, every disposition-enemy NPC). Opens the door to town-guard
   // allies engaging wandering monsters even when those monsters aren't
   // disposition-enemy to the player yet.
+  //
+  // **Companion ATTACK override** — when the player has issued an explicit
+  // `attack { targetId }` command via the COMPANION chip, force the target
+  // list to just that NPC. The companion still uses the regular ally AI
+  // (movement + attack roll); only the target picker is overridden. If the
+  // forced target is dead / missing, fall through to autonomous selection
+  // and clear the override so the panel resyncs.
   const allyView = { factionId: ally.factionId, disposition: ally.disposition };
-  const enemyTargets = s.npcs
-    .filter((n) => n !== ally && n.hp > 0 && isHostileTo(s, allyView, { factionId: n.factionId, disposition: n.disposition }))
+  const override = ally.companion?.override;
+  let forcedTarget: NpcState | null = null;
+  if (override?.kind === 'attack') {
+    const candidate = s.npcs.find((n) => n.id === override.targetId);
+    if (candidate && candidate.hp > 0) forcedTarget = candidate;
+    else if (ally.companion) ally.companion.override = undefined;
+  }
+  const enemyTargets = (forcedTarget
+    ? [forcedTarget]
+    : s.npcs.filter((n) => n !== ally && n.hp > 0 && isHostileTo(s, allyView, { factionId: n.factionId, disposition: n.disposition })))
     .map((n) => {
       const ndef = ctx.resolveMonsterDef(n.defId);
       return { id: n.id, tileX: n.tileX, tileY: n.tileY, ac: ndef?.ac ?? 10 };

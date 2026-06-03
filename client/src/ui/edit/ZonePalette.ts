@@ -133,6 +133,7 @@ export class ZonePalette {
   dispose(): void {
     for (const h of this.handles) h.dispose();
     this.handles = [];
+    this.listEl?.remove();
     this.listEl = null;
     this.activeZoneId = null;
   }

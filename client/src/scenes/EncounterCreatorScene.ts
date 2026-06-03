@@ -1894,6 +1894,14 @@ function singleActionToComposed(a: EncounterTrigger["then"][number]): ComposedAc
     }
     case "start_conversation":
       return { kind: "open_conversation", npcRef: a.npcRef, conversationId: a.conversationId };
+    case "set_npc_companion":
+      return {
+        kind: "set_companion",
+        defId: a.defId,
+        isCompanion: a.isCompanion,
+        followMode: a.followMode,
+        returnDisposition: a.returnDisposition,
+      };
     default:
       return null;
   }

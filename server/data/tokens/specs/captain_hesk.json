@@ -1,0 +1,18 @@
+{
+  "id": "captain_hesk",
+  "slots": {
+    "body": "silver_rim",
+    "ears": "earring_drops",
+    "face": "round_small",
+    "beard": "mutton_chops",
+    "eyes": "large",
+    "mouth": "scowl",
+    "hair": "receding",
+    "accessory": "nose_stud"
+  },
+  "palette": {
+    "body": "#445566",
+    "skin": "#f1c9a5",
+    "hair": "#88ccff"
+  }
+}

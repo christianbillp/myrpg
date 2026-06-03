@@ -875,6 +875,7 @@ export class GameScene extends Phaser.Scene {
       onReleaseConcentration: () => gameClient.sendAction({ type: "releaseConcentration" }),
       onDevCompleteObjective: () => gameClient.sendAction({ type: "devCompleteEncounter" }),
       onLeaveEncounter: () => this.leaveEncounter(),
+      onCompanionCommand: (npcId, command) => gameClient.sendAction({ type: "companionCommand", npcId, command }),
     });
     this.targetPanel = new TargetPanel(this.uiScale);
     if (DevMode.showDevToolsPanel) {
@@ -1041,7 +1042,24 @@ export class GameScene extends Phaser.Scene {
           costsBonusAction: n.summonSpellId === 'flaming-sphere',
         })),
       hasSelectedTarget: !!state.selectedTargetId,
+      selectedTargetId: state.selectedTargetId,
       statusChips: buildPlayerStatusChips(state.player, concSpell?.name ?? null),
+      companion: (() => {
+        // Single-companion assumption for step 2 — pick the first companion
+        // we see on the map. The chip surfaces this NPC's id + display
+        // name; future steps (party support) generalise via a roster
+        // selector. The mode read is "wait" iff the active sim task is
+        // `wait_here`; otherwise the companion is autonomously following.
+        const c = state.npcs.find((n) => n.companion && n.hp > 0);
+        if (!c || !c.companion) return null;
+        const mode: 'follow' | 'wait' =
+          c.companion.simState?.activeTaskId === 'wait_here' ? 'wait' : 'follow';
+        return {
+          npcId: c.id,
+          displayName: c.revealedName ?? c.name ?? 'COMPANION',
+          currentMode: mode,
+        };
+      })(),
     };
   }
 

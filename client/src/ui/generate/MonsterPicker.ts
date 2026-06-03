@@ -17,6 +17,7 @@
 import Phaser from "phaser";
 import type { MonsterDef } from "../../../../shared/types";
 import type { NPCDef } from "../../../../shared/types";
+import { instanceIdForSlot } from "../../../../shared/spawnInstanceIds";
 
 export type RosterRole = "ally" | "neutral" | "enemy";
 
@@ -320,12 +321,18 @@ export class MonsterPicker {
       this.rosterEl.appendChild(hint);
       return;
     }
-    this.renderRosterSection("ENEMIES",  "enemy",   this.enemySlots);
-    this.renderRosterSection("ALLIES",   "ally",    this.allySlots);
-    this.renderRosterSection("NEUTRALS", "neutral", this.neutralSlots);
+    // Pass the full id lists into each section so `instanceIdForSlot` can
+    // compute the canonical runtime id — a defId that's a singleton WITHIN
+    // a role can still be a duplicate ACROSS roles (e.g. ally `commoner` +
+    // enemy `commoner` would both surface as `commoner_1` / `commoner_2`
+    // at spawn time). Showing those is what makes trigger authoring work.
+    const lists = { allyIds: this.allySlots, enemyIds: this.enemySlots, npcIds: this.neutralSlots };
+    this.renderRosterSection("ENEMIES",  "enemy",   this.enemySlots,   lists);
+    this.renderRosterSection("ALLIES",   "ally",    this.allySlots,    lists);
+    this.renderRosterSection("NEUTRALS", "neutral", this.neutralSlots, lists);
   }
 
-  private renderRosterSection(label: string, role: RosterRole, slots: string[]): void {
+  private renderRosterSection(label: string, role: RosterRole, slots: string[], lists: { allyIds: string[]; enemyIds: string[]; npcIds: string[] }): void {
     if (slots.length === 0) return;
     const header = document.createElement("div");
     header.textContent = `${label} (${slots.length})`;
@@ -335,16 +342,16 @@ export class MonsterPicker {
       padding: 6px 6px 2px;
     `;
     this.rosterEl.appendChild(header);
-    // Per-id ordinals so duplicates show `#1` / `#2` suffixes. Two bandit
-    // slots otherwise read identical and the author can't tell them apart.
-    const idCounts = new Map<string, number>();
-    const idTotals = new Map<string, number>();
-    for (const id of slots) idTotals.set(id, (idTotals.get(id) ?? 0) + 1);
+    // Per-slot runtime id resolved via `instanceIdForSlot` — the SAME
+    // function the spawn helpers and the trigger system use at runtime.
+    // Singletons keep the bare defId; duplicates get `${defId}_${ordinal}`.
+    // Surfacing this exact id is what lets authors copy-paste it into
+    // trigger fields (`set_npc_companion`, `set_disposition_by_def_id`,
+    // `set_npc_hidden`, …) and have it match.
     slots.forEach((id, idx) => {
-      const ordinal = (idCounts.get(id) ?? 0) + 1;
-      idCounts.set(id, ordinal);
-      const isDup = (idTotals.get(id) ?? 1) > 1;
-      const dupSuffix = isDup ? ` #${ordinal}` : "";
+      const runtimeId = instanceIdForSlot(role, idx, lists) ?? id;
+      const isDup = runtimeId !== id;
+      const dupSuffix = isDup ? runtimeId.slice(id.length) : "";  // e.g. "_2"
 
       const row = document.createElement("div");
       row.style.cssText = `
@@ -373,7 +380,7 @@ export class MonsterPicker {
       nameEl.style.cssText = "overflow: hidden; text-overflow: ellipsis; white-space: nowrap;";
       name.appendChild(nameEl);
       const idEl = document.createElement("div");
-      idEl.textContent = `${id}${dupSuffix}`;
+      idEl.textContent = runtimeId;
       idEl.style.cssText = "color: #6a7888; font-size: 9px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;";
       name.appendChild(idEl);
       row.appendChild(name);

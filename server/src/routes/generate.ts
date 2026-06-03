@@ -32,7 +32,8 @@ type EditorActionKind =
   | "perception" | "log" | "aigm" | "combat" | "xp"
   | "announcement" | "speech" | "fade" | "set_flag"
   | "enable_long_rest" | "disable_long_rest"
-  | "hide_npc" | "kill_npc" | "open_conversation";
+  | "hide_npc" | "kill_npc" | "open_conversation"
+  | "set_companion";
 
 /** One author-facing action. Same shape used for the trigger's primary
  *  action AND for each entry in `extraActions[]`. Every per-kind field is
@@ -59,6 +60,12 @@ interface EditorComposedAction {
   corpseSearchFail?: string;
   npcRef?: string;
   conversationId?: string;
+  /** `set_companion` only. When true the matching NPC is promoted to a
+   *  companion (ally disposition + sim runner enabled); when false they
+   *  drop back to `returnDisposition`. */
+  isCompanion?: boolean;
+  followMode?: "tight" | "loose";
+  returnDisposition?: "neutral" | "ally" | "enemy";
 }
 
 interface EditorComposedTrigger extends EditorComposedAction {
@@ -187,6 +194,18 @@ function expandComposedAction(a: EditorComposedAction): Record<string, unknown>[
       const obj: Record<string, unknown> = { type: "start_conversation", npcRef };
       const conv = (a.conversationId ?? "").trim();
       if (conv) obj.conversationId = conv;
+      return [obj];
+    }
+    case "set_companion": {
+      const defId = (a.defId ?? "").trim();
+      if (!defId) return [];
+      const obj: Record<string, unknown> = {
+        type: "set_npc_companion",
+        defId,
+        isCompanion: a.isCompanion !== false,
+      };
+      if (a.followMode) obj.followMode = a.followMode;
+      if (a.returnDisposition) obj.returnDisposition = a.returnDisposition;
       return [obj];
     }
   }
@@ -722,6 +741,7 @@ export function registerGenerateRoutes(server: FastifyInstance, ctx: GenerateRou
           'award_xp', 'show_announcement', 'npc_speaks', 'fade_screen',
           'set_flag', 'set_long_rest',
           'set_npc_hidden', 'set_npc_dead', 'start_conversation',
+          'set_npc_companion',
           // Combat editor kind expands to these two:
           'set_disposition_by_def_id', 'trigger_combat',
         ]);

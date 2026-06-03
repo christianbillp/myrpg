@@ -265,13 +265,6 @@ export interface MonsterDef {
   xp: number;
   cr: string;
   color: number;
-  /** Default faction membership for raw-monster spawns (i.e. when the spawn
-   *  has no NPC wrapper to declare a faction). `SpawnHelpers` reads this
-   *  first; if absent it falls back to the def id as a faction-of-one. Use
-   *  this when the bare monster def already belongs to one of the world's
-   *  factions in `defs.factions/` — e.g. `cultist` → `cultists` so the
-   *  Target Panel renders the faction row instead of hiding it. */
-  factionId?: string;
   resistances?: string[];
   vulnerabilities?: string[];
   immunities?: string[];
@@ -386,6 +379,18 @@ export interface NPCDef {
    * `EncounterDef.conversationOverrides` (see EncounterDef).
    */
   conversationId?: string;
+  /**
+   * Optional daily routine — one entry per day phase the NPC behaves
+   * differently in. The world tick consults this whenever the day phase
+   * advances; the matching entry's `task` becomes the NPC's active sim
+   * task. See `RoutineEntry` in `shared/types/longRest.ts`.
+   *
+   * Seeded onto every spawned instance at session-create time by
+   * `SessionBuilder` (no per-instance customisation today; future
+   * `set_npc_routine` triggers will be able to mutate at runtime). NPCs
+   * without a routine simply skip the routine path.
+   */
+  routine?: import('./longRest.js').RoutineEntry[];
   /**
    * When true, the engine maintains a per-character `NpcSave` file recording
    * this NPC's relationship, memories, and stateful overrides across sessions,

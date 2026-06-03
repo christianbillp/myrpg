@@ -12,6 +12,7 @@ import { runSingleEnemyTurn, runSingleAllyTurn } from './NpcTurnRunners.js';
 import { applyMonsterAttachToPlayer } from './OngoingEffectsSystem.js';
 import { tickActiveZones, tickZoneEnterSaves, runGustOfWindEndOfTurnSaves } from './SpellSystem.js';
 import { endConcentration } from './ConcentrationSystem.js';
+import { pingFactionAlert } from './npcSim/index.js';
 
 // ── Combat lifecycle ────────────────────────────────────────────────────────
 
@@ -65,6 +66,22 @@ export function doStartCombat(ctx: GameContext, events: GameEvent[]): void {
     enemies: enemies.map((n) => ({ id: n.id, defId: n.defId, hp: n.hp })),
     playerHidden: s.player.conditions.includes('hidden'),
   });
+
+  // Sim-awareness propagation. Every faction with a living member
+  // engaged in this fight pings its OTHER same-faction members so an
+  // ambient bandit out of sight knows the captain just got hit. Only
+  // fires for NPCs that aren't already combat-eligible — combatants
+  // pick targets through the existing AI; the awareness ping is purely
+  // for the sim-layer NPCs (routine-bearing + future ambient).
+  const seenFactions = new Set<string>();
+  for (const enemy of enemies) {
+    if (seenFactions.has(enemy.factionId)) continue;
+    seenFactions.add(enemy.factionId);
+    pingFactionAlert(ctx, { x: enemy.tileX, y: enemy.tileY }, enemy.factionId, {
+      sourceId: 'player',
+      tickId: s.worldTickCount,
+    });
+  }
 
   // Read playerWasHidden BUT keep the condition active. A hidden opener should
   // grant Advantage on the very first attack (which is what triggered combat
@@ -318,7 +335,7 @@ export function endPlayerTurn(ctx: GameContext, events: GameEvent[]): void {
   // SRD Gust of Wind: any creature ending its turn in the Line re-rolls
   // the STR save and is pushed 15 ft away on failure. Same trigger
   // moment as Flaming Sphere.
-  runGustOfWindEndOfTurnSaves(ctx, 'player');
+  runGustOfWindEndOfTurnSaves(ctx, 'player', events);
   // Tick spell-imposed conditions whose duration is keyed to the caster's
   // own turns (Color Spray's Blinded, future "until the start/end of your
   // next turn" effects). Decrement `turnsRemaining`; when it hits 0 strip
@@ -510,7 +527,7 @@ export function applyEnemyHitToPlayer(
   }
 }
 
-export function finalizeNpcTurn(ctx: GameContext, npc: NpcState): void {
+export function finalizeNpcTurn(ctx: GameContext, npc: NpcState, events?: GameEvent[]): void {
   const s = ctx.state;
   // SRD Flaming Sphere — any creature ending its turn within 5 ft of the
   // sphere makes a DEX save vs the spell's damage. Resolve before the
@@ -519,7 +536,7 @@ export function finalizeNpcTurn(ctx: GameContext, npc: NpcState): void {
   // SRD Gust of Wind end-of-turn save for this NPC. Same shape as
   // Flaming Sphere — a creature ending its turn on a zone tile rolls
   // STR vs the spell's DC and is pushed 15 ft away on failure.
-  runGustOfWindEndOfTurnSaves(ctx, npc.id);
+  runGustOfWindEndOfTurnSaves(ctx, npc.id, events);
   // SRD: Hide / Invisible only ends when an enemy FINDS the hider — i.e. an
   // active Perception roll opposes their hideDC and wins. Run a sweep here
   // so the finishing NPC (and every other observer) gets one chance to spot
@@ -674,7 +691,7 @@ export function doResolveReaction(ctx: GameContext, accept: boolean, events: Gam
       } else {
         ctx.addLog({ left: `${ctx.playerDef.name} holds — no Opportunity Attack`, style: 'status' });
       }
-      finalizeNpcTurn(ctx, npc);
+      finalizeNpcTurn(ctx, npc, events);
     }
   } else if (pending.kind === 'shield') {
     const attacker = s.npcs.find((n) => n.id === pending.attackerId);
@@ -730,7 +747,7 @@ export function doResolveReaction(ctx: GameContext, accept: boolean, events: Gam
       };
       applyEnemyHitToPlayer(ctx, attacker, synthResult, events);
     }
-    if (attacker) finalizeNpcTurn(ctx, attacker);
+    if (attacker) finalizeNpcTurn(ctx, attacker, events);
   }
 
   // Resume the turn loop.

@@ -1,7 +1,6 @@
 {
   "id": "commoner",
   "name": "Commoner",
-  "factionId": "townsfolk",
   "type": "Medium Humanoid",
   "maxHp": 4,
   "hpFormula": "1d8",

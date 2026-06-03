@@ -165,7 +165,7 @@ Faction definitions loaded from `server/data/factions/*.json` and surfaced via `
 
 | Field | Type | Notes |
 |---|---|---|
-| `id` | string | Stable id, referenced from `NpcState.factionId` and `MonsterDef.factionId` / `NPCDef.factionId`. |
+| `id` | string | Stable id, referenced from `NpcState.factionId` and `NPCDef.factionId`. `MonsterDef` does NOT carry `factionId` — monsters are pure stat blocks; faction membership lives on the NPC wrapper. |
 | `name` | string | Player-facing display name, shown in the Target Panel once discovered. |
 | `description` | string \| *omitted* | One-line flavour shown alongside the name. |
 | `displayColor` | string | Hex `#rrggbb` for the faction tag chip. |
@@ -244,6 +244,9 @@ Named characters with identity and persona layered on top of a monster stat bloc
 | `tokenAsset` | string | *(optional)* Path to the SVG token sprite, e.g. `/tokens/npc_wandering_sage.svg`. When omitted, the path is derived by convention: `/tokens/npc_<id>.svg`. If neither an explicit field nor a convention-matched file exists, the NPC falls back to its `monsterClass`'s token at render time. See [tokens/](#tokens-1). |
 | `factionId` | string | *(optional)* Faction membership for spawns of this NPC. Referenced by `SpawnHelpers.spawnNpc` to set `NpcState.factionId` and inherits the faction's relations with everyone else via `GameState.factionRelations`. When omitted, the spawn uses the NPC's own id as a faction-of-one (legacy behaviour). NPCs are the worldbuilding layer — `MonsterDef` deliberately does NOT carry a `factionId` since stats and faction loyalty are orthogonal concerns. See [factions/](#factions). |
 | `attitude` | string | *(optional)* Starting **social** attitude toward the party: `"friendly"`, `"indifferent"`, or `"hostile"` (SRD US-092). Defaults to `"indifferent"` per SRD when omitted. **Distinct from combat disposition** — a hostile-attitude shopkeeper can still be neutral-disposition (won't fight but resists persuasion). Attitude drives Advantage/Disadvantage on Influence-type ability checks (Deception, Intimidation, Performance, Persuasion, Animal Handling). Mutated mid-play via the AIGM `set_attitude` tool. |
+| `conversationId` | string | *(optional)* Default conversation graph id this NPC opens when the player initiates dialogue. Resolves against `server/data/settings/<setting>/conversations/`. Encounter authors can override per-encounter via `EncounterDef.conversationOverrides`. |
+| `persistent` | boolean | *(optional)* When `true`, the engine maintains a per-character `NpcSave` file recording this NPC's relationship, memories, and stateful overrides across sessions, encounters, and adventures. Most NPCs are throwaway and leave this `false` — flip it on for named characters the player is expected to interact with again. Save file path: `<setting>/saves/<characterId>_npcs/<npcId>.json`. |
+| `routine` | array | *(optional)* Daily routine — one `RoutineEntry` per day phase the NPC behaves differently in (US-094). Each entry is `{ phase: "morning" \| "noon" \| "evening" \| "night", task: { kind: "walk_to", tileX, tileY } \| { kind: "idle" } }`. The world tick rolls the day phase every `TICKS_PER_DAY_PHASE` ticks (60 by default) and the matching row becomes the NPC's active sim task. NPCs without a routine simply skip the routine path. The routine task pool always includes `IdleTask` plus the awareness tasks `InvestigateTask` / `AlertTask`, so a routine NPC will pause its row to investigate noise or respond to a faction alert and resume the row once alertness decays. |
 
 ### Example — `npcs/tavern_keeper.json`
 
@@ -253,9 +256,46 @@ Named characters with identity and persona layered on top of a monster stat bloc
   "name": "Bram Holdfast",
   "monsterClass": "commoner",
   "color": 13395456,
-  "persona": "You are Bram Holdfast, the gruff but fair keeper of The Rusty Flagon..."
+  "persona": "You are Bram Holdfast, the gruff but fair keeper of The Rusty Flagon...",
+  "factionId": "commoners",
+  "persistent": true,
+  "conversationId": "tavern_keeper_chat",
+  "routine": [
+    { "phase": "morning", "task": { "kind": "walk_to", "tileX": 2,  "tileY": 1 } },
+    { "phase": "noon",    "task": { "kind": "walk_to", "tileX": 11, "tileY": 1 } },
+    { "phase": "evening", "task": { "kind": "idle" } },
+    { "phase": "night",   "task": { "kind": "walk_to", "tileX": 6,  "tileY": 1 } }
+  ]
 }
 ```
+
+### NPC simulation layer — runtime model
+
+The sim layer (US-094) gives every off-camera NPC autonomous behaviour: routines that run by day phase, an awareness ladder that propagates via faction alerts and noise, and an optional companion binding the player can drive directly. The pieces live under `server/src/engine/npcSim/`:
+
+- **`SimRng.forNpcTick(tickId, npcId)`** — deterministic mulberry32 RNG keyed by the current world tick + NPC id. Every NPC decision pulls from this; given the same world state + same tick id, every decision is byte-for-byte reproducible.
+- **`NpcAction`** — an atomic per-tick step (e.g. `WalkOneTileAction(dx, dy)`).
+- **`NpcTask`** — a multi-tick goal with `priority` (`'critical' | 'normal' | 'idle'`), `score(sim)`, and `nextAction(sim)`. Returns `'done'` when the goal is reached.
+- **`NpcTickRunner.run(sim, registry, simState)`** — resumes the active task if any, otherwise scores every task in the registry and picks the highest (priority band breaks ties).
+- **`NpcSimState`** (on `NpcState.simState` for ambient/routine NPCs, on `NpcState.companion.simState` for companions) — `{ activeTaskId, lastTickId }`. Survives save/load.
+
+**Day phase + tick cadence.** `GameState.worldTickCount` increments once per real-time off-camera tick (6 s game time = one SRD round). `GameState.dayPhase` cycles `morning → noon → evening → night` every `TICKS_PER_DAY_PHASE = 60` ticks (≈ 6 real minutes per phase, ≈ 24 real minutes per game day). Per-encounter scope today — each encounter starts at `morning`; cross-encounter persistence is part of the WorldState refactor (scaffold in `server/src/engine/npcSim/WorldStateScaffold.ts`).
+
+**Task pools.**
+- *Companions* — `IdleTask`, `FollowPlayerTask(followMode)`, `WaitHereTask`. Player overrides via the COMPANION chip on the Player Panel are consumed inline.
+- *Routine-bearing NPCs* — `IdleTask`, `InvestigateTask`, `AlertTask`, plus the task derived from the matching `RoutineEntry` for the current day phase.
+- *Alerted ambient NPCs* (no companion, no routine, but `alertness !== 'calm'`) — `IdleTask`, `InvestigateTask`, `AlertTask`. Once alertness decays to `calm` they fall off the tick.
+
+**Awareness ladder.** Every NPC carries `alertness: 'calm' | 'suspicious' | 'alert'` (default `calm`) and an `NpcMemory` block (`lastAlertTick`, `lastAlertTile`, `lastAlertSource`, `lastAlertKind: 'combat' | 'noise' | 'sight' | 'faction'`). Two propagation surfaces wake NPCs up:
+
+- `pingFactionAlert(ctx, sourceTile, factionId, …)` — called from `CombatFlow.doStartCombat`. Every same-faction NPC within `FACTION_ALERT_RADIUS = 30` tiles flips to `alert` regardless of line of sight. Logs `ai.faction_alert`.
+- `registerAwarenessHooks(ctx)` — subscribes to the existing `noise` bus event from `Sound.ts`. Every audible noise (combat swing `NOISE_COMBAT = 5`, spell verbal component `NOISE_SPELL_VERBAL = 5`, footstep `NOISE_FOOTSTEP = 2`, …) raises NPCs within the source's `intensity` tile radius to `suspicious`. Logs `ai.noise_alert`.
+
+Both surfaces only ever **raise** alertness. `decayAlertness` in `WorldTick` steps the ladder back down (`alert → suspicious` after `ALERT_DECAY_TICKS.alert = 15` ticks, `suspicious → calm` after `ALERT_DECAY_TICKS.suspicious = 25` ticks). On return to `calm` the memory pointer is cleared.
+
+**Movement-only, no threat conversion.** `AlertTask` (priority `critical`, tolerance `0`) and `InvestigateTask` (priority `normal`, tolerance Chebyshev ≤ 1) walk the NPC toward `lastAlertTile`, but neither flips disposition. A neutral disguised-faction member who gets pinged walks to the source tile and stops. Threat conversion remains the faction matrix's job — `WorldTick`'s `anyHostileToParty` check escalates to combat for NPCs whose factions are already hostile to the party, so an alerted bandit just gets there faster.
+
+**Tick eligibility.** The sim only ticks during `s.phase === 'exploring'`. Combat freezes routine + ambient NPCs (they hold their current tile); companion behaviour during combat routes through the existing ally AI in `NpcTurnRunners.ts` and consumes the same `override` the chip writes.
 
 ---
 

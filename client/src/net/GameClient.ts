@@ -47,7 +47,8 @@ export type TriggerActionKindWire =
   | 'perception' | 'log' | 'aigm' | 'combat' | 'xp'
   | 'announcement' | 'speech' | 'fade' | 'set_flag'
   | 'enable_long_rest' | 'disable_long_rest'
-  | 'hide_npc' | 'kill_npc' | 'open_conversation';
+  | 'hide_npc' | 'kill_npc' | 'open_conversation'
+  | 'set_companion';
 
 /** One author-facing action — used both for a trigger's primary action and
  *  for entries in `extraActions`. Every per-kind field is optional. */
@@ -73,6 +74,9 @@ export interface ComposedActionWire {
   corpseSearchFail?: string;
   npcRef?: string;
   conversationId?: string;
+  isCompanion?: boolean;
+  followMode?: 'tight' | 'loose';
+  returnDisposition?: 'neutral' | 'ally' | 'enemy';
 }
 
 /** Subset of the editor's `ComposedTrigger` carried over the wire. */
@@ -102,6 +106,9 @@ export interface RefinerTrigger {
   corpseSearchFail?: string;
   npcRef?: string;
   conversationId?: string;
+  isCompanion?: boolean;
+  followMode?: 'tight' | 'loose';
+  returnDisposition?: 'neutral' | 'ally' | 'enemy';
   /** Additional consequences appended to this trigger's `then` array
    *  after the primary action. Each entry is the same shape as the
    *  primary action; the server expansion walks them in order. */

@@ -7,5 +7,11 @@
   "tokenAsset": "/tokens/npc_tavern_keeper.svg",
   "factionId": "commoners",
   "persistent": true,
-  "conversationId": "tavern_keeper_chat"
+  "conversationId": "tavern_keeper_chat",
+  "routine": [
+    { "phase": "morning", "task": { "kind": "walk_to", "tileX": 2,  "tileY": 1 } },
+    { "phase": "noon",    "task": { "kind": "walk_to", "tileX": 11, "tileY": 1 } },
+    { "phase": "evening", "task": { "kind": "idle" } },
+    { "phase": "night",   "task": { "kind": "walk_to", "tileX": 6,  "tileY": 1 } }
+  ]
 }

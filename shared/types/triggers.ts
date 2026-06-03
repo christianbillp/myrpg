@@ -124,6 +124,24 @@ export type TriggerAction =
    * licence-seal stays on his person, surfaced via `corpseSearch`).
    */
   | { type: 'set_npc_dead'; defId: string; corpseSearch?: { dc: number; successText: string; failureText: string }; dropInventory?: boolean }
+  /**
+   * Promote (or demote) every living NPC with matching `defId` to / from
+   * COMPANION status — the NPC sim runner ticks them once per off-camera
+   * tick, the COMPANION chip appears in the Player Panel, and the player
+   * can issue FOLLOW / WAIT / ATTACK commands via that chip.
+   *
+   * `isCompanion: true` flips the NPC to:
+   *   • disposition `'ally'` so combat picks the ally-AI path,
+   *   • a fresh `CompanionState { followMode, simState }` so the sim engine
+   *     can resume mid-walk if the world saves between ticks.
+   * `isCompanion: false` clears `companion` and demotes back to whatever
+   * disposition the author wants (`returnDisposition`, default `'neutral'`).
+   *
+   * Idempotent: re-promoting a companion just resets the `followMode`
+   * without resetting the sim state, so an in-flight WAIT / ATTACK
+   * override survives a re-fire.
+   */
+  | { type: 'set_npc_companion'; defId: string; isCompanion: boolean; followMode?: 'tight' | 'loose'; returnDisposition?: 'neutral' | 'ally' | 'enemy' }
   /** Kicks off combat when the engine is in the exploring phase and at least one enemy is alive. Idempotent — no-ops if either precondition fails. */
   | { type: 'trigger_combat' }
   /** Award XP to the player. Use for trigger-fired story rewards (parley success, scouted clue, riddle solved) where no kill rolled the XP automatically. */

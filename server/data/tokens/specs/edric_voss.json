@@ -1,0 +1,17 @@
+{
+  "id": "edric_voss",
+  "slots": {
+    "body": "plain",
+    "ears": "round_large",
+    "face": "oblong",
+    "eyes": "normal",
+    "mouth": "neutral",
+    "hair": "helmet",
+    "beard": "stubble_light"
+  },
+  "palette": {
+    "body": "#7a6a44",
+    "skin": "#e8b888",
+    "hair": "#3a2a1a"
+  }
+}

@@ -104,6 +104,11 @@ function validateTrigger(trigger: EncounterTrigger, ctx: GameContext): void {
         warn(`set_npc_dead defId "${a.defId}" is not spawned in this encounter — action will no-op`);
       }
     }
+    if (a.type === 'set_npc_companion'
+        && !spawnedDefIds.has(a.defId)
+        && !spawnedInstanceIds.has(a.defId)) {
+      warn(`set_npc_companion defId "${a.defId}" doesn't match any spawned NPC's defId or instance id — action will no-op`);
+    }
     if (a.type === 'set_disposition_by_def_id'
         && !spawnedDefIds.has(a.defId)
         && !spawnedInstanceIds.has(a.defId)) {
@@ -250,341 +255,281 @@ function compare(a: number, op: ComparisonOp, b: number): boolean {
  * mutation semantics (the new faction-relation tools, etc.) can route through
  * the canonical handler instead of re-implementing it.
  */
-export function fireAction(ctx: GameContext, action: TriggerAction): void {
-  switch (action.type) {
-    case 'spawn_enemy_near_player': {
-      const spawned = ctx.spawnEnemyNearPlayer(action.monsterId, action.minDist, action.maxDist);
-      if (spawned) ctx.addLog({ left: `⚔ ${spawned.name} appears!`, style: 'header' });
-      return;
+/**
+ * Trigger-action handler registry. One entry per `TriggerAction.type`.
+ *
+ * Generic `Registry<TriggerAction>` enforces compile-time exhaustiveness:
+ * adding a new `TriggerAction` variant without registering a handler is
+ * a TS error. Handlers receive the narrowed `action` shape so e.g.
+ * `a.monsterId` only exists for the spawn cases.
+ *
+ * Adding a new trigger action = add the variant to `TriggerAction` +
+ * one entry here. No central switch to keep in sync.
+ */
+type TriggerHandler<K extends TriggerAction['type']> = (
+  ctx: GameContext,
+  action: Extract<TriggerAction, { type: K }>,
+) => void;
+
+type TriggerRegistry = { [K in TriggerAction['type']]: TriggerHandler<K> };
+
+const TRIGGER_ACTIONS: TriggerRegistry = {
+  spawn_enemy_near_player: (ctx, a) => {
+    const spawned = ctx.spawnEnemyNearPlayer(a.monsterId, a.minDist, a.maxDist);
+    if (spawned) ctx.addLog({ left: `⚔ ${spawned.name} appears!`, style: 'header' });
+  },
+  spawn_enemy_at: (ctx, a) => {
+    const spawned = ctx.spawnEnemyAt(a.monsterId, a.x, a.y);
+    if (spawned) ctx.addLog({ left: `⚔ ${spawned.name} appears!`, style: 'header' });
+  },
+  show_log: (ctx, a) => {
+    ctx.addLog({ left: a.message, style: 'header' });
+  },
+  send_aigm_message: (ctx, a) => {
+    ctx.state.pendingAigmEvents.push(a.message);
+  },
+  narrate: (ctx, a) => {
+    const text = pickNarrationVariant(ctx, a.narrationId);
+    if (text) ctx.addLog({ left: text, style: 'header' });
+  },
+  set_flag: (ctx, a) => {
+    ctx.state.worldFlags[a.name] = a.value;
+    // Publishing flag_set lets other triggers fan out off a flag change.
+    ctx.publish({ type: 'flag_set', name: a.name, value: a.value });
+  },
+  apply_condition_to_player: (ctx, a) => {
+    if (!ctx.state.player.conditions.includes(a.condition)) {
+      ctx.state.player.conditions.push(a.condition);
+      ctx.addLog({ left: `${ctx.playerDef.name} is now ${a.condition}`, style: 'status' });
     }
-    case 'spawn_enemy_at': {
-      const spawned = ctx.spawnEnemyAt(action.monsterId, action.x, action.y);
-      if (spawned) ctx.addLog({ left: `⚔ ${spawned.name} appears!`, style: 'header' });
-      return;
+  },
+  emit_event: (ctx, a) => {
+    // Only `custom` events can be authored — engine-canonical events
+    // (npc_killed, damage_dealt, …) must originate from the engine.
+    ctx.publish({ type: 'custom', name: a.name, payload: a.payload });
+  },
+  adjust_faction_standing: (ctx, a) => {
+    adjustFactionStanding(ctx, a.factionId, a.delta);
+  },
+  record_rumor: (ctx, a) => {
+    recordRumor(ctx, a.id, a.text, a.salience ?? 5);
+  },
+  adjust_faction_relation: (ctx, a) => {
+    const before = ctx.state.factionRelations[a.a]?.[a.b] ?? 0;
+    adjustRelation(ctx.state, a.a, a.b, a.delta, { mirror: a.mirror ?? true });
+    const after = ctx.state.factionRelations[a.a]?.[a.b] ?? 0;
+    if (a.a === PLAYER_FACTION_ID) ctx.publish({ type: 'faction_changed', factionId: a.b, oldValue: before, newValue: after });
+    else if (a.b === PLAYER_FACTION_ID) ctx.publish({ type: 'faction_changed', factionId: a.a, oldValue: before, newValue: after });
+  },
+  set_faction_relation: (ctx, a) => {
+    const before = ctx.state.factionRelations[a.a]?.[a.b] ?? 0;
+    setRelation(ctx.state, a.a, a.b, a.value, { mirror: a.mirror ?? true });
+    const after = ctx.state.factionRelations[a.a]?.[a.b] ?? 0;
+    if (a.a === PLAYER_FACTION_ID) ctx.publish({ type: 'faction_changed', factionId: a.b, oldValue: before, newValue: after });
+    else if (a.b === PLAYER_FACTION_ID) ctx.publish({ type: 'faction_changed', factionId: a.a, oldValue: before, newValue: after });
+  },
+  reveal_faction: (ctx, a) => {
+    if (!ctx.state.discoveredFactions.includes(a.factionId)) {
+      ctx.state.discoveredFactions.push(a.factionId);
     }
-    case 'show_log':
-      ctx.addLog({ left: action.message, style: 'header' });
-      return;
-    case 'send_aigm_message':
-      ctx.state.pendingAigmEvents.push(action.message);
-      return;
-    case 'narrate': {
-      const text = pickNarrationVariant(ctx, action.narrationId);
-      if (text) ctx.addLog({ left: text, style: 'header' });
-      return;
-    }
-    case 'set_flag': {
-      ctx.state.worldFlags[action.name] = action.value;
-      // Publishing flag_set lets other triggers fan out off a flag change.
-      ctx.publish({ type: 'flag_set', name: action.name, value: action.value });
-      return;
-    }
-    case 'apply_condition_to_player': {
-      if (!ctx.state.player.conditions.includes(action.condition)) {
-        ctx.state.player.conditions.push(action.condition);
-        ctx.addLog({ left: `${ctx.playerDef.name} is now ${action.condition}`, style: 'status' });
+  },
+  set_npc_dead: (ctx, a) => {
+    // Mark every matching NPC as a corpse. Drops inventory unless opted out;
+    // attaches optional one-shot search payload.
+    const dropInventory = a.dropInventory !== false;
+    for (const npc of ctx.state.npcs.filter((n) => n.defId === a.defId)) {
+      npc.hp = 0;
+      if (!npc.conditions.includes('dead')) npc.conditions.push('dead');
+      npc.conditions = npc.conditions.filter((c) => c !== 'hidden' && c !== 'invisible');
+      npc.hideDC = undefined;
+      npc.revealedByTrigger = undefined;
+      npc.disposition = 'neutral';
+      if (dropInventory && npc.inventoryIds.length > 0) {
+        for (const defId of npc.inventoryIds) {
+          ctx.state.mapItems.push({ id: ctx.uid(), defId, tileX: npc.tileX, tileY: npc.tileY });
+        }
+        npc.inventoryIds = [];
       }
-      return;
+      if (a.corpseSearch) npc.corpseSearch = { ...a.corpseSearch };
     }
-    case 'emit_event':
-      // Only `custom` events can be authored — engine-canonical events
-      // (npc_killed, damage_dealt, …) must originate from the engine.
-      ctx.publish({ type: 'custom', name: action.name, payload: action.payload });
-      return;
-    case 'adjust_faction_standing': {
-      adjustFactionStanding(ctx, action.factionId, action.delta);
-      return;
-    }
-    case 'record_rumor': {
-      recordRumor(ctx, action.id, action.text, action.salience ?? 5);
-      return;
-    }
-    case 'adjust_faction_relation': {
-      const before = ctx.state.factionRelations[action.a]?.[action.b] ?? 0;
-      adjustRelation(ctx.state, action.a, action.b, action.delta, { mirror: action.mirror ?? true });
-      const after = ctx.state.factionRelations[action.a]?.[action.b] ?? 0;
-      // Surface a `faction_changed` event for any pair touching the player
-      // so existing `faction_changed` listeners stay correct without extra
-      // wiring. NPC-vs-NPC shifts don't publish (no existing listeners).
-      if (action.a === PLAYER_FACTION_ID) ctx.publish({ type: 'faction_changed', factionId: action.b, oldValue: before, newValue: after });
-      else if (action.b === PLAYER_FACTION_ID) ctx.publish({ type: 'faction_changed', factionId: action.a, oldValue: before, newValue: after });
-      return;
-    }
-    case 'set_faction_relation': {
-      const before = ctx.state.factionRelations[action.a]?.[action.b] ?? 0;
-      setRelation(ctx.state, action.a, action.b, action.value, { mirror: action.mirror ?? true });
-      const after = ctx.state.factionRelations[action.a]?.[action.b] ?? 0;
-      if (action.a === PLAYER_FACTION_ID) ctx.publish({ type: 'faction_changed', factionId: action.b, oldValue: before, newValue: after });
-      else if (action.b === PLAYER_FACTION_ID) ctx.publish({ type: 'faction_changed', factionId: action.a, oldValue: before, newValue: after });
-      return;
-    }
-    case 'reveal_faction': {
-      if (!ctx.state.discoveredFactions.includes(action.factionId)) {
-        ctx.state.discoveredFactions.push(action.factionId);
-      }
-      return;
-    }
-    case 'set_npc_dead': {
-      // Mark every matching NPC as a corpse. Sets hp to 0, tags the `dead`
-      // condition (so condition-aware code paths — incapacitation gates,
-      // perception sweeps, AIGM combatant listings — treat them uniformly),
-      // forces disposition to neutral (a corpse can't be hostile), drops
-      // their `inventoryIds` to the map (mirrors `killNpc`) unless the
-      // author opts out via `dropInventory: false`, and attaches the
-      // optional one-shot search payload. Idempotent on the hp/condition
-      // fields; the corpseSearch payload overwrites any prior.
-      const dropInventory = action.dropInventory !== false;
-      for (const npc of ctx.state.npcs.filter((n) => n.defId === action.defId)) {
-        npc.hp = 0;
-        if (!npc.conditions.includes('dead')) npc.conditions.push('dead');
+  },
+  set_npc_hidden: (ctx, a) => {
+    // Hide/reveal every living NPC matching `defId`. Default DC from
+    // monster's stealthBonus + 10. On reveal, bumps off occupied tiles.
+    for (const npc of ctx.state.npcs.filter((n) => n.defId === a.defId && n.hp > 0)) {
+      if (a.hidden) {
+        if (!npc.conditions.includes('hidden')) npc.conditions.push('hidden');
+        if (typeof a.hideDC === 'number') {
+          npc.hideDC = a.hideDC;
+        } else if (typeof npc.hideDC !== 'number') {
+          const def = ctx.resolveMonsterDef(npc.defId);
+          npc.hideDC = 10 + (def?.stealthBonus ?? 0);
+        }
+        npc.revealedByTrigger = a.revealedBy === 'trigger';
+      } else {
         npc.conditions = npc.conditions.filter((c) => c !== 'hidden' && c !== 'invisible');
         npc.hideDC = undefined;
         npc.revealedByTrigger = undefined;
-        npc.disposition = 'neutral';
-        if (dropInventory && npc.inventoryIds.length > 0) {
-          for (const defId of npc.inventoryIds) {
-            ctx.state.mapItems.push({ id: ctx.uid(), defId, tileX: npc.tileX, tileY: npc.tileY });
-          }
-          npc.inventoryIds = [];
-        }
-        if (action.corpseSearch) npc.corpseSearch = { ...action.corpseSearch };
+        bumpOffOccupiedTile(ctx, npc);
       }
-      return;
     }
-    case 'set_npc_hidden': {
-      // Hide/reveal every living NPC matching `defId`. Stored as the standard
-      // `hidden` condition + `hideDC` so the existing perception machinery
-      // (Vision.canSee, runPerceptionSweep, runPassivePerceptionSweep) finds
-      // and resolves them with no special-casing. Default DC is derived from
-      // the monster's `stealthBonus` (10 + bonus) so authors don't have to
-      // hand-pick one for routine scrub/ambush starts. When
-      // `revealedBy: 'trigger'` is set, the npc also gets the
-      // `revealedByTrigger` flag so the passive Perception sweep skips it —
-      // only an explicit `hidden: false` reveal will surface it.
-      //
-      // On reveal (`hidden: false`), if the NPC's tile is occupied by the
-      // player or another living NPC (possible when the player walked
-      // through a trigger-locked tile), the NPC is bumped to the nearest
-      // free passable tile so the two creatures don't share a cell.
-      for (const npc of ctx.state.npcs.filter((n) => n.defId === action.defId && n.hp > 0)) {
-        if (action.hidden) {
-          if (!npc.conditions.includes('hidden')) npc.conditions.push('hidden');
-          if (typeof action.hideDC === 'number') {
-            npc.hideDC = action.hideDC;
-          } else if (typeof npc.hideDC !== 'number') {
-            const def = ctx.resolveMonsterDef(npc.defId);
-            npc.hideDC = 10 + (def?.stealthBonus ?? 0);
-          }
-          npc.revealedByTrigger = action.revealedBy === 'trigger';
+  },
+  set_npc_companion: (ctx, a) => {
+    // Promote / demote every matching NPC. `defId` accepts either a bare
+    // def id (`"guard"` → every guard) or an instance id (`"guard_3"` →
+    // just that one). Existing companion's simState survives re-fires.
+    const followMode = a.followMode ?? 'loose';
+    for (const npc of ctx.state.npcs.filter((n) =>
+      (n.defId === a.defId || n.id === a.defId) && n.hp > 0,
+    )) {
+      if (a.isCompanion) {
+        if (!npc.companion) {
+          npc.companion = {
+            followMode,
+            simState: { activeTaskId: null, lastTickId: 0 },
+          };
         } else {
-          npc.conditions = npc.conditions.filter((c) => c !== 'hidden' && c !== 'invisible');
-          npc.hideDC = undefined;
-          npc.revealedByTrigger = undefined;
-          bumpOffOccupiedTile(ctx, npc);
+          npc.companion.followMode = followMode;
         }
-      }
-      return;
-    }
-    case 'set_disposition_by_def_id': {
-      // Disposition flips are sugar for setting the affected NPC's faction
-      // standing with `party` to the corresponding pole. Mirror to the matrix
-      // so Pass 3 readers (off-camera tick, NPC-vs-NPC AI) see the same view
-      // as the existing combat-start condition that still reads disposition.
-      //
-      // The action's `defId` field accepts either:
-      //   • a bare def id (`"commoner"`) — flips every spawned NPC with that
-      //     def, the historical "the bandits attack" shape;
-      //   • an instance id (`"commoner_3"`) — flips just that one NPC, so an
-      //     author can wire "the third commoner reveals himself" without
-      //     pulling every other commoner into combat with them.
-      // The runtime instance id is whatever `instanceIdForSlot` produced at
-      // spawn time (`${defId}` for singletons, `${defId}_${ordinal}` for
-      // duplicates), so the editor's free-text input can target either.
-      const standingByDisp = action.disposition === 'enemy' ? -100
-                            : action.disposition === 'ally' ? 100
-                            : 0;
-      // Detect instance-targeted vs def-targeted before iterating: when the
-      // action's `defId` resolves to a unique NPC instance (`commoner_3`),
-      // only that one creature flips — aggroing the rest of its faction
-      // would drag every other instance with it, defeating the point of
-      // calling out a single duplicate. Bare-def flips keep the historical
-      // faction-wide aggro since the author meant "everyone with this def".
-      const isInstanceTargeted = ctx.state.npcs.some((n) => n.id === action.defId);
-      const matches = ctx.state.npcs.filter((n) =>
-        n.hp > 0 && (n.defId === action.defId || n.id === action.defId),
-      );
-      const touchedFactions = new Set<string>();
-      for (const npc of matches) {
-        npc.disposition = action.disposition;
-        if ((action.disposition === 'ally' || action.disposition === 'enemy') && !npc.combatLabel) {
-          ctx.assignCombatLabel(npc);
-        }
-        if (action.disposition === 'enemy' && !isInstanceTargeted) ctx.aggroFaction(npc);
-        touchedFactions.add(npc.factionId);
-      }
-      // Faction-level matrix flip only applies to a def-targeted action —
-      // an instance-targeted flip is a single-NPC event, not a faction
-      // realignment, and shouldn't move the standings dial.
-      if (!isInstanceTargeted) {
-        for (const factionId of touchedFactions) {
-          setRelation(ctx.state, factionId, PLAYER_FACTION_ID, standingByDisp);
-        }
-      }
-      return;
-    }
-    case 'trigger_combat': {
-      // Precondition mirrors `CombatFlow.triggerCombat`: must be exploring and
-      // have at least one living enemy.
-      if (ctx.state.phase !== 'exploring') return;
-      if (!ctx.state.npcs.some((n) => n.disposition === 'enemy' && n.hp > 0)) return;
-      // Append to the outer call's event sink so any entity_move events
-      // generated by an NPC's first turn (if they outroll the player on
-      // Initiative) make it back to the client.
-      const sink = ctx.eventSink ?? [];
-      ctx.doStartCombat(sink);
-      return;
-    }
-    case 'award_xp': {
-      // Authored story XP — perception finds, riddles solved, parley
-      // resolved, etc. Kill XP is awarded automatically by the kill resolver;
-      // this is the "no kill happened" path. No-op when the amount is non-
-      // positive so authoring "+0" doesn't add spurious log entries.
-      const amount = Math.max(0, Math.floor(action.amount));
-      if (amount <= 0) return;
-      ctx.state.player.xp += amount;
-      ctx.addLog({ left: `+${amount} XP`, style: 'status' });
-      return;
-    }
-    case 'player_ability_check': {
-      // d20 + player's skill bonus (defaults to 0 for unknown skills). The
-      // roll itself is intentionally NOT logged so a failed check leaks no
-      // information about hidden content — write any visible feedback inside
-      // the onPass / onFail action lists instead.
-      const bonus = ctx.playerDef.skills[action.skill] ?? 0;
-      const roll = d20Local();
-      const total = roll + bonus;
-      const branch = total >= action.dc ? action.onPass : action.onFail;
-      for (const a of branch) fireAction(ctx, a);
-      return;
-    }
-    case 'show_announcement': {
-      const text = action.text.trim();
-      if (!text) return;
-      // Mirror the announcement to the Event Log so it persists after the
-      // visual fades — same behaviour as the AIGM tool.
-      ctx.addLog(text);
-      const sink = ctx.eventSink;
-      if (!sink) return;
-      const mode: 'focused' | 'unfocused' = action.mode === 'unfocused' ? 'unfocused' : 'focused';
-      const ev: GameEvent = action.durationMs !== undefined
-        ? { type: 'announcement', text, durationMs: clampDuration(action.durationMs, 15000), mode }
-        : { type: 'announcement', text, mode };
-      sink.push(ev);
-      return;
-    }
-    case 'npc_speaks': {
-      const text = action.text.trim();
-      if (!text) return;
-      let entityId: string | null = null;
-      let speakerName: string | null = null;
-      if (action.entity === 'player') {
-        entityId = 'player';
-        speakerName = ctx.playerDef.name;
+        npc.disposition = 'ally';
       } else {
-        const npc = ctx.resolveNpcByEntity(action.entity);
-        if (npc) {
-          entityId = npc.id;
-          speakerName = npc.revealedName ?? npc.name;
-        }
+        npc.companion = undefined;
+        npc.disposition = a.returnDisposition ?? 'neutral';
       }
-      if (!entityId || !speakerName) return;
-      // Mirror the spoken line into the Event Log — same surfacing as the
-      // AIGM `npc_speaks` tool. Logged even when there's no eventSink so
-      // a startup-event trigger (encounter_started) still leaves a record.
-      // 💬 prefix matches the AIGM-tool path so dialogue lines line up
-      // visually in the log.
-      ctx.addLog({ left: `💬 ${speakerName}: "${text}"`, style: 'status' });
-      const sink = ctx.eventSink;
-      if (!sink) return;
-      sink.push({ type: 'npc_speech', entityId, text, speakerName });
-      return;
     }
-    case 'fade_screen': {
-      const sink = ctx.eventSink;
-      if (!sink) return;
-      const durationMs = clampDuration(action.durationMs ?? 1200, 10000);
-      sink.push({ type: 'screen_fade', mode: action.mode, durationMs });
-      return;
+  },
+  set_disposition_by_def_id: (ctx, a) => {
+    // Disposition flips are sugar for the affected NPC's faction standing
+    // with `party`. `defId` accepts a bare def or an instance id;
+    // instance-targeted flips skip the faction-wide aggro + matrix flip.
+    const standingByDisp = a.disposition === 'enemy' ? -100
+                          : a.disposition === 'ally' ? 100
+                          : 0;
+    const isInstanceTargeted = ctx.state.npcs.some((n) => n.id === a.defId);
+    const matches = ctx.state.npcs.filter((n) =>
+      n.hp > 0 && (n.defId === a.defId || n.id === a.defId),
+    );
+    const touchedFactions = new Set<string>();
+    for (const npc of matches) {
+      npc.disposition = a.disposition;
+      if ((a.disposition === 'ally' || a.disposition === 'enemy') && !npc.combatLabel) {
+        ctx.assignCombatLabel(npc);
+      }
+      if (a.disposition === 'enemy' && !isInstanceTargeted) ctx.aggroFaction(npc);
+      touchedFactions.add(npc.factionId);
     }
-    case 'set_long_rest': {
-      // No-op if the flag is already in the requested state — avoids spurious
-      // log entries on idempotent re-fires.
-      if (ctx.state.allowsLongRest === action.allowed) return;
-      ctx.state.allowsLongRest = action.allowed;
+    if (!isInstanceTargeted) {
+      for (const factionId of touchedFactions) {
+        setRelation(ctx.state, factionId, PLAYER_FACTION_ID, standingByDisp);
+      }
+    }
+  },
+  trigger_combat: (ctx) => {
+    if (ctx.state.phase !== 'exploring') return;
+    if (!ctx.state.npcs.some((n) => n.disposition === 'enemy' && n.hp > 0)) return;
+    const sink = ctx.eventSink ?? [];
+    ctx.doStartCombat(sink);
+  },
+  award_xp: (ctx, a) => {
+    // Authored story XP — kill XP is awarded automatically by the kill resolver.
+    const amount = Math.max(0, Math.floor(a.amount));
+    if (amount <= 0) return;
+    ctx.state.player.xp += amount;
+    ctx.addLog({ left: `+${amount} XP`, style: 'status' });
+  },
+  player_ability_check: (ctx, a) => {
+    // Roll intentionally NOT logged so a failed check leaks no info.
+    const bonus = ctx.playerDef.skills[a.skill] ?? 0;
+    const roll = d20Local();
+    const total = roll + bonus;
+    const branch = total >= a.dc ? a.onPass : a.onFail;
+    for (const sub of branch) fireAction(ctx, sub);
+  },
+  show_announcement: (ctx, a) => {
+    const text = a.text.trim();
+    if (!text) return;
+    ctx.addLog(text);
+    const sink = ctx.eventSink;
+    if (!sink) return;
+    const mode: 'focused' | 'unfocused' = a.mode === 'unfocused' ? 'unfocused' : 'focused';
+    const ev: GameEvent = a.durationMs !== undefined
+      ? { type: 'announcement', text, durationMs: clampDuration(a.durationMs, 15000), mode }
+      : { type: 'announcement', text, mode };
+    sink.push(ev);
+  },
+  npc_speaks: (ctx, a) => {
+    const text = a.text.trim();
+    if (!text) return;
+    let entityId: string | null = null;
+    let speakerName: string | null = null;
+    if (a.entity === 'player') {
+      entityId = 'player';
+      speakerName = ctx.playerDef.name;
+    } else {
+      const npc = ctx.resolveNpcByEntity(a.entity);
+      if (npc) {
+        entityId = npc.id;
+        speakerName = npc.revealedName ?? npc.name;
+      }
+    }
+    if (!entityId || !speakerName) return;
+    ctx.addLog({ left: `💬 ${speakerName}: "${text}"`, style: 'status' });
+    const sink = ctx.eventSink;
+    if (!sink) return;
+    sink.push({ type: 'npc_speech', entityId, text, speakerName });
+  },
+  fade_screen: (ctx, a) => {
+    const sink = ctx.eventSink;
+    if (!sink) return;
+    const durationMs = clampDuration(a.durationMs ?? 1200, 10000);
+    sink.push({ type: 'screen_fade', mode: a.mode, durationMs });
+  },
+  set_long_rest: (ctx, a) => {
+    if (ctx.state.allowsLongRest === a.allowed) return;
+    ctx.state.allowsLongRest = a.allowed;
+    ctx.addLog({
+      left: a.allowed ? "You can take a Long Rest here." : "Long Rest is no longer available.",
+      style: 'status',
+    });
+  },
+  adjust_player_balance_cp: (ctx, a) => {
+    // Positive = award, negative = spend. A spend below zero is refused.
+    const delta = Math.floor(a.deltaCp);
+    if (!Number.isFinite(delta) || delta === 0) return;
+    const before = ctx.state.player.balanceCp;
+    if (delta < 0 && before + delta < 0) {
       ctx.addLog({
-        left: action.allowed
-          ? "You can take a Long Rest here."
-          : "Long Rest is no longer available.",
+        left: a.reason
+          ? `You can't afford ${a.reason} — you have ${formatCoinsTrigger(before)}.`
+          : `You can't afford that — you have ${formatCoinsTrigger(before)}.`,
         style: 'status',
       });
       return;
     }
-    case 'adjust_player_balance_cp': {
-      // Same semantics as the AIGM `award_coins` tool: positive = award,
-      // negative = spend. A spend that would leave the player below zero is
-      // refused (no mutation, a refusal log) so a conversation choice can't
-      // accidentally bankrupt the player past zero. Authors who want a
-      // visible "can you afford this?" branch should gate the choice with
-      // `balance_cp` upstream.
-      const delta = Math.floor(action.deltaCp);
-      if (!Number.isFinite(delta) || delta === 0) return;
-      const before = ctx.state.player.balanceCp;
-      if (delta < 0 && before + delta < 0) {
-        ctx.addLog({
-          left: action.reason
-            ? `You can't afford ${action.reason} — you have ${formatCoinsTrigger(before)}.`
-            : `You can't afford that — you have ${formatCoinsTrigger(before)}.`,
-          style: 'status',
-        });
-        return;
-      }
-      ctx.state.player.balanceCp = before + delta;
-      const verb = delta > 0 ? "Received" : "Paid";
-      const amount = formatCoinsTrigger(Math.abs(delta));
-      const tail = action.reason ? ` (${action.reason})` : "";
-      ctx.addLog({
-        left: `${verb} ${amount}${tail}. Purse: ${formatCoinsTrigger(ctx.state.player.balanceCp)}.`,
-        style: delta > 0 ? 'heal' : 'status',
-      });
-      return;
-    }
-    // ── Conversation system ────────────────────────────────────────────
-    case 'start_conversation':
-      startConversation(ctx, action.npcRef, action.conversationId);
-      return;
-    case 'end_conversation':
-      endConversation(ctx);
-      return;
-    case 'set_conversation_node':
-      setConversationNode(ctx, action.nodeId);
-      return;
-    // ── NPC persistence ────────────────────────────────────────────────
-    case 'npc_remember':
-      applyNpcRemember(ctx, action.ref, action.fact, action.value, action.source ?? 'authored');
-      return;
-    case 'npc_forget':
-      applyNpcForget(ctx, action.ref, action.fact);
-      return;
-    case 'npc_adjust_relationship':
-      applyNpcAdjustRelationship(ctx, action.ref, action.target, action.delta);
-      return;
-    case 'npc_record_journal':
-      applyNpcRecordJournal(ctx, action.ref, action.text, action.source ?? 'authored', action.salience);
-      return;
-    case 'npc_set_arc_phase':
-      applyNpcSetArcPhase(ctx, action.ref, action.phase);
-      return;
-  }
+    ctx.state.player.balanceCp = before + delta;
+    const verb = delta > 0 ? "Received" : "Paid";
+    const amount = formatCoinsTrigger(Math.abs(delta));
+    const tail = a.reason ? ` (${a.reason})` : "";
+    ctx.addLog({
+      left: `${verb} ${amount}${tail}. Purse: ${formatCoinsTrigger(ctx.state.player.balanceCp)}.`,
+      style: delta > 0 ? 'heal' : 'status',
+    });
+  },
+  start_conversation:   (ctx, a) => startConversation(ctx, a.npcRef, a.conversationId),
+  end_conversation:     (ctx)    => endConversation(ctx),
+  set_conversation_node:(ctx, a) => setConversationNode(ctx, a.nodeId),
+  npc_remember:           (ctx, a) => applyNpcRemember(ctx, a.ref, a.fact, a.value, a.source ?? 'authored'),
+  npc_forget:             (ctx, a) => applyNpcForget(ctx, a.ref, a.fact),
+  npc_adjust_relationship:(ctx, a) => applyNpcAdjustRelationship(ctx, a.ref, a.target, a.delta),
+  npc_record_journal:     (ctx, a) => applyNpcRecordJournal(ctx, a.ref, a.text, a.source ?? 'authored', a.salience),
+  npc_set_arc_phase:      (ctx, a) => applyNpcSetArcPhase(ctx, a.ref, a.phase),
+};
+
+export function fireAction(ctx: GameContext, action: TriggerAction): void {
+  const handler = TRIGGER_ACTIONS[action.type] as
+    | ((ctx: GameContext, a: TriggerAction) => void)
+    | undefined;
+  if (handler) handler(ctx, action);
 }
 
 function clampDuration(raw: number, max: number): number {

@@ -1,8 +1,0 @@
-{
-  "id": "woodcutter",
-  "name": "Woodcutter",
-  "monsterClass": "commoner",
-  "factionId": "commoners",
-  "color": 9476402,
-  "tokenAsset": "/tokens/monster_commoner.svg"
-}

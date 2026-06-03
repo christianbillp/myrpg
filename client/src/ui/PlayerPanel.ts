@@ -52,6 +52,14 @@ export interface PlayerPanelActionState {
   /** True when a creature is currently selected as the target. The TALK
    *  button needs a target so the line can be routed to a `sayto`. */
   hasSelectedTarget: boolean;
+  /** Id of the currently-selected target NPC, or null. Required by the
+   *  COMPANION: ATTACK TARGET chip — without it the companion command
+   *  has no `targetId` to send. */
+  selectedTargetId: string | null;
+  /** The companion NPC currently in scope (single-companion assumption
+   *  for step 2). Null when the player has no companion on the map.
+   *  Drives the COMPANION chip. */
+  companion: { npcId: string; displayName: string; currentMode: 'follow' | 'wait' } | null;
 }
 
 export interface PlayerPanelCallbacks {
@@ -90,6 +98,10 @@ export interface PlayerPanelCallbacks {
    *  only when concentrating — wired to a small RELEASE button beside the
    *  CAST button. SRD: ending concentration is free, no action cost. */
   onReleaseConcentration: () => void;
+  /** Companion command — sent when the player toggles the COMPANION chip.
+   *  `npcId` is the companion's id (the panel only shows the chip when
+   *  exactly one companion is on the map for now). */
+  onCompanionCommand: (npcId: string, command: import('../../../shared/types').CompanionCommand) => void;
 }
 
 function waitMs(ms: number): Promise<void> {
@@ -542,6 +554,44 @@ export class PlayerPanel {
 
     } else if (mode === 'death_saves') {
       this.actionArea.prepend(btn('ROLL DEATH SAVE', '#5a1a1a', this.callbacks.onDeathSave));
+    }
+
+    // COMPANION chip — surfaces whenever a companion NPC exists on the
+    // map, regardless of phase. Behaviour depends on context:
+    //   • Exploration: tap cycles FOLLOW ↔ WAIT.
+    //   • Combat with a target selected: tap = "attack this target".
+    //   • Combat without a target: chip is informational (greyed) — clicking
+    //     it has no effect; it just confirms which NPC is bound.
+    // Rendered last so it lands at the BOTTOM visually (the action area
+    // uses column-reverse, so DOM-last == top-visible — we want this
+    // BELOW combat buttons so the action stack stays familiar).
+    const companion = state.companion;
+    if (companion) {
+      if (mode === 'exploring') {
+        const label = companion.currentMode === 'wait'
+          ? `${companion.displayName.toUpperCase()}: WAIT`
+          : `${companion.displayName.toUpperCase()}: FOLLOW`;
+        const color = companion.currentMode === 'wait' ? '#3a3a4a' : '#1a3a3a';
+        this.actionArea.prepend(this.makeBtn(label, color, () => {
+          const nextCommand = companion.currentMode === 'wait'
+            ? { kind: 'follow' as const, mode: 'loose' as const }
+            : { kind: 'wait' as const };
+          this.callbacks.onCompanionCommand(companion.npcId, nextCommand);
+        }));
+      } else if (mode === 'player_turn') {
+        const targetId = state.selectedTargetId;
+        if (targetId) {
+          this.actionArea.prepend(this.makeBtn(`${companion.displayName.toUpperCase()}: ATTACK TARGET`, '#5a2a2a', () => {
+            this.callbacks.onCompanionCommand(companion.npcId, { kind: 'attack', targetId });
+          }));
+        } else {
+          // Informational chip — confirms a companion is bound even when
+          // there's no actionable command available right now.
+          const dim = this.makeBtn(`${companion.displayName.toUpperCase()} — SELECT A TARGET`, '#2a2a2a', () => {});
+          dim.disabled = true;
+          this.actionArea.prepend(dim);
+        }
+      }
     }
   }
 

@@ -25,7 +25,7 @@ import { Logger } from '../Logger.js';
 import { canSee as visCanSee } from './Vision.js';
 import {
   tilesInArea, playerInArea, creaturesInArea,
-  cubeSideTiles, sphereRadiusTiles, chebyshevDiscTiles,
+  sphereRadiusTiles, chebyshevDiscTiles,
 } from './SpellGeometry.js';
 
 /** Cover the target benefits from against the player's spell attack. */
@@ -878,7 +878,7 @@ function stripZoneAffectedConditions(ctx: GameContext, zone: { condition?: strin
  * Caller passes the subject id (`'player'` or an NPC id). Idempotent — a
  * creature pushed clear of the zone in this tick won't keep re-rolling.
  */
-export function runGustOfWindEndOfTurnSaves(ctx: GameContext, subjectId: 'player' | string): void {
+export function runGustOfWindEndOfTurnSaves(ctx: GameContext, subjectId: 'player' | string, events?: GameEvent[]): void {
   const s = ctx.state;
   if (!s.activeZones || s.activeZones.length === 0) return;
   const gustZones = s.activeZones.filter((z) => z.spellId === 'gust-of-wind');
@@ -923,7 +923,7 @@ export function runGustOfWindEndOfTurnSaves(ctx: GameContext, subjectId: 'player
       right: `STR d20(${roll})+${saveBonus}=${total} vs DC ${dc}`,
       style: success ? 'normal' : 'status',
     });
-    if (!success) pushNpcAway(ctx, npc, 15);
+    if (!success) pushNpcAway(ctx, npc, 15, events);
   }
 }
 
@@ -982,7 +982,7 @@ function conditionLogText(spell: SpellDef, conds: string[]): string {
  * the caster, stopping at the first impassable tile or another creature.
  * One tile = 5 ft. No-op when the spell would push back into the caster.
  */
-function pushNpcAway(ctx: GameContext, npc: NpcState, feet: number): void {
+function pushNpcAway(ctx: GameContext, npc: NpcState, feet: number, events?: GameEvent[]): void {
   const tiles = Math.floor(feet / 5);
   if (tiles <= 0) return;
   const s = ctx.state;
@@ -1001,6 +1001,11 @@ function pushNpcAway(ctx: GameContext, npc: NpcState, feet: number): void {
     npc.tileX = nx;
     npc.tileY = ny;
     moved++;
+    // Emit one `entity_move` per step so the client animates the push the
+    // same way it animates a regular walk. Without this the NPC silently
+    // teleports to the final tile on the next state update (US-bug: gust
+    // of wind looked broken because nothing visibly happened).
+    events?.push({ type: 'entity_move', entityId: npc.id, toX: nx, toY: ny });
   }
   if (moved > 0) {
     ctx.addLog({ left: `${combatantDisplayName(npc, s.npcs)} pushed ${moved * 5} ft`, style: 'status' });
@@ -1185,7 +1190,7 @@ function resolveSaveSpell(
       // is applied first; if the creature died, the push is a no-op since
       // applyDamageToNpc gates on hp > 0.
       if (!success && spell.push && target.hp > 0) {
-        pushNpcAway(ctx, target, spell.push.feet);
+        pushNpcAway(ctx, target, spell.push.feet, events);
       }
       if (dmg > 0) anyAffected = true;
     } else if (spell.effect) {
@@ -1235,7 +1240,7 @@ function resolveSaveSpell(
         style: success ? 'normal' : 'status',
       });
       if (!success && target.hp > 0) {
-        pushNpcAway(ctx, target, spell.push.feet);
+        pushNpcAway(ctx, target, spell.push.feet, events);
         anyAffected = true;
       }
     }

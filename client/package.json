@@ -4,14 +4,19 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "dependencies": {
     "marked": "^18.0.4",
     "phaser": "^3.88.0"
   },
   "devDependencies": {
+    "@vitest/coverage-v8": "^4.1.8",
+    "jsdom": "^29.1.1",
     "typescript": "^5.7.0",
-    "vite": "^6.3.0"
+    "vite": "^6.3.0",
+    "vitest": "^4.1.8"
   }
 }
