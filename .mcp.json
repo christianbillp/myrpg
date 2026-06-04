@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "snyk": {
+      "command": "/home/node/.npm-global/bin/snyk",
+      "args": ["mcp", "-t", "stdio"]
+    }
+  }
+}

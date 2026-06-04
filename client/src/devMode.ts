@@ -10,7 +10,7 @@
  */
 import type { DevFlags } from "../../shared/types";
 
-const KEY = 'myrpg_dev_mode';
+const KEY_DEV_MODE = 'myrpg_dev_mode';
 const KEY_DISABLE_AIGM = 'myrpg_disable_aigm';
 const KEY_DISABLE_SUPERTITLE = 'myrpg_dev_disable_supertitle';
 const KEY_UNLIMITED_SPELL_SLOTS = 'myrpg_dev_unlimited_spell_slots';
@@ -42,7 +42,7 @@ export const DevMode = {
   get enabled(): boolean {
     const urlOverride = readUrlParam('dev');
     if (urlOverride !== null) return urlOverride;
-    const stored = localStorage.getItem(KEY);
+    const stored = localStorage.getItem(KEY_DEV_MODE);
     return stored === null ? true : stored === 'true';
   },
   /**
