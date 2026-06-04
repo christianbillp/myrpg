@@ -91,7 +91,7 @@ function applyPushMastery(ctx: GameContext, target: NpcState): void {
     const nx = target.tileX + dx;
     const ny = target.tileY + dy;
     if (ny < 0 || ny >= s.map.rows || nx < 0 || nx >= s.map.cols) break;
-    if (!s.map.passable[ny][nx]) break;
+    if (s.map.blocksMovement[ny][nx]) break;
     if (s.player.tileX === nx && s.player.tileY === ny) break;
     if (s.npcs.some((o) => o.id !== target.id && o.hp > 0 && o.tileX === nx && o.tileY === ny)) break;
     target.tileX = nx;

@@ -33,7 +33,7 @@ export class WalkOneTileAction implements NpcAction {
     const nx = sim.npc.tileX + this.dx;
     const ny = sim.npc.tileY + this.dy;
     if (nx < 0 || nx >= s.map.cols || ny < 0 || ny >= s.map.rows) return false;
-    if (!s.map.passable[ny][nx]) return false;
+    if (s.map.blocksMovement[ny][nx]) return false;
     if (s.player.tileX === nx && s.player.tileY === ny) return false;
     if (s.npcs.some((n) => n !== sim.npc && n.hp > 0 && n.tileX === nx && n.tileY === ny)) return false;
     return true;

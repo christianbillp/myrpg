@@ -18,18 +18,17 @@
 import { BIOME_PALETTES, pickGroundGid } from '../../../../shared/biomePalettes.js';
 import type { ComposedMap, Feature, MapAnchors } from '../mapTypes.js';
 import { WALL_GIDS } from '../mapTiles.js';
-import { SCRIBBLE_TILESET, filterPalette, flatten } from './shared.js';
+import { SCRIBBLE_TILESET, flatten } from './shared.js';
 
 export interface ComposeDungeonOpts {
   width: number;
   height: number;
   features: Feature[];
   rng: () => number;
-  disabledScribble: Set<number>;
 }
 
 export function composeDungeon(opts: ComposeDungeonOpts): ComposedMap {
-  const { width: W, height: H, features, rng, disabledScribble } = opts;
+  const { width: W, height: H, features, rng } = opts;
   const terrainGrid: number[][] = [];
   const objectGrid: number[][]  = [];
   for (let r = 0; r < H; r++) {
@@ -75,7 +74,7 @@ export function composeDungeon(opts: ComposeDungeonOpts): ComposedMap {
     for (let r = entryRoom.y + entryRoom.h; r < H; r++) floor[r][entryX] = true;
   }
 
-  const dungeonPalette = filterPalette(BIOME_PALETTES.dungeon, disabledScribble);
+  const dungeonPalette = BIOME_PALETTES.dungeon;
   for (let r = 0; r < H; r++) {
     for (let c = 0; c < W; c++) {
       if (floor[r][c]) {

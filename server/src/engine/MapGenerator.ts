@@ -1,5 +1,5 @@
 import { GameMap } from './types.js';
-import { floodFillCount } from './MapUtils.js';
+import { floodFillCount, blockGridsFromPassable } from './MapUtils.js';
 
 export function generateMap(): GameMap {
   for (let attempt = 0; attempt < 200; attempt++) {
@@ -7,9 +7,11 @@ export function generateMap(): GameMap {
     if (result) return result;
   }
   const size = 15;
+  const open = Array.from({ length: size }, () => new Array<boolean>(size).fill(false));
   return {
     cols: size, rows: size,
-    passable: Array.from({ length: size }, () => new Array<boolean>(size).fill(true)),
+    blocksMovement: open,
+    blocksSight: open.map((row) => [...row]),
   };
 }
 
@@ -42,5 +44,5 @@ function tryGenerate(): GameMap | null {
       if (passable[r][c]) total++;
 
   if (floodFillCount(passable, size, size, startR, startC) !== total) return null;
-  return { cols: size, rows: size, passable };
+  return { cols: size, rows: size, ...blockGridsFromPassable(passable) };
 }

@@ -6,7 +6,7 @@ import { NpcToken } from "../entities/NpcToken";
 import { MapItem } from "../entities/MapItem";
 import { PlayerPanel, PlayerPanelActionState } from "../ui/PlayerPanel";
 import { buildPlayerStatusChips } from "../ui/PlayerStatus";
-import { TargetPanel } from "../ui/TargetPanel";
+import { TargetPanel, type TileDetails } from "../ui/TargetPanel";
 import { MissionTopBar } from "../ui/MissionTopBar";
 import { DevToolsPanel } from "../ui/DevToolsPanel";
 import { HUD, HUDState } from "../ui/HUD";
@@ -104,6 +104,13 @@ export class GameScene extends Phaser.Scene {
   private overlays!: OverlayManager;
   private highlightLayer!: Phaser.GameObjects.Graphics;
   private movePathLayer!: Phaser.GameObjects.Graphics;
+  /** Outline drawn on the tile the player has selected for inspection (empty
+   *  tile click → tile details in the Target Panel). Cleared when a creature
+   *  is selected or the selection is cleared. */
+  private tileSelectLayer!: Phaser.GameObjects.Graphics;
+  /** The tile currently selected for inspection, or null. Mutually exclusive
+   *  with `selectedEntityId`. */
+  private selectedTile: { x: number; y: number } | null = null;
   /** Fog-of-war + sound-rings overlay (Vision/Sound system). */
   private visionMask!: VisionMask;
   /** Persistent overlays driven by player state: Detect Magic ring, etc. Redrawn each state tick. */
@@ -210,12 +217,6 @@ export class GameScene extends Phaser.Scene {
   private awaitingFirstStateUpdate = true;
 
   private cursors!: Phaser.Types.Input.Keyboard.CursorKeys;
-  private wasd!: {
-    up: Phaser.Input.Keyboard.Key;
-    down: Phaser.Input.Keyboard.Key;
-    left: Phaser.Input.Keyboard.Key;
-    right: Phaser.Input.Keyboard.Key;
-  };
   private escKey!: Phaser.Input.Keyboard.Key;
 
   constructor() {
@@ -240,6 +241,7 @@ export class GameScene extends Phaser.Scene {
     this.npcTokens = new Map();
     this.itemTokens = new Map();
     this.selectedEntityId = null;
+    this.selectedTile = null;
     this.uiDestroyed = false;
     // Phaser reuses the same scene instance across encounters, so class-member
     // initializers only fire once per page load. These flags MUST be reset
@@ -262,6 +264,7 @@ export class GameScene extends Phaser.Scene {
     this.gridView = new GridView(this);
     this.highlightLayer = this.add.graphics();
     this.movePathLayer  = this.add.graphics();
+    this.tileSelectLayer = this.add.graphics();
     this.spellAuraLayer = this.add.graphics();
     this.spellAoeLayer  = this.add.graphics();
     this.activeZoneLayer = this.add.graphics();
@@ -269,6 +272,7 @@ export class GameScene extends Phaser.Scene {
     this.visionMask = new VisionMask(this);
     this.gridView.container.add(this.highlightLayer);
     this.gridView.container.add(this.movePathLayer);
+    this.gridView.container.add(this.tileSelectLayer);
     this.gridView.container.add(this.spellAuraLayer);
     this.gridView.container.add(this.spellAoeLayer);
     this.gridView.container.add(this.activeZoneLayer);
@@ -585,6 +589,7 @@ export class GameScene extends Phaser.Scene {
     this.reconcileNpcs(state);
     this.reconcileItems(state);
     this.reconcileSelection(state);
+    this.refreshTilePanel();
 
     // Skip the eager intro mount when one is queued for after-cinematic
     // mount in processNextEvent — otherwise it would land behind the parked
@@ -694,12 +699,6 @@ export class GameScene extends Phaser.Scene {
 
   private setupInput(): void {
     this.cursors = this.input.keyboard!.createCursorKeys();
-    this.wasd = {
-      up:    this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.W),
-      down:  this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.S),
-      left:  this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.A),
-      right: this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.D),
-    };
     this.escKey = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.ESC);
 
     this.input.on("wheel", (pointer: Phaser.Input.Pointer, _go: unknown, _dx: number, dy: number) => {
@@ -741,9 +740,9 @@ export class GameScene extends Phaser.Scene {
     if (this.companionMoveToMode) {
       const npcId = this.companionMoveToMode.npcId;
       this.exitCompanionMoveToMode();
-      const { passable } = this.gameState.map;
+      const { blocksMovement } = this.gameState.map;
       const isPlayerTile = this.gameState.player.tileX === tileX && this.gameState.player.tileY === tileY;
-      if (!passable[tileY]?.[tileX] || isPlayerTile) return;
+      if (blocksMovement[tileY]?.[tileX] || isPlayerTile) return;
       gameClient.sendAction({
         type: "companionCommand",
         npcId,
@@ -808,13 +807,14 @@ export class GameScene extends Phaser.Scene {
     if (nState) {
       this.selectEntity(nState.id);
     } else {
-      this.clearSelection();
+      this.selectTile(tileX, tileY);
     }
   }
 
   private selectEntity(id: string): void {
     if (this.selectedEntityId === id) return;
     if (this.selectedEntityId) this.npcTokens.get(this.selectedEntityId)?.setSelected(false);
+    this.clearTileSelection();
     this.selectedEntityId = id;
     this.npcTokens.get(id)?.setSelected(true);
     const nState = this.gameState.npcs.find(n => n.id === id);
@@ -831,9 +831,83 @@ export class GameScene extends Phaser.Scene {
       this.npcTokens.get(this.selectedEntityId)?.setSelected(false);
       this.selectedEntityId = null;
     }
+    this.clearTileSelection();
     this.targetPanel.hide();
     gameClient.sendAction({ type: "selectTarget", entityId: null });
     if (this.gameState) this.updateHUD(this.gameState);
+  }
+
+  /** Select an empty tile for inspection: clears any creature target, paints
+   *  the selection outline, and shows the tile's details in the Target Panel.
+   *  Clicking the already-selected tile again deselects (toggle). */
+  private selectTile(x: number, y: number): void {
+    if (!this.gameState) return;
+    if (this.selectedTile && this.selectedTile.x === x && this.selectedTile.y === y) {
+      this.clearSelection();
+      return;
+    }
+    if (this.selectedEntityId) {
+      this.npcTokens.get(this.selectedEntityId)?.setSelected(false);
+      this.selectedEntityId = null;
+      gameClient.sendAction({ type: "selectTarget", entityId: null });
+    }
+    this.selectedTile = { x, y };
+    this.drawTileSelection(x, y);
+    this.targetPanel.showTile(this.buildTileDetails(x, y));
+    if (this.gameState) this.updateHUD(this.gameState);
+  }
+
+  private clearTileSelection(): void {
+    this.selectedTile = null;
+    this.tileSelectLayer.clear();
+  }
+
+  private drawTileSelection(x: number, y: number): void {
+    this.tileSelectLayer.clear();
+    this.tileSelectLayer.lineStyle(2, 0xc9b27a, 1);
+    this.tileSelectLayer.strokeRect(x * TILE_SIZE + 1, y * TILE_SIZE + 1, TILE_SIZE - 2, TILE_SIZE - 2);
+  }
+
+  /** Re-render the tile panel from current state — called on each state apply
+   *  so active-zone effects (Grease, Fog Cloud) update as rounds tick down. */
+  private refreshTilePanel(): void {
+    if (!this.selectedTile || !this.gameState) return;
+    this.targetPanel.showTile(this.buildTileDetails(this.selectedTile.x, this.selectedTile.y));
+  }
+
+  /** Resolve everything the Target Panel shows for an inspected tile from the
+   *  map grids, the encounter environment, and the active AOE zones. */
+  private buildTileDetails(x: number, y: number): TileDetails {
+    const map = this.gameState!.map;
+    const legend = this.defs.tileLegend().tiles;
+    const tileName = (rawGid: number | undefined): string | null => {
+      const gid = decodeTileGid(rawGid ?? 0).gid;
+      if (gid === 0) return null;
+      if (gid === TILE_VOID_GID) return 'Void';
+      const name = legend[String(gid)]?.name;
+      if (!name) return `#${gid}`;
+      return name.replace(/_transparent$/, '').replace(/_/g, ' ');
+    };
+    const terrain = tileName(map.gidGrid?.[y]?.[x]) ?? '—';
+    const object = tileName(map.objectGidGrid?.[y]?.[x]);
+
+    const zones = (this.gameState!.activeZones ?? []).filter((z) =>
+      z.tiles.some(([zx, zy]) => zx === x && zy === y));
+    const blocked = map.blocksMovement?.[y]?.[x] === true;
+    const difficult = zones.some((z) => z.difficultTerrain);
+    const movement: TileDetails['movement'] = blocked ? 'Blocked' : difficult ? 'Difficult' : 'Normal';
+
+    const cap = (s: string): string => s.charAt(0).toUpperCase() + s.slice(1);
+    const coverLabel: Record<string, string> = { half: 'Half (+2 AC)', 'three-quarters': 'Three-quarters (+5 AC)', total: 'Total (blocks LoS)' };
+    const cover = map.cover?.[y]?.[x] ? coverLabel[map.cover[y][x] as string] : null;
+    const obscurance = map.obscurance?.[y]?.[x] ? cap(map.obscurance[y][x] as string) : null;
+
+    return {
+      x, y, terrain, object, movement,
+      lighting: cap(this.gameState!.environment?.lightLevel ?? 'bright'),
+      cover, obscurance,
+      effects: zones.map((z) => z.name),
+    };
   }
 
   update(): void {
@@ -856,10 +930,10 @@ export class GameScene extends Phaser.Scene {
     const phase = this.gameState.phase;
     if (phase !== "exploring" && phase !== "player_turn") return;
 
-    const leftJust  = Phaser.Input.Keyboard.JustDown(this.cursors.left)  || Phaser.Input.Keyboard.JustDown(this.wasd.left);
-    const rightJust = Phaser.Input.Keyboard.JustDown(this.cursors.right) || Phaser.Input.Keyboard.JustDown(this.wasd.right);
-    const upJust    = Phaser.Input.Keyboard.JustDown(this.cursors.up)    || Phaser.Input.Keyboard.JustDown(this.wasd.up);
-    const downJust  = Phaser.Input.Keyboard.JustDown(this.cursors.down)  || Phaser.Input.Keyboard.JustDown(this.wasd.down);
+    const leftJust  = Phaser.Input.Keyboard.JustDown(this.cursors.left);
+    const rightJust = Phaser.Input.Keyboard.JustDown(this.cursors.right);
+    const upJust    = Phaser.Input.Keyboard.JustDown(this.cursors.up);
+    const downJust  = Phaser.Input.Keyboard.JustDown(this.cursors.down);
 
     let dx = 0, dy = 0;
     if (leftJust  && !rightJust) dx = -1;
@@ -874,7 +948,7 @@ export class GameScene extends Phaser.Scene {
     const nx = px + dx, ny = py + dy;
 
     if (nx < 0 || ny < 0 || nx >= map.cols || ny >= map.rows) return;
-    if (!map.passable[ny][nx]) return;
+    if (map.blocksMovement[ny][nx]) return;
     if (npcs.some(n => n.hp > 0 && n.tileX === nx && n.tileY === ny)) return;
 
     gameClient.sendAction({ type: "move", dx, dy });
@@ -2001,7 +2075,7 @@ export class GameScene extends Phaser.Scene {
       const g = this.add.graphics();
       for (let row = 0; row < map.rows; row++) {
         for (let col = 0; col < map.cols; col++) {
-          g.fillStyle(map.passable[row][col] ? 0x16213e : 0x05080f);
+          g.fillStyle(map.blocksMovement[row][col] ? 0x05080f : 0x16213e);
           g.fillRect(col * TILE_SIZE + 1, row * TILE_SIZE + 1, TILE_SIZE - 2, TILE_SIZE - 2);
         }
       }
@@ -2019,7 +2093,7 @@ export class GameScene extends Phaser.Scene {
     const inExploringMoveMode = state.phase === "exploring" && this.moveMode;
     if (!inCombatTurn && !inExploringMoveMode) return;
 
-    const { cols, rows, passable } = state.map;
+    const { cols, rows, blocksMovement } = state.map;
     const px = this.player.tileX, py = this.player.tileY;
 
     const dist: number[][] = Array.from({ length: rows }, () => new Array<number>(cols).fill(-1));
@@ -2039,8 +2113,8 @@ export class GameScene extends Phaser.Scene {
       ] as [number, number][]) {
         const nr = cy + dr, nc = cx + dc;
         if (nr < 0 || nr >= rows || nc < 0 || nc >= cols) continue;
-        if (!passable[nr][nc]) continue;
-        if (dr !== 0 && dc !== 0 && !passable[cy][nc] && !passable[nr][cx]) continue;
+        if (blocksMovement[nr][nc]) continue;
+        if (dr !== 0 && dc !== 0 && blocksMovement[cy][nc] && blocksMovement[nr][cx]) continue;
         if (state.npcs.some(n => n.hp > 0 && n.tileX === nc && n.tileY === nr)) continue;
         if (dist[nr][nc] !== -1) continue;
         dist[nr][nc] = dist[cy][cx] + 1;

@@ -105,6 +105,9 @@ export class MainMenuScene extends Phaser.Scene {
     this.makeMenuButton(createCx, createY(4), "TOKEN CREATOR", "Mix and match parts (hair, eyes, beard, …) to build an NPC token", () => {
       this.scene.start("TokenCreatorScene");
     });
+    this.makeMenuButton(createCx, createY(5), "TILE CREATOR", "Edit each tile's attributes — movement, sight, cover, tags — per tileset", () => {
+      this.scene.start("TileCreatorScene");
+    });
 
     // ── Configuration cog ────────────────────────────────────────
     this.makeCogButton(() => this.scene.start("ConfigurationScene"));

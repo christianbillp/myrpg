@@ -282,7 +282,14 @@ export interface SecretState {
 }
 
 export interface GameMap {
-  passable: boolean[][];
+  /** Per-tile movement blocking. `blocksMovement[y][x] === true` means the
+   *  tile cannot be walked onto (wall, tree, chasm). Baked at session-build
+   *  from each tile's `blocksMovement` flag (object-overrides-terrain). */
+  blocksMovement: boolean[][];
+  /** Per-tile sight blocking. `blocksSight[y][x] === true` means line-of-sight
+   *  cannot pass through the tile. Baked from each tile's `blocksSight` flag,
+   *  ORing the ground and object features so either one blocks the cell. */
+  blocksSight: boolean[][];
   cols: number;
   rows: number;
   /** Per-tile cover (SRD 5.2.1). `null` = no cover. Authored via
@@ -548,7 +555,23 @@ export interface DevFlags {
    * scrub their progress.
    */
   cleanModeOnStart?: boolean;
+  /**
+   * Server-side structured-logging verbosity. Controls how much the
+   * `Logger` writes per session — high-volume logging on the request path
+   * is a measurable source of in-encounter lag, so this lets a developer
+   * dial it down (or off) without a code change.
+   *   • `none`    — only `error` events are emitted; everything else is
+   *                 dropped before it touches stdout or the NDJSON file.
+   *   • `regular` — info / warn / error (debug dropped). The default.
+   *   • `maximum` — everything, including `debug` (= legacy MYRPG_LOG_DEBUG=1).
+   * Server-only, applied globally on boot and on every Configuration save.
+   * Absent means `regular`.
+   */
+  logLevel?: LogLevel;
 }
+
+/** Server logging verbosity — see `DevFlags.logLevel`. */
+export type LogLevel = "none" | "regular" | "maximum";
 
 export interface AdventureSessionContext {
   adventureId: string;

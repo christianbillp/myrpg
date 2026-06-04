@@ -19,9 +19,9 @@ export function doMove(ctx: GameContext, dx: number, dy: number, events: GameEve
   const nx = s.player.tileX + dx;
   const ny = s.player.tileY + dy;
   if (nx < 0 || ny < 0 || nx >= s.map.cols || ny >= s.map.rows) return;
-  if (!s.map.passable[ny][nx]) return;
+  if (s.map.blocksMovement[ny][nx]) return;
   if (dx !== 0 && dy !== 0) {
-    if (!s.map.passable[s.player.tileY][nx] && !s.map.passable[ny][s.player.tileX]) return;
+    if (s.map.blocksMovement[s.player.tileY][nx] && s.map.blocksMovement[ny][s.player.tileX]) return;
   }
   // Living-NPC collision check with hidden-NPC handling:
   //   • Trigger-locked hidden NPC (in_a_niche, behind_a_wall) — incorporeal
@@ -99,7 +99,7 @@ export function doMove(ctx: GameContext, dx: number, dy: number, events: GameEve
 export function doMoveTo(ctx: GameContext, targetX: number, targetY: number, events: GameEvent[]): void {
   const s = ctx.state;
   if (s.phase !== 'exploring' && s.phase !== 'player_turn') return;
-  const { cols, rows, passable } = s.map;
+  const { cols, rows, blocksMovement } = s.map;
   if (targetX < 0 || targetX >= cols || targetY < 0 || targetY >= rows) return;
 
   const dist: number[][] = Array.from({ length: rows }, () => new Array<number>(cols).fill(-1));
@@ -112,8 +112,8 @@ export function doMoveTo(ctx: GameContext, targetX: number, targetY: number, eve
     for (const [dr, dc] of [[0,1],[0,-1],[1,0],[-1,0],[1,1],[1,-1],[-1,1],[-1,-1]] as [number,number][]) {
       const nr = cy + dr, nc = cx + dc;
       if (nr < 0 || nr >= rows || nc < 0 || nc >= cols) continue;
-      if (!passable[nr][nc]) continue;
-      if (dr !== 0 && dc !== 0 && !passable[cy][nc] && !passable[nr][cx]) continue;
+      if (blocksMovement[nr][nc]) continue;
+      if (dr !== 0 && dc !== 0 && blocksMovement[cy][nc] && blocksMovement[nr][cx]) continue;
       // Trigger-locked hidden NPCs are treated as walk-through here so the
       // BFS doesn't carve detours around invisible creatures; `doMove` will
       // let the step land on their tile silently. Normal hidden + visible

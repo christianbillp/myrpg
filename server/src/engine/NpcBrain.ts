@@ -133,8 +133,8 @@ export function fleeFromThreat(
       const nx = tileX + dx;
       const ny = tileY + dy;
       if (nx < 0 || ny < 0 || nx >= s.map.cols || ny >= s.map.rows) continue;
-      if (!s.map.passable[ny][nx]) continue;
-      if (dx !== 0 && dy !== 0 && !s.map.passable[tileY][nx] && !s.map.passable[ny][tileX]) continue;
+      if (s.map.blocksMovement[ny][nx]) continue;
+      if (dx !== 0 && dy !== 0 && s.map.blocksMovement[tileY][nx] && s.map.blocksMovement[ny][tileX]) continue;
       if (occupied.some(([ox, oy]) => ox === nx && oy === ny)) continue;
       const dist = chebyshev(nx, ny, threatX, threatY);
       if (!best || dist > best.dist) best = { x: nx, y: ny, dist };

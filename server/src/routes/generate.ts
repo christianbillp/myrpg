@@ -246,18 +246,10 @@ export interface GenerateRoutesCtx {
    * the output is persisted under that setting's `maps/` + `encounters/`.
    */
   getSettingDataDir: () => string;
-  /**
-   * Live reader for the Configure Tiles list. Returns the `disabledTiles`
-   * map from `server_config.json` so the deterministic composer and AI map
-   * generator can both filter their tile pools on every request — toggling
-   * a tile in the Configure Tiles page takes effect on the next generate
-   * call without a server restart. Empty object = nothing disabled.
-   */
-  getDisabledTiles: () => Record<string, number[]>;
 }
 
 export function registerGenerateRoutes(server: FastifyInstance, ctx: GenerateRoutesCtx): void {
-  const { anthropic, getDefs, loadDefs, getSettingDataDir, getDisabledTiles } = ctx;
+  const { anthropic, getDefs, loadDefs, getSettingDataDir } = ctx;
   const dataDir = (): string => getSettingDataDir();
 
   /**
@@ -274,7 +266,7 @@ export function registerGenerateRoutes(server: FastifyInstance, ctx: GenerateRou
       return reply.code(400).send({ error: "terrain must be 'grassland', 'forest', 'dungeon', or 'tavern'" });
     }
     try {
-      const composed = composeMap({ width, height, terrain, features: features ?? [], seed, buildingsCount, disabledTiles: getDisabledTiles() });
+      const composed = composeMap({ width, height, terrain, features: features ?? [], seed, buildingsCount });
       return reply.send({
         mapId: null,
         width: composed.width,
@@ -485,7 +477,7 @@ export function registerGenerateRoutes(server: FastifyInstance, ctx: GenerateRou
         if (!terrain || (terrain !== 'grassland' && terrain !== 'forest')) {
           return reply.code(400).send({ error: "terrain must be 'grassland' or 'forest'" });
         }
-        const composed = composeMap({ width, height, terrain, features: features ?? [], seed, buildingsCount, disabledTiles: getDisabledTiles() });
+        const composed = composeMap({ width, height, terrain, features: features ?? [], seed, buildingsCount });
         const stamp = Date.now();
         slug = composed.name.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 32) || 'scene';
         mapId = `gen_${stamp}_${slug}`;
@@ -536,8 +528,8 @@ export function registerGenerateRoutes(server: FastifyInstance, ctx: GenerateRou
         for (let i = 0; i < terrainData.length; i++) {
           const gid = terrainData[i] & 0x1fffffff;
           const objGid = (objectData[i] ?? 0) & 0x1fffffff;
-          const groundPassable = (legend[String(gid)] as { passable?: boolean } | undefined)?.passable === true;
-          const objectPassable = objGid === 0 || (legend[String(objGid)] as { passable?: boolean } | undefined)?.passable === true;
+          const groundPassable = (legend[String(gid)] as { blocksMovement?: boolean } | undefined)?.blocksMovement === false;
+          const objectPassable = objGid === 0 || (legend[String(objGid)] as { blocksMovement?: boolean } | undefined)?.blocksMovement === false;
           if (groundPassable && objectPassable) { zoneData[i] = STARTING_ZONE_PLAYER; break; }
         }
       }
@@ -788,7 +780,7 @@ export function registerGenerateRoutes(server: FastifyInstance, ctx: GenerateRou
       return reply.code(400).send({ error: "prompt must be at least 8 characters" });
     }
     try {
-      const result = await generateMap(anthropic, getDefs(), { prompt }, getDisabledTiles());
+      const result = await generateMap(anthropic, getDefs(), { prompt });
       await loadDefs();
       return reply.send(result);
     } catch (err) {
@@ -811,7 +803,7 @@ export function registerGenerateRoutes(server: FastifyInstance, ctx: GenerateRou
       return reply.code(400).send({ error: "prompt must be at least 8 characters" });
     }
     try {
-      const result = await generateEncounter(anthropic, getDefs(), { prompt, playerName, playerClassName }, getDisabledTiles());
+      const result = await generateEncounter(anthropic, getDefs(), { prompt, playerName, playerClassName });
       await loadDefs();
       return reply.send(result);
     } catch (err) {

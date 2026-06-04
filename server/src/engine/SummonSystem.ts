@@ -72,9 +72,9 @@ export function doCommandSummon(
   // Destination bounds + occupancy check. We don't path-find — the summon
   // just glides to the chosen tile if it's reachable in straight line of
   // sight (Mage Hand is spectral; Unseen Servant is incorporeal).
-  const { cols, rows, passable } = s.map;
+  const { cols, rows, blocksMovement } = s.map;
   if (tile.x < 0 || tile.x >= cols || tile.y < 0 || tile.y >= rows) return;
-  if (!passable[tile.y][tile.x]) return;
+  if (blocksMovement[tile.y][tile.x]) return;
   const occupant: { kind: 'player' } | { kind: 'npc'; npc: NpcState } | null =
     (s.player.tileX === tile.x && s.player.tileY === tile.y && s.player.hp > 0)
       ? { kind: 'player' }

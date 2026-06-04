@@ -66,7 +66,7 @@ function stepCompanionToward(ctx: GameContext, npc: NpcState, targetX: number, t
   const nx = npc.tileX + dx;
   const ny = npc.tileY + dy;
   if (nx < 0 || nx >= s.map.cols || ny < 0 || ny >= s.map.rows) return;
-  if (!s.map.passable[ny][nx]) return;
+  if (s.map.blocksMovement[ny][nx]) return;
   if (s.player.tileX === nx && s.player.tileY === ny) return;
   if (s.npcs.some((n) => n !== npc && n.hp > 0 && n.tileX === nx && n.tileY === ny)) return;
   npc.tileX = nx;

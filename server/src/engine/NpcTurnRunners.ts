@@ -313,7 +313,7 @@ export function runSingleEnemyTurn(ctx: GameContext, npc: NpcState, events: Game
   const result = runEnemyTurn(npc, def, {
     displayName: combatantDisplayName(npc, s.npcs),
     target,
-    passable: s.map.passable,
+    blocksMovement: s.map.blocksMovement,
     mapCols: s.map.cols,
     mapRows: s.map.rows,
     occupiedTiles: occupied,
@@ -564,7 +564,7 @@ export function runSingleAllyTurn(ctx: GameContext, ally: NpcState, events: Game
   const result = runAllyTurn(ally, def, {
     displayName: combatantDisplayName(ally, s.npcs),
     enemyTargets,
-    passable: s.map.passable,
+    blocksMovement: s.map.blocksMovement,
     mapCols: s.map.cols,
     mapRows: s.map.rows,
     occupiedTiles: occupied,

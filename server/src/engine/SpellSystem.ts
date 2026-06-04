@@ -995,7 +995,7 @@ function pushNpcAway(ctx: GameContext, npc: NpcState, feet: number, events?: Gam
     const nx = npc.tileX + dx;
     const ny = npc.tileY + dy;
     if (ny < 0 || ny >= s.map.rows || nx < 0 || nx >= s.map.cols) break;
-    if (!s.map.passable[ny][nx]) break;
+    if (s.map.blocksMovement[ny][nx]) break;
     if (s.player.tileX === nx && s.player.tileY === ny) break;
     if (s.npcs.some((other) => other.id !== npc.id && other.hp > 0 && other.tileX === nx && other.tileY === ny)) break;
     npc.tileX = nx;
@@ -1489,8 +1489,8 @@ function resolveUtilitySpell(ctx: GameContext, spell: SpellDef, slotLevel: numbe
         ctx.addLog({ left: `${spell.name} — destination is out of range (${spell.selfTeleport.rangeFeet} ft)`, style: 'miss' });
         break;
       }
-      const { cols, rows, passable } = s.map;
-      if (tile.x < 0 || tile.x >= cols || tile.y < 0 || tile.y >= rows || !passable[tile.y][tile.x]) {
+      const { cols, rows, blocksMovement } = s.map;
+      if (tile.x < 0 || tile.x >= cols || tile.y < 0 || tile.y >= rows || blocksMovement[tile.y][tile.x]) {
         ctx.addLog({ left: `${spell.name} — destination is impassable`, style: 'miss' });
         break;
       }

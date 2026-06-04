@@ -477,12 +477,12 @@ export class GameEngine {
    */
   moveEntity(entity: string, tileX: number, tileY: number): { events: GameEvent[]; error: string | null } {
     const s = this.state;
-    const { cols, rows, passable } = s.map;
+    const { cols, rows, blocksMovement } = s.map;
 
     if (!(tileX >= 0 && tileX < cols && tileY >= 0 && tileY < rows)) {
       return { events: [], error: `tile (${tileX}, ${tileY}) is out of bounds — map is ${cols}×${rows}` };
     }
-    if (!passable[tileY]?.[tileX]) {
+    if (blocksMovement[tileY]?.[tileX]) {
       return { events: [], error: `tile (${tileX}, ${tileY}) is impassable (wall, water, void, or a non-walkable object)` };
     }
 
@@ -600,13 +600,13 @@ export class GameEngine {
       this.addLog({ left: `${existing.name} fades away.`, style: 'status' });
     }
 
-    const { cols, rows, passable } = s.map;
+    const { cols, rows, blocksMovement } = s.map;
     const occupied = (x: number, y: number): boolean =>
       (s.player.tileX === x && s.player.tileY === y)
       || s.npcs.some((n) => n.hp > 0 && n.tileX === x && n.tileY === y);
     let fx = tx, fy = ty;
     const inBounds = tx >= 0 && tx < cols && ty >= 0 && ty < rows;
-    if (!inBounds || !passable[ty][tx] || occupied(tx, ty)) {
+    if (!inBounds || blocksMovement[ty][tx] || occupied(tx, ty)) {
       const [nfx, nfy] = this.findFreeTileNear(tx, ty, 0, 6);
       if (nfx === -1) return null;
       fx = nfx; fy = nfy;
@@ -634,12 +634,12 @@ export class GameEngine {
 
   spawnEnemyAt(monsterId: string, tx: number, ty: number): NpcState | null {
     const s = this.state;
-    const { cols, rows, passable } = s.map;
+    const { cols, rows, blocksMovement } = s.map;
     const inBounds = tx >= 0 && tx < cols && ty >= 0 && ty < rows;
     const occupied = (x: number, y: number) =>
       (s.player.tileX === x && s.player.tileY === y)
       || s.npcs.some((n) => n.hp > 0 && n.tileX === x && n.tileY === y);
-    if (inBounds && passable[ty][tx] && !occupied(tx, ty)) {
+    if (inBounds && !blocksMovement[ty][tx] && !occupied(tx, ty)) {
       return this.materializeEnemy(monsterId, tx, ty);
     }
     // Fall back to the nearest free tile around the requested anchor.
@@ -1326,7 +1326,7 @@ export class GameEngine {
 
   private findFreeTileNear(cx: number, cy: number, minDist: number, maxDist: number): [number, number] {
     const s = this.state;
-    const { cols, rows, passable } = s.map;
+    const { cols, rows, blocksMovement } = s.map;
     const occupied = new Set<string>([
       `${s.player.tileX},${s.player.tileY}`,
       ...s.npcs.filter((n) => n.hp > 0).map((n) => `${n.tileX},${n.tileY}`),
@@ -1337,7 +1337,7 @@ export class GameEngine {
           if (Math.abs(dc) !== dist && Math.abs(dr) !== dist) continue;
           const tc = cx + dc, tr = cy + dr;
           if (tc < 0 || tc >= cols || tr < 0 || tr >= rows) continue;
-          if (!passable[tr][tc]) continue;
+          if (blocksMovement[tr][tc]) continue;
           if (!occupied.has(`${tc},${tr}`)) return [tc, tr];
         }
       }

@@ -45,17 +45,17 @@
       ],
       "choices": [
         {
-          "label": "(Read the slip.)",
+          "label": "(Read the slip — bandits on the east road.)",
           "visibleIf": [{ "type": "flag_equals", "name": "mission_offer_flavour", "value": "bandit" }],
           "next": "offer_bandit"
         },
         {
-          "label": "(Read the slip.)",
+          "label": "(Read the slip — goblins in the wardstone wood.)",
           "visibleIf": [{ "type": "flag_equals", "name": "mission_offer_flavour", "value": "goblin" }],
           "next": "offer_goblin"
         },
         {
-          "label": "(Read the slip.)",
+          "label": "(Read the slip — risen at the broken ward.)",
           "visibleIf": [{ "type": "flag_equals", "name": "mission_offer_flavour", "value": "skeleton" }],
           "next": "offer_skeleton"
         }

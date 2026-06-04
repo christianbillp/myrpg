@@ -867,12 +867,15 @@ Each tile entry:
 | Field | Type | Notes |
 |---|---|---|
 | `name` | string | Short identifier, e.g. `"grass"`, `"chair_right"`. |
-| `passable` | boolean | Engine-authoritative default. Encounter `tileProperties` can override; if neither declares a value the engine defaults to impassable. |
+| `blocksMovement` | boolean | When true, creatures cannot walk onto the tile (wall, tree, chasm). Engine-authoritative default; encounter `tileProperties` can override. Absent ⇒ does not block (passable). |
+| `blocksSight` | boolean | When true, line-of-sight cannot pass through the tile. Independent of movement (a chasm blocks movement but not sight; a glass wall the reverse). Baked into `GameMap.blocksSight` by ORing the ground and object features so either one blocks the cell. Absent ⇒ does not block. |
 | `layer` | string | `"ground"` or `"object"`. Tells map authors which tile layer the entry belongs on. Ground tiles are drawn first; object tiles overlay them. |
 | `description` | string | Visual / authoring description. Surfaced to AI map generators. |
 | `tags` | string[] | Free-form classification tags, e.g. `["wood", "bridge", "floor"]`. |
 
 The server loads every `*_legend.json` file at startup and merges them into a single GID → entry map under `defs.tileLegend`. New tilesets are added by dropping in `{name}.png`, `{name}.tsj`, and `{name}_legend.json` together — no engine code changes required.
+
+The **Tile Creator** page (see `ui.md`) edits these entries through `PUT /tilesets/:tileset/tiles/:gid` (body = a `TileLegendEntry`). The handler validates the entry, writes it into `<tileset>_legend.json` (preserving the `notes` block and every other tile), and reloads defs. `GET /tilesets/legends` returns one block per tileset (`{ tileset, image, notes, tiles }`) for rendering, and `GET /tilesets` returns the image-slicing metadata (`tilewidth`, `tileheight`, `columns`, `margin`, `spacing`) the Creator uses to crop each frame.
 
 The current scribble legend also reserves **GID 65534 (`void`)** as a sentinel: the renderer paints solid black instead of sampling a frame, and the cell is impassable. Used for chasms / abysses on tilesets that have no flat-black tile of their own (see `shared/tileGid.ts`).
 
@@ -953,7 +956,7 @@ The server engine factors out repeated work into a handful of small support modu
 
 Hand-crafted encounter maps stored as **Tiled-compatible JSON** (a stripped-down subset of the format that Tiled's "Save As JSON" export produces). Maps are pure geometry — they carry the tile-GID grid, the tile palette as graphical references, and identifying metadata. They do **not** declare what tiles mean (passable, difficult terrain, trapped, cover, …). That's the encounter's job: each encounter declares, via `tileProperties`, how the GIDs in its referenced map behave for that scenario. This separation means the same map can be reused across encounters with very different mechanics (a peaceful crossing today, a flooded crossing with broken parapets next week — same `bridge.json`).
 
-The server loads each map at startup and stores the raw GID grid(s) — a required ground layer plus an optional object layer drawn on top. The combined `passable: boolean[][]` is built per-session from `map.gidGrid + map.objectGidGrid + encounter.tileProperties + tileset legend` (see [encounters/](#encounters), [tilesets/](#tilesets-1), and [`SessionBuilder.buildGameMapFromSaved`](../server/src/engine/SessionBuilder.ts)).
+The server loads each map at startup and stores the raw GID grid(s) — a required ground layer plus an optional object layer drawn on top. The `blocksMovement: boolean[][]` and `blocksSight: boolean[][]` grids are built per-session from `map.gidGrid + map.objectGidGrid + encounter.tileProperties + tileset legend` (see [encounters/](#encounters), [tilesets/](#tilesets-1), and [`SessionBuilder.buildGameMapFromSaved`](../server/src/engine/SessionBuilder.ts)). Movement uses object-overrides-terrain (the object's flag wins when present); sight ORs the two layers (either blocks the cell).
 
 ### Fields
 
@@ -1138,26 +1141,26 @@ Encounters that want a delayed reveal (stealth / ambush) should leave the map fr
 
 ### tileProperties
 
-Each entry maps one of the map's GIDs to the semantic properties that GID should carry during this encounter. The engine honours `passable`, `cover`, `obscurance`, and `transparent`; SessionBuilder bakes them into per-tile arrays on `GameMap` so the Vision module + combat resolver can read them in O(1).
+Each entry maps one of the map's GIDs to the semantic properties that GID should carry during this encounter. The engine honours `blocksMovement`, `blocksSight`, `cover`, and `obscurance`; SessionBuilder bakes them into per-tile arrays on `GameMap` so the Vision module + combat resolver can read them in O(1).
 
 | Field | Type | Notes |
 |---|---|---|
 | `gid` | integer | GID from the referenced map's terrain layer (= the map's `firstgid + tile.id`). |
-| `passable` | boolean | *(default: `false`)* Whether creatures can walk onto a tile of this GID. |
-| `cover` | string | *(optional)* SRD Cover: `"half"` (+2 AC/Dex), `"three-quarters"` (+5 AC/Dex), `"total"` (untargetable, blocks line of sight). Walls without an explicit cover declaration are auto-promoted to `"total"` if the tile is also impassable (so authors don't have to tag every wall GID). |
+| `blocksMovement` | boolean | *(default: `false`)* Whether creatures are blocked from walking onto a tile of this GID. |
+| `blocksSight` | boolean | *(default: `false`)* Whether line-of-sight is blocked by a tile of this GID. Independent of movement. |
+| `cover` | string | *(optional)* SRD Cover: `"half"` (+2 AC/Dex), `"three-quarters"` (+5 AC/Dex), `"total"` (untargetable, blocks line of sight). Combat-only — sight blocking is handled by `blocksSight`. |
 | `obscurance` | string | *(optional)* SRD Obscurance: `"lightly"` (Disadv on Perception sight checks, counts as Hide-eligible terrain only when combined with cover); `"heavily"` (Blinded into the tile; counts as Hide-eligible on its own). Underbrush, smoke, fog. |
-| `transparent` | boolean | *(optional, default `false`)* Opts an impassable tile **out of** the auto-Total-Cover promotion. Use for chasms, deep water, low walls — terrain you can see across but cannot walk onto. Has no effect on passable tiles. |
 
-**Lookup order for a GID's `passable`:**
+**Lookup order for a GID's `blocksMovement` / `blocksSight`:**
 
 1. The encounter's own `tileProperties` entry — explicit override.
 2. The tileset's legend file (see [tilesets/](#tilesets-1)) — sensible default for tiles the encounter didn't customise.
-3. `false` (impassable) — final fallback when neither source declares a value.
+3. `false` (does not block) — final fallback when neither source declares a value.
 
-**Cover + obscurance baking** (`SessionBuilder.buildGameMapFromSaved`):
-  - For every cell the walker checks the ground GID and the object GID. The **worst** declared `cover` and the **worst** declared `obscurance` across the two layers win — so a tree (object) on grass (ground) → three-quarters cover and lightly obscured if both are declared that way.
-  - Impassable cells without an explicit `cover` declaration → auto-`"total"` UNLESS either layer has `transparent: true`. This means walls block LOS out of the box.
-  - Results are stored on `GameMap.cover: (null|'half'|'three-quarters'|'total')[][]` and `GameMap.obscurance: (null|'lightly'|'heavily')[][]`.
+**Blocking + cover + obscurance baking** (`SessionBuilder.buildGameMapFromSaved`):
+  - **Movement** uses object-overrides-terrain: the object GID's `blocksMovement` wins when an object is present, else the ground GID's.
+  - **Sight** ORs the layers: a cell blocks sight if **either** the ground or the object GID has `blocksSight`. Stored on `GameMap.blocksSight: boolean[][]`; the Vision LOS walker stops the line on the first blocking cell.
+  - **Cover/obscurance**: the **worst** declared `cover` and `obscurance` across the two layers win — so a tree (object) on grass (ground) → three-quarters cover and lightly obscured if both are declared that way. Stored on `GameMap.cover` and `GameMap.obscurance`. Cover is now purely a combat (AC) concern; it no longer doubles as the sight blocker.
 
 So encounters only need to list GIDs whose meaning differs from the legend (e.g. an "underground passage" scenario marks GID 287 / chasm as `passable: true, transparent: true`); a GID that matches the legend default can be omitted.
 

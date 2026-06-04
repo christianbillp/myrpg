@@ -15,7 +15,6 @@ import {
   dropMission,
   isGeneratedMissionId,
   getGeneratedMapTilesets,
-  getGeneratedMapDisabledScribble,
 } from '../mission/missionRegistry.js';
 import {
   startConversation, endConversation, setConversationNode,
@@ -341,8 +340,7 @@ const TRIGGER_ACTIONS: TriggerRegistry = {
     const last = ctx.state.worldFlags['mission_last_flavour'];
     const excludeFlavour = (last === 'bandit' || last === 'goblin' || last === 'skeleton') ? last : undefined;
     const tilesets = getGeneratedMapTilesets();
-    const disabledScribble = getGeneratedMapDisabledScribble();
-    const mission = generateMission({ tilesets, disabledScribble, excludeFlavour });
+    const mission = generateMission({ tilesets, excludeFlavour });
     recordMission(mission);
     // Set every flag the conversation prose / TO MISSION button read.
     const setFlag = (name: string, value: number | string | boolean): void => {
@@ -611,7 +609,7 @@ function bumpOffOccupiedTile(ctx: GameContext, npc: import('./types.js').NpcStat
   const overlapsPlayer = s.player.tileX === npc.tileX && s.player.tileY === npc.tileY;
   const overlapsOther = s.npcs.some((n) => n !== npc && n.hp > 0 && n.tileX === npc.tileX && n.tileY === npc.tileY);
   if (!overlapsPlayer && !overlapsOther) return;
-  const { cols, rows, passable } = s.map;
+  const { cols, rows, blocksMovement } = s.map;
   const occupied = new Set<string>([
     `${s.player.tileX},${s.player.tileY}`,
     ...s.npcs.filter((n) => n.hp > 0 && n !== npc).map((n) => `${n.tileX},${n.tileY}`),
@@ -622,7 +620,7 @@ function bumpOffOccupiedTile(ctx: GameContext, npc: import('./types.js').NpcStat
         if (Math.abs(dc) !== dist && Math.abs(dr) !== dist) continue;
         const tc = npc.tileX + dc, tr = npc.tileY + dr;
         if (tc < 0 || tc >= cols || tr < 0 || tr >= rows) continue;
-        if (!passable[tr][tc]) continue;
+        if (blocksMovement[tr][tc]) continue;
         if (occupied.has(`${tc},${tr}`)) continue;
         npc.tileX = tc;
         npc.tileY = tr;

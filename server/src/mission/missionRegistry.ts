@@ -37,14 +37,9 @@ const missions = new Map<string, GeneratedMission>();
  *  `setGeneratedMapTilesets` at server startup; the generator reads
  *  it via `getGeneratedMapTilesets`. */
 let cachedTilesets: MapTilesetInfo[] | null = null;
-let cachedDisabledScribble: Set<number> = new Set();
 
 export function setGeneratedMapTilesets(tilesets: MapTilesetInfo[]): void {
   cachedTilesets = tilesets;
-}
-
-export function setGeneratedMapDisabledScribble(ids: Set<number>): void {
-  cachedDisabledScribble = ids;
 }
 
 export function getGeneratedMapTilesets(): MapTilesetInfo[] {
@@ -52,10 +47,6 @@ export function getGeneratedMapTilesets(): MapTilesetInfo[] {
     throw new Error('Generated map tilesets not initialised. Call setGeneratedMapTilesets() at server startup.');
   }
   return cachedTilesets;
-}
-
-export function getGeneratedMapDisabledScribble(): Set<number> {
-  return cachedDisabledScribble;
 }
 
 export function recordMission(m: GeneratedMission): void {

@@ -126,7 +126,7 @@ export function pickMissionFlavour(rng: () => number = Math.random): MissionFlav
 }
 
 /** Compose the procedural map for the chosen flavour. */
-function composeMissionMap(flavour: MissionFlavour, rng: () => number, disabledScribble: Set<number>): ComposedMap {
+function composeMissionMap(flavour: MissionFlavour, rng: () => number): ComposedMap {
   // Allocator stub — generated mission maps don't surface zones to the
   // editor, so we ignore the zone-id arg. Allocate uniques to keep the
   // shared `reserved` machinery happy.
@@ -137,7 +137,6 @@ function composeMissionMap(flavour: MissionFlavour, rng: () => number, disabledS
     height: 14,
     terrain: flavour === 'goblin' ? 'forest' : 'grassland',
     features: ['path'],
-    disabledScribble,
     rng,
     allocZoneId,
   });
@@ -252,9 +251,6 @@ export interface GenerateMissionOpts {
    *  because reading tileset .tsj files is async and the registry
    *  reads them ONCE at startup. */
   tilesets: MapTilesetInfo[];
-  /** Tile GIDs the active setting has disabled — same set
-   *  SessionBuilder passes to `composeOutdoor`. Empty Set when none. */
-  disabledScribble: Set<number>;
   /** Optional flavour override for testing. Random when omitted. */
   flavour?: MissionFlavour;
   /** Optional enemy count override for testing. 1 or 2; rolled when omitted. */
@@ -278,7 +274,7 @@ export function generateMission(opts: GenerateMissionOpts): GeneratedMission {
   }
   const count: 1 | 2 = opts.count ?? (rng() < 0.5 ? 1 : 2);
   const missionId = `mission_gen_${randomUUID()}`;
-  const composed = composeMissionMap(flavour, rng, opts.disabledScribble);
+  const composed = composeMissionMap(flavour, rng);
   const savedMap = composedToSavedMap(composed, missionId, opts.tilesets);
   const reward = calculateReward(flavour, count);
   const encounterDef = buildEncounterDef(missionId, flavour, count, composed.width, composed.height, reward);

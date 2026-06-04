@@ -8,7 +8,8 @@
     "showDeleteSaveButton": true,
     "allowRetryChecks": true,
     "completePrimaryObjective": true,
-    "showDevToolsPanel": true
+    "showDevToolsPanel": true,
+    "logLevel": "none"
   },
   "disabledTiles": {}
 }

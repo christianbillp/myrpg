@@ -21,10 +21,6 @@ export interface AppCtx {
   getDefs(): GameDefs;
   /** Re-read every JSON-backed def from disk. Awaited after any file write. */
   loadDefs(): Promise<void>;
-  /** In-memory mirror of `server_config.disabledTiles`. Get-with-fallback
-   *  getter; setter is exposed so the `/server-config` PUT refreshes it. */
-  getDisabledTiles(): Record<string, number[]>;
-  setDisabledTiles(value: Record<string, number[]>): void;
   /** Resolve a sub-folder under the active setting's data directory.
    *  Returns null when no setting is active. */
   settingSubDir(sub: string): string | null;

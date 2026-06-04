@@ -36,12 +36,12 @@ export interface MapTilesetInfo {
   margin: number;
   columns: number;
   /**
-   * Per-tile passability extracted from the source .tsj's `tiles[].properties`.
-   * Keyed by tileset-local tile id (i.e. `gid - firstgid`). Tiles absent from
-   * this map default to passable, matching Tiled's convention that unmarked
-   * tiles have no restrictions.
+   * Per-tile movement blocking extracted from the source .tsj's
+   * `tiles[].properties`. Keyed by tileset-local tile id (i.e. `gid - firstgid`).
+   * Tiles absent from this map default to NOT blocking movement, matching
+   * Tiled's convention that unmarked tiles have no restrictions.
    */
-  tilePassability: Record<number, boolean>;
+  tileBlocksMovement: Record<number, boolean>;
 }
 
 // Map definition as served by the API. Maps are pure geometry now:
@@ -79,28 +79,25 @@ export interface SavedMapDef {
  * properties (e.g. one runs a bridge with broken walls passable, another
  * keeps them solid).
  *
- * Lookup priority for a tile's `passable` flag:
+ * Lookup priority for a tile's `blocksMovement` / `blocksSight` flags:
  *   1. Encounter's tileProperties (this type) — explicit override.
- *   2. The source tileset's per-tile passability declared in its .tsj
- *      and carried on `MapTilesetInfo.tilePassability`.
- *   3. Default `true` (Tiled convention: unmarked tiles have no restrictions).
+ *   2. The source tileset's per-tile data (`MapTilesetInfo.tileBlocksMovement`).
+ *   3. The global tile legend.
+ *   4. Default `false` (unmarked tiles neither block movement nor sight).
  */
 export interface EncounterTileProperty {
   gid: number;
-  passable?: boolean;
+  /** When true, creatures cannot walk onto this tile. */
+  blocksMovement?: boolean;
+  /** When true, line-of-sight cannot pass through this tile (wall, dense
+   *  foliage). Independent of movement — a chasm blocks movement but not
+   *  sight; a glass wall blocks sight but not movement. */
+  blocksSight?: boolean;
   /** SRD 5.2.1 Cover — tiles between an attacker and a target contribute to
    *  the target's effective cover. The `Vision.canSee` LOS walker collects
    *  the worst cover along the line and the combat resolver translates it
-   *  to an AC bonus: half (+2), three-quarters (+5), total (untargetable
-   *  AND blocks sight). */
+   *  to an AC bonus: half (+2), three-quarters (+5), total (untargetable). */
   cover?: 'half' | 'three-quarters' | 'total';
-  /** When the tile is **impassable** but `transparent: true` is set, the LOS
-   *  walker does NOT auto-promote it to Total Cover. Use for chasms, deep
-   *  water, low walls — terrain you can see across but cannot walk onto.
-   *  Default: false. When false, every impassable tile that has no explicit
-   *  `cover` declaration is treated as Total Cover by the Vision module so
-   *  walls block sight without authors having to tag every wall GID. */
-  transparent?: boolean;
   /** SRD 5.2.1 Obscurance — `lightly` imposes Disadvantage on Wisdom
    *  (Perception) checks to see into the tile; `heavily` Blinds the
    *  observer while looking into it AND counts as a valid Hide cover for
@@ -188,7 +185,12 @@ export interface WorldbookEntry {
  */
 export interface TileLegendEntry {
   name: string;
-  passable: boolean;
+  /** When true, creatures cannot walk onto this tile (wall, tree, chasm). */
+  blocksMovement: boolean;
+  /** When true, line-of-sight cannot pass through this tile. Independent of
+   *  movement: a chasm blocks movement but not sight; a glass wall blocks
+   *  sight but not movement. */
+  blocksSight: boolean;
   /** Which layer this tile belongs on. `"ground"` is drawn first; `"object"` is overlaid on top. */
   layer: 'ground' | 'object';
   description: string;
@@ -198,10 +200,6 @@ export interface TileLegendEntry {
   cover?: 'half' | 'three-quarters' | 'total';
   /** SRD Obscurance the tile imposes by default. */
   obscurance?: 'lightly' | 'heavily';
-  /** Whether an impassable tile is see-through (chasms, water, windows).
-   *  Opts the tile out of SessionBuilder's "impassable → Total Cover"
-   *  auto-promotion. */
-  transparent?: boolean;
 }
 export interface TileLegend {
   notes: string;

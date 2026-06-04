@@ -20,13 +20,13 @@ function stubTilesets(): MapTilesetInfo[] {
     tilewidth: 16,  tileheight: 16,
     spacing: 0, margin: 0,
     columns: 4,
-    tilePassability: {},
+    tileBlocksMovement: {},
   }];
 }
 
 describe('generateMission', () => {
   it('returns a complete envelope with map, encounter def, and reward', () => {
-    const m = generateMission({ tilesets: stubTilesets(), disabledScribble: new Set() });
+    const m = generateMission({ tilesets: stubTilesets() });
     expect(m.missionId).toMatch(/^mission_gen_/);
     expect(['bandit', 'goblin', 'skeleton']).toContain(m.flavour);
     expect([1, 2]).toContain(m.enemyCount);
@@ -44,7 +44,6 @@ describe('generateMission', () => {
     for (let i = 0; i < 20; i++) {
       const m = generateMission({
         tilesets: stubTilesets(),
-        disabledScribble: new Set(),
         excludeFlavour: 'bandit',
       });
       expect(m.flavour).not.toBe('bandit');
@@ -54,12 +53,10 @@ describe('generateMission', () => {
   it('scales reward by count', () => {
     const one = generateMission({
       tilesets: stubTilesets(),
-      disabledScribble: new Set(),
       flavour: 'bandit', count: 1,
     });
     const two = generateMission({
       tilesets: stubTilesets(),
-      disabledScribble: new Set(),
       flavour: 'bandit', count: 2,
     });
     // Two-enemy reward = 2x base + same completion bonus.
@@ -70,7 +67,6 @@ describe('generateMission', () => {
   it('placements put player at west, enemies at east', () => {
     const m = generateMission({
       tilesets: stubTilesets(),
-      disabledScribble: new Set(),
       flavour: 'bandit', count: 2,
     });
     const player = m.encounterDef.placements?.find((p) => p.role === 'player');
@@ -80,7 +76,7 @@ describe('generateMission', () => {
   });
 
   it('generates triggers for intro, done, and done-aigm', () => {
-    const m = generateMission({ tilesets: stubTilesets(), disabledScribble: new Set() });
+    const m = generateMission({ tilesets: stubTilesets() });
     const triggerIds = ((m.encounterDef.triggers ?? []) as Array<{ id: string }>).map((t) => t.id);
     expect(triggerIds).toEqual(['mission_intro', 'mission_done', 'mission_done_aigm']);
   });

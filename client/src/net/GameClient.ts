@@ -279,6 +279,24 @@ export class TokenExistsError extends Error {
   }
 }
 
+/** One tileset's legend block as served by `GET /tilesets/legends`. */
+export interface TileLegendBlock {
+  tileset: string;
+  image: string;
+  notes: string;
+  tiles: Record<string, import("../../../shared/types").TileLegendEntry>;
+}
+
+/** Tileset image-slicing metadata from `GET /tilesets`. */
+export interface TilesetMeta {
+  imageUrl: string;
+  tilewidth: number;
+  tileheight: number;
+  margin: number;
+  spacing: number;
+  columns: number;
+}
+
 
 export class GameClient {
   private sessionId: string | null = null;
@@ -832,6 +850,41 @@ export class GameClient {
       throw new Error(body.error ?? `Token save failed: ${res.status}`);
     }
     return res.json() as Promise<{ id: string; tokenAsset: string }>;
+  }
+
+  /** Per-tileset tile legends (one block per tileset) used by the Tile
+   *  Creator to render each tileset's frame grid + load existing attributes. */
+  async listTileLegends(): Promise<{ tilesets: TileLegendBlock[] }> {
+    const res = await fetch(`${API_URL}/tilesets/legends`);
+    if (!res.ok) throw new Error(`List tile legends failed: ${res.status}`);
+    return res.json() as Promise<{ tilesets: TileLegendBlock[] }>;
+  }
+
+  /** Tileset image-slicing metadata (tilewidth/columns/etc.) so the Tile
+   *  Creator can crop individual frames from each tileset PNG. */
+  async listTilesetMeta(): Promise<TilesetMeta[]> {
+    const res = await fetch(`${API_URL}/tilesets`);
+    if (!res.ok) throw new Error(`List tilesets failed: ${res.status}`);
+    return res.json() as Promise<TilesetMeta[]>;
+  }
+
+  /** Create or update a single tile's legend entry. Server writes it into
+   *  `<tileset>_legend.json` and reloads defs so the new semantics take
+   *  effect on the next session. */
+  async saveTileEntry(
+    tileset: string,
+    gid: number,
+    entry: import("../../../shared/types").TileLegendEntry,
+  ): Promise<void> {
+    const res = await fetch(`${API_URL}/tilesets/${encodeURIComponent(tileset)}/tiles/${gid}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(entry),
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({ error: `HTTP ${res.status}` })) as { error?: string };
+      throw new Error(body.error ?? `Tile save failed: ${res.status}`);
+    }
   }
 
   /** Upsert an authored NPC. Server validates the `monsterClass` against the
