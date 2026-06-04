@@ -2,6 +2,7 @@ import Phaser from "phaser";
 import { PlayerDef } from "../../../shared/types";
 import { ItemDef } from "../../../shared/types";
 import { EncounterDef } from "../../../shared/types";
+import type { AdventureDef } from "../../../shared/types";
 import { SavedMapDef } from "../../../shared/types";
 import { gameClient } from "../net/GameClient";
 import type { GameState, EquipmentSlots, EncounterRecord, StorylogEntry } from "../../../shared/types";
@@ -36,7 +37,15 @@ const ENC_ROW_SPACING = 169;
  *  doesn't bleed into the bottom-bar or character column. */
 const ENC_VIEWPORT_TOP = ENC_ROW_FIRST_CY - ENC_CARD_H / 2 - 4;
 const ENC_VIEWPORT_BOTTOM = 808;
-const ENC_VISIBLE_ROWS = 4;
+/** Top of the scrollable content band (cards + section headers are laid out in
+ *  content-space y, measured from here, then shifted by the scroll offset). */
+const ENC_CONTENT_TOP = ENC_VIEWPORT_TOP + 4;
+/** Section-header band height + the gaps framing it. */
+const ENC_HEADER_H = 22;
+const ENC_GAP_ABOVE_HEADER = 16;   // breathing room before a section (not the first)
+const ENC_GAP_BELOW_HEADER = 8;    // header → its first card row
+/** Vertical gap between successive card rows (keeps the old 169px row stride). */
+const ENC_CARD_VGAP = ENC_ROW_SPACING - ENC_CARD_H;
 
 
 const LAST_CHAR_KEY = 'myrpg_last_character';
@@ -58,18 +67,34 @@ interface LocalSave {
 
 interface EncCardElems {
   cardBtn: HtmlButtonHandle;
-  /** Row index in the conceptual grid (0..N). Used by `applyEncScrollOffset`
-   *  to compute the card's current y after the user scrolls. */
-  row: number;
+  /** Encounter id this card represents. NOT unique across the list — the same
+   *  encounter appears once per adventure that contains it, so selection
+   *  highlights every card sharing this id. */
+  defId: string;
+  /** Content-space y (top edge) at scroll offset 0. `applyEncScrollOffset`
+   *  subtracts the scroll offset to get the on-screen position. */
+  top: number;
   /** Column x — kept verbatim because the columns don't move on scroll. */
   cx: number;
+}
+
+interface EncHeaderElems {
+  handle: HtmlTextHandle;
+  /** Content-space y (top edge) at scroll offset 0. */
+  top: number;
 }
 
 export class EncounterSetupScene extends Phaser.Scene {
   private selectedPlayer: PlayerDef | null = null;
   private selectedEncounter: EncounterDef | null = null;
 
-  private encounterCards: Map<string, EncCardElems> = new Map();
+  /** All rendered encounter cards in layout order. An array (not a Map keyed by
+   *  id) because the same encounter is shown once per adventure it belongs to. */
+  private encCards: EncCardElems[] = [];
+  /** Section-header labels (GENERATED / each adventure / OTHER), scrolled with the cards. */
+  private encHeaders: EncHeaderElems[] = [];
+  /** Total content height of the laid-out sections — drives the scroll range. */
+  private encContentHeight = 0;
   private htmlTexts: HtmlTextHandle[] = [];
   private htmlButtons: HtmlButtonHandle[] = [];
   private beginBtn!: HtmlButtonHandle;
@@ -79,6 +104,7 @@ export class EncounterSetupScene extends Phaser.Scene {
 
   private characters: PlayerDef[] = [];
   private encounters: EncounterDef[] = [];
+  private adventures: AdventureDef[] = [];
   private allSaves: Map<string, LocalSave> = new Map();
   private selectedSave: LocalSave | null = null;
   /** Vertical scroll offset (in scene-space pixels) applied to every
@@ -104,13 +130,15 @@ export class EncounterSetupScene extends Phaser.Scene {
     this.selectedEncounter = null;
     this.selectedSave = null;
     this.allSaves.clear();
-    this.encounterCards.clear();
+    this.encCards = [];
+    this.encHeaders = [];
     this.pendingEncounterId = data?.presetEncounterId ?? null;
   }
 
   create(): void {
     this.characters = this.registry.get("characters") as PlayerDef[];
     this.encounters = this.registry.get("encounters") as EncounterDef[];
+    this.adventures = (this.registry.get("adventures") as AdventureDef[]) ?? [];
 
     if (this.pendingEncounterId && !this.encounters.find((e) => e.id === this.pendingEncounterId)) {
       Promise.all([gameClient.listEncounters(), gameClient.listMaps()]).then(([encs, maps]) => {
@@ -210,15 +238,12 @@ export class EncounterSetupScene extends Phaser.Scene {
       onChange: (def) => this.selectChar(def),
     });
 
-    // Layout: 2 columns × N rows. The first ENC_VISIBLE_ROWS rows fit in
-    // the viewport; surplus rows scroll into view via the wheel handler
-    // installed by `installEncScroll`.
+    // Encounters are grouped into sections — GENERATED first, then one per
+    // adventure, then OTHER (authored encounters in no adventure). Within each
+    // section the cards fill a 2-column grid; surplus content scrolls into view
+    // via the wheel handler installed by `installEncScroll`.
     this.encScrollOffset = 0;
-    this.encounters.forEach((enc, i) => {
-      const row = Math.floor(i / 2);
-      const cx = i % 2 === 0 ? ENC_COL1_CX : ENC_COL2_CX;
-      this.buildEncounterCard(enc, row, cx);
-    });
+    this.buildEncounterSections();
     this.installEncScroll();
     this.applyEncScrollOffset();
 
@@ -302,14 +327,85 @@ export class EncounterSetupScene extends Phaser.Scene {
     this.refreshPromoteButton();
   }
 
-  private buildEncounterCard(def: EncounterDef, row: number, cx: number): void {
-    const cy = ENC_ROW_FIRST_CY + row * ENC_ROW_SPACING;
+  /** Group the encounters into sections and lay them out top-to-bottom:
+   *  GENERATED, then one section per adventure (in load order), then OTHER for
+   *  any authored encounter that belongs to no adventure. An encounter that
+   *  appears in two adventures is rendered in each. */
+  private buildEncounterSections(): void {
+    const sections = this.computeEncounterSections();
+    let y = 0;
+    sections.forEach((section, sIdx) => {
+      if (sIdx > 0) y += ENC_GAP_ABOVE_HEADER;
+      this.buildSectionHeader(section.label, y);
+      y += ENC_HEADER_H + ENC_GAP_BELOW_HEADER;
+      section.encounters.forEach((def, i) => {
+        const cx = i % 2 === 0 ? ENC_COL1_CX : ENC_COL2_CX;
+        const top = y + Math.floor(i / 2) * (ENC_CARD_H + ENC_CARD_VGAP);
+        this.buildEncounterCard(def, top, cx);
+      });
+      y += Math.ceil(section.encounters.length / 2) * (ENC_CARD_H + ENC_CARD_VGAP);
+    });
+    this.encContentHeight = y;
+  }
+
+  /** Build the ordered section list. GENERATED first; then each adventure's
+   *  encounters (chapters in order, plus its rest encounter), deduped within
+   *  the adventure but NOT across adventures; then OTHER for whatever authored
+   *  encounter no adventure claimed. Empty sections are dropped. */
+  private computeEncounterSections(): { label: string; encounters: EncounterDef[] }[] {
+    const byId = new Map(this.encounters.map((e) => [e.id, e]));
+    const sections: { label: string; encounters: EncounterDef[] }[] = [];
+    const claimed = new Set<string>();
+
+    const generated = this.encounters.filter((e) => (e as { generated?: boolean }).generated);
+    if (generated.length > 0) {
+      sections.push({ label: "Generated", encounters: generated });
+      for (const e of generated) claimed.add(e.id);
+    }
+
+    for (const adv of this.adventures) {
+      const seen = new Set<string>();
+      const encs: EncounterDef[] = [];
+      const add = (id: string | undefined): void => {
+        if (!id || seen.has(id)) return;
+        const def = byId.get(id);
+        if (!def) return;
+        seen.add(id);
+        encs.push(def);
+      };
+      for (const ch of adv.chapters ?? []) add(ch.encounterId);
+      add(adv.restEncounterId);
+      if (encs.length === 0) continue;
+      for (const e of encs) claimed.add(e.id);
+      sections.push({ label: adv.title, encounters: encs });
+    }
+
+    const other = this.encounters.filter((e) => !claimed.has(e.id));
+    if (other.length > 0) sections.push({ label: "Other", encounters: other });
+
+    return sections;
+  }
+
+  /** A section header spanning both card columns, scrolled with the cards. */
+  private buildSectionHeader(label: string, top: number): void {
+    const left = ENC_COL1_CX - ENC_CARD_W / 2;
+    const width = (ENC_COL2_CX + ENC_CARD_W / 2) - left;
+    const handle = createHtmlText({
+      scene: this, sceneWidth: W,
+      x: left, y: ENC_CONTENT_TOP + top, w: width, h: ENC_HEADER_H,
+      text: label.toUpperCase(),
+      fontSize: 12, color: "#e2b96f", align: "left", letterSpacing: 2,
+    });
+    this.encHeaders.push({ handle, top });
+  }
+
+  private buildEncounterCard(def: EncounterDef, top: number, cx: number): void {
     const left = cx - ENC_CARD_W / 2;
-    const top = cy - ENC_CARD_H / 2;
+    const topPx = ENC_CONTENT_TOP + top;
 
     const cardBtn = createHtmlButton({
       scene: this, sceneWidth: W,
-      x: left, y: top, w: ENC_CARD_W, h: ENC_CARD_H,
+      x: left, y: topPx, w: ENC_CARD_W, h: ENC_CARD_H,
       label: "", variant: "ghost",
       onClick: () => this.selectEncounter(def),
     });
@@ -350,21 +446,20 @@ export class EncounterSetupScene extends Phaser.Scene {
     desc.style.cssText = "margin-top: 10px; font-size: 10px; color: #8899aa; line-height: 1.5;";
     inner.appendChild(desc);
 
-    this.encounterCards.set(def.id, { cardBtn, row, cx });
+    this.encCards.push({ cardBtn, defId: def.id, top, cx });
   }
 
   // ── Scrolling ──────────────────────────────────────────────────────────
 
-  /** Total number of rows in the encounter grid (2 columns wide). */
-  private encRowCount(): number {
-    return Math.ceil(this.encounters.length / 2);
+  /** Height of the visible content band (where cards + headers are shown). */
+  private encViewportHeight(): number {
+    return ENC_VIEWPORT_BOTTOM - ENC_CONTENT_TOP;
   }
 
-  /** Maximum vertical scroll, in scene-space pixels. Zero when the grid
-   *  fits in the viewport. */
+  /** Maximum vertical scroll, in scene-space pixels. Zero when all sections
+   *  fit in the viewport. */
   private encMaxScroll(): number {
-    const extraRows = Math.max(0, this.encRowCount() - ENC_VISIBLE_ROWS);
-    return extraRows * ENC_ROW_SPACING;
+    return Math.max(0, this.encContentHeight - this.encViewportHeight());
   }
 
   /** Install a Phaser wheel listener and the visual scrollbar. Wheel
@@ -403,23 +498,30 @@ export class EncounterSetupScene extends Phaser.Scene {
     this.applyEncScrollOffset();
   }
 
-  /** Re-place every encounter card based on the current scroll offset and
-   *  hide any card whose centre falls outside the visible band. Also
+  /** Re-place every encounter card + section header based on the current
+   *  scroll offset and hide anything fully outside the visible band. Also
    *  positions the scrollbar thumb. */
   private applyEncScrollOffset(): void {
-    for (const elems of this.encounterCards.values()) {
-      const cy = ENC_ROW_FIRST_CY + elems.row * ENC_ROW_SPACING - this.encScrollOffset;
+    for (const elems of this.encCards) {
+      const top = ENC_CONTENT_TOP + elems.top - this.encScrollOffset;
       const left = elems.cx - ENC_CARD_W / 2;
-      const top = cy - ENC_CARD_H / 2;
-      const offscreen = cy + ENC_CARD_H / 2 < ENC_VIEWPORT_TOP || cy - ENC_CARD_H / 2 > ENC_VIEWPORT_BOTTOM;
+      const offscreen = top + ENC_CARD_H < ENC_VIEWPORT_TOP || top > ENC_VIEWPORT_BOTTOM;
       elems.cardBtn.setBounds(left, top, ENC_CARD_W, ENC_CARD_H);
       elems.cardBtn.setVisible(!offscreen);
     }
-    // Position the scrollbar thumb. Thumb height = visible fraction of
-    // total grid; thumb y = lerped against the scroll offset.
+    const headerLeft = ENC_COL1_CX - ENC_CARD_W / 2;
+    const headerW = (ENC_COL2_CX + ENC_CARD_W / 2) - headerLeft;
+    for (const h of this.encHeaders) {
+      const top = ENC_CONTENT_TOP + h.top - this.encScrollOffset;
+      const offscreen = top + ENC_HEADER_H < ENC_VIEWPORT_TOP || top > ENC_VIEWPORT_BOTTOM;
+      h.handle.setBounds(headerLeft, top, headerW, ENC_HEADER_H);
+      h.handle.setVisible(!offscreen);
+    }
+    // Position the scrollbar thumb. Thumb height = visible fraction of the
+    // total content; thumb y = lerped against the scroll offset.
     if (this.encScrollbarTrack && this.encScrollbarThumb) {
-      const totalRows = this.encRowCount();
-      const fraction = ENC_VISIBLE_ROWS / Math.max(ENC_VISIBLE_ROWS, totalRows);
+      const viewportH = this.encViewportHeight();
+      const fraction = viewportH / Math.max(viewportH, this.encContentHeight);
       const trackH = ENC_VIEWPORT_BOTTOM - ENC_VIEWPORT_TOP;
       const thumbH = Math.max(20, Math.floor(trackH * fraction));
       const max = this.encMaxScroll();
@@ -431,9 +533,10 @@ export class EncounterSetupScene extends Phaser.Scene {
   }
 
   private selectEncounter(def: EncounterDef): void {
-    for (const [id, elems] of this.encounterCards) {
-      const active = id === def.id;
-      elems.cardBtn.el.style.borderColor = active ? "#e2b96f" : "#334455";
+    // The same encounter can have multiple cards (one per adventure) — light
+    // up every card sharing the id so the selection reads consistently.
+    for (const elems of this.encCards) {
+      elems.cardBtn.el.style.borderColor = elems.defId === def.id ? "#e2b96f" : "#334455";
     }
     this.selectedEncounter = def;
     this.scrollEncounterIntoView(def);
@@ -441,17 +544,16 @@ export class EncounterSetupScene extends Phaser.Scene {
     this.refreshPromoteButton();
   }
 
-  /** Ensure the card for `def` is fully visible in the encounter viewport.
-   *  Used by `pendingEncounterId` auto-select and by manual selections so
-   *  the user always sees what they just clicked. */
+  /** Ensure a card for `def` is fully visible in the encounter viewport. Used
+   *  by `pendingEncounterId` auto-select and by manual selections so the user
+   *  always sees what they just clicked. Scrolls to the first card for the id. */
   private scrollEncounterIntoView(def: EncounterDef): void {
-    const elems = this.encounterCards.get(def.id);
+    const elems = this.encCards.find((c) => c.defId === def.id);
     if (!elems) return;
-    const cyAtZero = ENC_ROW_FIRST_CY + elems.row * ENC_ROW_SPACING;
-    const cyShown = cyAtZero - this.encScrollOffset;
-    if (cyShown - ENC_CARD_H / 2 >= ENC_VIEWPORT_TOP && cyShown + ENC_CARD_H / 2 <= ENC_VIEWPORT_BOTTOM) return;
-    // Centre the row in the viewport.
-    const target = cyAtZero - (ENC_VIEWPORT_TOP + ENC_VIEWPORT_BOTTOM) / 2;
+    const topShown = ENC_CONTENT_TOP + elems.top - this.encScrollOffset;
+    if (topShown >= ENC_VIEWPORT_TOP && topShown + ENC_CARD_H <= ENC_VIEWPORT_BOTTOM) return;
+    // Centre the card in the visible band.
+    const target = elems.top - (this.encViewportHeight() - ENC_CARD_H) / 2;
     this.setEncScrollOffset(target);
   }
 
@@ -582,10 +684,12 @@ export class EncounterSetupScene extends Phaser.Scene {
   private teardown(): void {
     for (const t of this.htmlTexts) t.dispose();
     for (const b of this.htmlButtons) b.dispose();
-    for (const c of this.encounterCards.values()) c.cardBtn.dispose();
+    for (const c of this.encCards) c.cardBtn.dispose();
+    for (const h of this.encHeaders) h.handle.dispose();
     this.htmlTexts = [];
     this.htmlButtons = [];
-    this.encounterCards.clear();
+    this.encCards = [];
+    this.encHeaders = [];
     this.encScrollbarTrack?.destroy(); this.encScrollbarTrack = null;
     this.encScrollbarThumb?.destroy(); this.encScrollbarThumb = null;
     this.characterCarousel?.destroy();

@@ -138,6 +138,7 @@ export class PlayerPanel {
   private readonly actionArea: HTMLElement;
   private readonly devCompleteBtn: HTMLButtonElement;
   private readonly endTurnBtn: HTMLButtonElement;
+  private readonly leaveBtn: HTMLButtonElement;
   private readonly offResize: () => void;
 
   private visible = true;
@@ -211,7 +212,8 @@ export class PlayerPanel {
     this.endTurnBtn = ref('end-turn') as HTMLButtonElement;
 
     (ref('charsheet') as HTMLButtonElement).onclick = () => callbacks.onOpenCharacterSheet();
-    (ref('leave-enc') as HTMLButtonElement).onclick = () => callbacks.onLeaveEncounter();
+    this.leaveBtn = ref('leave-enc') as HTMLButtonElement;
+    this.leaveBtn.onclick = () => callbacks.onLeaveEncounter();
     this.endTurnBtn.onclick = () => callbacks.onEndTurn();
     this.devCompleteBtn = ref('dev-complete') as HTMLButtonElement;
     this.devCompleteBtn.onclick = () => callbacks.onDevCompleteObjective();
@@ -332,6 +334,13 @@ export class PlayerPanel {
     this.hpText.textContent = `${hp} / ${maxHp}`;
 
     this.objectiveEl.textContent = objective || '—';
+  }
+
+  /** Relabel the exit button to match context. Inside an authored adventure it
+   *  reads LEAVE ADVENTURE (and routes back to Adventure Setup); otherwise
+   *  LEAVE ENCOUNTER. Called each state tick from the scene's HUD refresh. */
+  setInAdventure(inAdventure: boolean): void {
+    this.leaveBtn.textContent = inAdventure ? 'LEAVE ADVENTURE' : 'LEAVE ENCOUNTER';
   }
 
   refreshActions(state: PlayerPanelActionState): void {

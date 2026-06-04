@@ -159,6 +159,7 @@ const defs: GameDefs = {
   settings: [],
   activeSetting: null,
   tileLegend: { notes: "", tiles: {} },
+  tileLegendsByTileset: {},
   conversations: [],
   classes: [],
   subclasses: [],
@@ -235,7 +236,9 @@ async function loadDefs(): Promise<void> {
     applyEquipment(p, p.defaultEquipment, defs.equipment);
   }
   defs.maps = await Promise.all(rawMaps.map(loadTiledMap));
-  defs.tileLegend = await loadTileLegends();
+  const legends = await loadTileLegends();
+  defs.tileLegend = legends.merged;
+  defs.tileLegendsByTileset = legends.byTileset;
   // Snapshot the scribble + water tileset metadata for the mission
   // generator. Any outdoor map references both; we pick the first one
   // that has the union of needed tilesets. Procedural missions reuse
@@ -255,16 +258,24 @@ let tokenPartsLibrary: PartsLibrary = { parts: {} as Record<TokenSlot, Record<st
  * single GID-keyed lookup. Used by SessionBuilder as a passability fallback
  * when an encounter omits a GID from its `tileProperties`.
  */
-async function loadTileLegends(): Promise<GameDefs["tileLegend"]> {
+async function loadTileLegends(): Promise<{ merged: GameDefs["tileLegend"]; byTileset: GameDefs["tileLegendsByTileset"] }> {
   const files = await readdir(TILESETS_DIR);
   const legendFiles = files.filter((f) => f.endsWith("_legend.json"));
+  // `merged` flattens every tileset's tiles into one GID→entry map — convenient
+  // for AI map-prompt listings, but lossy: tilesets share local GID keys, so a
+  // later file overwrites an earlier one (scribble 8 = grass vs water 8 =
+  // water_edge_w). `byTileset` keeps each tileset's legend separate, keyed by
+  // its base name, so gameplay resolution (SessionBuilder) stays collision-free.
   const merged: GameDefs["tileLegend"] = { notes: "", tiles: {} };
+  const byTileset: GameDefs["tileLegendsByTileset"] = {};
   for (const file of legendFiles) {
-    const raw = JSON.parse(await readFile(join(TILESETS_DIR, file), "utf-8")) as GameDefs["tileLegend"];
+    const raw = JSON.parse(await readFile(join(TILESETS_DIR, file), "utf-8")) as GameDefs["tileLegend"] & { tileset?: string };
     if (raw.notes && !merged.notes) merged.notes = raw.notes;
     Object.assign(merged.tiles, raw.tiles);
+    const name = (raw.tileset ?? file.replace(/_legend\.json$/i, "")).toLowerCase();
+    byTileset[name] = raw.tiles;
   }
-  return merged;
+  return { merged, byTileset };
 }
 
 // ── Tiled-compatible map format ───────────────────────────────────────────────
@@ -851,9 +862,48 @@ server.post<{ Body: { characterId: string; adventureId: string; devFlags?: impor
       save = makeAdventureSave(characterId, adventureId);
       await writeAdventureSave(save);
     }
+    // Booting a chapter fresh — clear any stale world save (e.g. left over from
+    // a different adventure) so it can't shadow this start as an exact-resume.
+    // Exact resume of an in-progress chapter goes through `GET /world`, not here.
+    await deleteWorldSave();
     const result = await startAdventureChapter(characterId, adv, save, devFlags);
     if ("error" in result) return reply.code(400).send(result);
     return reply.send(result);
+  },
+);
+
+/**
+ * POST /adventure/:characterId/checkpoint — persist the in-progress chapter's
+ * cross-chapter state into the AdventureSave WITHOUT advancing. Called when the
+ * player leaves an adventure mid-chapter (the LEAVE ADVENTURE button) so the
+ * adventure can be resumed from Adventure Setup with world flags, faction
+ * standings, rumors and NPC memory intact — rather than replaying the chapter
+ * from its last boundary. Mirrors the cross-chapter capture in `/advance`,
+ * minus the chapter bump + summary. No-op (`ok:false`) when there's no active
+ * adventure save or no live session.
+ */
+server.post<{ Params: { characterId: string } }>(
+  "/adventure/:characterId/checkpoint",
+  async (req, reply) => {
+    const { characterId } = req.params;
+    const save = await readAdventureSave(characterId);
+    if (!save) return reply.send({ ok: false });
+    const found = findSessionByCharacter(characterId);
+    if (!found) return reply.send({ ok: false });
+    const state = found.session.engine.getState();
+    save.worldFlags = { ...state.worldFlags };
+    save.factionStandings = { ...state.factionStandings };
+    save.factionRelations = structuredClone(state.factionRelations);
+    save.discoveredFactions = [...state.discoveredFactions];
+    save.rumors = [...state.rumors];
+    await flushSessionNpcSaves(found.sessionId);
+    await writeAdventureSave(save);
+    // Persist the EXACT live state to the world save so returning restores the
+    // encounter as it was left — positions, NPC HP, combat phase, zones, log.
+    // (The AdventureSave capture above is the cross-chapter fallback used only
+    // if the world save is ever missing.) Crucially we do NOT delete it here.
+    await saveWorldState(state, getAigmHistory(found.sessionId) ?? []);
+    return reply.send({ ok: true });
   },
 );
 
@@ -2110,6 +2160,7 @@ server.get("/world", async (_req, reply) => {
   return reply.send({
     sessionId: state.sessionId,
     state: engine.getState(),
+    playerDef: engine.getPlayerDef(),
     gmHistory: buildGmDisplayHistory(aigmHistory),
   });
 });
@@ -2288,6 +2339,32 @@ server.post<{
   const oldState = oldEngine.getState();
   const playerDef = oldEngine.getPlayerDef();
 
+  // Companions travel with the player across the transition (onto a mission,
+  // and back to the station when they leave). The companion mark lives only on
+  // the live NpcState (`npc.companion`) — there's no world-level roster — so
+  // read it from the OLD session. Inject any companion the target encounter
+  // doesn't already author into its ally list (so it spawns near the player),
+  // and re-promote them to companions after the new session is built. Their
+  // memory (facts / journal / relationship) rides along via the persistent
+  // NpcSave flush + attach below.
+  const carriedCompanions = oldState.npcs
+    .filter((n) => n.companion && n.hp > 0)
+    .map((n) => ({ defId: n.defId, followMode: n.companion!.followMode }));
+  const authoredDefIds = new Set<string>([
+    ...(encDef.npcIds ?? []), ...(encDef.allyIds ?? []), ...(encDef.enemyIds ?? []),
+  ]);
+  const mergedAllyIds = [
+    ...(encDef.allyIds ?? []),
+    ...carriedCompanions.map((c) => c.defId).filter((id) => !authoredDefIds.has(id)),
+  ];
+
+  // The player's persisted save carries the `levelUps` history — without it the
+  // rebuilt player reverts to base level after a transition (e.g. the player
+  // levels up mid-mission, then leaves and is back at the old level). HP/XP/
+  // inventory still come from the live `oldState` below; only the level-up
+  // ladder needs the save.
+  const charSave = await readSaveIfExists(playerDef.id);
+
   // Build the new encounter's context using the target encounter's
   // authored fields (npcs, enemies, allies, prose, placements).
   const encounterContext = buildEncounter({
@@ -2302,7 +2379,7 @@ server.post<{
     savedMapName: savedMap?.name,
     savedMapDescription: savedMap?.mapdescription,
     npcIds: encDef.npcIds,
-    allyIds: encDef.allyIds,
+    allyIds: mergedAllyIds,
     enemyIds: encDef.enemyIds,
     customIntroduction: encDef.customIntroduction,
     customContext: encDef.customContext,
@@ -2343,7 +2420,7 @@ server.post<{
     savedMapName: savedMap?.name,
     savedMapDescription: savedMap?.mapdescription,
     npcIds: encDef.npcIds,
-    allyIds: encDef.allyIds,
+    allyIds: mergedAllyIds,
     enemyIds: encDef.enemyIds,
     customIntroduction: encDef.customIntroduction,
     customContext: encDef.customContext,
@@ -2354,6 +2431,11 @@ server.post<{
     placementMode: encDef.placementMode,
     placements: encDef.placements,
     triggers: encDef.triggers,
+    // Per-NPC conversation overrides — without this the bureau's Vask spawns
+    // with no `conversationId` on the return leg, so TALK falls back to free
+    // text instead of opening the structured dialogue. Mirrors the other two
+    // session-create paths.
+    conversationOverrides: encDef.conversationOverrides,
     allowsLongRest: encDef.allowsLongRest,
     adventureSeed: seed,
     // Player state carry-over. Inventory + equipment + spell slots +
@@ -2368,6 +2450,7 @@ server.post<{
     resumePreparedSpellIds: oldState.player.preparedSpellIds,
     resumeConcentratingOn: oldState.player.concentratingOn,
     resumeMageArmor: oldState.player.mageArmor,
+    resumeLevelUps: charSave?.levelUps,
     devFlags: await resolveDevFlags(undefined),
   };
 
@@ -2384,6 +2467,45 @@ server.post<{
     savedMap,
   );
   await attachPersistentNpcSaves(newEngine, playerDef.id);
+  // Re-establish companion status on the spawned NPCs — whether injected into
+  // the ally list above or already authored in the encounter — so they keep
+  // following the player. Runs after `attachPersistentNpcSaves` (which may set
+  // disposition from the NpcSave) and before the world tick starts.
+  const newState = newEngine.getState();
+  // Drop a companion onto the nearest free tile around the player. Used when a
+  // companion is authored into the target encounter at a fixed spot (e.g. Edric
+  // standing in the station office) — on a return trip he travels WITH the
+  // player, so he should appear beside them, not back at his old post.
+  const placeNearPlayer = (npc: import("../../shared/types.js").NpcState): void => {
+    const px = newState.player.tileX, py = newState.player.tileY;
+    const blocked = newState.map.blocksMovement;
+    const occupied = new Set<string>([`${px},${py}`]);
+    for (const n of newState.npcs) if (n !== npc && n.hp > 0) occupied.add(`${n.tileX},${n.tileY}`);
+    for (let r = 1; r <= 4; r++) {
+      for (let dy = -r; dy <= r; dy++) {
+        for (let dx = -r; dx <= r; dx++) {
+          if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue;
+          const x = px + dx, y = py + dy;
+          if (y < 0 || x < 0 || y >= newState.map.rows || x >= newState.map.cols) continue;
+          if (blocked[y]?.[x]) continue;
+          if (occupied.has(`${x},${y}`)) continue;
+          npc.tileX = x; npc.tileY = y;
+          return;
+        }
+      }
+    }
+  };
+  for (const c of carriedCompanions) {
+    const npc = newState.npcs.find((n) => n.defId === c.defId && n.hp > 0);
+    if (!npc) continue;
+    npc.companion = { followMode: c.followMode, simState: { activeTaskId: null, lastTickId: 0 } };
+    npc.disposition = 'ally';
+    // If the spawned instance landed far from the player (authored at a fixed
+    // placement rather than injected near them), bring it to their side.
+    if (Math.max(Math.abs(npc.tileX - newState.player.tileX), Math.abs(npc.tileY - newState.player.tileY)) > 2) {
+      placeNearPlayer(npc);
+    }
+  }
   createSession(newSessionId, newEngine);
   installWorldTick(newSessionId, newEngine);
 
@@ -2687,6 +2809,9 @@ server.post("/game/session/:id/aigm", async (req, reply) => {
 
 server.delete("/game/session/:id", async (req, reply) => {
   const { id } = req.params as { id: string };
+  // Leaving an authored adventure keeps the world save so the exact encounter
+  // state can be restored on return (the LEAVE ADVENTURE path passes this).
+  const keepWorldSave = (req.query as Record<string, string> | undefined)?.keepWorldSave === '1';
   const adventureData = getAdventureData(id);
   if (adventureData) {
     const { meta, lines, state } = adventureData;
@@ -2713,7 +2838,7 @@ server.delete("/game/session/:id", async (req, reply) => {
   }
   await flushSessionNpcSaves(id);
   deleteSession(id);
-  await deleteWorldSave();
+  if (!keepWorldSave) await deleteWorldSave();
   return reply.code(200).send({ ok: true });
 });
 

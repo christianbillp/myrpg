@@ -34,8 +34,10 @@ export interface GameDefs {
   /** Currently selected setting — null when only core rules apply. Chosen at
    *  startup from `ACTIVE_SETTING_ID` env var or the first loaded setting. */
   activeSetting: SettingDef | null;
-  /** Merged tile legend(s) from server/data/tilesets/*_legend.json — used as a passability fallback when an encounter omits a GID from its tileProperties. */
+  /** Merged tile legend(s) from server/data/tilesets/*_legend.json — used as a passability fallback when an encounter omits a GID from its tileProperties. NOTE: the merge collides GID keys across tilesets (scribble 8 = grass, water 8 = water_edge_w); for gameplay resolution use `tileLegendsByTileset` instead. Kept only for AI map-prompt listings. */
   tileLegend: TileLegend;
+  /** Per-tileset tile legends keyed by tileset base name ("scribble", "water"). Each is that tileset's own GID→entry map (keyed by standalone id = local frame + 1). Used for collision-free movement / sight / cover resolution in SessionBuilder. */
+  tileLegendsByTileset: Record<string, TileLegend['tiles']>;
   /** Conversation graphs loaded from the active setting's `conversations/`
    *  directory. Empty when no setting is active. The conversation system
    *  looks up an NPC's `conversationId` here at start time. */

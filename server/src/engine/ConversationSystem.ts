@@ -6,6 +6,14 @@ import type {
 import {
   writeFact, clearFact, adjustRelationship, pushJournal, setArcPhase,
 } from "./NpcSavePersistence.js";
+import { guardHolds } from "./TriggerSystem.js";
+
+/** A choice is visible when every `visibleIf` guard holds (no guards ⇒ always
+ *  visible). Evaluated against live world state so mission flags drive which
+ *  branches the player sees. */
+function choiceIsVisible(ctx: GameContext, choice: ConversationChoice): boolean {
+  return (choice.visibleIf ?? []).every((g) => guardHolds(ctx, g));
+}
 
 /**
  * ConversationSystem — server runtime for the deterministic dialogue layer.
@@ -243,6 +251,15 @@ function enterNode(ctx: GameContext, def: ConversationDef, nodeId: string, speak
   // the conversation overlay shows the effects inline.
   if (node.onEnter) {
     runActionsCapturingLog(ctx, node.onEnter);
+  }
+
+  // Resolve which choices are visible NOW — after onEnter, so a node's choices
+  // can react to flags it (or the choice that led here) just set. The client
+  // renders only these indices. Skip if onEnter ended the conversation.
+  if (ctx.state.activeConversation === ac) {
+    ac.choiceVisibility = node.choices
+      .map((choice, i) => (choiceIsVisible(ctx, choice) ? i : -1))
+      .filter((i) => i >= 0);
   }
 
   // Auto-end terminal nodes.

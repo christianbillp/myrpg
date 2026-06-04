@@ -35,6 +35,17 @@ export interface TilesetDescriptor {
 
 /** Maps every registry key to its stored value type. Keep this in sync with
  *  the `registry.set(...)` calls in `BootScene.ts`. */
+/** One tileset's legend block as served by `GET /tilesets/legends` and stored
+ *  in the registry under `tileLegend`. Kept un-merged: tilesets share local GID
+ *  keys, so a flat merge would collide (scribble 8 = grass, water 8 =
+ *  water_edge_w). Callers resolve a GID through its owning tileset's firstgid. */
+export interface TileLegendBlock {
+  tileset: string;
+  image: string;
+  notes: string;
+  tiles: TileLegend['tiles'];
+}
+
 export interface RegistryMap {
   adventures:           AdventureDef[];
   backgrounds:          BackgroundDef[];
@@ -52,7 +63,7 @@ export interface RegistryMap {
   species:              SpeciesDef[];
   spells:               SpellDef[];
   subclasses:           SubclassDef[];
-  tileLegend:           TileLegend;
+  tileLegend:           { tilesets: TileLegendBlock[] };
   tilesetMeta:          TilesetDescriptor[];
   /** Round-trip scratch the NPC Creator stashes while detouring through the
    *  Token Creator. Untyped on purpose — the contents are scene-private. */
@@ -99,6 +110,8 @@ export class DefRegistry {
   species():       SpeciesDef[]                   { return this.getOr('species', []); }
   spells():        SpellDef[]                     { return this.getOr('spells', []); }
   subclasses():    SubclassDef[]                  { return this.getOr('subclasses', []); }
-  tileLegend():    TileLegend                     { return this.getOr('tileLegend', { notes: '', tiles: {} }); }
+  /** Per-tileset legend blocks from `/tilesets/legends`. Un-merged on purpose
+   *  (see `TileLegendBlock`) — resolve a GID through its owning tileset. */
+  tileLegendTilesets(): TileLegendBlock[]         { return this.getOr('tileLegend', { tilesets: [] }).tilesets; }
   tilesetMeta():   TilesetDescriptor[]            { return this.getOr('tilesetMeta', []); }
 }

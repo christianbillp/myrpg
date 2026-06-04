@@ -211,13 +211,17 @@ function whenMatches(when: WhenClause, event: EngineEvent): boolean {
 
 // ── IF (guards) ──────────────────────────────────────────────────────────────
 
-function guardHolds(ctx: GameContext, guard: TriggerGuard): boolean {
+export function guardHolds(ctx: GameContext, guard: TriggerGuard): boolean {
   const s = ctx.state;
   switch (guard.type) {
+    // `set` / `unset` are truthiness, not mere presence: authors clear a flag
+    // by writing `value: false` (or `0` / `""`), not by deleting it — e.g. the
+    // bureau cycle does `set_flag mission_pending false` on turn-in. Treating a
+    // cleared flag as still "set" would surface contradictory dialogue choices.
     case 'flag_set':
-      return s.worldFlags[guard.name] !== undefined;
+      return !!s.worldFlags[guard.name];
     case 'flag_unset':
-      return s.worldFlags[guard.name] === undefined;
+      return !s.worldFlags[guard.name];
     case 'flag_equals':
       return s.worldFlags[guard.name] === guard.value;
     case 'hp_below':
@@ -348,6 +352,9 @@ const TRIGGER_ACTIONS: TriggerRegistry = {
       ctx.publish({ type: 'flag_set', name, value });
     };
     setFlag('mission_pending', mission.missionId);
+    // Remember which hub issued this contract so LEAVE MISSION returns the
+    // player there (the bureau cycle now has more than one hub encounter).
+    if (ctx.state.currentEncounterId) setFlag('mission_hub_id', ctx.state.currentEncounterId);
     setFlag('mission_offer_flavour', mission.flavour);
     setFlag('mission_offer_count', mission.enemyCount);
     setFlag('mission_offer_reward_cp', mission.reward.cpDelta);

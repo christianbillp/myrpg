@@ -39,6 +39,11 @@ export interface LongRestPreview {
   featuresRestored: Array<{ id: string; name: string; before: number; max: number }>;
   /** Whether the player has at least one Exhaustion level to remove. */
   exhaustionReduced: boolean;
+  /** Living companions that benefit from the rest (HP restored to full and any
+   *  rest-clearable conditions removed). One entry per companion with something
+   *  to gain — surfaced on the Long Rest screen so the player sees the party
+   *  rest, not just themselves. */
+  companionsRestored?: Array<{ id: string; name: string; hpRestored: number; conditionsCleared: string[] }>;
   /** Wizard-only: prepared-spell picker state. Omitted for non-Wizard classes. */
   wizardSpellPrep?: {
     spellbookSpells: Array<{ id: string; name: string; level: number; school: string }>;

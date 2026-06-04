@@ -12,6 +12,7 @@
   "customContext": "BUREAU OFFICE — HUB ENCOUNTER. This is the contract-taking hub between field missions. Vask is the only NPC. The player came here to ASK FOR A NEW CONTRACT, TURN IN A FINISHED CONTRACT, or just CHAT. The room has no enemies and no tension. Treat it as a quiet workplace.\n\nVASK'S STATE depends on world flags the engine sets — the conversation tree (`bureau_office_chat`) reads them directly. Do not narrate the contract content yourself — the conversation system handles the offer, the turn-in, and the reward; you provide flavour beats around the edges (Vask sets down her pen, takes the ledger, hands over a coin pouch, etc.).\n\nIF the player asks for a contract: a short Vask line, then defer to the conversation system. IF the player has a finished contract and walks in: the AIGM can narrate Vask noting his return (\"You're back. Show me the seal.\") and then defer to the turn-in flow.\n\nNO COMBAT in this room. If the player tries to attack Vask, narrate her standing up, hand on the bell-pull that summons every other regular on duty, and tell the player plainly that violence here ends the commission.",
   "objective": "Take a contract. Run it. Come back. Get paid.",
   "allowsLongRest": true,
+  "missionHub": true,
   "conversationOverrides": {
     "renna_vask": "bureau_office_chat"
   },

@@ -346,7 +346,10 @@ export class AdventureSetupScene extends Phaser.Scene {
     const save = this.selectedPlayer && this.selectedAdventure
       ? this.adventureSaves.get(this.selectedPlayer.id)
       : null;
-    const continuing = !!save && save.adventureId === this.selectedAdventure?.id && save.completedChapterIds.length > 0;
+    // A save exists for this adventure ⇒ it's in progress (started, and now
+    // resumable — including mid-first-chapter after a LEAVE ADVENTURE, which
+    // checkpoints progress). Offer CONTINUE rather than a fresh BEGIN.
+    const continuing = !!save && save.adventureId === this.selectedAdventure?.id;
 
     this.beginBtn.setLabel(continuing ? "CONTINUE ADVENTURE" : "BEGIN ADVENTURE");
     this.beginBtn.setDisabled(!ready);
@@ -354,13 +357,39 @@ export class AdventureSetupScene extends Phaser.Scene {
 
   private beginAdventure(): void {
     if (!this.selectedPlayer || !this.selectedAdventure) return;
+    const player = this.selectedPlayer;
+    const adventure = this.selectedAdventure;
     this.beginBtn.setDisabled(true);
-    gameClient.startAdventure(this.selectedPlayer.id, this.selectedAdventure.id).then(({ state, playerDef }) => {
-      // Use the server-returned PlayerDef so the HUD reflects the character's
-      // current level (level-up history already replayed engine-side).
+    const save = this.adventureSaves.get(player.id);
+    const continuing = !!save && save.adventureId === adventure.id;
+
+    const go = async (): Promise<void> => {
+      if (continuing) {
+        // Exact-state resume: a preserved world save left by LEAVE ADVENTURE
+        // restores the encounter exactly as it was — positions, NPC HP, combat,
+        // zones, log. Only use it when it belongs to THIS adventure + character.
+        const world = await gameClient.loadWorld().catch(() => null);
+        if (world
+          && world.state.adventureContext?.adventureId === adventure.id
+          && world.state.player.defId === player.id) {
+          gameClient.resumeSession(world.sessionId);
+          this.scene.start("GameScene", {
+            sessionId: world.sessionId,
+            playerDef: world.playerDef ?? player,
+            gmHistory: world.gmHistory,
+            isResume: true,
+          });
+          return;
+        }
+      }
+      // Fresh start, or no exact save to restore → boot the (current) chapter.
+      // Server-returned PlayerDef reflects the character's leveled-up state.
+      const { state, playerDef } = await gameClient.startAdventure(player.id, adventure.id);
       this.scene.start("GameScene", { sessionId: state.sessionId, playerDef });
-    }).catch((err: unknown) => {
-      console.error("Failed to start adventure:", err);
+    };
+
+    void go().catch((err: unknown) => {
+      console.error("Failed to start/resume adventure:", err);
       this.beginBtn.setDisabled(false);
     });
   }

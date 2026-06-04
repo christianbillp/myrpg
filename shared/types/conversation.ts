@@ -136,6 +136,12 @@ export interface ActiveConversation {
    *  reads this to hide the choice (or surface it with a `[DEV]` tag when
    *  retry is dev-enabled). */
   attemptedCheckKeys: string[];
+  /** Indices into the current node's `choices` whose `visibleIf` guards pass —
+   *  computed server-side on node entry (after `onEnter` actions run, so a
+   *  choice can react to flags its predecessor set). The client renders only
+   *  these, using the original index so `onChoice` still maps correctly.
+   *  Absent ⇒ every choice is visible (node had no guards / pre-existing save). */
+  choiceVisibility?: number[];
   /** Set when the conversation is paused awaiting an ability-check resolution.
    *  The engine writes the outcome and resumes via the choice's onPass/onFail. */
   pendingCheck?: {

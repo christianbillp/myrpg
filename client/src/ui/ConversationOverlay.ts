@@ -157,7 +157,12 @@ export class ConversationOverlay extends BaseOverlay {
     }
     const attemptedKeys = new Set(state.attemptedCheckKeys ?? []);
     const allowRetry = DevMode.allowRetryChecks;
+    // `choiceVisibility` (server-computed `visibleIf` result) lists the indices
+    // to show; absent ⇒ show all. Filtering by index keeps `i` aligned with the
+    // server's `node.choices[choiceIndex]` so the click maps to the right choice.
+    const visibleIndices = state.choiceVisibility ? new Set(state.choiceVisibility) : null;
     node.choices.forEach((choice, i) => {
+      if (visibleIndices && !visibleIndices.has(i)) return;
       const isCheck = !!choice.check;
       const checkKey = `${node.id}#${i}`;
       const alreadyTried = isCheck && attemptedKeys.has(checkKey);

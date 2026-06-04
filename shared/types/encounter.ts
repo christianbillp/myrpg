@@ -332,6 +332,16 @@ export interface EncounterDef {
    */
   generated?: boolean;
   /**
+   * Marks this encounter as a Bureau mission **hub** (e.g. the station where
+   * the player takes/turns-in contracts). Hubs drive the MissionTopBar: while
+   * the player is in one they get LEAVE ADVENTURE (and TO MISSION when a
+   * contract is pending), and the chapter-complete wrap-up is suppressed
+   * because navigation runs through the top bar instead. Multiple encounters
+   * may be hubs; the LEAVE MISSION button returns to whichever hub issued the
+   * contract (tracked in the `mission_hub_id` world flag).
+   */
+  missionHub?: boolean;
+  /**
    * Environmental flags consulted by combat resolvers. Today only `sunlit`
    * is used — it triggers Sunlight Sensitivity (Disadvantage on attacks) for
    * creatures whose `traits` include `sunlight_sensitivity`.

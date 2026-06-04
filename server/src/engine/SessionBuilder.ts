@@ -17,18 +17,60 @@ import { stripTileFlipBits } from '../../../shared/tileGid.js';
  *  Identical to SavedMapDef (shared); aliased here for engine-side clarity. */
 export type SavedMapRecord = import('./types.js').SavedMapDef;
 
+/** A tileset legend's GID→entry map (the value side of
+ *  `defs.tileLegendsByTileset`), narrowed to the fields gameplay reads. */
+type LegendTiles = Record<string, {
+  blocksMovement?: boolean;
+  blocksSight?: boolean;
+  cover?: 'half' | 'three-quarters' | 'total';
+  obscurance?: 'lightly' | 'heavily';
+}>;
+
+/** Base tileset key from an image URL: `/tilesets/scribble.png` → `scribble`.
+ *  Matches the key `loadTileLegends` files each tileset's legend under. */
+function tilesetKeyFromUrl(imageUrl: string): string {
+  const base = imageUrl.split('/').pop() ?? imageUrl;
+  return base.replace(/\.[^.]+$/, '').toLowerCase();
+}
+
+/** The tileset that owns a GID — the one with the greatest firstgid still ≤
+ *  gid (tilesets in a map have disjoint, ascending GID ranges). */
+function ownerTileset(gid: number, tilesets: MapTilesetInfo[]): MapTilesetInfo | undefined {
+  let owner: MapTilesetInfo | undefined;
+  for (const ts of tilesets) {
+    if (ts.firstgid <= gid && (!owner || ts.firstgid > owner.firstgid)) owner = ts;
+  }
+  return owner;
+}
+
+/** Look up a GID's legend entry in its OWNING tileset's legend, keyed by the
+ *  tile's standalone id (local frame + 1). Routing through the owner tileset
+ *  is essential: legends from different tilesets share local GID keys
+ *  (scribble's 8 = grass, water's 8 = water_edge_w), so a flat cross-tileset
+ *  merge silently overwrites one with the other. */
+function legendEntryForGid(
+  rawGid: number,
+  tilesets: MapTilesetInfo[],
+  legendsByTileset: Record<string, LegendTiles>,
+): LegendTiles[string] | undefined {
+  const gid = stripTileFlipBits(rawGid);
+  const owner = ownerTileset(gid, tilesets);
+  if (!owner) return undefined;
+  return legendsByTileset[tilesetKeyFromUrl(owner.imageUrl)]?.[String(gid - owner.firstgid + 1)];
+}
+
 /**
  * Resolve whether a single GID blocks movement against (1) the encounter's
  * explicit tileProperties, (2) the source tileset's per-tile data carried on
- * `MapTilesetInfo.tileBlocksMovement`, (3) the global tile legend, and (4) a
- * default of `false` (unmarked tiles do not block). Encounter overrides win,
+ * `MapTilesetInfo.tileBlocksMovement`, (3) the owning tileset's legend, and (4)
+ * a default of `false` (unmarked tiles do not block). Encounter overrides win,
  * then tileset, then legend.
  */
 function resolveGidBlocksMovement(
   rawGid: number,
   byGid: Map<number, EncounterTileProperty>,
   tilesets: MapTilesetInfo[],
-  tileLegend: Record<string, { blocksMovement?: boolean }>,
+  legendsByTileset: Record<string, LegendTiles>,
 ): boolean {
   if (rawGid === 0) return false; // empty object-layer cell — no obstacle here.
   // Strip Tiled's flip/rotation bits before looking up — orientation never
@@ -36,40 +78,35 @@ function resolveGidBlocksMovement(
   const gid = stripTileFlipBits(rawGid);
   const explicit = byGid.get(gid);
   if (explicit?.blocksMovement !== undefined) return explicit.blocksMovement;
-  // Find the tileset this GID belongs to — the one with the greatest
-  // firstgid that is still ≤ gid. (Tilesets in a map have disjoint GID ranges.)
-  let owner: MapTilesetInfo | undefined;
-  for (const ts of tilesets) {
-    if (ts.firstgid <= gid && (!owner || ts.firstgid > owner.firstgid)) owner = ts;
-  }
+  const owner = ownerTileset(gid, tilesets);
   if (owner) {
-    const local = gid - owner.firstgid;
-    const declared = owner.tileBlocksMovement[local];
+    const declared = owner.tileBlocksMovement[gid - owner.firstgid];
     if (declared !== undefined) return declared;
   }
-  // Fall through to the legend — transparent-twin tiles and others added in
-  // the legend JSON but missing from the source .tsj end up here.
-  const legendBlocks = tileLegend[String(gid)]?.blocksMovement;
-  if (legendBlocks !== undefined) return legendBlocks;
+  // Fall through to the owning tileset's legend — transparent-twin tiles and
+  // others added in the legend JSON but missing from the source .tsj end here.
+  const legend = legendEntryForGid(gid, tilesets, legendsByTileset);
+  if (legend?.blocksMovement !== undefined) return legend.blocksMovement;
   return false;
 }
 
 /**
  * Resolve whether a single GID blocks line-of-sight. Encounter override wins,
- * then the global tile legend; defaults to `false`. Tilesets carry no sight
- * data (the source .tsj only declares passability), so sight is authored in
- * the legend / per-encounter.
+ * then the owning tileset's legend; defaults to `false`. Tilesets carry no
+ * sight data in their `.tsj` (only passability), so sight is authored in the
+ * legend / per-encounter.
  */
 function resolveGidBlocksSight(
   rawGid: number,
   byGid: Map<number, EncounterTileProperty>,
-  tileLegend: Record<string, { blocksSight?: boolean }>,
+  tilesets: MapTilesetInfo[],
+  legendsByTileset: Record<string, LegendTiles>,
 ): boolean {
   if (rawGid === 0) return false; // empty object-layer cell — see straight through.
   const gid = stripTileFlipBits(rawGid);
   const explicit = byGid.get(gid);
   if (explicit?.blocksSight !== undefined) return explicit.blocksSight;
-  return tileLegend[String(gid)]?.blocksSight ?? false;
+  return legendEntryForGid(gid, tilesets, legendsByTileset)?.blocksSight ?? false;
 }
 
 /**
@@ -84,16 +121,16 @@ function resolveGidBlocksSight(
 function buildGameMapFromSaved(
   saved: SavedMapRecord,
   tileProperties: EncounterTileProperty[] | undefined,
-  tileLegend: Record<string, { blocksMovement?: boolean; blocksSight?: boolean; cover?: 'half' | 'three-quarters' | 'total'; obscurance?: 'lightly' | 'heavily' }>,
+  legendsByTileset: Record<string, LegendTiles>,
 ): GameMap {
   const byGid = new Map<number, EncounterTileProperty>();
   for (const tp of tileProperties ?? []) byGid.set(tp.gid, tp);
   /** Read cover/obscurance for a GID. Encounter override wins; otherwise fall
-   *  through to the tileset legend defaults. */
+   *  through to the owning tileset's legend defaults. */
   const tileCoverFor = (gid: number): 'half' | 'three-quarters' | 'total' | null =>
-    byGid.get(gid)?.cover ?? tileLegend[String(gid)]?.cover ?? null;
+    byGid.get(gid)?.cover ?? legendEntryForGid(gid, saved.tilesets, legendsByTileset)?.cover ?? null;
   const tileObsFor = (gid: number): 'lightly' | 'heavily' | null =>
-    byGid.get(gid)?.obscurance ?? tileLegend[String(gid)]?.obscurance ?? null;
+    byGid.get(gid)?.obscurance ?? legendEntryForGid(gid, saved.tilesets, legendsByTileset)?.obscurance ?? null;
   /** GID whose tile properties win for this cell — the object when present,
    *  otherwise the ground GID. Implements the object-overrides-terrain rule. */
   const effectiveGid = (groundGid: number, objectGid: number): number =>
@@ -101,7 +138,7 @@ function buildGameMapFromSaved(
   const blocksMovement: boolean[][] = saved.gidGrid.map((row, y) =>
     row.map((groundGid, x) => {
       const objectGid = saved.objectGidGrid?.[y]?.[x] ?? 0;
-      return resolveGidBlocksMovement(effectiveGid(groundGid, objectGid), byGid, saved.tilesets, tileLegend);
+      return resolveGidBlocksMovement(effectiveGid(groundGid, objectGid), byGid, saved.tilesets, legendsByTileset);
     }),
   );
   // Sight blocking ORs the ground and object features: vision is stopped if
@@ -111,8 +148,8 @@ function buildGameMapFromSaved(
   const blocksSight: boolean[][] = saved.gidGrid.map((row, y) =>
     row.map((groundGid, x) => {
       const objectGid = saved.objectGidGrid?.[y]?.[x] ?? 0;
-      return resolveGidBlocksSight(groundGid, byGid, tileLegend)
-        || resolveGidBlocksSight(objectGid, byGid, tileLegend);
+      return resolveGidBlocksSight(groundGid, byGid, saved.tilesets, legendsByTileset)
+        || resolveGidBlocksSight(objectGid, byGid, saved.tilesets, legendsByTileset);
     }),
   );
   // Bake per-tile cover and obscurance from the effective tile (object
@@ -159,7 +196,7 @@ export function buildSessionState(
   if (!playerDef) throw new Error(`Unknown playerDefId: ${req.playerDefId}`);
 
   const map: GameMap = savedMap
-    ? buildGameMapFromSaved(savedMap, req.tileProperties, defs.tileLegend.tiles)
+    ? buildGameMapFromSaved(savedMap, req.tileProperties, defs.tileLegendsByTileset)
     : (req.mapType === 'rooms' ? generateRoomsMap() : generateMap());
 
   const equippedSlots: EquipmentSlots = req.resumeEquippedSlots ?? { ...playerDef.defaultEquipment };

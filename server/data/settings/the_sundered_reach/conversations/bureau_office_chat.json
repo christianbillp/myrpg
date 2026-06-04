@@ -10,8 +10,25 @@
       ],
       "choices": [
         {
+          "label": "What've you got for me?",
+          "visibleIf": [
+            { "type": "flag_unset", "name": "part_one_signed_on" },
+            { "type": "flag_unset", "name": "proving_done" }
+          ],
+          "next": "proving_contract"
+        },
+        {
+          "label": "The road's clear — both raiders down. Reporting in.",
+          "visibleIf": [
+            { "type": "flag_set", "name": "proving_done" },
+            { "type": "flag_unset", "name": "part_one_signed_on" }
+          ],
+          "next": "report_proving"
+        },
+        {
           "label": "I'm here for work.",
           "visibleIf": [
+            { "type": "flag_set", "name": "part_one_signed_on" },
             { "type": "flag_unset", "name": "mission_pending" },
             { "type": "flag_unset", "name": "mission_complete" }
           ],
@@ -35,6 +52,47 @@
           "next": "already_have_contract"
         },
         { "label": "Nothing — just passing through.", "next": "goodbye" }
+      ]
+    },
+
+    {
+      "id": "proving_contract",
+      "lines": [
+        "Vask sets the pen down. \"Proving contract. You want a place on the roster, you earn it — same as everyone who's walked through that gate.\"",
+        "\"Two bandits raided the Maren farmstead and holed up on the road to the northwest. Go and put both of them down — that's the whole job.\"",
+        "\"You won't go alone. Voss has run that road before; he'll go with you. Come back when it's done and I'll sign you on.\""
+      ],
+      "choices": [
+        {
+          "label": "Understood. Two bandits, northwest. We'll handle it.",
+          "actions": [
+            { "type": "set_flag", "name": "vask_talked", "value": true }
+          ],
+          "end": true
+        }
+      ]
+    },
+
+    {
+      "id": "report_proving",
+      "lines": [
+        "Vask hears you out, checks something in her ledger, and nods once — not warmly, but it counts. \"Both of them. Good. You did the work and you came back to report it. That's the whole of it.\"",
+        "\"You're on the roster as of now — rank Hired Blade. Contracts go up on the board; pay's per head and per job. The Bureau remembers who delivers and who runs, so mind your Standing.\"",
+        "Flat, like a weather report: \"And watch yourself out there. The raids have been too coordinated lately — different families, same roads, same nights. That's not the usual rabble. I don't have a theory yet.\"",
+        "She squares the ledger and looks back up at you. \"So. You after a contract, or do you need a moment first?\""
+      ],
+      "onEnter": [
+        { "type": "set_flag", "name": "part_one_signed_on", "value": true }
+      ],
+      "choices": [
+        {
+          "label": "I'm ready. What've you got?",
+          "actions": [
+            { "type": "generate_mission_contract" }
+          ],
+          "next": "contract_offered"
+        },
+        { "label": "Give me a moment. I'll be back.", "next": "goodbye" }
       ]
     },
 

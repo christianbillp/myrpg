@@ -20,7 +20,7 @@
  * at L1-2 (the scope our level-up system currently supports).
  */
 import type {
-  PlayerDef, FeatureDef, SpellDef, PlayerState,
+  PlayerDef, FeatureDef, SpellDef, PlayerState, NpcState,
   LongRestPreview, LongRestChoices,
 } from '../../../shared/types.js';
 
@@ -29,6 +29,21 @@ export interface RestingInputs {
   player: PlayerState;
   features: FeatureDef[];
   spells: SpellDef[];
+  /** Live NPCs — companions among them share the rest's benefits. */
+  npcs?: NpcState[];
+}
+
+/** Negative / temporary conditions a Long Rest ends for a companion. Excludes
+ *  persistent or meta states (e.g. `dead`, `hidden`). */
+const REST_CLEARABLE_CONDITIONS: ReadonlySet<string> = new Set([
+  'poisoned', 'frightened', 'prone', 'blinded', 'deafened', 'stunned',
+  'restrained', 'grappled', 'charmed', 'slowed', 'vexed', 'paralyzed',
+  'incapacitated', 'dazed', 'exhausted',
+]);
+
+/** Living companions in a session's NPC list (the ones a rest benefits). */
+function restingCompanions(npcs: NpcState[] | undefined): NpcState[] {
+  return (npcs ?? []).filter((n) => n.companion && n.hp > 0);
 }
 
 /**
@@ -96,6 +111,16 @@ export function buildLongRestPreview(inputs: RestingInputs): LongRestPreview {
 
   const exhaustionReduced = (player.exhaustionLevel ?? 0) > 0;
 
+  // Companions rest too: full HP + any rest-clearable conditions removed.
+  const companionsRestored: NonNullable<LongRestPreview['companionsRestored']> = [];
+  for (const npc of restingCompanions(inputs.npcs)) {
+    const hpRestored = Math.max(0, npc.maxHp - npc.hp);
+    const conditionsCleared = npc.conditions.filter((c) => REST_CLEARABLE_CONDITIONS.has(c));
+    if (hpRestored > 0 || conditionsCleared.length > 0) {
+      companionsRestored.push({ id: npc.id, name: npc.revealedName ?? npc.name, hpRestored, conditionsCleared });
+    }
+  }
+
   // Wizard prep picker — only when the class is Wizard. The picker shows
   // every spell in the spellbook; the player ticks up to `maxPrepared`.
   let wizardSpellPrep: LongRestPreview['wizardSpellPrep'] | undefined;
@@ -120,6 +145,7 @@ export function buildLongRestPreview(inputs: RestingInputs): LongRestPreview {
     spellSlotsRestored,
     featuresRestored,
     exhaustionReduced,
+    companionsRestored,
     wizardSpellPrep,
   };
 }
@@ -168,6 +194,12 @@ export function applyLongRest(
 
   if (preview.exhaustionReduced) {
     player.exhaustionLevel = Math.max(0, (player.exhaustionLevel ?? 0) - 1);
+  }
+
+  // Companions share the Long Rest: HP to full, rest-clearable conditions gone.
+  for (const npc of restingCompanions(inputs.npcs)) {
+    npc.hp = npc.maxHp;
+    npc.conditions = npc.conditions.filter((c) => !REST_CLEARABLE_CONDITIONS.has(c));
   }
 
   // Wizard prepared-spell rebuild.

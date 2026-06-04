@@ -315,11 +315,11 @@ export class GameClient {
   resumeSession(sessionId: string): void { this.sessionId = sessionId; }
   getSessionId(): string | null { return this.sessionId; }
 
-  async loadWorld(): Promise<{ sessionId: string; state: GameState; gmHistory: { role: 'user' | 'assistant'; content: string }[] } | null> {
+  async loadWorld(): Promise<{ sessionId: string; state: GameState; playerDef?: PlayerDef; gmHistory: { role: 'user' | 'assistant'; content: string }[] } | null> {
     try {
       const res = await fetch(`${API_URL}/world`, { signal: AbortSignal.timeout(5000) });
       if (!res.ok) return null;
-      return res.json() as Promise<{ sessionId: string; state: GameState; gmHistory: { role: 'user' | 'assistant'; content: string }[] }>;
+      return res.json() as Promise<{ sessionId: string; state: GameState; playerDef?: PlayerDef; gmHistory: { role: 'user' | 'assistant'; content: string }[] }>;
     } catch {
       return null;
     }
@@ -371,12 +371,16 @@ export class GameClient {
     };
   }
 
-  async disconnect(): Promise<void> {
+  /** Close the WS and delete the server session. `keepWorldSave` preserves the
+   *  on-disk world save (used when leaving an adventure) so the exact encounter
+   *  state can be restored on return; otherwise the save is cleared. */
+  async disconnect(keepWorldSave = false): Promise<void> {
     this.intentionalClose = true;
     this.detachAndClose(this.ws);
     this.ws = null;
     if (this.sessionId) {
-      await fetch(`${API_URL}/game/session/${this.sessionId}`, { method: 'DELETE' }).catch(() => {});
+      const q = keepWorldSave ? '?keepWorldSave=1' : '';
+      await fetch(`${API_URL}/game/session/${this.sessionId}${q}`, { method: 'DELETE' }).catch(() => {});
       this.sessionId = null;
     }
   }
@@ -1101,6 +1105,13 @@ export class GameClient {
     this.sessionId = sessionId;
     state.sessionId = sessionId;
     return { state, playerDef };
+  }
+
+  /** Persist the in-progress chapter's cross-chapter state so the adventure can
+   *  be resumed from Adventure Setup. Called on LEAVE ADVENTURE before the
+   *  session is torn down. Best-effort — a failure must not block leaving. */
+  async checkpointAdventure(characterId: string): Promise<void> {
+    await fetch(`${API_URL}/adventure/${encodeURIComponent(characterId)}/checkpoint`, { method: 'POST' });
   }
 
   /**

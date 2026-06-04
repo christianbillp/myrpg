@@ -124,11 +124,6 @@ export function runEnemyTurn(
   }
 
   const belowHalf = enemy.hp <= enemy.maxHp / 2;
-  if (!enemyHidden && def.nimbleEscape && (belowHalf || Math.random() < 0.3)) {
-    const { hidden, logs: hideLogs } = tryNimbleEscape(def, target.passivePerception);
-    logs.push(...hideLogs);
-    enemyHidden = hidden;
-  }
 
   const tileSpeed = def.speed / 5;
   const standCost = proneStandCost(enemy.conditions, tileSpeed);
@@ -178,6 +173,25 @@ export function runEnemyTurn(
   const withDisadvantage = target.hidden || targetGrantsDisadv || hasAttackDisadvantage(enemy.conditions) || target.dodging || !!config.traitDisadvantage;
   const { damage, isHit, isCrit, attackTotal, logs: attackLogs, bonusComponents } = enemyAttack(meleeAttack, target.ac, withAdvantage, withDisadvantage);
   logs.push(...attackLogs);
+
+  // Making an attack gives away an unseen attacker's position — a hidden enemy
+  // is revealed by its own strike, hit or miss (SRD 5.2.1: a hidden attacker
+  // reveals its location when it attacks). The unseen-attacker advantage was
+  // already applied above; the reveal lands afterwards so the player sees who
+  // just hit them.
+  if (enemyHidden) {
+    enemyHidden = false;
+    logs.push({ left: `${config.displayName} breaks from cover as it strikes`, style: 'status' });
+  }
+
+  // Nimble Escape (goblins): Hide again as a bonus action after attacking —
+  // the signature strike-and-vanish. Rolls Stealth vs the target's passive
+  // Perception, so a watchful target keeps eyes on it. More likely when hurt.
+  if (def.nimbleEscape && (belowHalf || Math.random() < 0.3)) {
+    const { hidden, logs: hideLogs } = tryNimbleEscape(def, target.passivePerception);
+    logs.push(...hideLogs);
+    enemyHidden = hidden;
+  }
 
   return {
     damage, isHit, isCrit, attackTotal, attacked: true,

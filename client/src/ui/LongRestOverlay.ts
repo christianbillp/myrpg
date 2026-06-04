@@ -101,6 +101,23 @@ export class LongRestOverlay extends BaseOverlay {
 
     body.appendChild(summary);
 
+    // ── Companions ──────────────────────────────────────────────────────
+    // Companions share the rest — list each one's recovery so the player sees
+    // the whole party benefit, not just themselves.
+    if (p.companionsRestored && p.companionsRestored.length > 0) {
+      body.appendChild(this.sectionLabel("Companions"));
+      const compList = document.createElement("div");
+      compList.style.cssText = "display: flex; flex-direction: column; gap: 6px; font-size: 12px;";
+      for (const c of p.companionsRestored) {
+        const bits = [
+          c.hpRestored > 0 ? `+${c.hpRestored} HP (restored to maximum)` : "already at maximum",
+          c.conditionsCleared.length > 0 ? `cleared ${c.conditionsCleared.join(", ")}` : null,
+        ].filter((s): s is string => !!s);
+        compList.appendChild(this.statLine(c.name, bits.join(" · "), "#88cc99"));
+      }
+      body.appendChild(compList);
+    }
+
     // ── Wizard spell preparation (only Wizards) ─────────────────────────
     if (p.wizardSpellPrep) {
       body.appendChild(this.sectionLabel("Prepare Spells"));

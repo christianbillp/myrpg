@@ -50,6 +50,10 @@ export interface OverlayCallbacks {
   resolveSpeakerToken: (entityRef: string) => string | null;
   /** Conversation registry loaded at boot — see `BootScene`. */
   getConversations: () => ConversationDef[];
+  /** True when the given encounter id is a mission hub (`EncounterDef.missionHub`).
+   *  Hubs navigate via the MissionTopBar, so their completion does NOT show the
+   *  chapter-complete wrap-up. */
+  isMissionHub: (encounterId: string) => boolean;
 }
 
 export class OverlayManager {
@@ -257,6 +261,14 @@ export class OverlayManager {
    */
   syncEncounterComplete(state: GameState): void {
     if (!state.encounterComplete) return;
+    // The Bureau mission cycle (hub encounters + mission_* spokes) navigates
+    // via the MissionTopBar (TO MISSION / LEAVE MISSION / LEAVE ADVENTURE), not
+    // the chapter-complete overlay. Without this, clearing a mission's enemies
+    // sets `encounterComplete` and pops a wrap-up button on the mission map; and
+    // a hub that completes (e.g. signing_on after its proving fight) would pop
+    // one too instead of settling into hub mode. Skip the wrap-up in both cases.
+    const here = state.currentEncounterId;
+    if ((typeof here === 'string' && here.startsWith('mission_')) || (here != null && this.callbacks.isMissionHub(here))) return;
     const ctx = state.adventureContext;
     const dedupKey = ctx ? ctx.chapterId : "single-encounter";
     if (this.encounterCompleteShownFor === dedupKey) return;

@@ -305,6 +305,7 @@ export class GameScene extends Phaser.Scene {
       resolveSpeakerName: (ref) => this.resolveConversationSpeakerName(ref),
       resolveSpeakerToken: (ref) => this.resolveConversationSpeakerToken(ref),
       getConversations: () => this.defs.conversations(),
+      isMissionHub: (id) => !!this.defs.encounters().find((e) => e.id === id)?.missionHub,
     });
     if (this.pendingIsResume) this.overlays.markResumed();
 
@@ -375,17 +376,26 @@ export class GameScene extends Phaser.Scene {
     }
     if (this.speechInputBubble) { this.speechInputBubble.destroy(); this.speechInputBubble = null; }
     this.aigm?.dispose();
-    if (!this.uiDestroyed) {
-      this.uiDestroyed = true;
-      this.hud.destroy();
-      this.playerPanel.destroy();
-      this.targetPanel.destroy();
-      this.missionTopBar.destroy();
-      this.devToolsPanel?.destroy();
-      this.speechBubbles.destroy();
-      this.screenEffects.destroy();
-      this.uiScale.destroy();
-    }
+    this.teardownUi();
+  }
+
+  /** Tear down every body-mounted UI panel exactly once. Both the Phaser
+   *  SHUTDOWN handler and the explicit `leaveEncounter` exit route call this;
+   *  the `uiDestroyed` guard makes the second call a no-op. Keeping the list in
+   *  ONE place is the point — when these were two hand-maintained lists they
+   *  drifted, and `leaveEncounter` leaked the MissionTopBar onto the next scene
+   *  because it never destroyed it. */
+  private teardownUi(): void {
+    if (this.uiDestroyed) return;
+    this.uiDestroyed = true;
+    this.hud.destroy();
+    this.playerPanel.destroy();
+    this.targetPanel.destroy();
+    this.missionTopBar.destroy();
+    this.devToolsPanel?.destroy();
+    this.speechBubbles.destroy();
+    this.screenEffects.destroy();
+    this.uiScale.destroy();
   }
 
   // ── State update pipeline ─────────────────────────────────────────────────
@@ -804,9 +814,12 @@ export class GameScene extends Phaser.Scene {
       return;
     }
 
-    if (nState) {
+    if (nState && this.selectedEntityId !== nState.id) {
       this.selectEntity(nState.id);
     } else {
+      // Empty tile, or a re-click on the already-selected creature's tile:
+      // either way inspect the underlying tile (clicking the creature again
+      // peels the selection off it to reveal the terrain beneath).
       this.selectTile(tileX, tileY);
     }
   }
@@ -879,12 +892,19 @@ export class GameScene extends Phaser.Scene {
    *  map grids, the encounter environment, and the active AOE zones. */
   private buildTileDetails(x: number, y: number): TileDetails {
     const map = this.gameState!.map;
-    const legend = this.defs.tileLegend().tiles;
+    // Resolve a GID's name through its OWNING tileset (highest firstgid ≤ gid),
+    // then look it up in that tileset's legend block by the tile's standalone id
+    // (local frame + 1). A flat merge across tilesets would collide on shared
+    // GID keys (scribble 8 = grass, water 8 = water_edge_w).
+    const legendBlocks = this.defs.tileLegendTilesets();
+    const tilesetsByFirstgid = [...(map.tilesets ?? [])].sort((a, b) => b.firstgid - a.firstgid);
     const tileName = (rawGid: number | undefined): string | null => {
       const gid = decodeTileGid(rawGid ?? 0).gid;
       if (gid === 0) return null;
       if (gid === TILE_VOID_GID) return 'Void';
-      const name = legend[String(gid)]?.name;
+      const owner = tilesetsByFirstgid.find((t) => gid >= t.firstgid);
+      const block = owner ? legendBlocks.find((b) => b.image === owner.imageUrl) : undefined;
+      const name = owner && block ? block.tiles[String(gid - owner.firstgid + 1)]?.name : undefined;
       if (!name) return `#${gid}`;
       return name.replace(/_transparent$/, '').replace(/_/g, ' ');
     };
@@ -990,7 +1010,10 @@ export class GameScene extends Phaser.Scene {
       },
     });
     this.targetPanel = new TargetPanel(this.uiScale);
-    this.missionTopBar = new MissionTopBar(this.uiScale, (encounterId) => this.transitionToEncounter(encounterId));
+    this.missionTopBar = new MissionTopBar(this.uiScale, {
+      onTransition: (encounterId) => this.transitionToEncounter(encounterId),
+      onLeaveAdventure: () => this.leaveEncounter(),
+    });
     if (DevMode.showDevToolsPanel) {
       this.devToolsPanel = new DevToolsPanel(this.uiScale, {
         onReloadEncounter:    () => void this.reloadEncounter(),
@@ -1360,32 +1383,38 @@ export class GameScene extends Phaser.Scene {
 
   /**
    * Refresh the MissionTopBar mode from the current state. The bar
-   * surfaces the Bureau-office mission cycle:
+   * surfaces the Bureau mission cycle:
    *
-   *   • At the Bureau (`currentEncounterId === 'bureau_office'`) and
-   *     a contract is pending (`worldFlags.mission_pending` resolves
-   *     truthy and is a string identifying which mission) → TO MISSION
-   *     button targeting that encounter id.
+   *   • In a hub encounter (`EncounterDef.missionHub`) → LEAVE ADVENTURE,
+   *     plus TO MISSION when a contract is pending (`worldFlags.mission_pending`
+   *     resolves truthy and is a string identifying which mission).
    *
-   *   • Inside a mission encounter (currentEncounterId starts with
-   *     `mission_`) → LEAVE MISSION button targeting `bureau_office`.
+   *   • Inside a mission encounter (currentEncounterId starts with `mission_`)
+   *     → LEAVE MISSION, returning to whichever hub issued the contract
+   *     (`worldFlags.mission_hub_id`).
    *
    *   • Anywhere else → hidden.
    *
-   * Convention over configuration: the encounter id naming pattern
-   * (`mission_<flavour>`) drives the in-mission detection. Add a new
-   * mission encounter = no UI changes; the bar finds it automatically.
+   * Hubs are data-driven (the `missionHub` flag), not a hardcoded id, so any
+   * station encounter that sets it joins the cycle with no UI changes.
    */
   private refreshMissionTopBar(state: GameState): void {
     const here = state.currentEncounterId;
     const flags = state.worldFlags ?? {};
     const pending = flags['mission_pending'];
-    if (here === 'bureau_office' && typeof pending === 'string' && pending.length > 0) {
-      this.missionTopBar.setMode({ kind: 'to-mission', encounterId: pending });
+    const def = this.defs.encounters().find((e) => e.id === here);
+    if (def?.missionHub) {
+      // At a hub: LEAVE ADVENTURE is always offered (end the run); TO MISSION
+      // joins it side-by-side when a contract is pending.
+      this.missionTopBar.setButtons({
+        toMission: typeof pending === 'string' && pending.length > 0 ? pending : undefined,
+        leaveAdventure: true,
+      });
     } else if (typeof here === 'string' && here.startsWith('mission_')) {
-      this.missionTopBar.setMode({ kind: 'leave-mission' });
+      const hub = flags['mission_hub_id'];
+      this.missionTopBar.setButtons({ leaveMission: typeof hub === 'string' && hub.length > 0 ? hub : 'bureau_office' });
     } else {
-      this.missionTopBar.setMode({ kind: 'hidden' });
+      this.missionTopBar.setButtons({});
     }
   }
 
@@ -1402,7 +1431,7 @@ export class GameScene extends Phaser.Scene {
   private async transitionToEncounter(encounterId: string): Promise<void> {
     const sessionId = gameClient.getSessionId();
     if (!sessionId) return;
-    this.missionTopBar.setMode({ kind: 'hidden' });
+    this.missionTopBar.setButtons({});
     try {
       const resp = await fetch(`${API_URL}/game/session/${sessionId}/transition`, {
         method: 'POST',
@@ -1833,15 +1862,24 @@ export class GameScene extends Phaser.Scene {
       void this.advanceChapter();
       return;
     }
-    this.uiDestroyed = true;
-    this.playerPanel.destroy();
-    this.targetPanel.destroy();
-    this.devToolsPanel?.destroy();
-    this.hud.destroy();
-    this.speechBubbles.destroy();
-    this.screenEffects.destroy();
-    this.uiScale.destroy();
-    void gameClient.disconnect().then(() => this.scene.start("EncounterSetupScene"));
+    // Inside an authored adventure (real `adventureId` — not the bureau cycle's
+    // synthetic empty-id context) the player returns to Adventure Setup; a
+    // standalone encounter returns to Encounter Setup.
+    const adventureId = this.gameState?.adventureContext?.adventureId;
+    const characterId = this.playerDef?.id;
+    this.teardownUi();
+    const target = adventureId ? "AdventureSetupScene" : "EncounterSetupScene";
+    // Checkpoint the adventure BEFORE disconnecting (disconnect deletes the
+    // server session) so the chapter's progress survives and can be resumed
+    // from Adventure Setup. Best-effort — leaving proceeds regardless.
+    const checkpoint = adventureId && characterId
+      ? gameClient.checkpointAdventure(characterId).catch(() => { /* non-fatal */ })
+      : Promise.resolve();
+    void checkpoint
+      // Adventures keep the world save (exact-state resume); standalone
+      // encounters clear it as before.
+      .then(() => gameClient.disconnect(!!adventureId))
+      .then(() => this.scene.start(target));
   }
 
   /** DevTools: re-create the current session from the captured payload
@@ -1853,31 +1891,44 @@ export class GameScene extends Phaser.Scene {
    *  scene was entered without a captured payload (resume / chapter-
    *  advance entries don't currently carry one). */
   private async reloadEncounter(): Promise<void> {
-    if (!this.lastCreateRequest) {
-      console.warn("[DevTools] Reload Encounter unavailable — no captured CreateSessionRequest (resume / chapter-advance entry).");
+    // Path A — the scene was entered with the original create payload
+    // (Encounter Setup → BEGIN): recreate the exact session from it.
+    if (this.lastCreateRequest) {
+      const request = this.lastCreateRequest;
+      // `disconnect` closes the current WS AND deletes the current session on
+      // the server. We want both — there's no reason to keep the old session
+      // around once we've decided to reload.
+      await gameClient.disconnect();
+      try {
+        const { state, playerDef } = await gameClient.createSession(request);
+        // Critical — without this, the SHUTDOWN handler that fires on
+        // scene.restart would call `gameClient.disconnect()` again and DELETE
+        // the session we just created. The new scene's `create()` would then
+        // open a WS against a dead session → ConnectionLost overlay.
+        this.preserveSessionOnShutdown = true;
+        this.scene.restart({
+          sessionId: state.sessionId,
+          playerDef,
+          createRequest: request,
+        });
+      } catch (err) {
+        console.error("[DevTools] Reload Encounter failed:", err);
+        this.scene.start("EncounterSetupScene");
+      }
       return;
     }
-    const request = this.lastCreateRequest;
-    // `disconnect` closes the current WS AND deletes the current session on
-    // the server. We want both — there's no reason to keep the old session
-    // around once we've decided to reload.
-    await gameClient.disconnect();
-    try {
-      const { state, playerDef } = await gameClient.createSession(request);
-      // Critical — without this, the SHUTDOWN handler that fires on
-      // scene.restart would call `gameClient.disconnect()` again and DELETE
-      // the session we just created. The new scene's `create()` would then
-      // open a WS against a dead session → ConnectionLost overlay.
-      this.preserveSessionOnShutdown = true;
-      this.scene.restart({
-        sessionId: state.sessionId,
-        playerDef,
-        createRequest: request,
-      });
-    } catch (err) {
-      console.error("[DevTools] Reload Encounter failed:", err);
-      this.scene.start("EncounterSetupScene");
+    // Path B — no captured payload (entered via a mission-cycle transition or a
+    // resumed save). Rebuild the CURRENT encounter through the transition
+    // endpoint: it stands up a fresh session for the same encounter id while
+    // carrying world flags + player state across, so the encounter re-runs from
+    // the top. Skipped for authored adventures, whose multi-chapter context the
+    // transition path doesn't preserve.
+    const here = this.gameState?.currentEncounterId;
+    if (here && !this.gameState?.adventureContext?.adventureId) {
+      await this.transitionToEncounter(here);
+      return;
     }
+    console.warn("[DevTools] Reload Encounter unavailable for this entry (authored-adventure chapter with no captured payload).");
   }
 
   private async advanceChapter(): Promise<void> {
@@ -2000,6 +2051,10 @@ export class GameScene extends Phaser.Scene {
       this.playerDef.maxHp,
       state.objective,
     );
+    // Real authored adventure (non-empty adventureId, not the bureau cycle's
+    // synthetic context) → the exit button reads LEAVE ADVENTURE and routes
+    // back to Adventure Setup.
+    this.playerPanel.setInAdventure(!!state.adventureContext?.adventureId);
 
     if (this.selectedEntityId) {
       const nState = state.npcs.find(n => n.id === this.selectedEntityId);

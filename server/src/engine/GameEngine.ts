@@ -1285,6 +1285,7 @@ export class GameEngine {
       player: this.state.player,
       features: this.defs.features,
       spells: this.defs.spells,
+      npcs: this.state.npcs,
     });
   }
 
@@ -1298,7 +1299,7 @@ export class GameEngine {
     if (!preview) throw new Error('Long Rest is not available here.');
 
     applyLongRest(
-      { playerDef: this.playerDef, player: this.state.player, features: this.defs.features, spells: this.defs.spells },
+      { playerDef: this.playerDef, player: this.state.player, features: this.defs.features, spells: this.defs.spells, npcs: this.state.npcs },
       choices,
       preview,
     );
@@ -1318,6 +1319,13 @@ export class GameEngine {
     }
     if (preview.exhaustionReduced) {
       this.addLog({ left: `Exhaustion level: ${this.state.player.exhaustionLevel}`, style: 'status' });
+    }
+    for (const c of preview.companionsRestored ?? []) {
+      const bits = [
+        c.hpRestored > 0 ? `+${c.hpRestored} HP` : null,
+        c.conditionsCleared.length > 0 ? `cleared ${c.conditionsCleared.join(', ')}` : null,
+      ].filter((s): s is string => !!s);
+      this.addLog({ left: `${c.name} rests — ${bits.join(', ') || 'ready'}`, style: 'heal' });
     }
 
     this.computeAvailableActions();

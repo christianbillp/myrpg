@@ -303,6 +303,16 @@ export function doShortRest(ctx: GameContext): void {
       ctx.addLog({ left: `📖 Arcane Recovery — recovered ${summary}`, style: 'heal' });
     }
   }
+
+  // Companions catch their breath on a Short Rest too — a modest HP recovery
+  // (a quarter of maximum). NPCs don't track hit dice, so this is a flat proxy
+  // rather than a die roll.
+  for (const npc of s.npcs) {
+    if (!npc.companion || npc.hp <= 0 || npc.hp >= npc.maxHp) continue;
+    const beforeNpc = npc.hp;
+    npc.hp = Math.min(npc.maxHp, npc.hp + Math.max(1, Math.ceil(npc.maxHp * 0.25)));
+    ctx.addLog({ left: `${npc.revealedName ?? npc.name} catches a breath — +${npc.hp - beforeNpc} HP  (${npc.hp}/${npc.maxHp})`, style: 'heal' });
+  }
 }
 
 export function doUsePotion(ctx: GameContext): void {
