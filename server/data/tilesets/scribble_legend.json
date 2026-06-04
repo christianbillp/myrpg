@@ -1,9 +1,10 @@
 {
-  "notes": "AI-facing tile legend for the scribble tileset (128×128 hand-drawn art over a 14-column × 11-row sheet, 154 tiles total). Generate a map as a Tiled tile layer: an object with \"type\": \"tilelayer\", a \"name\", integer \"width\" and \"height\", and a flat \"data\" array of length width*height. Each entry in \"data\" is the GID of a tile defined below (use the id shown as each tile's key, e.g. 8 for grass). GIDs assume the tileset is referenced at firstgid: 1 (the only configuration this codebase uses); GID = row*14 + col + 1 over the 14×11 tilesheet. The array is row-major: the first \"width\" entries are the top row, left to right, then the next row. Only use ids listed below; do not invent ids. TRANSPARENT TWINS: columns 8-13 (GIDs in the gaps 9-14, 23-28, 37-42, 51-56, 65-70, 79-84, 93-98, 107-112) are transparent-background copies of the tiles in columns 1-6 of the same row (shifted +7 columns; e.g. the tile at col 8 is the transparent version of the tile at col 1). Their names end in \"_transparent\". They are \"layer\": \"object\" overlays with no floor of their own — place them on top of a ground tile (e.g. a transparent wall over grass). Passability is copied from their floored twin. ROTATION / FLIP: most directional tiles (wall edges, corners, bridges, paths) ship only in one orientation; to render them at other angles, OR the GID with one of Tiled's standard flip flags: 0x80000000 (flip H), 0x40000000 (flip V), 0x20000000 (anti-diagonal flip, used for 90° rotations). Common combinations: rotate 90° CW = 0xA0000000 (+2684354560); rotate 180° = 0xC0000000 (+3221225472); rotate 270° CW = 0x60000000 (+1610612736). Maps may have two stacked tile layers: a \"ground\" layer (one of the \"layer\": \"ground\" tiles below per cell) and an optional \"object\" layer (one of the \"layer\": \"object\" tiles per cell, or 0 for empty) drawn on top. \"passable\" is authoritative for reachability/validation — a cell is passable iff both its ground tile and its object tile (if any) are passable. Impassable terrain (chasm) can be crossed by placing a bridge or walkway tile over it.",
+  "notes": "AI-facing tile legend for the scribble tileset (128×128 hand-drawn art over a 14-column × 11-row sheet, 154 tiles total). Generate a map as a Tiled tile layer: an object with \"type\": \"tilelayer\", a \"name\", integer \"width\" and \"height\", and a flat \"data\" array of length width*height. Each entry in \"data\" is the GID of a tile defined below (use the id shown as each tile's key, e.g. 8 for grass). GIDs assume the tileset is referenced at firstgid: 1 (the only configuration this codebase uses); GID = row*14 + col + 1 over the 14×11 tilesheet. The array is row-major: the first \"width\" entries are the top row, left to right, then the next row. Only use ids listed below; do not invent ids. TRANSPARENT TWINS: columns 8-13 (GIDs in the gaps 9-14, 23-28, 37-42, 51-56, 65-70, 79-84, 93-98, 107-112) are transparent-background copies of the tiles in columns 1-6 of the same row (shifted +7 columns; e.g. the tile at col 8 is the transparent version of the tile at col 1). Their names end in \"_transparent\". They are \"layer\": \"object\" overlays with no floor of their own — place them on top of a ground tile (e.g. a transparent wall over grass). Movement/sight blocking is copied from their floored twin. ROTATION / FLIP: most directional tiles (wall edges, corners, bridges, paths) ship only in one orientation; to render them at other angles, OR the GID with one of Tiled's standard flip flags: 0x80000000 (flip H), 0x40000000 (flip V), 0x20000000 (anti-diagonal flip, used for 90° rotations). Common combinations: rotate 90° CW = 0xA0000000 (+2684354560); rotate 180° = 0xC0000000 (+3221225472); rotate 270° CW = 0x60000000 (+1610612736). Maps may have two stacked tile layers: a \"ground\" layer (one of the \"layer\": \"ground\" tiles below per cell) and an optional \"object\" layer (one of the \"layer\": \"object\" tiles per cell, or 0 for empty) drawn on top. \"blocksMovement\" is authoritative for reachability/validation — a cell is impassable if either its ground tile or its object tile (if any) has blocksMovement true. \"blocksSight\" works the same way for line-of-sight: vision is blocked if either the ground or object tile has blocksSight true. Impassable terrain (chasm) can be crossed by placing a bridge or walkway tile over it (a passable object over an impassable ground opens the cell).",
   "tiles": {
     "1": {
       "name": "blank",
-      "passable": true,
+      "blocksMovement": false,
+      "blocksSight": false,
       "layer": "ground",
       "description": "Featureless light tile with no surface detail. Passable. Use sparingly — for default walkable floors prefer stone_floor (GID 15) or its variants.",
       "tags": [
@@ -14,7 +15,8 @@
     },
     "8": {
       "name": "grass",
-      "passable": true,
+      "blocksMovement": false,
+      "blocksSight": false,
       "layer": "ground",
       "description": "Solid medium-green grass. Default outdoor ground fill.",
       "tags": [
@@ -25,9 +27,10 @@
     },
     "9": {
       "name": "path_corner_se_transparent",
-      "passable": true,
+      "blocksMovement": false,
+      "blocksSight": false,
       "layer": "object",
-      "description": "Dirt path corner; the path enters from the bottom edge and turns to exit on the right. Transparent background (no floor); overlay on top of a ground tile. Twin of path_corner_se.",
+      "description": "Dirt path corner; the path enters from the bottom edge and turns to exit on the right. Transparent background (no floor); overlay on top of a ground tile.",
       "tags": [
         "path",
         "road",
@@ -42,9 +45,10 @@
     },
     "10": {
       "name": "stone_wall_corner_tl_transparent",
-      "passable": false,
+      "blocksMovement": true,
+      "blocksSight": true,
       "layer": "object",
-      "description": "Solid stone wall corner piece (top-left). Blocks movement and sight. Transparent background (no floor); overlay on top of a ground tile. Twin of stone_wall_corner_tl.",
+      "description": "Solid stone wall corner piece (top-left). Blocks movement and sight. Transparent background (no floor); overlay on top of a ground tile.",
       "tags": [
         "stone",
         "wall",
@@ -59,7 +63,8 @@
     },
     "11": {
       "name": "stone_wall_top_transparent",
-      "passable": false,
+      "blocksMovement": true,
+      "blocksSight": true,
       "layer": "object",
       "description": "Solid stone wall segment placed along the top of the tile. Blocks movement and sight. Transparent background (no floor); overlay on top of a ground tile. Twin of stone_wall_top.",
       "tags": [
@@ -75,7 +80,8 @@
     },
     "12": {
       "name": "doorway_top_transparent",
-      "passable": true,
+      "blocksMovement": true,
+      "blocksSight": true,
       "layer": "object",
       "description": "An open doorway (no door) set in the top part of the tile. Passable opening; place over a wall tile. Transparent background (no floor); overlay on top of a ground tile. Twin of doorway_top.",
       "tags": [
@@ -90,10 +96,11 @@
       ]
     },
     "13": {
-      "name": "crate_transparent",
-      "passable": false,
+      "name": "crate_small_transparent",
+      "blocksMovement": false,
+      "blocksSight": false,
       "layer": "object",
-      "description": "A wooden crate marked with an X. Blocks movement; searchable for loot. Transparent background (no floor); overlay on top of a ground tile. Twin of crate.",
+      "description": "A small wooden crate. Does not block sight or movement. Transparent background (no floor); overlay on top of a ground tile.",
       "tags": [
         "crate",
         "container",
@@ -105,14 +112,14 @@
         "overlay",
         "no_background"
       ],
-      "cover": "half",
-      "transparent": true
+      "cover": "half"
     },
     "14": {
       "name": "wooden_plank_transparent",
-      "passable": true,
+      "blocksMovement": false,
+      "blocksSight": false,
       "layer": "object",
-      "description": "Light wooden plank overlay — a passable wooden surface drawn on top of an existing ground tile. Transparent background. Use to add wooden detail (boards, planking, decking) over a non-wood ground without replacing it. Twin of wooden_plank.",
+      "description": "Light wooden plank overlay — a passable wooden surface drawn on top of an existing ground tile. Transparent background. Use to add wooden detail (boards, planking, decking) over a non-wood ground without replacing it.",
       "tags": [
         "wood",
         "floor",
@@ -120,12 +127,15 @@
         "indoor",
         "transparent",
         "overlay",
-        "no_background"
+        "no_background",
+        "bar",
+        "table"
       ]
     },
     "15": {
       "name": "stone_floor",
-      "passable": true,
+      "blocksMovement": false,
+      "blocksSight": false,
       "layer": "ground",
       "description": "Pale grey flagstone floor with faint grid lines. **Default walkable dungeon / interior floor** — pair with stone_floor_cracked (71) for variation in worn or ruined areas.",
       "tags": [
@@ -139,9 +149,10 @@
     },
     "22": {
       "name": "crate_closed",
-      "passable": false,
+      "blocksMovement": true,
+      "blocksSight": true,
       "layer": "object",
-      "description": "A closed crate with a slatted lid. Blocks movement; searchable for loot.",
+      "description": "A closed crate with a slatted lid. Blocks movement and sight; searchable for loot.",
       "tags": [
         "crate",
         "container",
@@ -150,14 +161,14 @@
         "searchable",
         "indoor"
       ],
-      "cover": "half",
-      "transparent": true
+      "cover": "half"
     },
     "23": {
       "name": "path_straight_v_transparent",
-      "passable": true,
+      "blocksMovement": false,
+      "blocksSight": false,
       "layer": "object",
-      "description": "Straight vertical dirt path running from the bottom edge to the top edge. Transparent background (no floor); overlay on top of a ground tile. Twin of path_straight_v.",
+      "description": "Straight vertical dirt path running from the bottom edge to the top edge. Transparent background (no floor); overlay on top of a ground tile.",
       "tags": [
         "path",
         "road",
@@ -172,9 +183,10 @@
     },
     "24": {
       "name": "stone_wall_corner_curved_transparent",
-      "passable": false,
+      "blocksMovement": true,
+      "blocksSight": true,
       "layer": "object",
-      "description": "Curved stone wall corner piece. Blocks movement and sight. Transparent background (no floor); overlay on top of a ground tile. Twin of stone_wall_corner_curved.",
+      "description": "Curved stone wall corner piece. Blocks movement and sight. Transparent background (no floor); overlay on top of a ground tile.",
       "tags": [
         "stone",
         "wall",
@@ -189,9 +201,10 @@
     },
     "25": {
       "name": "half_wall_ul_transparent",
-      "passable": true,
+      "blocksMovement": false,
+      "blocksSight": false,
       "layer": "object",
-      "description": "A low half-wall in the upper-left of the tile. Passable; provides cover but does not block line of sight. Transparent background (no floor); overlay on top of a ground tile. Twin of half_wall_ul.",
+      "description": "A low half-wall in the upper-left of the tile. Passable; provides cover but does not block line of sight. Transparent background (no floor); overlay on top of a ground tile.",
       "tags": [
         "wall",
         "half_wall",
@@ -206,9 +219,10 @@
     },
     "26": {
       "name": "doorway_open_top_transparent",
-      "passable": true,
+      "blocksMovement": false,
+      "blocksSight": false,
       "layer": "object",
-      "description": "An open doorway with no door, set in the upper part of the tile. Passable opening. Transparent background (no floor); overlay on top of a ground tile. Twin of doorway_open_top.",
+      "description": "An open doorway with no door, set in the upper part of the tile. Passable opening. Transparent background (no floor); overlay on top of a ground tile.",
       "tags": [
         "door",
         "entrance",
@@ -221,9 +235,10 @@
     },
     "27": {
       "name": "brazier_transparent",
-      "passable": false,
+      "blocksMovement": true,
+      "blocksSight": false,
       "layer": "object",
-      "description": "A standing lit brazier. Blocks movement; emits light. Transparent background (no floor); overlay on top of a ground tile. Twin of brazier.",
+      "description": "A standing lit brazier. Blocks movement; emits light. Transparent background (no floor); overlay on top of a ground tile.",
       "tags": [
         "brazier",
         "light",
@@ -234,14 +249,14 @@
         "overlay",
         "no_background"
       ],
-      "cover": "half",
-      "transparent": true
+      "cover": "half"
     },
     "28": {
       "name": "chair_n_transparent",
-      "passable": true,
+      "blocksMovement": false,
+      "blocksSight": false,
       "layer": "object",
-      "description": "A wooden chair, centered, facing north. Passable seat a character can occupy. Transparent background (no floor); overlay on top of a ground tile. Twin of chair_n.",
+      "description": "A wooden chair, centered, facing north. Passable seat a character can occupy. Transparent background (no floor); overlay on top of a ground tile.",
       "tags": [
         "chair",
         "seat",
@@ -255,7 +270,8 @@
     },
     "36": {
       "name": "trapdoor",
-      "passable": true,
+      "blocksMovement": false,
+      "blocksSight": false,
       "layer": "object",
       "description": "A trapdoor set into the floor that opens toward the right. Passable; acts as a level transition.",
       "tags": [
@@ -268,9 +284,10 @@
     },
     "37": {
       "name": "path_intersection_transparent",
-      "passable": true,
+      "blocksMovement": false,
+      "blocksSight": false,
       "layer": "object",
-      "description": "A four-way dirt path intersection; paths meet in the center of the tile. Transparent background (no floor); overlay on top of a ground tile. Twin of path_intersection.",
+      "description": "A four-way dirt path intersection; paths meet in the center of the tile. Transparent background (no floor); overlay on top of a ground tile.",
       "tags": [
         "path",
         "road",
@@ -287,9 +304,10 @@
     },
     "38": {
       "name": "stone_wall_corner_pit_transparent",
-      "passable": false,
+      "blocksMovement": true,
+      "blocksSight": true,
       "layer": "object",
-      "description": "Stone wall corner beside a void. Blocks movement and sight. Transparent background (no floor); overlay on top of a ground tile. Twin of stone_wall_corner_pit.",
+      "description": "Stone wall corner beside a void. Blocks movement and sight. Transparent background (no floor); overlay on top of a ground tile.",
       "tags": [
         "stone",
         "wall",
@@ -304,9 +322,10 @@
     },
     "39": {
       "name": "half_wall_cracked_ul_transparent",
-      "passable": true,
+      "blocksMovement": false,
+      "blocksSight": false,
       "layer": "object",
-      "description": "A cracked low half-wall in the upper part of the tile. Passable; provides cover but does not block line of sight. Transparent background (no floor); overlay on top of a ground tile. Twin of half_wall_cracked_ul.",
+      "description": "A cracked low half-wall in the upper part of the tile. Passable; provides cover but does not block line of sight. Transparent background (no floor); overlay on top of a ground tile.",
       "tags": [
         "wall",
         "half_wall",
@@ -322,9 +341,10 @@
     },
     "40": {
       "name": "door_open_top_transparent",
-      "passable": true,
+      "blocksMovement": false,
+      "blocksSight": false,
       "layer": "object",
-      "description": "An open door; frame in the upper part of the tile, door swung open toward the lower right. Passable. Transparent background (no floor); overlay on top of a ground tile. Twin of door_open_top.",
+      "description": "An open door; frame in the upper part of the tile, door swung open toward the lower right. Passable. Transparent background (no floor); overlay on top of a ground tile.",
       "tags": [
         "door",
         "entrance",
@@ -338,9 +358,10 @@
     },
     "41": {
       "name": "barrels_two_transparent",
-      "passable": false,
+      "blocksMovement": false,
+      "blocksSight": false,
       "layer": "object",
-      "description": "Two barrels in the center; one upright at top-right, one lying on its side at lower-left. Blocks movement; searchable. Transparent background (no floor); overlay on top of a ground tile. Twin of barrels_two.",
+      "description": "Two barrels in the center; one upright at top-right, one lying on its side at lower-left. Searchable. Transparent background (no floor); overlay on top of a ground tile.",
       "tags": [
         "barrel",
         "container",
@@ -352,14 +373,14 @@
         "overlay",
         "no_background"
       ],
-      "cover": "half",
-      "transparent": true
+      "cover": "half"
     },
     "42": {
       "name": "firewood_transparent",
-      "passable": false,
+      "blocksMovement": false,
+      "blocksSight": false,
       "layer": "object",
-      "description": "A pile of planks or firewood. Blocks movement; searchable. Transparent background (no floor); overlay on top of a ground tile. Twin of firewood.",
+      "description": "A pile of planks or firewood. Searchable. Transparent background (no floor); overlay on top of a ground tile.",
       "tags": [
         "firewood",
         "planks",
@@ -370,12 +391,12 @@
         "overlay",
         "no_background"
       ],
-      "cover": "half",
-      "transparent": true
+      "cover": "half"
     },
     "43": {
       "name": "stone_floor_diamond",
-      "passable": true,
+      "blocksMovement": false,
+      "blocksSight": false,
       "layer": "ground",
       "description": "Stone floor with a diamond tile pattern. Walkable dungeon floor.",
       "tags": [
@@ -389,7 +410,8 @@
     },
     "50": {
       "name": "stairs_up",
-      "passable": true,
+      "blocksMovement": false,
+      "blocksSight": false,
       "layer": "object",
       "description": "A staircase leading up. Passable; acts as a level transition.",
       "tags": [
@@ -403,9 +425,10 @@
     },
     "51": {
       "name": "rail_corner_se_transparent",
-      "passable": true,
+      "blocksMovement": false,
+      "blocksSight": false,
       "layer": "object",
-      "description": "Railway track curving from the bottom edge to the right edge. Transparent background (no floor); overlay on top of a ground tile. Twin of rail_corner_se.",
+      "description": "Railway track curving from the bottom edge to the right edge. Transparent background (no floor); overlay on top of a ground tile.",
       "tags": [
         "rail",
         "track",
@@ -420,9 +443,10 @@
     },
     "52": {
       "name": "stone_wall_conduit_corner_transparent",
-      "passable": false,
+      "blocksMovement": true,
+      "blocksSight": true,
       "layer": "object",
-      "description": "Curved stone wall corner with a conduit/pipe. Blocks movement and sight. Transparent background (no floor); overlay on top of a ground tile. Twin of stone_wall_conduit_corner.",
+      "description": "Curved stone wall corner with a conduit/pipe. Blocks movement and sight. Transparent background (no floor); overlay on top of a ground tile.",
       "tags": [
         "stone",
         "wall",
@@ -437,9 +461,10 @@
     },
     "53": {
       "name": "window_top_transparent",
-      "passable": false,
+      "blocksMovement": true,
+      "blocksSight": false,
       "layer": "object",
-      "description": "A horizontal window set into the top part of a wall. Blocks movement. Transparent background (no floor); overlay on top of a ground tile. Twin of window_top.",
+      "description": "A horizontal window set into the top part of a wall. Transparent background (no floor); overlay on top of a ground tile.",
       "tags": [
         "window",
         "wall",
@@ -450,14 +475,14 @@
         "overlay",
         "no_background"
       ],
-      "cover": "half",
-      "transparent": true
+      "cover": "half"
     },
     "54": {
       "name": "brazier_b_transparent",
-      "passable": false,
+      "blocksMovement": false,
+      "blocksSight": false,
       "layer": "object",
-      "description": "A standing lit brazier. Blocks movement; emits light. Transparent background (no floor); overlay on top of a ground tile. Twin of brazier_b.",
+      "description": "A standing lit brazier. Transparent background (no floor); overlay on top of a ground tile.",
       "tags": [
         "brazier",
         "light",
@@ -468,14 +493,14 @@
         "overlay",
         "no_background"
       ],
-      "cover": "half",
-      "transparent": true
+      "cover": "half"
     },
     "55": {
       "name": "barrels_three_transparent",
-      "passable": false,
+      "blocksMovement": true,
+      "blocksSight": true,
       "layer": "object",
-      "description": "Three barrels arranged along the vertical center of the tile. Blocks movement; searchable. Transparent background (no floor); overlay on top of a ground tile. Twin of barrels_three.",
+      "description": "Three barrels arranged along the vertical center of the tile. Searchable. Transparent background (no floor); overlay on top of a ground tile. ",
       "tags": [
         "barrel",
         "container",
@@ -487,14 +512,14 @@
         "overlay",
         "no_background"
       ],
-      "cover": "half",
-      "transparent": true
+      "cover": "half"
     },
     "56": {
       "name": "bed_n_transparent",
-      "passable": false,
+      "blocksMovement": false,
+      "blocksSight": false,
       "layer": "object",
-      "description": "A bed, centered, vertical, facing north. Blocks movement. Transparent background (no floor); overlay on top of a ground tile. Twin of bed_n.",
+      "description": "A bed, centered, vertical, facing north. Transparent background (no floor); overlay on top of a ground tile.",
       "tags": [
         "bed",
         "furniture",
@@ -504,12 +529,12 @@
         "overlay",
         "no_background"
       ],
-      "cover": "half",
-      "transparent": true
+      "cover": "half"
     },
     "57": {
       "name": "stone_floor_inlay",
-      "passable": true,
+      "blocksMovement": false,
+      "blocksSight": false,
       "layer": "ground",
       "description": "Stone floor with a central diamond inlay. Walkable dungeon floor.",
       "tags": [
@@ -523,7 +548,8 @@
     },
     "64": {
       "name": "stairs_down",
-      "passable": true,
+      "blocksMovement": false,
+      "blocksSight": false,
       "layer": "object",
       "description": "A staircase leading down. Passable; acts as a level transition.",
       "tags": [
@@ -537,9 +563,10 @@
     },
     "65": {
       "name": "rail_straight_v_transparent",
-      "passable": true,
+      "blocksMovement": false,
+      "blocksSight": false,
       "layer": "object",
-      "description": "Straight railway track running from the bottom edge to the top edge. Transparent background (no floor); overlay on top of a ground tile. Twin of rail_straight_v.",
+      "description": "Straight railway track running from the bottom edge to the top edge. Transparent background (no floor); overlay on top of a ground tile. ",
       "tags": [
         "rail",
         "track",
@@ -554,9 +581,10 @@
     },
     "66": {
       "name": "stone_wall_corner_ul_transparent",
-      "passable": false,
+      "blocksMovement": true,
+      "blocksSight": true,
       "layer": "object",
-      "description": "Stone wall placed in the upper-left part of the tile. Blocks movement and sight. Transparent background (no floor); overlay on top of a ground tile. Twin of stone_wall_corner_ul.",
+      "description": "Stone wall placed in the upper-left part of the tile. Transparent background (no floor); overlay on top of a ground tile.",
       "tags": [
         "stone",
         "wall",
@@ -571,9 +599,10 @@
     },
     "67": {
       "name": "wall_spikes_top_transparent",
-      "passable": false,
+      "blocksMovement": true,
+      "blocksSight": true,
       "layer": "object",
-      "description": "A horizontal wall along the top of the tile with spikes facing toward the center. Blocks movement and deals contact damage. Transparent background (no floor); overlay on top of a ground tile. Twin of wall_spikes_top.",
+      "description": "A horizontal wall along the top of the tile with spikes facing toward the center. Deals contact damage. Transparent background (no floor); overlay on top of a ground tile.",
       "tags": [
         "wall",
         "spikes",
@@ -589,9 +618,10 @@
     },
     "68": {
       "name": "chest_s_transparent",
-      "passable": false,
+      "blocksMovement": false,
+      "blocksSight": false,
       "layer": "object",
-      "description": "A chest, facing south. Blocks movement; searchable for loot. Transparent background (no floor); overlay on top of a ground tile. Twin of chest_s.",
+      "description": "A chest, facing south. Searchable. Transparent background (no floor); overlay on top of a ground tile.",
       "tags": [
         "chest",
         "container",
@@ -603,14 +633,14 @@
         "overlay",
         "no_background"
       ],
-      "cover": "half",
-      "transparent": true
+      "cover": "half"
     },
     "69": {
       "name": "arrow_body_se_transparent",
-      "passable": true,
+      "blocksMovement": false,
+      "blocksSight": false,
       "layer": "object",
-      "description": "Marker: arrow body curving from the center-bottom toward the center-right. Part of a multi-tile directional arrow overlay. Transparent background (no floor); overlay on top of a ground tile. Twin of arrow_body_se.",
+      "description": "Marker: arrow body curving from the center-bottom toward the center-right. Part of a multi-tile directional arrow overlay. Transparent background (no floor); overlay on top of a ground tile.",
       "tags": [
         "marker",
         "arrow",
@@ -624,9 +654,10 @@
     },
     "70": {
       "name": "bed_unmade_transparent",
-      "passable": false,
+      "blocksMovement": false,
+      "blocksSight": false,
       "layer": "object",
-      "description": "An unmade bed. Blocks movement. Transparent background (no floor); overlay on top of a ground tile. Twin of bed_unmade.",
+      "description": "An unmade bed. Transparent background (no floor); overlay on top of a ground tile.",
       "tags": [
         "bed",
         "furniture",
@@ -636,12 +667,12 @@
         "overlay",
         "no_background"
       ],
-      "cover": "half",
-      "transparent": true
+      "cover": "half"
     },
     "71": {
       "name": "stone_floor_cracked",
-      "passable": true,
+      "blocksMovement": false,
+      "blocksSight": false,
       "layer": "ground",
       "description": "Cracked grey stone floor. Walkable dungeon floor.",
       "tags": [
@@ -655,7 +686,8 @@
     },
     "78": {
       "name": "bridge_v",
-      "passable": true,
+      "blocksMovement": false,
+      "blocksSight": false,
       "layer": "ground",
       "description": "A straight bridge segment running from top to bottom. Passable; lay across water or chasm to cross.",
       "tags": [
@@ -668,9 +700,10 @@
     },
     "79": {
       "name": "rail_intersection_transparent",
-      "passable": true,
+      "blocksMovement": false,
+      "blocksSight": false,
       "layer": "object",
-      "description": "A railway intersection; tracks meet in the center of the tile. Transparent background (no floor); overlay on top of a ground tile. Twin of rail_intersection.",
+      "description": "A railway intersection; tracks meet in the center of the tile. Transparent background (no floor); overlay on top of a ground tile.",
       "tags": [
         "rail",
         "track",
@@ -687,9 +720,10 @@
     },
     "80": {
       "name": "stone_wall_corner_ul_b_transparent",
-      "passable": false,
+      "blocksMovement": true,
+      "blocksSight": true,
       "layer": "object",
-      "description": "Stone wall placed in the upper-left part of the tile. Blocks movement and sight. Transparent background (no floor); overlay on top of a ground tile. Twin of stone_wall_corner_ul_b.",
+      "description": "Stone wall placed in the upper-left part of the tile. Transparent background (no floor); overlay on top of a ground tile.",
       "tags": [
         "stone",
         "wall",
@@ -704,9 +738,10 @@
     },
     "81": {
       "name": "wall_broken_top_transparent",
-      "passable": true,
+      "blocksMovement": false,
+      "blocksSight": false,
       "layer": "object",
-      "description": "A broken-down wall along the top of the tile, rubble spilling toward the center. Passable over the rubble. Transparent background (no floor); overlay on top of a ground tile. Twin of wall_broken_top.",
+      "description": "A broken-down wall along the top of the tile, rubble spilling toward the center. Transparent background (no floor); overlay on top of a ground tile.",
       "tags": [
         "wall",
         "broken",
@@ -721,9 +756,10 @@
     },
     "82": {
       "name": "campfire_transparent",
-      "passable": false,
+      "blocksMovement": false,
+      "blocksSight": false,
       "layer": "object",
-      "description": "A lit campfire. Blocks movement; emits light. Transparent background (no floor); overlay on top of a ground tile. Twin of campfire.",
+      "description": "A campfire. Transparent background (no floor); overlay on top of a ground tile.",
       "tags": [
         "campfire",
         "fire",
@@ -735,14 +771,14 @@
         "overlay",
         "no_background"
       ],
-      "cover": "half",
-      "transparent": true
+      "cover": "half"
     },
     "83": {
       "name": "arrow_body_v_transparent",
-      "passable": true,
+      "blocksMovement": false,
+      "blocksSight": false,
       "layer": "object",
-      "description": "Marker: vertical arrow body, centered, running from top to bottom. Part of a multi-tile directional arrow overlay. Transparent background (no floor); overlay on top of a ground tile. Twin of arrow_body_v.",
+      "description": "Marker: vertical arrow body, centered, running from top to bottom. Part of a multi-tile directional arrow overlay. Transparent background (no floor); overlay on top of a ground tile.",
       "tags": [
         "marker",
         "arrow",
@@ -756,9 +792,10 @@
     },
     "84": {
       "name": "coffin_transparent",
-      "passable": false,
+      "blocksMovement": true,
+      "blocksSight": true,
       "layer": "object",
-      "description": "A coffin or tomb marked with a cross. Blocks movement; searchable. Transparent background (no floor); overlay on top of a ground tile. Twin of coffin.",
+      "description": "A coffin or tomb marked with a cross. Searchable. Transparent background (no floor); overlay on top of a ground tile.",
       "tags": [
         "coffin",
         "tomb",
@@ -769,12 +806,12 @@
         "overlay",
         "no_background"
       ],
-      "cover": "half",
-      "transparent": true
+      "cover": "half"
     },
     "85": {
       "name": "wood_floor",
-      "passable": true,
+      "blocksMovement": false,
+      "blocksSight": false,
       "layer": "ground",
       "description": "Warm wooden plank floor. Default walkable floor for taverns and wooden interiors.",
       "tags": [
@@ -787,7 +824,8 @@
     },
     "92": {
       "name": "bridge_broken_bottom",
-      "passable": true,
+      "blocksMovement": false,
+      "blocksSight": false,
       "layer": "ground",
       "description": "A bridge segment with a missing board at the bottom. Passable but broken at the south edge.",
       "tags": [
@@ -800,9 +838,10 @@
     },
     "93": {
       "name": "minecart_n_transparent",
-      "passable": false,
+      "blocksMovement": true,
+      "blocksSight": true,
       "layer": "object",
-      "description": "A minecart on a railway track, facing north. Blocks movement. Transparent background (no floor); overlay on top of a ground tile. Twin of minecart_n.",
+      "description": "A minecart on a railway track, facing north. Blocks movement. Transparent background (no floor); overlay on top of a ground tile.",
       "tags": [
         "minecart",
         "rail",
@@ -813,14 +852,14 @@
         "overlay",
         "no_background"
       ],
-      "cover": "half",
-      "transparent": true
+      "cover": "half"
     },
     "94": {
       "name": "stone_wall_curve_top_transparent",
-      "passable": false,
+      "blocksMovement": true,
+      "blocksSight": true,
       "layer": "object",
-      "description": "A horizontal stone wall in the upper part of the tile, curved on the right side. Blocks movement and sight. Transparent background (no floor); overlay on top of a ground tile. Twin of stone_wall_curve_top.",
+      "description": "A horizontal stone wall in the upper part of the tile, curved on the right side. Transparent background (no floor); overlay on top of a ground tile. ",
       "tags": [
         "stone",
         "wall",
@@ -835,9 +874,10 @@
     },
     "95": {
       "name": "grate_square_transparent",
-      "passable": true,
+      "blocksMovement": false,
+      "blocksSight": false,
       "layer": "object",
-      "description": "A square floor grate. Passable. Transparent background (no floor); overlay on top of a ground tile. Twin of grate_square.",
+      "description": "A square floor grate. Transparent background (no floor); overlay on top of a ground tile.",
       "tags": [
         "grate",
         "floor",
@@ -850,9 +890,10 @@
     },
     "96": {
       "name": "flowers_transparent",
-      "passable": true,
+      "blocksMovement": false,
+      "blocksSight": false,
       "layer": "object",
-      "description": "A patch of flowers. Low decoration; does not block movement. Transparent background (no floor); overlay on top of a ground tile. Twin of flowers.",
+      "description": "A patch of flowers. Low decoration; does not block movement. Transparent background (no floor); overlay on top of a ground tile.",
       "tags": [
         "flowers",
         "nature",
@@ -865,9 +906,10 @@
     },
     "97": {
       "name": "arrow_head_n_transparent",
-      "passable": true,
+      "blocksMovement": false,
+      "blocksSight": false,
       "layer": "object",
-      "description": "Marker: arrowhead pointing up (north). Endpoint of a multi-tile directional arrow overlay. Transparent background (no floor); overlay on top of a ground tile. Twin of arrow_head_n.",
+      "description": "Marker: arrowhead pointing up (north). Endpoint of a multi-tile directional arrow overlay. Transparent background (no floor); overlay on top of a ground tile.",
       "tags": [
         "marker",
         "arrow",
@@ -881,9 +923,10 @@
     },
     "98": {
       "name": "liquid_floor_transparent",
-      "passable": true,
+      "blocksMovement": false,
+      "blocksSight": false,
       "layer": "object",
-      "description": "A pool of liquid on the ground. Passable. Transparent background (no floor); overlay on top of a ground tile. Twin of liquid_floor.",
+      "description": "A pool of liquid on the ground. Transparent background (no floor); overlay on top of a ground tile.",
       "tags": [
         "liquid",
         "water",
@@ -896,7 +939,8 @@
     },
     "99": {
       "name": "terrain_bumpy",
-      "passable": true,
+      "blocksMovement": false,
+      "blocksSight": false,
       "layer": "ground",
       "description": "Bumpy, uneven terrain. Walkable but counts as difficult terrain.",
       "tags": [
@@ -909,7 +953,8 @@
     },
     "106": {
       "name": "walkway_v",
-      "passable": true,
+      "blocksMovement": false,
+      "blocksSight": false,
       "layer": "ground",
       "description": "A straight elevated walkway running from top to bottom. Passable.",
       "tags": [
@@ -923,9 +968,10 @@
     },
     "107": {
       "name": "minecart_offrail_n_transparent",
-      "passable": false,
+      "blocksMovement": true,
+      "blocksSight": true,
       "layer": "object",
-      "description": "A minecart off the tracks, centered, facing north. Blocks movement. Transparent background (no floor); overlay on top of a ground tile. Twin of minecart_offrail_n.",
+      "description": "A minecart off the tracks, centered, facing north. Transparent background (no floor); overlay on top of a ground tile.",
       "tags": [
         "minecart",
         "cart",
@@ -935,14 +981,14 @@
         "overlay",
         "no_background"
       ],
-      "cover": "half",
-      "transparent": true
+      "cover": "half"
     },
     "108": {
       "name": "stone_wall_corner_ul_top_transparent",
-      "passable": false,
+      "blocksMovement": true,
+      "blocksSight": true,
       "layer": "object",
-      "description": "A horizontal stone wall in the upper-left part of the tile. Blocks movement and sight. Transparent background (no floor); overlay on top of a ground tile. Twin of stone_wall_corner_ul_top.",
+      "description": "A horizontal stone wall in the upper-left part of the tile. Transparent background (no floor); overlay on top of a ground tile. ",
       "tags": [
         "stone",
         "wall",
@@ -957,9 +1003,10 @@
     },
     "109": {
       "name": "grate_round_transparent",
-      "passable": true,
+      "blocksMovement": false,
+      "blocksSight": false,
       "layer": "object",
-      "description": "A round floor grate. Passable. Transparent background (no floor); overlay on top of a ground tile. Twin of grate_round.",
+      "description": "A round floor grate. Transparent background (no floor); overlay on top of a ground tile.",
       "tags": [
         "grate",
         "floor",
@@ -972,9 +1019,10 @@
     },
     "110": {
       "name": "tree_transparent",
-      "passable": false,
+      "blocksMovement": true,
+      "blocksSight": true,
       "layer": "object",
-      "description": "A tree placed on top of a ground tile. Blocks movement and sight. Transparent background (no floor); overlay on top of a ground tile. Twin of tree.",
+      "description": "A tree placed on top of a ground tile. Transparent background (no floor); overlay on top of a ground tile.",
       "tags": [
         "tree",
         "nature",
@@ -988,9 +1036,10 @@
     },
     "111": {
       "name": "arrow_start_n_transparent",
-      "passable": true,
+      "blocksMovement": false,
+      "blocksSight": false,
       "layer": "object",
-      "description": "Marker: start of a multi-tile arrow, beginning at center and continuing north. Part of a directional arrow overlay. Transparent background (no floor); overlay on top of a ground tile. Twin of arrow_start_n.",
+      "description": "Marker: start of a multi-tile arrow, beginning at center and continuing north. Part of a directional arrow overlay. Transparent background (no floor); overlay on top of a ground tile.",
       "tags": [
         "marker",
         "arrow",
@@ -1004,9 +1053,10 @@
     },
     "112": {
       "name": "dragon_skull_transparent",
-      "passable": false,
+      "blocksMovement": true,
+      "blocksSight": true,
       "layer": "object",
-      "description": "The skull of a dragon. Blocks movement; searchable. Transparent background (no floor); overlay on top of a ground tile. Twin of dragon_skull.",
+      "description": "The skull of a dragon. Searchable. Transparent background (no floor); overlay on top of a ground tile.",
       "tags": [
         "skull",
         "dragon",
@@ -1017,12 +1067,12 @@
         "overlay",
         "no_background"
       ],
-      "cover": "half",
-      "transparent": true
+      "cover": "half"
     },
     "65534": {
       "name": "void",
-      "passable": false,
+      "blocksMovement": true,
+      "blocksSight": true,
       "layer": "ground",
       "description": "Pure black void / abyss. The renderer draws a solid black rectangle here (no sprite is sampled from the tileset) and the cell is impassable. Use this as the chasm fill — fill the impassable region with GID 65534 and lay bridge tiles (78 or 106) across it for crossings.",
       "tags": [
@@ -1032,8 +1082,7 @@
         "abyss",
         "hazard",
         "fill"
-      ],
-      "transparent": true
+      ]
     }
   }
 }

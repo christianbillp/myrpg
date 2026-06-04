@@ -11,7 +11,8 @@
   "tiles": {
     "1": {
       "name": "water",
-      "passable": false,
+      "blocksMovement": true,
+      "blocksSight": true,
       "layer": "ground",
       "description": "Open water with rippling surface. Impassable unless bridged.",
       "tags": [
@@ -23,7 +24,8 @@
     },
     "2": {
       "name": "grass",
-      "passable": true,
+      "blocksMovement": false,
+      "blocksSight": false,
       "layer": "ground",
       "description": "Grassy ground.",
       "tags": [
@@ -35,7 +37,8 @@
     },
     "5": {
       "name": "water_edge_n",
-      "passable": false,
+      "blocksMovement": true,
+      "blocksSight": true,
       "layer": "ground",
       "description": "Shoreline: grass to the north, water to the south.",
       "tags": [
@@ -48,7 +51,8 @@
     },
     "6": {
       "name": "water_edge_e",
-      "passable": false,
+      "blocksMovement": true,
+      "blocksSight": true,
       "layer": "ground",
       "description": "Shoreline: grass to the east, water to the west.",
       "tags": [
@@ -61,7 +65,8 @@
     },
     "7": {
       "name": "water_edge_s",
-      "passable": false,
+      "blocksMovement": true,
+      "blocksSight": true,
       "layer": "ground",
       "description": "Shoreline: grass to the south, water to the north.",
       "tags": [
@@ -74,7 +79,8 @@
     },
     "8": {
       "name": "water_edge_w",
-      "passable": false,
+      "blocksMovement": true,
+      "blocksSight": true,
       "layer": "ground",
       "description": "Shoreline: grass to the west, water to the east.",
       "tags": [
@@ -87,7 +93,8 @@
     },
     "9": {
       "name": "water_outer_nw",
-      "passable": false,
+      "blocksMovement": true,
+      "blocksSight": true,
       "layer": "ground",
       "description": "Water body's rounded corner; grass pocket in the north-west.",
       "tags": [
@@ -100,7 +107,8 @@
     },
     "10": {
       "name": "water_outer_ne",
-      "passable": false,
+      "blocksMovement": true,
+      "blocksSight": true,
       "layer": "ground",
       "description": "Water body's rounded corner; grass pocket in the north-east.",
       "tags": [
@@ -113,7 +121,8 @@
     },
     "11": {
       "name": "water_outer_se",
-      "passable": false,
+      "blocksMovement": true,
+      "blocksSight": true,
       "layer": "ground",
       "description": "Water body's rounded corner; grass pocket in the south-east.",
       "tags": [
@@ -126,7 +135,8 @@
     },
     "12": {
       "name": "water_outer_sw",
-      "passable": false,
+      "blocksMovement": true,
+      "blocksSight": true,
       "layer": "ground",
       "description": "Water body's rounded corner; grass pocket in the south-west.",
       "tags": [
@@ -139,7 +149,8 @@
     },
     "13": {
       "name": "water_inner_nw",
-      "passable": false,
+      "blocksMovement": true,
+      "blocksSight": true,
       "layer": "ground",
       "description": "Grass with a water pocket rounding into the north-west corner.",
       "tags": [
@@ -152,7 +163,8 @@
     },
     "14": {
       "name": "water_inner_ne",
-      "passable": false,
+      "blocksMovement": true,
+      "blocksSight": true,
       "layer": "ground",
       "description": "Grass with a water pocket rounding into the north-east corner.",
       "tags": [
@@ -165,7 +177,8 @@
     },
     "15": {
       "name": "water_inner_se",
-      "passable": false,
+      "blocksMovement": true,
+      "blocksSight": true,
       "layer": "ground",
       "description": "Grass with a water pocket rounding into the south-east corner.",
       "tags": [
@@ -178,7 +191,8 @@
     },
     "16": {
       "name": "water_inner_sw",
-      "passable": false,
+      "blocksMovement": true,
+      "blocksSight": true,
       "layer": "ground",
       "description": "Grass with a water pocket rounding into the south-west corner.",
       "tags": [

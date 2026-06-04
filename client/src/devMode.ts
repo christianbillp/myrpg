@@ -8,9 +8,10 @@
  * the UI (see CLAUDE.md). The new feature toggles live in their own getters
  * + setters so the Configuration scene can render them independently.
  */
-import type { DevFlags } from "../../shared/types";
+import type { DevFlags, LogLevel } from "../../shared/types";
 
-const KEY = 'myrpg_dev_mode';
+const KEY_DEV_MODE = 'myrpg_dev_mode';
+const KEY_LOG_LEVEL = 'myrpg_dev_log_level';
 const KEY_DISABLE_AIGM = 'myrpg_disable_aigm';
 const KEY_DISABLE_SUPERTITLE = 'myrpg_dev_disable_supertitle';
 const KEY_UNLIMITED_SPELL_SLOTS = 'myrpg_dev_unlimited_spell_slots';
@@ -42,7 +43,7 @@ export const DevMode = {
   get enabled(): boolean {
     const urlOverride = readUrlParam('dev');
     if (urlOverride !== null) return urlOverride;
-    const stored = localStorage.getItem(KEY);
+    const stored = localStorage.getItem(KEY_DEV_MODE);
     return stored === null ? true : stored === 'true';
   },
   /**
@@ -82,6 +83,18 @@ export const DevMode = {
    *  true; this client flag is purely UI-state. */
   get cleanModeOnStart(): boolean           { return readBoolStorage(KEY_CLEAN_MODE_ON_START); },
   set cleanModeOnStart(v: boolean)          { writeBoolStorage(KEY_CLEAN_MODE_ON_START, v); },
+  /** Server-side logging verbosity. Like `cleanModeOnStart` this is a
+   *  server-global setting, not a per-session override — mirrored to
+   *  localStorage only so the Configuration screen renders the saved state
+   *  without an extra GET. Defaults to `regular`. */
+  get logLevel(): LogLevel {
+    const stored = localStorage.getItem(KEY_LOG_LEVEL);
+    return stored === 'none' || stored === 'maximum' ? stored : 'regular';
+  },
+  set logLevel(v: LogLevel) {
+    if (v === 'regular') localStorage.removeItem(KEY_LOG_LEVEL);
+    else localStorage.setItem(KEY_LOG_LEVEL, v);
+  },
 
   /** Snapshot the current flags for inclusion in a `CreateSessionRequest`.
    *  Only set fields that are TRUE so the request stays lean. Returns

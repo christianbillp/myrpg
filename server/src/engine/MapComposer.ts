@@ -35,10 +35,9 @@ export function composeMap(opts: ComposeOptions): ComposedMap {
   const seed = (opts.seed ?? Date.now()) & 0xffffffff;
   const rng = mulberry32(seed);
   const allocZoneId = makeZoneIdAlloc(seed);
-  const disabledScribble = new Set(opts.disabledTiles?.scribble ?? []);
 
   if (terrain === 'dungeon') {
-    return composeDungeon({ width, height, features: opts.features, rng, disabledScribble });
+    return composeDungeon({ width, height, features: opts.features, rng });
   }
   if (terrain === 'tavern') {
     return composeTavern({ width, height, rng, allocZoneId });
@@ -48,7 +47,6 @@ export function composeMap(opts: ComposeOptions): ComposedMap {
     terrain,
     features: opts.features,
     buildingsCount: opts.buildingsCount,
-    disabledScribble,
     rng,
     allocZoneId,
   });

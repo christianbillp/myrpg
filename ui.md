@@ -192,6 +192,7 @@ Defined in `client/src/ui/StorylogOverlay.ts`. Standalone HTML overlay (no `Base
 | **ADVENTURE CREATOR** | [Adventure Creator Scene](#adventure-creator-scene) | String encounters into an adventure with overarching story, AI context, and a rest stop |
 | **NPC CREATOR** | [NPC Creator Scene](#npc-creator-scene) | Author an NPC on top of an existing monster — name, faction, persona, token |
 | **TOKEN CREATOR** | [Token Creator Scene](#token-creator-scene) | Mix and match parts (hair, eyes, beard, …) to build an NPC token |
+| **TILE CREATOR** | [Tile Creator Scene](#tile-creator-scene) | Edit each tile's attributes — movement, sight, cover, obscurance, tags — per tileset |
 | **CONFIGURATION** | Configuration Scene | Choose the active setting; toggle Development Mode flags including the destructive **Clean Mode** (`cleanModeOnStart` — wipes every player progress artefact under each setting's `saves/` directory on every server restart). |
 
 ---
@@ -490,6 +491,29 @@ The composed SVG is saved through `POST /token`, which writes both the flattened
 | **BACK** button | Bottom-left (HTML, `ghost` variant). Returns to Main Menu Scene. |
 | **✓ SAVE TOKEN** button | Bottom-right (HTML, `primary` variant). Composes the SVG from the spec + the in-memory parts library and writes BOTH `data/tokens/<id>.svg` (flattened) and `data/tokens/specs/<id>.json` (editable). Returns the token's asset path so the caller can drop it straight into the NPC Creator's TOKEN ASSET PATH field. |
 | **Status line** | HTML text above the bottom row — surfaces in-flight messages ("Saving…") and disabled-button hints. |
+
+### Tile Creator Scene
+
+`client/src/scenes/TileCreatorScene.ts` — top-level scene reached via `MainMenuScene → TILE CREATOR`. Standalone page for editing a tileset's per-tile attributes (the global **tile legend**). The author picks a tileset, clicks one of the tiles **declared in that tileset's legend**, and edits its entry.
+
+Each save goes through `PUT /tilesets/:tileset/tiles/:gid`, which writes the entry into `server/data/tilesets/<tileset>_legend.json` (preserving the notes block and every other tile) and reloads defs, so the new semantics take effect on the next session. The legend is global; per-encounter overrides still live in `EncounterDef.tileProperties`.
+
+**Layout:** LEFT column hosts the tileset picker, a preview of the selected tile (cropped from the tileset PNG), and the attribute controls + SAVE. RIGHT column hosts a scrollable grid of the tiles in the chosen tileset's legend (not the raw spritesheet). BOTTOM bar carries BACK and SAVE TILE.
+
+| Component | Description |
+| --------- | ----------- |
+| **Tileset picker** *(LEFT, top)* | Dropdown of every tileset with a legend file. Switching repaints the frame grid and clears the current selection. |
+| **Frame preview** *(LEFT, mid)* | Pixel-cropped preview of the selected frame + a `<tileset> · GID <n>` label. |
+| **NAME** input | Short identifier, e.g. `stone_wall`. Required to save. |
+| **LAYER** select | `ground` or `object`. |
+| **Blocks movement** / **Blocks sight** checkboxes | The two independent blocking flags baked into `GameMap.blocksMovement` / `GameMap.blocksSight`. |
+| **COVER** / **OBSCURANCE** selects | SRD cover (none / half / three-quarters / total) and obscurance (none / lightly / heavily). |
+| **TAGS** input | Comma-separated free-form tags. |
+| **DESCRIPTION** textarea | Shown to AI map generators. |
+| **Tile grid** *(RIGHT, fills the column)* | One clickable thumbnail per tile declared in the tileset's legend (cropped from the tileset PNG), grouped under **GROUND** / **OBJECT** layer headers and sorted by GID within each group; clicking loads its attributes into the LEFT controls. The selected tile highlights with the accent border. |
+| **BACK** button | Bottom-left (HTML, `ghost` variant). Returns to Main Menu Scene. |
+| **✓ SAVE TILE** button | Bottom-right (HTML, `primary` variant). Upserts the legend entry via `PUT /tilesets/:tileset/tiles/:gid`. |
+| **Status line** | HTML text above the bottom row — save progress and validation hints. |
 
 ### Token Picker Overlay
 

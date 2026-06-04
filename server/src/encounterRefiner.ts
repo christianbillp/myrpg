@@ -222,7 +222,7 @@ export async function refineEncounter(
 /** Build a row-major passability grid: `.` passable, `#` impassable. Skips
  *  flip-bits when looking up GIDs (orientation doesn't affect passability). */
 function buildPassabilityGrid(
-  map: { gidGrid: number[][]; objectGidGrid?: number[][]; tilesets: Array<{ firstgid: number; tilePassability: Record<number, boolean> }> },
+  map: { gidGrid: number[][]; objectGidGrid?: number[][]; tilesets: Array<{ firstgid: number; tileBlocksMovement: Record<number, boolean> }> },
   defs: GameDefs,
 ): string {
   const legend = defs.tileLegend.tiles;
@@ -231,17 +231,17 @@ function buildPassabilityGrid(
     const eff = (objectRaw && objectRaw !== 0) ? objectRaw : groundRaw;
     if (eff === 0) return true;
     const gid = stripTileFlipBits(eff);
-    let owner: { firstgid: number; tilePassability: Record<number, boolean> } | undefined;
+    let owner: { firstgid: number; tileBlocksMovement: Record<number, boolean> } | undefined;
     for (const ts of tilesets) {
       if (ts.firstgid <= gid && (!owner || ts.firstgid > owner.firstgid)) owner = ts;
     }
     if (owner) {
       const local = gid - owner.firstgid;
-      const declared = owner.tilePassability[local];
-      if (declared !== undefined) return declared;
+      const declared = owner.tileBlocksMovement[local];
+      if (declared !== undefined) return !declared;
     }
-    const legendPassable = legend[String(gid)]?.passable;
-    if (legendPassable !== undefined) return legendPassable;
+    const legendBlocks = legend[String(gid)]?.blocksMovement;
+    if (legendBlocks !== undefined) return !legendBlocks;
     return true;
   };
   const lines: string[] = [];

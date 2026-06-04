@@ -20,12 +20,6 @@ export interface ComposeOptions {
    *  Clamped to 1..5. Defaults to 1. Ignored when the `buildings` feature
    *  is not selected. */
   buildingsCount?: number;
-  /** Per-tileset list of disabled LOCAL tile ids. The biome palettes index
-   *  into the scribble tileset, so the only key we read here is
-   *  `disabledTiles.scribble`; matching gids are stripped from the biome's
-   *  ground/object pools so the deterministic composer never paints them.
-   *  Empty / absent = no filtering. */
-  disabledTiles?: Record<string, number[]>;
 }
 
 export interface ComposedTilesetRef {

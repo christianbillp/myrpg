@@ -32,7 +32,7 @@ export function parseStartingZones(layer: StartingZonesLayer, map: GameMap): Zon
       if (!gid) continue;
       const key = GID_TO_ZONE_KEY[gid];
       if (!key) continue;
-      if (!map.passable[y]?.[x]) continue;
+      if (map.blocksMovement[y]?.[x]) continue;
       if (!result.has(key)) result.set(key, []);
       result.get(key)!.push([x, y]);
     }
@@ -52,22 +52,22 @@ export function findPlayerSpawn(map: GameMap, zone?: Zone, exactTile?: [number, 
   // accidentally-wall-bound exact placement doesn't strand the player.
   if (exactTile) {
     const [ex, ey] = exactTile;
-    const { cols, rows, passable } = map;
-    if (ex >= 0 && ex < cols && ey >= 0 && ey < rows && passable[ey][ex]) return [ex, ey];
+    const { cols, rows, blocksMovement } = map;
+    if (ex >= 0 && ex < cols && ey >= 0 && ey < rows && !blocksMovement[ey][ex]) return [ex, ey];
   }
   if (zone) {
     const pick = zone[Math.floor(Math.random() * zone.length)];
     if (pick) return pick;
   }
-  const { cols, rows, passable } = map;
+  const { cols, rows, blocksMovement } = map;
   const candidates: [number, number][] = [];
   for (let r = 0; r < rows; r++)
     for (let c = 0; c < Math.floor(cols / 3); c++)
-      if (passable[r][c]) candidates.push([c, r]);
+      if (!blocksMovement[r][c]) candidates.push([c, r]);
   if (candidates.length > 0) return candidates[Math.floor(Math.random() * candidates.length)];
   for (let r = 0; r < rows; r++)
     for (let c = 0; c < cols; c++)
-      if (passable[r][c]) return [c, r];
+      if (!blocksMovement[r][c]) return [c, r];
   return [0, 0];
 }
 
@@ -78,11 +78,11 @@ export function spawnItems(
 ): void {
   const potion = items.find((i) => i.id === 'health_potion');
   if (!potion) return;
-  const { cols, rows, passable } = map;
+  const { cols, rows, blocksMovement } = map;
   const candidates: [number, number][] = [];
   for (let r = 0; r < rows; r++)
     for (let c = 0; c < cols; c++)
-      if (passable[r][c] && chebyshev(c, r, px, py) >= 3 && !npcs.some((n) => n.tileX === c && n.tileY === r))
+      if (!blocksMovement[r][c] && chebyshev(c, r, px, py) >= 3 && !npcs.some((n) => n.tileX === c && n.tileY === r))
         candidates.push([r, c]);
   shuffle(candidates).slice(0, Math.min(3, candidates.length)).forEach(([r, c], i) => {
     out.push({ id: `item_${i}`, defId: potion.id, tileX: c, tileY: r });
@@ -170,8 +170,8 @@ export function spawnNpc(
   // a spawn by binding it to a wall or another entity.
   if (exactTile) {
     const [ex, ey] = exactTile;
-    const { cols, rows, passable } = map;
-    if (ex >= 0 && ex < cols && ey >= 0 && ey < rows && passable[ey][ex] && !occupied.has(`${ex},${ey}`)) {
+    const { cols, rows, blocksMovement } = map;
+    if (ex >= 0 && ex < cols && ey >= 0 && ey < rows && !blocksMovement[ey][ex] && !occupied.has(`${ex},${ey}`)) {
       let combatLabel = '';
       if (disposition === 'enemy') {
         const enemyCount = out.filter((n) => n.disposition === 'enemy').length;
@@ -203,7 +203,7 @@ export function spawnNpc(
   if (zone) {
     candidates = zone.filter(([c, r]) => !occupied.has(`${c},${r}`));
   } else {
-    const { cols, rows, passable } = map;
+    const { cols, rows, blocksMovement } = map;
     candidates = [];
     for (let r = 0; r < rows; r++)
       for (let c = 0; c < cols; c++) {
@@ -211,7 +211,7 @@ export function spawnNpc(
         // Distance gate by disposition: allies hug close (1-3 tiles), enemies
         // start at sniping range (≥5), neutrals likewise stay back.
         const inRange = disposition === 'ally' ? dist >= 1 && dist <= 3 : dist >= 5;
-        if (passable[r][c] && inRange && !occupied.has(`${c},${r}`))
+        if (!blocksMovement[r][c] && inRange && !occupied.has(`${c},${r}`))
           candidates.push([c, r]);
       }
   }
@@ -250,11 +250,11 @@ export function spawnSecrets(
   out: SecretState[], map: GameMap, secretDefs: SecretDef[],
   px: number, py: number, npcs: NpcState[],
 ): void {
-  const { cols, rows, passable } = map;
+  const { cols, rows, blocksMovement } = map;
   const candidates: [number, number][] = [];
   for (let r = 0; r < rows; r++)
     for (let c = 0; c < cols; c++)
-      if (passable[r][c] && chebyshev(c, r, px, py) >= 3 && !npcs.some((n) => n.tileX === c && n.tileY === r))
+      if (!blocksMovement[r][c] && chebyshev(c, r, px, py) >= 3 && !npcs.some((n) => n.tileX === c && n.tileY === r))
         candidates.push([r, c]);
   shuffle(candidates).slice(0, Math.min(secretDefs.length, candidates.length)).forEach(([r, c], i) => {
     out.push({ tileX: c, tileY: r, def: secretDefs[i] as SecretDef });

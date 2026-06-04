@@ -20,7 +20,7 @@
 import { BIOME_PALETTES, pickGroundGid, rollObjectGid, type BiomePalette } from '../../../../shared/biomePalettes.js';
 import type { ComposedMap, ComposedTilesetRef, Feature, MapAnchors, MapZone, Terrain } from '../mapTypes.js';
 import { DECOR_GIDS, PATH_GIDS, TERRAIN_GIDS, WALL_GIDS, WATER_FIRSTGID, WATER_GIDS } from '../mapTiles.js';
-import { SCRIBBLE_TILESET, WATER_TILESET, filterPalette, flatten } from './shared.js';
+import { SCRIBBLE_TILESET, WATER_TILESET, flatten } from './shared.js';
 
 export interface ComposeOutdoorOpts {
   width: number;
@@ -28,14 +28,13 @@ export interface ComposeOutdoorOpts {
   terrain: 'grassland' | 'forest';
   features: Feature[];
   buildingsCount?: number;
-  disabledScribble: Set<number>;
   rng: () => number;
   allocZoneId: (kind: string) => string;
 }
 
 export function composeOutdoor(opts: ComposeOutdoorOpts): ComposedMap {
-  const { width, height, terrain, features, rng, allocZoneId, disabledScribble } = opts;
-  const palette = filterPalette(BIOME_PALETTES[terrain], disabledScribble);
+  const { width, height, terrain, features, rng, allocZoneId } = opts;
+  const palette = BIOME_PALETTES[terrain];
 
   // Terrain layer — fill with the biome's natural ground.
   const terrainGrid: number[][] = [];

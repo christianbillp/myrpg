@@ -135,7 +135,7 @@ export function runOffCameraTick(ctx: GameContext): GameEvent[] {
     const result = runEnemyTurn(npc, def, {
       displayName: npc.name,
       target: snapshot,
-      passable: s.map.passable,
+      blocksMovement: s.map.blocksMovement,
       mapCols: s.map.cols,
       mapRows: s.map.rows,
       occupiedTiles: occupied,

@@ -338,7 +338,11 @@ function walkLOS(map: GameMap, a: { tileX: number; tileY: number }, b: { tileX: 
     if (x0 === x1 && y0 === y1) break;     // skip end tile too
     cover = worseCover(cover, tileCover(map, x0, y0));
     obs = worseObscurance(obs, tileObs(map, x0, y0));
-    if (cover === 'total') break;          // total cover short-circuits
+    // A sight-blocking tile (wall, dense foliage) stops the line entirely —
+    // modelled as total cover so every downstream consumer (canSee, combat
+    // targeting) already handles it.
+    if (map.blocksSight[y0][x0]) cover = 'total';
+    if (cover === 'total') break;          // total cover / blocked sight short-circuits
   }
   return { cover, obscurance: obs };
 }

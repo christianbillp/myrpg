@@ -38,11 +38,29 @@
 import { appendFile, mkdir, readdir, stat, unlink, symlink, rm } from 'node:fs/promises';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import type { LogLevel } from '../../shared/types.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
-/** Severity levels. `debug` is dropped unless MYRPG_LOG_DEBUG=1. */
+/** Severity levels. `debug` is dropped unless the level is `maximum`. */
 export type LogSeverity = 'debug' | 'info' | 'warn' | 'error';
+
+/**
+ * Global logging verbosity (see `DevFlags.logLevel`). High-volume logging on
+ * the request path is a real source of in-encounter lag, so the whole module
+ * gates on this single value. `Logger.setLevel` is called on boot and on every
+ * Configuration save; `MYRPG_LOG_DEBUG=1` seeds `maximum` before any config
+ * loads so early-boot debug lines survive.
+ */
+let currentLevel: LogLevel = process.env.MYRPG_LOG_DEBUG === '1' ? 'maximum' : 'regular';
+
+/** Decide whether an entry of `severity` should be emitted at `currentLevel`.
+ *  `none` keeps only errors; `regular` drops debug; `maximum` keeps all. */
+function shouldEmit(severity: LogSeverity): boolean {
+  if (currentLevel === 'none') return severity === 'error';
+  if (severity === 'debug') return currentLevel === 'maximum';
+  return true;
+}
 
 /** Maximum number of session log files to keep on disk. Tunable via env. */
 const MAX_SESSION_LOGS = (() => {
@@ -52,8 +70,6 @@ const MAX_SESSION_LOGS = (() => {
 })();
 
 const LOG_DIR = join(__dirname, '../data/logs');
-
-const DEBUG_ENABLED = process.env.MYRPG_LOG_DEBUG === '1';
 
 /** Resolve "now" once per call so log lines are consistent. */
 function nowIso(): string { return new Date().toISOString(); }
@@ -148,7 +164,7 @@ export const Logger = {
    * before any session is bound (e.g. boot, save load).
    */
   log(category: string, payload: Record<string, unknown> = {}, severity: LogSeverity = 'info', sid?: string): void {
-    if (severity === 'debug' && !DEBUG_ENABLED) return;
+    if (!shouldEmit(severity)) return;
     const effectiveSid = sid ?? activeSessionId ?? null;
     const state = effectiveSid ? sessionStates.get(effectiveSid) : undefined;
     const ms = state ? Date.now() - state.startedAtMs : 0;
@@ -185,8 +201,19 @@ export const Logger = {
     this.log(category, payload, 'error', sid);
   },
 
-  /** Convenience: debug-level shorthand (dropped unless MYRPG_LOG_DEBUG=1). */
+  /** Convenience: debug-level shorthand (dropped unless level is `maximum`). */
   debug(category: string, payload: Record<string, unknown> = {}, sid?: string): void {
     this.log(category, payload, 'debug', sid);
+  },
+
+  /** Set the global logging verbosity. Called on boot and whenever the
+   *  Configuration screen's logging-level control is saved. */
+  setLevel(level: LogLevel): void {
+    currentLevel = level;
+  },
+
+  /** Current global logging verbosity. */
+  getLevel(): LogLevel {
+    return currentLevel;
   },
 };

@@ -1,6 +1,13 @@
 import Phaser from "phaser";
 import { DevMode } from "../devMode";
-import type { DevFlags } from "../../../shared/types";
+import type { DevFlags, LogLevel } from "../../../shared/types";
+
+/** The boolean-valued keys of `DevFlags` — i.e. every flag except `logLevel`,
+ *  which is an enum handled by its own selector. The generic toggle loop
+ *  writes `true` through this key type, so it must exclude non-boolean keys. */
+type BooleanDevFlagKey = {
+  [K in keyof DevFlags]-?: DevFlags[K] extends boolean | undefined ? K : never;
+}[keyof DevFlags];
 
 /**
  * ConfigurationScene — game-wide settings page reached from the main menu.
@@ -184,9 +191,6 @@ export class ConfigurationScene extends Phaser.Scene {
     // ── Development Mode section ─────────────────────────────────────────
     root.appendChild(this.buildDevModeSection());
 
-    // ── Tools section: launch sub-pages keyed off Configuration ─────────
-    root.appendChild(this.buildToolsSection());
-
     // ── Footer: divider, status, BACK + CONFIRM ─────────────────────────
     const footerDivider = document.createElement("div");
     footerDivider.style.cssText = `
@@ -271,7 +275,7 @@ export class ConfigurationScene extends Phaser.Scene {
     // are persisted (and mirrored to localStorage) when CONFIRM is pressed.
     // Until then the toggle's visual state is allowed to drift from the
     // saved baseline — that's how the user previews their changes.
-    const toggles: Array<{ label: string; description: string; flag: keyof DevFlags; invert?: boolean }> = [
+    const toggles: Array<{ label: string; description: string; flag: BooleanDevFlagKey; invert?: boolean }> = [
       {
         label: "Encounter intro screen",
         description: "When OFF, skip the title supertitle at encounter start. The intro text still appears in the GM chat.",
@@ -339,8 +343,82 @@ export class ConfigurationScene extends Phaser.Scene {
         },
       ));
     }
+    grid.appendChild(this.buildLogLevelCard());
     section.appendChild(grid);
     return section;
+  }
+
+  /** Logging-level card — a three-way segmented control (None / Regular /
+   *  Maximum) writing `pendingDevFlags.logLevel`. Server-side verbosity:
+   *  high-volume logging on the request path causes in-encounter lag, so
+   *  dialling it down (or off) is the fix. Persisted on CONFIRM like the
+   *  toggles. */
+  private buildLogLevelCard(): HTMLDivElement {
+    const card = document.createElement("div");
+    card.style.cssText = `
+      background: ${COLOR_CARD};
+      border: 1px solid ${COLOR_DIVIDER};
+      padding: 10px 12px;
+      display: flex; flex-direction: column; gap: 6px;
+    `;
+
+    const titleEl = document.createElement("div");
+    titleEl.textContent = "Logging level";
+    titleEl.style.cssText = `font-family: monospace; font-size: 12px; color: ${COLOR_TEXT_BRIGHT};`;
+    card.appendChild(titleEl);
+
+    const desc = document.createElement("div");
+    desc.textContent = "Server-side log verbosity. None = errors only (fastest — use this if logging is causing lag). Regular = normal info logs. Maximum = full debug trace.";
+    desc.style.cssText = `font-family: sans-serif; font-size: 10.5px; color: ${COLOR_TEXT}; line-height: 1.4;`;
+    card.appendChild(desc);
+
+    const row = document.createElement("div");
+    row.style.cssText = `display: flex; gap: 6px; margin-top: 2px;`;
+
+    const options: Array<{ value: LogLevel; label: string }> = [
+      { value: "none", label: "None" },
+      { value: "regular", label: "Regular" },
+      { value: "maximum", label: "Maximum" },
+    ];
+    const current = (): LogLevel => this.pendingDevFlags.logLevel ?? "regular";
+    const buttons: Array<{ value: LogLevel; el: HTMLButtonElement }> = [];
+    const repaint = (): void => {
+      for (const b of buttons) {
+        const active = b.value === current();
+        b.el.style.background = active ? COLOR_CARD_ACTIVE : COLOR_CARD;
+        b.el.style.borderColor = active ? COLOR_TITLE : COLOR_DIVIDER;
+        b.el.style.color = active ? COLOR_TEXT_BRIGHT : COLOR_TEXT;
+      }
+      card.style.borderColor = current() === "regular" ? COLOR_DIVIDER : COLOR_TITLE;
+    };
+
+    for (const opt of options) {
+      const btn = document.createElement("button");
+      btn.textContent = opt.label;
+      btn.style.cssText = `
+        flex: 1; padding: 6px 4px; cursor: pointer;
+        font-family: monospace; font-size: 11px;
+        background: ${COLOR_CARD}; color: ${COLOR_TEXT};
+        border: 1px solid ${COLOR_DIVIDER};
+      `;
+      btn.addEventListener("click", () => {
+        if (opt.value === "regular") delete this.pendingDevFlags.logLevel;
+        else this.pendingDevFlags.logLevel = opt.value;
+        repaint();
+        this.refreshConfirmButton();
+        this.setStatus(
+          this.hasPendingChanges()
+            ? "Pending changes — press CONFIRM to apply."
+            : "No pending change.",
+          COLOR_TEXT,
+        );
+      });
+      buttons.push({ value: opt.value, el: btn });
+      row.appendChild(btn);
+    }
+    repaint();
+    card.appendChild(row);
+    return card;
   }
 
   /** One toggle card: bold title row with a styled checkbox + small caption. */
@@ -398,54 +476,6 @@ export class ConfigurationScene extends Phaser.Scene {
     return card;
   }
 
-  /** Tools section — list of buttons that launch a sub-page focused on a
-   *  single Configuration concern (currently: tile enable / disable). The
-   *  section sits below the dev-mode toggles and above the footer. */
-  private buildToolsSection(): HTMLDivElement {
-    const section = document.createElement("div");
-    section.style.cssText = `
-      margin-top: 22px;
-      padding-top: 18px;
-      border-top: 1px solid ${COLOR_DIVIDER};
-      display: flex; flex-direction: column; gap: 12px;
-    `;
-    const label = document.createElement("div");
-    label.textContent = "TOOLS";
-    label.style.cssText = `
-      font-family: monospace; font-size: 11px;
-      color: ${COLOR_SUBLABEL}; letter-spacing: 2px;
-      text-align: center;
-    `;
-    section.appendChild(label);
-
-    const row = document.createElement("div");
-    row.style.cssText = `
-      display: flex; gap: 12px; justify-content: center; flex-wrap: wrap;
-    `;
-    const btn = document.createElement("button");
-    btn.textContent = "CONFIGURE TILES";
-    btn.style.cssText = `
-      background: transparent; color: ${COLOR_TITLE};
-      border: 1px solid ${COLOR_TITLE};
-      font-family: monospace; font-size: 11px; letter-spacing: 2px;
-      padding: 10px 22px; min-width: 220px; cursor: pointer;
-    `;
-    btn.addEventListener("click", () => void this.openTileConfigOverlay());
-    row.appendChild(btn);
-    section.appendChild(row);
-    return section;
-  }
-
-  /** Open the tile-enable / disable sub-page. Loads the current tile
-   *  legend, paints a thumbnail grid grouped by tileset, and lets the
-   *  user click each tile to flip its enabled state. Persists on CONFIRM,
-   *  discards on CANCEL, and returns to the Configuration menu on BACK. */
-  private async openTileConfigOverlay(): Promise<void> {
-    const { TileConfigOverlay } = await import("../ui/configure/TileConfigOverlay");
-    new TileConfigOverlay(this, {
-      onClose: () => { /* overlay self-removes; nothing further to do */ },
-    });
-  }
 
   /** Footer button styled like the other scenes' overlay buttons. */
   private makeFooterButton(label: string, primary: boolean): HTMLButtonElement {
@@ -521,6 +551,7 @@ export class ConfigurationScene extends Phaser.Scene {
     DevMode.completePrimaryObjective = !!flags.completePrimaryObjective;
     DevMode.showDevToolsPanel    = !!flags.showDevToolsPanel;
     DevMode.cleanModeOnStart     = !!flags.cleanModeOnStart;
+    DevMode.logLevel             = flags.logLevel ?? "regular";
   }
 
   /** True when there is a pending change waiting on CONFIRM — either a
@@ -528,7 +559,8 @@ export class ConfigurationScene extends Phaser.Scene {
   private hasPendingChanges(): boolean {
     if (this.pendingId !== this.activeId) return true;
     const fields: (keyof DevFlags)[] = ['disableSupertitle', 'unlimitedSpellSlots', 'unlockAllSpells', 'unlimitedActions', 'showDeleteSaveButton', 'allowRetryChecks', 'completePrimaryObjective', 'showDevToolsPanel', 'cleanModeOnStart'];
-    return fields.some((k) => !!this.pendingDevFlags[k] !== !!this.savedDevFlags[k]);
+    if (fields.some((k) => !!this.pendingDevFlags[k] !== !!this.savedDevFlags[k])) return true;
+    return (this.pendingDevFlags.logLevel ?? 'regular') !== (this.savedDevFlags.logLevel ?? 'regular');
   }
 
   /** Update the CONFIRM button's enabled state + opacity to match

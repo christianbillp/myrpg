@@ -89,6 +89,7 @@ export class VisionMask {
       if (e2 > -dy) { err -= dy; cx += sx; }
       if (e2 < dx) { err += dx; cy += sy; }
       if (cx === x1 && cy === y1) break;
+      if (state.map.blocksSight?.[cy]?.[cx]) return true;
       if (state.map.cover?.[cy]?.[cx] === "total") return true;
     }
     return false;

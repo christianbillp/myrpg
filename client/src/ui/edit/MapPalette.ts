@@ -303,14 +303,12 @@ export class MapPalette {
     const legend = (this.ctx.scene.registry.get("tileLegend") as TileLegendPayload | null) ?? { tilesets: [] };
     const tilesetMetaArr = (this.ctx.scene.registry.get("tilesetMeta") as TilesetDescriptor[] | null) ?? [];
     const metaByUrl = new Map(tilesetMetaArr.map((m) => [m.imageUrl, m]));
-    const disabledTiles = (this.ctx.scene.registry.get("disabledTiles") as Record<string, number[]> | null) ?? {};
 
     palette.appendChild(this.makeEraserEntry());
 
     for (const ts of legend.tilesets) {
       const meta = metaByUrl.get(ts.image);
       if (!meta) continue;
-      const disabledIds = new Set(disabledTiles[ts.tileset] ?? []);
       const header = document.createElement("div");
       header.textContent = ts.tileset.toUpperCase() + " TILESET";
       header.style.cssText = `
@@ -325,7 +323,6 @@ export class MapPalette {
       for (const k of Object.keys(ts.tiles)) {
         const id = parseInt(k, 10);
         if (!Number.isFinite(id) || id <= 0) continue;
-        if (disabledIds.has(id)) continue;
         if (ts.tiles[k].layer === 'object') objectIds.push(id);
         else groundIds.push(id);
       }

@@ -19,13 +19,6 @@ export interface ServerConfig {
    *  session creation — the file is the source of truth across browsers, the
    *  client copy in localStorage is a per-browser cache for UI display. */
   devFlags?: DevFlags;
-  /** Per-tileset list of disabled local tile ids. Disabled tiles are hidden
-   *  from the Map Editor palette, skipped by the deterministic composer's
-   *  biome pools, and stripped from the AI map-generator's tile-legend
-   *  prompt. Keys are tileset names (e.g. "scribble", "water"); values are
-   *  the local 1-based ids of disabled tiles. Empty / absent = nothing
-   *  disabled in that tileset. */
-  disabledTiles?: Record<string, number[]>;
 }
 
 const CONFIG_FILE = 'server_config.json';

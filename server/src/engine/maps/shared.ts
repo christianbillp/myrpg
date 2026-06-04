@@ -34,20 +34,6 @@ export function flatten(grid: number[][]): number[] {
   return out;
 }
 
-/**
- * Drop palette entries whose scribble-local gid is in `disabled`. The palette
- * is keyed by gid (scribble firstgid is 1, so gid `n` is local id `n`). Returns
- * a shallow-cloned palette with filtered pools so the original constant isn't
- * mutated. If the filter empties the groundPool the original palette is
- * returned unchanged — the composer has nothing to paint with otherwise.
- */
-export function filterPalette(palette: BiomePalette, disabled: Set<number>): BiomePalette {
-  if (disabled.size === 0) return palette;
-  const ground = palette.groundPool.filter((e) => !disabled.has(e.gid));
-  const object = palette.objectPool.filter((e) => !disabled.has(e.gid));
-  if (ground.length === 0) return palette;
-  return { ...palette, groundPool: ground, objectPool: object };
-}
 
 /**
  * Make a zone-id allocator scoped to a single `composeMap` call. Each call

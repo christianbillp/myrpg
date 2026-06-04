@@ -35,7 +35,7 @@ export interface EnemyTurnConfig {
   /** The creature this enemy is engaging this turn — caller picks via
    *  faction hostility + range; if absent the enemy will Hold / skip. */
   target: EnemyAttackTarget;
-  passable: boolean[][];
+  blocksMovement: boolean[][];
   mapCols: number;
   mapRows: number;
   occupiedTiles: [number, number][];
@@ -78,7 +78,7 @@ export interface AllyTurnConfig {
   /** Pre-disambiguated display name; same convention as EnemyTurnConfig. */
   displayName: string;
   enemyTargets: Array<{ id: string; tileX: number; tileY: number; ac: number }>;
-  passable: boolean[][];
+  blocksMovement: boolean[][];
   mapCols: number;
   mapRows: number;
   occupiedTiles: [number, number][];
@@ -140,7 +140,7 @@ export function runEnemyTurn(
     const next = nextStepToward(
       tileX, tileY,
       target.tileX, target.tileY,
-      config.passable, config.mapRows, config.mapCols,
+      config.blocksMovement, config.mapRows, config.mapCols,
       config.occupiedTiles,
     );
     if (!next || (next[0] === target.tileX && next[1] === target.tileY)) break;
@@ -215,7 +215,7 @@ export function runAllyTurn(
     const next = nextStepToward(
       tileX, tileY,
       nearest.tileX, nearest.tileY,
-      config.passable, config.mapRows, config.mapCols,
+      config.blocksMovement, config.mapRows, config.mapCols,
       config.occupiedTiles,
     );
     if (!next || (next[0] === nearest.tileX && next[1] === nearest.tileY)) break;
@@ -246,7 +246,7 @@ export function runAllyTurn(
 export function nextStepToward(
   fromX: number, fromY: number,
   targetX: number, targetY: number,
-  passable: boolean[][], rows: number, cols: number,
+  blocksMovement: boolean[][], rows: number, cols: number,
   occupiedTiles: [number, number][],
 ): [number, number] | null {
   if (chebyshev(fromX, fromY, targetX, targetY) <= 1) return null;
@@ -268,8 +268,8 @@ export function nextStepToward(
     for (const [dr, dc] of dirs) {
       const ny = cy + dr, nx = cx + dc;
       if (ny < 0 || ny >= rows || nx < 0 || nx >= cols) continue;
-      if (!passable[ny][nx]) continue;
-      if (dr !== 0 && dc !== 0 && !passable[cy][cx + dc] && !passable[cy + dr][cx]) continue;
+      if (blocksMovement[ny][nx]) continue;
+      if (dr !== 0 && dc !== 0 && blocksMovement[cy][cx + dc] && blocksMovement[cy + dr][cx]) continue;
       if (visited[ny][nx]) continue;
       if (occupiedTiles.some(([ox, oy]) => ox === nx && oy === ny)) continue;
       visited[ny][nx] = true;

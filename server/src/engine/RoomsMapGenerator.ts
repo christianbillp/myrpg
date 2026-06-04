@@ -1,5 +1,5 @@
 import { GameMap } from './types.js';
-import { floodFillCount } from './MapUtils.js';
+import { floodFillCount, blockGridsFromPassable } from './MapUtils.js';
 
 interface Room { x: number; y: number; w: number; h: number; }
 
@@ -52,7 +52,7 @@ function tryGenerate(): GameMap | null {
       if (passable[r][c]) total++;
 
   if (floodFillCount(passable, rows, cols, startR, startC) !== total) return null;
-  return { cols, rows, passable };
+  return { cols, rows, ...blockGridsFromPassable(passable) };
 }
 
 function carveCorridor(passable: boolean[][], a: Room, b: Room): void {
@@ -74,5 +74,5 @@ function fallback(): GameMap {
   for (let cx = 2; cx <= 17; cx++) passable[4][cx] = true;
   for (let cy = 4; cy <= 17; cy++) passable[cy][17] = true;
   for (let cx = 5; cx <= 17; cx++) passable[17][cx] = true;
-  return { cols, rows, passable };
+  return { cols, rows, ...blockGridsFromPassable(passable) };
 }

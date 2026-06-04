@@ -24,8 +24,8 @@ import { generateEncounter, generateMap } from "./encounterGenerator.js";
 import { generateMission } from "./mission/missionGenerator.js";
 import {
   getMission, recordMission, isGeneratedMissionId,
-  setGeneratedMapTilesets, setGeneratedMapDisabledScribble,
-  getGeneratedMapTilesets, getGeneratedMapDisabledScribble,
+  setGeneratedMapTilesets,
+  getGeneratedMapTilesets,
   serialiseForSave as serialiseMissionsForSave,
   restoreFromSave as restoreMissionsFromSave,
   dropMission,
@@ -97,13 +97,6 @@ const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const DATA_DIR = join(__dirname, "../data");
-
-// In-memory mirror of `server_config.disabledTiles`. Loaded once at startup
-// and refreshed inside the PUT /server-config handler so the generate routes
-// (composeMap, AI map prompt) can read it synchronously per request without
-// re-hitting disk. Kept here so any future consumer that also wants a live
-// view of the disable list can share the same source.
-let cachedDisabledTiles: Record<string, number[]> = {};
 
 /**
  * Resolve the effective Development Mode flags for a session-create call.
@@ -329,15 +322,17 @@ interface TiledMapFile {
 // slice it correctly. The `imageUrl` is a relative URL the server serves
 // from /tilesets/<filename> (see the static route below).
 /**
- * Build a tileset-local `{ tileId → passable }` map from a Tiled .tsj's
- * `tiles[].properties[]`. Tiles without a `passable` property are omitted —
- * SessionBuilder treats absence as passable (Tiled's convention).
+ * Build a tileset-local `{ tileId → blocksMovement }` map from a Tiled .tsj's
+ * `tiles[].properties[]`. Tiled authors the source property as `passable`
+ * (its convention), so we read that name and invert it into the engine's
+ * `blocksMovement` model. Tiles without the property are omitted — absence
+ * means "does not block" (Tiled's convention: unmarked tiles are passable).
  */
-function extractTilePassability(tiles: TiledTileDef[] | undefined): Record<number, boolean> {
+function extractTileBlocksMovement(tiles: TiledTileDef[] | undefined): Record<number, boolean> {
   const out: Record<number, boolean> = {};
   for (const t of tiles ?? []) {
     const prop = t.properties?.find((p) => p.name === "passable");
-    if (prop && typeof prop.value === "boolean") out[t.id] = prop.value;
+    if (prop && typeof prop.value === "boolean") out[t.id] = !prop.value;
   }
   return out;
 }
@@ -415,7 +410,7 @@ async function loadTiledMap(file: TiledMapFile) {
       spacing: inline.spacing ?? 0,
       margin: inline.margin ?? 0,
       columns: inline.columns,
-      tilePassability: extractTilePassability(inline.tiles),
+      tileBlocksMovement: extractTileBlocksMovement(inline.tiles),
     });
   }
 
@@ -515,12 +510,6 @@ function cacheGeneratedMapTilesetsFromDefs(maps: GameDefs['maps']): void {
     ?? maps.find((m) => /road|woods|ward|field|ruin/.test(m.id))
     ?? maps[0];
   setGeneratedMapTilesets(outdoor.tilesets);
-  // Disabled-scribble: same source the encounter generator uses —
-  // server-side config keeps a set of GIDs the user has flagged out.
-  // Read the active setting's disabled list if present.
-  const active = defs.activeSetting?.id;
-  const list = active ? (cachedDisabledTiles[active] ?? []) : [];
-  setGeneratedMapDisabledScribble(new Set(list));
 }
 
 // ── Server setup ───────────────────────────────────────────────────────────────
@@ -550,8 +539,6 @@ registerDefsRoutes(server, {
   dataDir: DATA_DIR,
   getDefs: () => defs,
   loadDefs,
-  getDisabledTiles: () => cachedDisabledTiles,
-  setDisabledTiles: (v) => { cachedDisabledTiles = v; },
   settingSubDir,
   resolveDevFlags,
 });
@@ -762,7 +749,6 @@ server.get("/server-config", async () => {
   return {
     activeSettingId: defs.activeSetting?.id ?? null,
     devFlags: config.devFlags ?? {},
-    disabledTiles: config.disabledTiles ?? {},
     settings: defs.settings.map((s) => ({ id: s.id, name: s.name, version: s.version, ruleset: s.ruleset, summary: s.summary, sections: s.sections })),
   };
 });
@@ -775,7 +761,7 @@ server.get("/server-config", async () => {
  * active setting changes. Returns the updated config + settings list so the
  * client renders without an extra GET.
  */
-server.put<{ Body: { activeSettingId?: string | null; devFlags?: import("../../shared/types.js").DevFlags; disabledTiles?: Record<string, number[]> } }>("/server-config", async (req, reply) => {
+server.put<{ Body: { activeSettingId?: string | null; devFlags?: import("../../shared/types.js").DevFlags } }>("/server-config", async (req, reply) => {
   const body = req.body ?? {};
 
   // Validate activeSettingId if the caller is changing it.
@@ -806,26 +792,14 @@ server.put<{ Body: { activeSettingId?: string | null; devFlags?: import("../../s
     if (body.devFlags.completePrimaryObjective) sanitised.completePrimaryObjective = true;
     if (body.devFlags.showDevToolsPanel)    sanitised.showDevToolsPanel = true;
     if (body.devFlags.cleanModeOnStart)     sanitised.cleanModeOnStart = true;
-    next.devFlags = sanitised;
-  }
-  if (body.disabledTiles !== undefined) {
-    // Validate shape — Record<tilesetName, number[]>. Reject anything else
-    // so a malformed PUT can't corrupt the config file. Empty arrays are
-    // fine (nothing disabled in that tileset).
-    const sanitised: Record<string, number[]> = {};
-    for (const [tileset, ids] of Object.entries(body.disabledTiles ?? {})) {
-      if (typeof tileset !== 'string' || !Array.isArray(ids)) continue;
-      const cleanIds: number[] = [];
-      for (const id of ids) {
-        if (typeof id === 'number' && Number.isInteger(id) && id > 0) cleanIds.push(id);
-      }
-      if (cleanIds.length > 0) sanitised[tileset] = cleanIds;
+    if (body.devFlags.logLevel === "none" || body.devFlags.logLevel === "regular" || body.devFlags.logLevel === "maximum") {
+      sanitised.logLevel = body.devFlags.logLevel;
     }
-    next.disabledTiles = sanitised;
+    next.devFlags = sanitised;
   }
 
   await saveServerConfig(DATA_DIR, next);
-  cachedDisabledTiles = next.disabledTiles ?? {};
+  Logger.setLevel(next.devFlags?.logLevel ?? "regular");
 
   // Reload all defs only when the active setting actually changed —
   // characters, NPCs, factions, adventures, encounters, maps re-source from
@@ -836,7 +810,6 @@ server.put<{ Body: { activeSettingId?: string | null; devFlags?: import("../../s
   return reply.send({
     activeSettingId: defs.activeSetting?.id ?? null,
     devFlags: next.devFlags ?? {},
-    disabledTiles: next.disabledTiles ?? {},
     settings: defs.settings.map((s) => ({ id: s.id, name: s.name, version: s.version, ruleset: s.ruleset, summary: s.summary, sections: s.sections })),
   });
 });
@@ -850,7 +823,6 @@ registerGenerateRoutes(server, {
     if (!defs.activeSetting) throw new Error("Cannot generate content — no active setting.");
     return join(DATA_DIR, "settings", defs.activeSetting.id);
   },
-  getDisabledTiles: () => cachedDisabledTiles,
 });
 
 
@@ -1067,6 +1039,72 @@ server.get("/tilesets/legends", async (_req, reply) => {
   }
   return reply.send({ tilesets });
 });
+
+/**
+ * PUT /tilesets/:tileset/tiles/:gid — upsert a single tile's legend entry.
+ * Backs the Tile Creator's SAVE button: the author selects a tileset frame
+ * and edits its attributes (name, layer, blocksMovement, blocksSight, cover,
+ * obscurance, tags, description). Writes the entry back into
+ * `<tileset>_legend.json` (preserving notes + every other tile) and reloads
+ * defs so subsequent sessions bake the new semantics. Creating an entry for a
+ * frame that had none and editing an existing one are the same operation.
+ */
+server.put<{ Params: { tileset: string; gid: string }; Body: import("../../shared/types.js").TileLegendEntry }>(
+  "/tilesets/:tileset/tiles/:gid",
+  async (req, reply) => {
+    const tileset = req.params.tileset;
+    if (!/^[A-Za-z0-9_-]+$/.test(tileset)) {
+      return reply.code(400).send({ error: "invalid tileset name" });
+    }
+    if (!/^[1-9][0-9]*$/.test(req.params.gid)) {
+      return reply.code(400).send({ error: "gid must be a positive integer" });
+    }
+    const gid = req.params.gid;
+    const b = req.body;
+    if (!b || typeof b !== "object") return reply.code(400).send({ error: "Body must be a tile legend entry" });
+    if (typeof b.name !== "string" || !b.name.trim()) return reply.code(400).send({ error: "tile.name is required" });
+    if (b.layer !== "ground" && b.layer !== "object") return reply.code(400).send({ error: "tile.layer must be 'ground' or 'object'" });
+    if (b.cover !== undefined && b.cover !== "half" && b.cover !== "three-quarters" && b.cover !== "total") {
+      return reply.code(400).send({ error: "tile.cover must be half | three-quarters | total" });
+    }
+    if (b.obscurance !== undefined && b.obscurance !== "lightly" && b.obscurance !== "heavily") {
+      return reply.code(400).send({ error: "tile.obscurance must be lightly | heavily" });
+    }
+
+    const legendPath = join(TILESETS_DIR, `${tileset}_legend.json`);
+    let legend: { notes?: string; image?: string; tileset?: string; tiles: Record<string, unknown> };
+    try {
+      legend = JSON.parse(await readFile(legendPath, "utf-8"));
+    } catch {
+      return reply.code(404).send({ error: `tileset "${tileset}" has no legend file` });
+    }
+
+    // Build a clean entry — coerce types and drop blank optionals so the
+    // written JSON stays tidy and matches the TileLegendEntry shape.
+    const entry: import("../../shared/types.js").TileLegendEntry = {
+      name: b.name.trim(),
+      blocksMovement: b.blocksMovement === true,
+      blocksSight: b.blocksSight === true,
+      layer: b.layer,
+      description: typeof b.description === "string" ? b.description : "",
+      tags: Array.isArray(b.tags) ? b.tags.filter((t): t is string => typeof t === "string") : [],
+      ...(b.cover ? { cover: b.cover } : {}),
+      ...(b.obscurance ? { obscurance: b.obscurance } : {}),
+    };
+    legend.tiles ??= {};
+    legend.tiles[gid] = entry;
+
+    try {
+      await writeFile(legendPath, JSON.stringify(legend, null, 2) + "\n");
+      await loadDefs();
+      return reply.send({ tileset, gid: Number(gid), entry });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error("[PUT /tilesets/:tileset/tiles/:gid] failed", msg);
+      return reply.code(500).send({ error: msg });
+    }
+  },
+);
 
 server.get("/tilesets", async (_req, reply) => {
   try {
@@ -1412,6 +1450,19 @@ async function loadWorldState(): Promise<{
       rawJson.eventLog = rawJson.combatLog;
       delete rawJson.combatLog;
       migrationsApplied.push('combatLog→eventLog');
+    }
+    // Migrate saves authored before the `passable` → `blocksMovement` rename.
+    // The old grid stored walkability (true = walkable); the new model stores
+    // blocking (true = blocked). Sight blocking mirrors movement for migrated
+    // walls (the "all walls block sight" conversion).
+    const savedMap = rawJson.map as Record<string, unknown> | undefined;
+    if (savedMap && Array.isArray(savedMap.passable) && !savedMap.blocksMovement) {
+      const passable = savedMap.passable as boolean[][];
+      const inverted = passable.map((row) => row.map((p) => !p));
+      savedMap.blocksMovement = inverted;
+      savedMap.blocksSight = inverted.map((row) => [...row]);
+      delete savedMap.passable;
+      migrationsApplied.push('passable→blocksMovement/blocksSight');
     }
     // Shape-light runtime check — a corrupt save shouldn't crash with a
     // mysterious "Cannot read X of undefined" at use time. The full type is
@@ -2732,7 +2783,8 @@ server.get("/game/session/:id/ws", { websocket: true }, (socket, req) => {
 // ── Start ──────────────────────────────────────────────────────────────────────
 
 await loadDefs();
-cachedDisabledTiles = (await loadServerConfig(DATA_DIR)).disabledTiles ?? {};
+const bootConfig = await loadServerConfig(DATA_DIR);
+Logger.setLevel(bootConfig.devFlags?.logLevel ?? "regular");
 await wipeAllSavesIfCleanMode();
 await server.listen({ port: 3000, host: "0.0.0.0" });
 const readyMs = Math.round(performance.now() - startupT0);

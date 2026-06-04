@@ -1,3 +1,14 @@
+/** Convert a procedural generator's `passable` working grid (true = walkable)
+ *  into the GameMap blocking grids. Procedurally-generated walls block both
+ *  movement and sight, so the two grids are identical (independent copies). */
+export function blockGridsFromPassable(passable: boolean[][]): {
+  blocksMovement: boolean[][];
+  blocksSight: boolean[][];
+} {
+  const blocksMovement = passable.map((row) => row.map((p) => !p));
+  return { blocksMovement, blocksSight: blocksMovement.map((row) => [...row]) };
+}
+
 export function shuffle<T>(arr: T[]): T[] {
   const out = [...arr];
   for (let i = out.length - 1; i > 0; i--) {

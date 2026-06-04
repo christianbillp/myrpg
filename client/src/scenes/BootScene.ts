@@ -90,12 +90,6 @@ export class BootScene extends Phaser.Scene {
       // tile dimensions) used to render thumbnails.
       this.registry.set("tileLegend",         this.cache.json.get("tileLegend") ?? { tilesets: [] });
       this.registry.set("tilesetMeta",        this.cache.json.get("tilesets") ?? []);
-      // disabledTiles is the per-tileset disable list set from the Configuration
-      // scene's "Configure Tiles" page. Consumers — MapPalette (Map Editor) and
-      // the AI map-generator legend — read from the registry so the same
-      // single source of truth gates every place tiles can be selected from.
-      const serverConfig = this.cache.json.get("serverConfig") as { disabledTiles?: Record<string, number[]> } | null;
-      this.registry.set("disabledTiles",      serverConfig?.disabledTiles ?? {});
 
       // Preload every spritesheet on the server (from /tilesets) so the map
       // preview overlay can render any composed map immediately — including

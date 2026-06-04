@@ -89,23 +89,17 @@ export async function generateEncounter(
   anthropic: Anthropic,
   defs: GameDefs,
   req: GenerateRequest,
-  disabledTiles: Record<string, number[]> = {},
 ): Promise<GeneratedScenario> {
   const validMonsterIds = new Set(defs.monsters.map((m) => m.id));
   const validNpcIds = new Set(defs.npcs.map((n) => n.id));
-  const disabledGids = new Set<number>();
-  for (const ids of Object.values(disabledTiles)) for (const id of ids) disabledGids.add(id);
   const validTileGids = new Set<number>();
   for (const k of Object.keys(defs.tileLegend.tiles)) {
-    const gid = parseInt(k, 10);
-    if (disabledGids.has(gid)) continue;
-    validTileGids.add(gid);
+    validTileGids.add(parseInt(k, 10));
   }
   const groundLayerGids = layerGidSet(defs, 'ground');
   const objectLayerGids = layerGidSet(defs, 'object');
-  for (const gid of disabledGids) { groundLayerGids.delete(gid); objectLayerGids.delete(gid); }
 
-  const system = buildSystemPrompt(defs, disabledGids);
+  const system = buildSystemPrompt(defs);
   const user = buildUserPrompt(req);
   const tool = buildResponseTool();
 
@@ -151,22 +145,15 @@ export async function generateMap(
   anthropic: Anthropic,
   defs: GameDefs,
   req: GenerateRequest,
-  disabledTiles: Record<string, number[]> = {},
 ): Promise<GeneratedMap> {
-  const disabledGids = new Set<number>();
-  for (const ids of Object.values(disabledTiles)) for (const id of ids) disabledGids.add(id);
-
   const validTileGids = new Set<number>();
   for (const k of Object.keys(defs.tileLegend.tiles)) {
-    const gid = parseInt(k, 10);
-    if (disabledGids.has(gid)) continue;
-    validTileGids.add(gid);
+    validTileGids.add(parseInt(k, 10));
   }
   const groundLayerGids = layerGidSet(defs, 'ground');
   const objectLayerGids = layerGidSet(defs, 'object');
-  for (const gid of disabledGids) { groundLayerGids.delete(gid); objectLayerGids.delete(gid); }
 
-  const system = buildMapSystemPrompt(defs, disabledGids);
+  const system = buildMapSystemPrompt(defs);
   const user = buildUserPrompt(req);
   const tool = buildMapResponseTool();
 
@@ -226,11 +213,10 @@ interface GeneratedMapPayload {
   objectData: number[];
 }
 
-function buildMapSystemPrompt(defs: GameDefs, disabledGids: Set<number> = new Set()): string {
+function buildMapSystemPrompt(defs: GameDefs): string {
   const legendLines = Object.entries(defs.tileLegend.tiles)
-    .filter(([gid]) => !disabledGids.has(parseInt(gid, 10)))
     .map(([gid, t]) => {
-      return `  GID ${gid} (${t.name}, ${t.layer}, ${t.passable ? "passable" : "impassable"}): ${t.description}`;
+      return `  GID ${gid} (${t.name}, ${t.layer}, ${t.blocksMovement ? "impassable" : "passable"}${t.blocksSight ? ", blocks sight" : ""}): ${t.description}`;
     }).join("\n");
   const setting = settingPromptBlock(defs.activeSetting, 'full');
 
@@ -319,11 +305,10 @@ function validateMapPayload(
 
 // ── System prompt + user prompt ─────────────────────────────────────────────
 
-function buildSystemPrompt(defs: GameDefs, disabledGids: Set<number> = new Set()): string {
+function buildSystemPrompt(defs: GameDefs): string {
   const legendLines = Object.entries(defs.tileLegend.tiles)
-    .filter(([gid]) => !disabledGids.has(parseInt(gid, 10)))
     .map(([gid, t]) => {
-      return `  GID ${gid} (${t.name}, ${t.layer}, ${t.passable ? "passable" : "impassable"}): ${t.description}`;
+      return `  GID ${gid} (${t.name}, ${t.layer}, ${t.blocksMovement ? "impassable" : "passable"}${t.blocksSight ? ", blocks sight" : ""}): ${t.description}`;
     }).join("\n");
 
   const monsterLines = defs.monsters.map((m) => `  ${m.id} — ${m.name} (CR ${m.cr})`).join("\n");

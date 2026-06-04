@@ -18,24 +18,24 @@ import { stripTileFlipBits } from '../../../shared/tileGid.js';
 export type SavedMapRecord = import('./types.js').SavedMapDef;
 
 /**
- * Resolve the passability of a single GID against (1) the encounter's explicit
- * tileProperties, (2) the source tileset's `tiles[].properties[].passable`
- * carried on `MapTilesetInfo.tilePassability`, (3) the global tile legend,
- * and (4) a default of `true` (Tiled's convention: unmarked tiles are
- * passable). Encounter overrides win, then tileset, then legend.
+ * Resolve whether a single GID blocks movement against (1) the encounter's
+ * explicit tileProperties, (2) the source tileset's per-tile data carried on
+ * `MapTilesetInfo.tileBlocksMovement`, (3) the global tile legend, and (4) a
+ * default of `false` (unmarked tiles do not block). Encounter overrides win,
+ * then tileset, then legend.
  */
-function resolveGidPassable(
+function resolveGidBlocksMovement(
   rawGid: number,
   byGid: Map<number, EncounterTileProperty>,
   tilesets: MapTilesetInfo[],
-  tileLegend: Record<string, { passable?: boolean }>,
+  tileLegend: Record<string, { blocksMovement?: boolean }>,
 ): boolean {
-  if (rawGid === 0) return true; // empty object-layer cell — no obstacle here.
+  if (rawGid === 0) return false; // empty object-layer cell — no obstacle here.
   // Strip Tiled's flip/rotation bits before looking up — orientation never
   // affects passability, only rendering.
   const gid = stripTileFlipBits(rawGid);
   const explicit = byGid.get(gid);
-  if (explicit?.passable !== undefined) return explicit.passable;
+  if (explicit?.blocksMovement !== undefined) return explicit.blocksMovement;
   // Find the tileset this GID belongs to — the one with the greatest
   // firstgid that is still ≤ gid. (Tilesets in a map have disjoint GID ranges.)
   let owner: MapTilesetInfo | undefined;
@@ -44,14 +44,32 @@ function resolveGidPassable(
   }
   if (owner) {
     const local = gid - owner.firstgid;
-    const declared = owner.tilePassability[local];
+    const declared = owner.tileBlocksMovement[local];
     if (declared !== undefined) return declared;
   }
   // Fall through to the legend — transparent-twin tiles and others added in
   // the legend JSON but missing from the source .tsj end up here.
-  const legendPassable = tileLegend[String(gid)]?.passable;
-  if (legendPassable !== undefined) return legendPassable;
-  return true;
+  const legendBlocks = tileLegend[String(gid)]?.blocksMovement;
+  if (legendBlocks !== undefined) return legendBlocks;
+  return false;
+}
+
+/**
+ * Resolve whether a single GID blocks line-of-sight. Encounter override wins,
+ * then the global tile legend; defaults to `false`. Tilesets carry no sight
+ * data (the source .tsj only declares passability), so sight is authored in
+ * the legend / per-encounter.
+ */
+function resolveGidBlocksSight(
+  rawGid: number,
+  byGid: Map<number, EncounterTileProperty>,
+  tileLegend: Record<string, { blocksSight?: boolean }>,
+): boolean {
+  if (rawGid === 0) return false; // empty object-layer cell — see straight through.
+  const gid = stripTileFlipBits(rawGid);
+  const explicit = byGid.get(gid);
+  if (explicit?.blocksSight !== undefined) return explicit.blocksSight;
+  return tileLegend[String(gid)]?.blocksSight ?? false;
 }
 
 /**
@@ -66,45 +84,45 @@ function resolveGidPassable(
 function buildGameMapFromSaved(
   saved: SavedMapRecord,
   tileProperties: EncounterTileProperty[] | undefined,
-  tileLegend: Record<string, { passable?: boolean; cover?: 'half' | 'three-quarters' | 'total'; obscurance?: 'lightly' | 'heavily'; transparent?: boolean }>,
+  tileLegend: Record<string, { blocksMovement?: boolean; blocksSight?: boolean; cover?: 'half' | 'three-quarters' | 'total'; obscurance?: 'lightly' | 'heavily' }>,
 ): GameMap {
   const byGid = new Map<number, EncounterTileProperty>();
   for (const tp of tileProperties ?? []) byGid.set(tp.gid, tp);
-  /** Read cover/obscurance/transparent for a GID. Encounter override wins;
-   *  otherwise fall through to the tileset legend defaults. */
+  /** Read cover/obscurance for a GID. Encounter override wins; otherwise fall
+   *  through to the tileset legend defaults. */
   const tileCoverFor = (gid: number): 'half' | 'three-quarters' | 'total' | null =>
     byGid.get(gid)?.cover ?? tileLegend[String(gid)]?.cover ?? null;
   const tileObsFor = (gid: number): 'lightly' | 'heavily' | null =>
     byGid.get(gid)?.obscurance ?? tileLegend[String(gid)]?.obscurance ?? null;
-  const tileTransparent = (gid: number): boolean =>
-    byGid.get(gid)?.transparent ?? tileLegend[String(gid)]?.transparent ?? false;
   /** GID whose tile properties win for this cell — the object when present,
    *  otherwise the ground GID. Implements the object-overrides-terrain rule. */
   const effectiveGid = (groundGid: number, objectGid: number): number =>
     objectGid !== 0 ? objectGid : groundGid;
-  const passable: boolean[][] = saved.gidGrid.map((row, y) =>
+  const blocksMovement: boolean[][] = saved.gidGrid.map((row, y) =>
     row.map((groundGid, x) => {
       const objectGid = saved.objectGidGrid?.[y]?.[x] ?? 0;
-      return resolveGidPassable(effectiveGid(groundGid, objectGid), byGid, saved.tilesets, tileLegend);
+      return resolveGidBlocksMovement(effectiveGid(groundGid, objectGid), byGid, saved.tilesets, tileLegend);
+    }),
+  );
+  // Sight blocking ORs the ground and object features: vision is stopped if
+  // EITHER the terrain or whatever sits on top of it blocks sight (a tree
+  // over grass blocks; a clear path over a wall opening does not). This
+  // differs from movement, which uses object-overrides-terrain.
+  const blocksSight: boolean[][] = saved.gidGrid.map((row, y) =>
+    row.map((groundGid, x) => {
+      const objectGid = saved.objectGidGrid?.[y]?.[x] ?? 0;
+      return resolveGidBlocksSight(groundGid, byGid, tileLegend)
+        || resolveGidBlocksSight(objectGid, byGid, tileLegend);
     }),
   );
   // Bake per-tile cover and obscurance from the effective tile (object
-  // overrides ground per the rule above) plus any encounter override. A
-  // tree-on-grass cell reads as "tree" (impassable, total cover); an empty
-  // patch of underbrush stays at ground-tile defaults.
-  //
-  // Impassable tiles without an explicit cover declaration are auto-promoted
-  // to Total Cover so walls block vision out of the box. Authors opt out of
-  // this by setting `transparent: true` on the tile (chasms, water, windows).
+  // overrides ground per the rule above) plus any encounter override. Cover
+  // is a combat concern (AC bonus); sight blocking is handled separately by
+  // the `blocksSight` grid above.
   const coverGrid: (null | 'half' | 'three-quarters' | 'total')[][] = saved.gidGrid.map((row, y) =>
     row.map((groundGid, x) => {
       const objectGid = saved.objectGidGrid?.[y]?.[x] ?? 0;
-      const gid = effectiveGid(groundGid, objectGid);
-      let cover = tileCoverFor(gid);
-      if (!passable[y][x] && !tileTransparent(gid) && cover === null) {
-        cover = 'total';
-      }
-      return cover;
+      return tileCoverFor(effectiveGid(groundGid, objectGid));
     }),
   );
   const obscuranceGrid: (null | 'lightly' | 'heavily')[][] = saved.gidGrid.map((row, y) =>
@@ -116,7 +134,8 @@ function buildGameMapFromSaved(
   return {
     cols: saved.cols,
     rows: saved.rows,
-    passable,
+    blocksMovement,
+    blocksSight,
     cover: coverGrid,
     obscurance: obscuranceGrid,
     // Carry rendering info through to the client.

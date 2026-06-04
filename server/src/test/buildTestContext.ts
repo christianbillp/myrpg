@@ -54,17 +54,21 @@ export interface TestContextResult {
   logs: LogEntry[];
 }
 
-/** Build a passable 20x20 grid by default. */
+/** Build a fully open (no movement/sight blocking) 20x20 grid by default. */
 function makeMap(overrides?: Partial<GameState['map']>): GameState['map'] {
   const cols = overrides?.cols ?? 20;
   const rows = overrides?.rows ?? 20;
-  const passable =
-    overrides?.passable ??
-    Array.from({ length: rows }, () => new Array<boolean>(cols).fill(true));
+  const blocksMovement =
+    overrides?.blocksMovement ??
+    Array.from({ length: rows }, () => new Array<boolean>(cols).fill(false));
+  const blocksSight =
+    overrides?.blocksSight ??
+    Array.from({ length: rows }, () => new Array<boolean>(cols).fill(false));
   return {
     cols,
     rows,
-    passable,
+    blocksMovement,
+    blocksSight,
     ...overrides,
   } as GameState['map'];
 }

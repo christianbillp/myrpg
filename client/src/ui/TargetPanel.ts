@@ -61,8 +61,29 @@ const CONDITION_DESCRIPTIONS: Record<string, string> = {
   blurred: 'Blurred — attacks against have Disadvantage (Blur spell).',
 };
 
+/** Per-tile summary rendered by `TargetPanel.showTile` when the player clicks
+ *  an empty tile. All fields are pre-resolved by the caller (GameScene) from
+ *  the map grids, environment, and active zones. */
+export interface TileDetails {
+  x: number;
+  y: number;
+  terrain: string;
+  object: string | null;
+  movement: 'Normal' | 'Difficult' | 'Blocked';
+  lighting: string;
+  cover: string | null;
+  obscurance: string | null;
+  effects: string[];
+}
+
 export class TargetPanel {
   private readonly el: HTMLDivElement;
+  private readonly creatureBody: HTMLElement;
+  private readonly tileBody: HTMLElement;
+  private readonly tileTitleEl: HTMLElement;
+  private readonly tileRowsEl: HTMLElement;
+  private readonly tileEffectsEl: HTMLElement;
+  private readonly tileEffectsLabelEl: HTMLElement;
   private readonly nameEl: HTMLElement;
   private readonly aliasEl: HTMLElement;
   private readonly typeEl: HTMLElement;
@@ -107,6 +128,7 @@ export class TargetPanel {
     `;
 
     this.el.innerHTML = `
+      <div data-creature-body>
       <div style="padding:14px 12px 0;font-size:12px;" data-name></div>
       <div style="padding:1px 12px 0;font-size:10px;color:#778899;display:none;" data-alias></div>
       <div style="padding:2px 12px 4px;font-size:10px;color:#667788;" data-type></div>
@@ -131,9 +153,25 @@ export class TargetPanel {
       <div style="padding:4px 12px;font-size:10px;line-height:1.6;display:none;" data-alertness></div>
       <div class="gui-sep" style="margin-top:2px;" data-faction-sep></div>
       <div style="padding:4px 12px;font-size:10px;line-height:1.6;" data-faction></div>
+      </div>
+
+      <div data-tile-body style="display:none;">
+        <div style="padding:14px 12px 0;font-size:12px;color:#c9b27a;" data-tile-title></div>
+        <div style="padding:2px 12px 4px;font-size:10px;color:#667788;" data-tile-sub>Tile</div>
+        <div class="gui-sep"></div>
+        <div style="padding:6px 12px;font-size:10px;color:#aabbcc;line-height:2.0;" data-tile-rows></div>
+        <div class="gui-label" data-tile-effects-label style="display:none;">EFFECTS</div>
+        <div style="padding:4px 12px;font-size:10px;line-height:1.6;display:none;flex-wrap:wrap;gap:4px;" data-tile-effects></div>
+      </div>
     `;
 
     const ref = (attr: string) => this.el.querySelector(`[data-${attr}]`) as HTMLElement;
+    this.creatureBody = ref('creature-body');
+    this.tileBody     = ref('tile-body');
+    this.tileTitleEl  = ref('tile-title');
+    this.tileRowsEl   = ref('tile-rows');
+    this.tileEffectsEl = ref('tile-effects');
+    this.tileEffectsLabelEl = ref('tile-effects-label');
     this.nameEl       = ref('name');
     this.aliasEl      = ref('alias');
     this.typeEl       = ref('type');
@@ -177,6 +215,8 @@ export class TargetPanel {
   show(def: MonsterDef, npcState: NpcState, factions: FactionDef[] = [], discoveredFactions: string[] = [], _conditions: string[] = []): void {
     this.currentDef = def;
     this.currentNpcState = npcState;
+    this.creatureBody.style.display = '';
+    this.tileBody.style.display = 'none';
     const colorHex = '#' + def.color.toString(16).padStart(6, '0');
     this.renderName(def, npcState, colorHex);
     this.typeEl.textContent = `${def.type}  CR ${def.cr}`;
@@ -239,6 +279,46 @@ export class TargetPanel {
     } else {
       this.factionEl.innerHTML = `<span style="color:#778899">FACTION</span>  <span style="color:#556677">???</span>`;
     }
+  }
+
+  /**
+   * Render tile details (no creature). Shown when the player clicks an empty
+   * tile. Mirrors the creature panel's layout — a title, a separator, a block
+   * of label/value rows (terrain, object, movement, lighting, cover,
+   * obscurance), and an EFFECTS chip row for any active zones on the tile.
+   */
+  showTile(d: TileDetails): void {
+    this.currentDef = null;
+    this.currentNpcState = null;
+    this.creatureBody.style.display = 'none';
+    this.tileBody.style.display = '';
+
+    this.tileTitleEl.textContent = `TILE (${d.x}, ${d.y})`;
+
+    const rows: Array<[string, string, string?]> = [
+      ['TERRAIN', d.terrain],
+      ['OBJECT', d.object ?? '—'],
+      ['MOVEMENT', d.movement, d.movement === 'Blocked' ? '#e07a5a' : d.movement === 'Difficult' ? '#d9a23a' : '#7aa86a'],
+      ['LIGHTING', d.lighting],
+    ];
+    if (d.cover) rows.push(['COVER', d.cover]);
+    if (d.obscurance) rows.push(['OBSCURANCE', d.obscurance]);
+    this.tileRowsEl.innerHTML = rows.map(([label, value, color]) =>
+      `<div><span style="color:#778899">${label}</span>  <span style="color:${color ?? '#bbccdd'}">${escapeHtml(value)}</span></div>`,
+    ).join('');
+
+    if (d.effects.length > 0) {
+      this.tileEffectsLabelEl.style.display = '';
+      this.tileEffectsEl.style.display = 'flex';
+      this.tileEffectsEl.innerHTML = d.effects.map((e) =>
+        `<span style="padding:1px 6px;background:#102030;border:1px solid #2a4a66;color:#7fbce0;font-size:9px;letter-spacing:1px;">${escapeHtml(e.toUpperCase())}</span>`,
+      ).join('');
+    } else {
+      this.tileEffectsLabelEl.style.display = 'none';
+      this.tileEffectsEl.style.display = 'none';
+    }
+
+    this.el.style.display = 'block';
   }
 
   hide(): void {

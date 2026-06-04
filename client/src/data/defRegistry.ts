@@ -41,7 +41,6 @@ export interface RegistryMap {
   characters:           PlayerDef[];
   classes:              ClassDef[];
   conversations:        ConversationDef[];
-  disabledTiles:        Record<string, number[]>;
   encounters:           EncounterDef[];
   equipment:            ItemDef[];
   factions:             FactionDef[];
@@ -89,7 +88,6 @@ export class DefRegistry {
   characters():    PlayerDef[]                    { return this.getOr('characters', []); }
   classes():       ClassDef[]                     { return this.getOr('classes', []); }
   conversations(): ConversationDef[]              { return this.getOr('conversations', []); }
-  disabledTiles(): Record<string, number[]>       { return this.getOr('disabledTiles', {}); }
   encounters():    EncounterDef[]                 { return this.getOr('encounters', []); }
   equipment():     ItemDef[]                      { return this.getOr('equipment', []); }
   factions():      FactionDef[]                   { return this.getOr('factions', []); }
