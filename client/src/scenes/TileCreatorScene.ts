@@ -1,6 +1,7 @@
 import Phaser from "phaser";
 import { gameClient, type TileLegendBlock, type TilesetMeta } from "../net/GameClient";
 import type { TileLegendEntry } from "../../../shared/types";
+import { rasterizeSvg, assembleSpritesheet } from "../ui/tileRaster";
 import { createHtmlButton, createHtmlText, type HtmlButtonHandle, type HtmlTextHandle } from "../ui/htmlButtons";
 import {
   buildLineInput as sharedBuildLineInput,
@@ -73,6 +74,10 @@ export class TileCreatorScene extends Phaser.Scene {
   private activeTileset: string | null = null;
   private activeGid: number | null = null;
   private draft: TileLegendEntry = blankEntry();
+  /** SVG of a just-generated, not-yet-saved tile. When set, the panel is in
+   *  "generated draft" mode and SAVE writes a new tile to the `generated`
+   *  tileset rather than editing an existing legend entry. */
+  private genSvg: string | null = null;
 
   // DOM references reused across frame selections.
   private previewCanvas: HTMLCanvasElement | null = null;
@@ -363,6 +368,7 @@ export class TileCreatorScene extends Phaser.Scene {
 
   /** Load a frame's entry (or defaults) into the editor controls. */
   private selectFrame(gid: number, cell: HTMLDivElement): void {
+    this.genSvg = null; // editing an existing tile cancels any generated draft
     // Repaint the previous selection's border back to the resting colour.
     if (this.activeGid !== null) {
       const prev = this.cellEls.get(this.activeGid);
@@ -416,6 +422,87 @@ export class TileCreatorScene extends Phaser.Scene {
     }
   }
 
+  // ── Tile generation ──────────────────────────────────────────────────────
+
+  /** Generate a tile from the DESCRIPTION field (used as the prompt). Stores
+   *  the SVG as a draft, fills the attribute controls from the AIGM's
+   *  suggestion, and previews it. SAVE then writes it to `generated`. */
+  private async generateFromPrompt(): Promise<void> {
+    if (this.busy) return;
+    const prompt = this.draft.description.trim();
+    if (!prompt) {
+      if (this.statusEl) this.statusEl.textContent = "Type a DESCRIPTION first — it's the prompt.";
+      return;
+    }
+    this.busy = true;
+    if (this.statusEl) this.statusEl.textContent = "Generating tile…";
+    try {
+      const { svg, suggested } = await gameClient.generateTile(prompt);
+      this.genSvg = svg;
+      this.activeGid = null;
+      this.applySuggested(suggested);
+      await this.paintSvgPreview(svg);
+      if (this.previewLabel) this.previewLabel.setText("✦ GENERATED (unsaved)");
+      if (this.statusEl) this.statusEl.textContent = "Generated — review attributes and SAVE.";
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (this.statusEl) this.statusEl.textContent = `Generation failed: ${msg}`;
+    } finally {
+      this.busy = false;
+    }
+  }
+
+  /** Push an AIGM-suggested entry into the draft + every attribute control. */
+  private applySuggested(s: TileLegendEntry): void {
+    this.draft = { ...s, tags: [...(s.tags ?? [])] };
+    if (this.nameInput) this.nameInput.value = this.draft.name;
+    if (this.layerSelect) this.layerSelect.value = this.draft.layer;
+    if (this.moveCheck) this.moveCheck.checked = this.draft.blocksMovement;
+    if (this.sightCheck) this.sightCheck.checked = this.draft.blocksSight;
+    if (this.coverSelect) this.coverSelect.value = this.draft.cover ?? "";
+    if (this.obsSelect) this.obsSelect.value = this.draft.obscurance ?? "";
+    if (this.tagsInput) this.tagsInput.value = this.draft.tags.join(", ");
+    if (this.descInput) this.descInput.value = this.draft.description;
+  }
+
+  /** Rasterise the draft SVG into the preview canvas. */
+  private async paintSvgPreview(svg: string): Promise<void> {
+    if (!this.previewCanvas) return;
+    const size = this.previewCanvas.width;
+    const frame = await rasterizeSvg(svg, size);
+    const ctx = this.previewCanvas.getContext("2d");
+    if (!ctx) return;
+    ctx.clearRect(0, 0, size, size);
+    ctx.drawImage(frame, 0, 0);
+  }
+
+  /** Persist the generated draft: re-rasterise every existing generated tile
+   *  plus this one into the shared spritesheet and upload it with the legend
+   *  entry. Reloads the scene so the new tile shows in the picker + grid. */
+  private async saveGenerated(): Promise<void> {
+    if (this.busy || !this.genSvg) return;
+    if (!this.draft.name.trim()) {
+      if (this.statusEl) this.statusEl.textContent = "Name is required.";
+      return;
+    }
+    this.busy = true;
+    if (this.statusEl) this.statusEl.textContent = "Assembling + saving generated tile…";
+    try {
+      const { tiles, tileSize, columns } = await gameClient.listGeneratedTiles();
+      const svgs = [...tiles.map((t) => t.svg), this.genSvg];
+      const pngBase64 = await assembleSpritesheet(svgs, tileSize, columns);
+      const { gid } = await gameClient.saveGeneratedTile({ svg: this.genSvg, entry: this.draft, pngBase64 });
+      this.genSvg = null;
+      if (this.statusEl) this.statusEl.textContent = `Saved generated tile “${this.draft.name}” (gid ${gid}). Reloading…`;
+      this.time.delayedCall(600, () => this.scene.restart());
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (this.statusEl) this.statusEl.textContent = `Save failed: ${msg}`;
+    } finally {
+      this.busy = false;
+    }
+  }
+
   // ── Canvas cropping ──────────────────────────────────────────────────────
 
   private drawFrame(canvas: HTMLCanvasElement, img: HTMLImageElement, frame: number, meta: TilesetMeta): void {
@@ -446,7 +533,10 @@ export class TileCreatorScene extends Phaser.Scene {
     const cached = this.images.get(serverUrl);
     if (cached) return cached;
     const img = new Image();
-    img.src = `${API_HOST}${serverUrl}`;
+    // The `generated` sheet is rewritten on every save, so bust the cache for
+    // it (other tilesets are static and cache fine).
+    const bust = serverUrl.includes("generated") ? `?v=${Date.now()}` : "";
+    img.src = `${API_HOST}${serverUrl}${bust}`;
     this.images.set(serverUrl, img);
     return img;
   }
@@ -463,11 +553,21 @@ export class TileCreatorScene extends Phaser.Scene {
       label: "BACK", variant: "ghost", fontSize: 13,
       onClick: () => this.scene.start("MainMenuScene"),
     }));
+    // ✦ GENERATE — uses the DESCRIPTION field as the prompt; the AIGM returns
+    // an SVG tile + suggested attributes for review.
+    this.chrome.push(createHtmlButton({
+      scene: this, sceneWidth: W,
+      x: W - 560, y, w: 180, h: btnH,
+      label: "✦ GENERATE", variant: "warn", fontSize: 13,
+      onClick: () => void this.generateFromPrompt(),
+    }));
     this.chrome.push(createHtmlButton({
       scene: this, sceneWidth: W,
       x: W - 360, y, w: 320, h: btnH,
       label: "✓ SAVE TILE", variant: "primary", fontSize: 14,
-      onClick: () => this.runSave(),
+      // Generated draft → write a new tile to the `generated` tileset; an
+      // existing selected frame → save its legend entry.
+      onClick: () => void (this.genSvg ? this.saveGenerated() : this.runSave()),
     }));
   }
 

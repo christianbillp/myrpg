@@ -21,6 +21,7 @@ import { fileURLToPath } from "url";
 import { randomUUID } from "crypto";
 import { buildEncounter } from "./encounterService.js";
 import { generateEncounter, generateMap } from "./encounterGenerator.js";
+import { generateTile, GENERATED_TILE_SIZE, GENERATED_TILE_COLUMNS } from "./tileGenerator.js";
 import { generateMission } from "./mission/missionGenerator.js";
 import {
   getMission, recordMission, isGeneratedMissionId,
@@ -349,6 +350,10 @@ function extractTileBlocksMovement(tiles: TiledTileDef[] | undefined): Record<nu
 }
 
 const TILESETS_DIR = join(DATA_DIR, "tilesets");
+/** Source SVGs for AI-generated tiles, one file per gid (`<gid>.svg`). The
+ *  assembled spritesheet lives in TILESETS_DIR as `generated.png`. */
+const GENERATED_TILES_DIR = join(DATA_DIR, "tiles", "generated");
+const GENERATED_TILESET = "generated";
 const TOKENS_DIR = join(DATA_DIR, "tokens");
 const TOKEN_PARTS_DIR = join(TOKENS_DIR, "parts");
 const TOKEN_SPECS_DIR = join(TOKENS_DIR, "specs");
@@ -1151,6 +1156,127 @@ server.put<{ Params: { tileset: string; gid: string }; Body: import("../../share
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       console.error("[PUT /tilesets/:tileset/tiles/:gid] failed", msg);
+      return reply.code(500).send({ error: msg });
+    }
+  },
+);
+
+// ── Tile generator ─────────────────────────────────────────────────────────
+// The AIGM authors a tile as SVG; the client rasterises + composites it into
+// the shared `generated` tileset, then saves the assembled sheet + legend here.
+
+/** Existing generated tiles, in gid order — used by the client to re-assemble
+ *  the spritesheet (it rasterises every source SVG, taint-free, and appends the
+ *  new frame). */
+server.get("/tiles/generated", async (_req, reply) => {
+  const legendPath = join(TILESETS_DIR, `${GENERATED_TILESET}_legend.json`);
+  let legend: { tiles?: Record<string, import("../../shared/types.js").TileLegendEntry> };
+  try {
+    legend = JSON.parse(await readFile(legendPath, "utf-8"));
+  } catch {
+    return reply.send({ tiles: [], tileSize: GENERATED_TILE_SIZE, columns: GENERATED_TILE_COLUMNS });
+  }
+  const gids = Object.keys(legend.tiles ?? {}).map(Number).filter((n) => n > 0).sort((a, b) => a - b);
+  const tiles: Array<{ gid: number; svg: string; entry: unknown }> = [];
+  for (const gid of gids) {
+    let svg = "";
+    try { svg = await readFile(join(GENERATED_TILES_DIR, `${gid}.svg`), "utf-8"); } catch { /* missing svg */ }
+    tiles.push({ gid, svg, entry: legend.tiles![String(gid)] });
+  }
+  return reply.send({ tiles, tileSize: GENERATED_TILE_SIZE, columns: GENERATED_TILE_COLUMNS });
+});
+
+/** Generate a tile from a free-text description → SVG + suggested attributes. */
+server.post<{ Body: { description?: string } }>("/tiles/generate", async (req, reply) => {
+  const description = (req.body?.description ?? "").trim();
+  if (!description) return reply.code(400).send({ error: "description is required" });
+  try {
+    // Send the primary tileset as a vision reference so generated tiles match
+    // its art style + palette. Skipped gracefully if the image isn't present.
+    let reference: { base64: string; mediaType: "image/png" } | undefined;
+    try {
+      const png = await readFile(join(TILESETS_DIR, "scribble.png"));
+      reference = { base64: png.toString("base64"), mediaType: "image/png" };
+    } catch { /* no reference tileset — generate without one */ }
+    const result = await generateTile(anthropic, description, reference);
+    return reply.send(result);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error("[POST /tiles/generate] failed", msg);
+    return reply.code(500).send({ error: msg });
+  }
+});
+
+/** Persist a newly-generated tile: the client sends the source SVG, its legend
+ *  entry, and the FULL re-assembled spritesheet PNG (existing frames + the new
+ *  one, in gid order). The new tile is appended at gid = existingCount + 1 (the
+ *  generated tileset is append-only). Writes png/.tsj/_legend.json/<gid>.svg and
+ *  reloads defs so the tile is immediately part of the database. */
+server.post<{ Body: { svg?: string; entry?: import("../../shared/types.js").TileLegendEntry; pngBase64?: string } }>(
+  "/tiles/save",
+  async (req, reply) => {
+    const b = req.body ?? {};
+    const svg = typeof b.svg === "string" ? b.svg : "";
+    const e = b.entry;
+    const pngBase64 = typeof b.pngBase64 === "string" ? b.pngBase64.replace(/^data:image\/png;base64,/, "") : "";
+    if (!svg.includes("<svg")) return reply.code(400).send({ error: "svg is required" });
+    if (!pngBase64) return reply.code(400).send({ error: "pngBase64 (assembled sheet) is required" });
+    if (!e || typeof e !== "object" || typeof e.name !== "string" || !e.name.trim()) {
+      return reply.code(400).send({ error: "entry.name is required" });
+    }
+    if (e.layer !== "ground" && e.layer !== "object") return reply.code(400).send({ error: "entry.layer must be ground|object" });
+
+    const legendPath = join(TILESETS_DIR, `${GENERATED_TILESET}_legend.json`);
+    let legend: { notes: string; tileset: string; image: string; tiles: Record<string, import("../../shared/types.js").TileLegendEntry> };
+    try {
+      legend = JSON.parse(await readFile(legendPath, "utf-8"));
+      legend.tiles ??= {};
+    } catch {
+      legend = { notes: "AI-generated tiles. Appended via the Tile Creator's Generate panel.", tileset: GENERATED_TILESET, image: `${GENERATED_TILESET}.png`, tiles: {} };
+    }
+
+    const existingCount = Object.keys(legend.tiles).length;
+    const gid = existingCount + 1; // append-only; standalone gid == frame + 1
+
+    const entry: import("../../shared/types.js").TileLegendEntry = {
+      name: e.name.trim(),
+      blocksMovement: e.blocksMovement === true,
+      blocksSight: e.blocksSight === true,
+      layer: e.layer,
+      description: typeof e.description === "string" ? e.description : "",
+      tags: Array.isArray(e.tags) ? e.tags.filter((t): t is string => typeof t === "string") : [],
+      ...(e.cover ? { cover: e.cover } : {}),
+      ...(e.obscurance ? { obscurance: e.obscurance } : {}),
+    };
+    legend.tiles[String(gid)] = entry;
+
+    const total = gid;
+    const rows = Math.ceil(total / GENERATED_TILE_COLUMNS);
+    const tsj = {
+      name: GENERATED_TILESET,
+      image: `${GENERATED_TILESET}.png`,
+      tilewidth: GENERATED_TILE_SIZE,
+      tileheight: GENERATED_TILE_SIZE,
+      columns: GENERATED_TILE_COLUMNS,
+      imagewidth: GENERATED_TILE_COLUMNS * GENERATED_TILE_SIZE,
+      imageheight: rows * GENERATED_TILE_SIZE,
+      tilecount: total,
+      margin: 0,
+      spacing: 0,
+    };
+
+    try {
+      await mkdir(GENERATED_TILES_DIR, { recursive: true });
+      await mkdir(TILESETS_DIR, { recursive: true });
+      await writeFile(join(GENERATED_TILES_DIR, `${gid}.svg`), svg);
+      await writeFile(join(TILESETS_DIR, `${GENERATED_TILESET}.png`), Buffer.from(pngBase64, "base64"));
+      await writeFile(join(TILESETS_DIR, `${GENERATED_TILESET}.tsj`), JSON.stringify(tsj, null, 2) + "\n");
+      await writeFile(legendPath, JSON.stringify(legend, null, 2) + "\n");
+      await loadDefs();
+      return reply.send({ gid, tileset: GENERATED_TILESET, entry });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error("[POST /tiles/save] failed", msg);
       return reply.code(500).send({ error: msg });
     }
   },

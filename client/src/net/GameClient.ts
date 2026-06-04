@@ -891,6 +891,45 @@ export class GameClient {
     }
   }
 
+  /** AIGM tile generation: a description → an SVG image + suggested legend
+   *  attributes. The client rasterises the SVG and composites it into the
+   *  shared `generated` tileset before calling `saveGeneratedTile`. */
+  async generateTile(description: string): Promise<{ svg: string; suggested: import("../../../shared/types").TileLegendEntry }> {
+    const res = await fetch(`${API_URL}/tiles/generate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ description }),
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({ error: `HTTP ${res.status}` })) as { error?: string };
+      throw new Error(body.error ?? `Tile generation failed: ${res.status}`);
+    }
+    return res.json() as Promise<{ svg: string; suggested: import("../../../shared/types").TileLegendEntry }>;
+  }
+
+  /** Existing generated tiles (gid order) + the sheet's grid metadata. The
+   *  client re-rasterises every source SVG to rebuild the spritesheet. */
+  async listGeneratedTiles(): Promise<{ tiles: Array<{ gid: number; svg: string; entry: import("../../../shared/types").TileLegendEntry }>; tileSize: number; columns: number }> {
+    const res = await fetch(`${API_URL}/tiles/generated`);
+    if (!res.ok) throw new Error(`List generated tiles failed: ${res.status}`);
+    return res.json() as Promise<{ tiles: Array<{ gid: number; svg: string; entry: import("../../../shared/types").TileLegendEntry }>; tileSize: number; columns: number }>;
+  }
+
+  /** Persist a generated tile: its source SVG, legend entry, and the full
+   *  re-assembled spritesheet PNG (base64). Returns the assigned gid. */
+  async saveGeneratedTile(payload: { svg: string; entry: import("../../../shared/types").TileLegendEntry; pngBase64: string }): Promise<{ gid: number }> {
+    const res = await fetch(`${API_URL}/tiles/save`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({ error: `HTTP ${res.status}` })) as { error?: string };
+      throw new Error(body.error ?? `Tile save failed: ${res.status}`);
+    }
+    return res.json() as Promise<{ gid: number }>;
+  }
+
   /** Upsert an authored NPC. Server validates the `monsterClass` against the
    *  monster roster (the engine resolves an NPC's stats by looking up its
    *  monsterClass) and writes `<active-setting>/npcs/<id>.json`. */
