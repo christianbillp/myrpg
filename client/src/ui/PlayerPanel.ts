@@ -11,6 +11,8 @@ const MAX_PICKER_SLOTS = 6;
 const PANEL_MIN_WIDTH = 120;
 const PANEL_MAX_WIDTH = 480;
 const PANEL_WIDTH_KEY = 'myrpg_player_panel_width';
+/** Reserved height (px) for the fixed footer (END TURN + meta row). */
+const FOOTER_H = 104;
 
 /** Display info for a class feature button + resource chip. */
 export interface PlayerPanelFeature {
@@ -114,6 +116,25 @@ export interface PlayerPanelCallbacks {
   onCompanionPickTile: (npcId: string) => void;
 }
 
+/** Which economy bucket an Action Button belongs to. Drives the grouped,
+ *  headed layout and what folds under the "⋯ More" expander. */
+type ActionGroup = 'action' | 'bonus' | 'move' | 'free' | 'more' | 'companion';
+
+/** Leading glyph per action so the button stack reads at a glance. Keyed by
+ *  the full label or its first word. Labels that already begin with a glyph
+ *  (★ LEVEL UP, ☾ LONG REST) are left alone — see `iconFor`. */
+const ACTION_ICONS: Record<string, string> = {
+  ATTACK: '⚔', THROW: '➶', DODGE: '❖', DASH: '»', DISENGAGE: '↩', DETACH: '⤴',
+  HIDE: '◐', SEARCH: '⚲', MOVE: '⤧', TALK: '❝', CAST: '✦',
+  'SHORT REST': '☕', 'ROLL DEATH SAVE': '☠',
+};
+
+function iconFor(label: string): string {
+  // Already prefixed with a non-letter glyph (e.g. "★ LEVEL UP") → leave as-is.
+  if (label.length > 0 && !/[A-Za-z]/.test(label[0])) return '';
+  return ACTION_ICONS[label] ?? ACTION_ICONS[label.split(' ')[0]] ?? '';
+}
+
 function waitMs(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -130,10 +151,8 @@ export class PlayerPanel {
   private readonly el: HTMLDivElement;
   private readonly hpFill: HTMLElement;
   private readonly hpText: HTMLElement;
-  private readonly slotsEl: HTMLElement;
-  private readonly featureChipsEl: HTMLElement;
-  private readonly concentrationEl: HTMLElement;
-  private readonly statusEl: HTMLElement;
+  /** One unified chip strip: spell slots + feature pools + status chips. */
+  private readonly resourcesEl: HTMLElement;
   private readonly objectiveEl: HTMLElement;
   private readonly actionArea: HTMLElement;
   private readonly devCompleteBtn: HTMLButtonElement;
@@ -143,6 +162,8 @@ export class PlayerPanel {
 
   private visible = true;
   private pickerOpen = false;
+  /** Whether the "⋯ More" group of situational actions is expanded. */
+  private moreOpen = false;
   private lastActionState: PlayerPanelActionState | null = null;
   private readonly callbacks: PlayerPanelCallbacks;
   private playerDef: PlayerDef;
@@ -176,36 +197,32 @@ export class PlayerPanel {
       <div class="gui-sep"></div>
 
       <div class="gui-label">HP</div>
-      <div class="gui-hp-track"><div class="gui-hp-fill" data-hp-fill></div></div>
-      <div style="padding:2px 12px;font-size:10px;color:#cccccc;" data-hp-text></div>
-      <div class="gui-sep"></div>
+      <div class="gui-hp-track" style="position:relative;">
+        <div class="gui-hp-fill" data-hp-fill></div>
+        <div data-hp-text style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:10px;color:#eef4fa;text-shadow:0 1px 2px #000,0 0 2px #000;font-family:monospace;pointer-events:none;"></div>
+      </div>
 
-      <div style="padding:2px 12px;font-size:10px;color:#8eb8e0;display:none;" data-slots></div>
-      <div style="padding:2px 12px;font-size:10px;color:#a8c8e8;display:none;line-height:1.6;" data-feature-chips></div>
-      <div style="padding:2px 12px;font-size:10px;color:#b8a8e8;display:none;" data-concentration></div>
-      <div style="padding:4px 12px 2px;display:none;flex-wrap:wrap;gap:3px;" data-status></div>
+      <div data-resources style="padding:6px 12px 2px;display:none;flex-wrap:wrap;gap:4px;"></div>
+
       <div class="gui-sep" style="margin-top:2px;"></div>
       <div class="gui-label">OBJECTIVE</div>
-      <div style="padding:2px 12px 6px;font-size:10px;color:#e2b96f;line-height:1.4;" data-objective>—</div>
+      <div data-objective style="padding:2px 12px 6px;font-size:10px;color:#e2b96f;line-height:1.4;">—</div>
 
-      <div class="gui-sep" style="position:absolute;left:8px;right:0;bottom:108px;"></div>
-      <div style="position:absolute;left:0;right:0;bottom:108px;display:flex;flex-direction:column-reverse;gap:4px;padding-bottom:4px;" data-actions></div>
+      <div class="gui-sep" style="position:absolute;left:8px;right:0;bottom:${FOOTER_H}px;"></div>
+      <div data-actions style="position:absolute;left:0;right:0;bottom:${FOOTER_H}px;display:flex;flex-direction:column;gap:3px;padding:0 8px 4px;"></div>
 
-      <div style="position:absolute;bottom:0;left:0;right:0;height:108px;display:flex;flex-direction:column-reverse;gap:4px;padding:0 8px 8px;">
-        <button class="gui-btn" style="background:#3a1a1a;" data-leave-enc>LEAVE ENCOUNTER</button>
-        <button class="gui-btn" style="background:#3a3020;display:none;" data-end-turn>END TURN</button>
-        <button class="gui-btn" style="background:#0a1a2a;" data-charsheet>CHARACTER</button>
-        <button class="gui-btn" style="background:#1a3a1a;color:#bbeeaa;display:none;" data-dev-complete>★ COMPLETE OBJECTIVE [DEV]</button>
+      <div style="position:absolute;bottom:0;left:0;right:0;height:${FOOTER_H}px;display:flex;flex-direction:column;gap:4px;padding:8px;box-sizing:border-box;">
+        <button class="gui-btn" style="background:#3a3020;display:none;" data-end-turn>⏭ END TURN</button>
+        <button class="gui-btn" style="background:#11202e;color:#9bb3cc;font-size:10px;" data-charsheet>☰ CHARACTER</button>
+        <button class="gui-btn" style="background:#2a1616;color:#cc9b9b;font-size:10px;" data-leave-enc>⏏ LEAVE ENCOUNTER</button>
+        <button class="gui-btn" style="background:#1a3a1a;color:#bbeeaa;display:none;font-size:10px;" data-dev-complete>★ COMPLETE OBJECTIVE [DEV]</button>
       </div>
     `;
 
     const ref = (attr: string) => this.el.querySelector(`[data-${attr}]`) as HTMLElement;
     this.hpFill    = ref('hp-fill');
     this.hpText    = ref('hp-text');
-    this.slotsEl   = ref('slots');
-    this.featureChipsEl = ref('feature-chips');
-    this.concentrationEl = ref('concentration');
-    this.statusEl = ref('status');
+    this.resourcesEl = ref('resources');
     this.objectiveEl = ref('objective');
     this.actionArea = ref('actions');
     this.headerSubEl = ref('header-sub');
@@ -340,7 +357,7 @@ export class PlayerPanel {
    *  reads LEAVE ADVENTURE (and routes back to Adventure Setup); otherwise
    *  LEAVE ENCOUNTER. Called each state tick from the scene's HUD refresh. */
   setInAdventure(inAdventure: boolean): void {
-    this.leaveBtn.textContent = inAdventure ? 'LEAVE ADVENTURE' : 'LEAVE ENCOUNTER';
+    this.leaveBtn.textContent = inAdventure ? '⏏ LEAVE ADVENTURE' : '⏏ LEAVE ENCOUNTER';
   }
 
   refreshActions(state: PlayerPanelActionState): void {
@@ -348,37 +365,8 @@ export class PlayerPanel {
     this.actionArea.innerHTML = '';
     this.endTurnBtn.style.display = state.mode === 'player_turn' ? 'block' : 'none';
 
-    // Spell slots: show "current/max" per slot level when the character has any.
-    const maxSlots = this.playerDef.defaultSpellSlots ?? [];
-    if (maxSlots.length > 0) {
-      const parts: string[] = [];
-      for (let i = 0; i < maxSlots.length; i++) {
-        if (maxSlots[i] > 0) parts.push(`L${i + 1} ${state.spellSlots[i] ?? 0}/${maxSlots[i]}`);
-      }
-      this.slotsEl.style.display = parts.length > 0 ? 'block' : 'none';
-      this.slotsEl.textContent = `Slots: ${parts.join(' · ')}`;
-    } else {
-      this.slotsEl.style.display = 'none';
-    }
-
-    // Class-feature resource chips (Second Wind 2/2, Rage 2/2, Channel Divinity 1/2, …).
-    const chips = state.features
-      .map((f) => f.resourceChipText)
-      .filter((s): s is string => !!s);
-    if (chips.length > 0) {
-      this.featureChipsEl.style.display = 'block';
-      this.featureChipsEl.textContent = chips.join(' · ');
-    } else {
-      this.featureChipsEl.style.display = 'none';
-    }
-
-    // Concentration is now folded into the unified status row beneath, so
-    // this dedicated chip stays hidden — kept in the DOM to avoid layout
-    // shift if anything else queries it.
-    this.concentrationEl.style.display = 'none';
-
-    // Status row: conditions, buffs, ongoing effects, concentration.
-    this.renderStatusChips(state.statusChips);
+    // Unified resource strip: spell slots + feature pools + status chips.
+    this.renderResources(state);
 
     if (!this.visible) return;
 
@@ -399,294 +387,252 @@ export class PlayerPanel {
       return;
     }
 
-    const { mode, actionUsed, bonusActionUsed, movesLeft, moveMode, availableActions: aa } = state;
-    const btn = (label: string, bg: string, onClick: () => void) => this.makeBtn(label, bg, onClick);
+    // Buttons are collected into economy buckets and rendered grouped (with
+    // headers in combat). Situational utilities fold under a "⋯ More" expander;
+    // context-only buttons (TALK with no target, CAST for non-casters, RELEASE
+    // when not concentrating) are omitted rather than shown greyed.
+    const groups: Record<ActionGroup, HTMLButtonElement[]> = {
+      action: [], bonus: [], move: [], free: [], more: [], companion: [],
+    };
+    const { mode, actionUsed, movesLeft, moveMode, availableActions: aa } = state;
 
-    // Cunning Action (Rogue L2+): Dash / Disengage / Hide are spent as a
-    // Bonus Action, so they render BLUE (the bonus-action accent) instead of
-    // GREEN (the action accent). The server's `spendCunningOrAction` helper
-    // mirrors the same fallback behaviour.
+    // Cunning Action (Rogue L2+): Dash / Disengage / Hide spend a Bonus Action,
+    // so they read BLUE and live in the BONUS group instead of ACTION.
     const hasCunningAction = (this.playerDef.defaultFeatureIds ?? []).includes('cunning-action');
     const BONUS_BLUE = '#1a3a5a';
 
     if (mode === 'exploring') {
-      const atkEl = this.makeTwoLineBtn('ATTACK', state.mainAttackName, '#1a4a1e', aa.canAttack ? this.callbacks.onAttack : () => {});
-      atkEl.disabled = !aa.canAttack;
-      this.actionArea.prepend(atkEl);
+      const GREEN = '#1a4a1e';
+      const atk = this.makeTwoLineBtn('ATTACK', state.mainAttackName, GREEN, aa.canAttack ? this.callbacks.onAttack : () => {});
+      atk.disabled = !aa.canAttack;
+      groups.action.push(atk);
 
-      const throwExEl = this.makeBtn('THROW', '#1a4a1e', state.throwableItems.length > 0 ? () => { this.pickerOpen = true; this.refreshActions(state); } : () => {});
-      throwExEl.disabled = state.throwableItems.length === 0;
-      this.actionArea.prepend(throwExEl);
+      if (state.throwableItems.length > 0) {
+        groups.action.push(this.makeBtn('THROW', GREEN, () => { this.pickerOpen = true; this.refreshActions(state); }));
+      }
 
-      if (aa.canShortRest)
-        this.actionArea.prepend(btn('SHORT REST', '#1a2a3a', this.callbacks.onShortRest));
-
-      // Hide is available during exploring too — lets a Rogue set up a Sneak
-      // Attack opener that triggers combat with Advantage on the first roll.
-      const hideColor = hasCunningAction ? BONUS_BLUE : '#1a3a1a';
-      if (aa.canHide) this.actionArea.prepend(btn('HIDE', hideColor, this.callbacks.onHide));
-
-      // SEARCH — green Action button. Free during exploration; the same
-      // button surfaces during combat as a full-Action cost below. Engine
-      // side resolves adjacent secrets, hidden NPCs, and corpse-search
-      // payloads on a single Perception roll.
-      const searchExEl = btn('SEARCH', '#1a4a1e', this.callbacks.onSearch);
-      searchExEl.disabled = !aa.canSearch;
-      this.actionArea.prepend(searchExEl);
-
-      // Player-owned summons during exploration — no action economy, just
-      // click DIRECT to move them.
+      // Free utilities during exploration → tucked under More.
+      const search = this.makeBtn('SEARCH', GREEN, this.callbacks.onSearch);
+      search.disabled = !aa.canSearch;
+      groups.more.push(search);
+      if (aa.canHide) groups.more.push(this.makeBtn('HIDE', hasCunningAction ? BONUS_BLUE : '#1a3a1a', this.callbacks.onHide));
+      if (aa.canShortRest) groups.more.push(this.makeBtn('SHORT REST', '#1a2a3a', this.callbacks.onShortRest));
       for (const summon of state.summons) {
-        this.actionArea.prepend(this.makeBtn(`DIRECT ${summon.name.toUpperCase()}`, '#2a3a55', () => this.callbacks.onCommandSummon(summon.id)));
+        groups.more.push(this.makeBtn(`DIRECT ${summon.name.toUpperCase()}`, '#2a3a55', () => this.callbacks.onCommandSummon(summon.id)));
       }
+      if (aa.canLevelUp) groups.more.push(this.makeBtn('★ LEVEL UP', '#3a2a5a', this.callbacks.onLevelUp));
+      if (aa.canLongRest) groups.more.push(this.makeBtn('☾ LONG REST', '#1a2a4a', this.callbacks.onLongRest));
 
-      const moveExEl = this.makeBtn('MOVE', moveMode ? '#5a4800' : '#3a3000', this.callbacks.onToggleMoveMode);
-      this.actionArea.appendChild(moveExEl);
+      groups.move.push(this.makeBtn('MOVE', moveMode ? '#5a4800' : '#3a3000', this.callbacks.onToggleMoveMode));
 
-      // TALK — opens an inline speech-bubble input near the player so the
-      // player can address the currently-selected target. Disabled when no
-      // target is selected (the bubble has no recipient to wrap into a
-      // `sayto`). Sits above MOVE in the action stack.
-      const talkExEl = this.makeBtn('TALK', '#1a3a4a', this.callbacks.onTalk);
-      talkExEl.disabled = !state.hasSelectedTarget;
-      this.actionArea.appendChild(talkExEl);
-
-      // CAST — shortcut to the Spells tab of the Character Sheet so a caster
-      // can pick a spell without first opening CHARACTER and switching tabs.
-      // Sits directly above TALK; same teal as TALK. Caster-only.
-      if (this.playerDef.spellcastingAbility) {
-        this.actionArea.appendChild(this.makeBtn('CAST', '#1a3a4a', this.callbacks.onOpenSpells));
-      }
-      // RELEASE — also surfaced during exploration so the player can drop a
-      // running concentration spell (a Web they set up in advance, a Mage
-      // Armor they no longer want) without having to enter combat first.
-      // SRD: ending concentration is free.
-      if (state.concentratingOn) {
-        const label = state.concentratingOnName
-          ? `RELEASE ${state.concentratingOnName.toUpperCase()}`
-          : 'RELEASE CONCENTRATION';
-        this.actionArea.appendChild(this.makeBtn(label, '#3a2a4a', this.callbacks.onReleaseConcentration));
-      }
-
-      // LEVEL UP and LONG REST sit above the MOVE button. The action area uses
-      // `flex-direction: column-reverse`, so a later DOM child renders higher.
-      if (aa.canLevelUp) {
-        this.actionArea.appendChild(this.makeBtn('★ LEVEL UP', '#3a2a5a', this.callbacks.onLevelUp));
-      }
-      if (aa.canLongRest) {
-        this.actionArea.appendChild(this.makeBtn('☾ LONG REST', '#1a2a4a', this.callbacks.onLongRest));
-      }
+      if (state.hasSelectedTarget) groups.free.push(this.makeBtn('TALK', '#1a3a4a', this.callbacks.onTalk));
+      if (this.playerDef.spellcastingAbility) groups.free.push(this.makeBtn('CAST', '#1a3a4a', this.callbacks.onOpenSpells));
+      if (state.concentratingOn) groups.free.push(this.makeReleaseBtn(state));
 
     } else if (mode === 'player_turn') {
       const GREEN = '#1a4a1e';
-
-      const atkEl = this.makeTwoLineBtn('ATTACK', state.mainAttackName, GREEN, aa.canAttack ? this.callbacks.onAttack : () => {});
-      atkEl.disabled = !aa.canAttack;
-      this.actionArea.prepend(atkEl);
-
-      const throwEl = this.makeBtn('THROW', GREEN, !actionUsed && state.throwableItems.length > 0 ? () => { this.pickerOpen = true; this.refreshActions(state); } : () => {});
-      throwEl.disabled = actionUsed || state.throwableItems.length === 0;
-      this.actionArea.prepend(throwEl);
-
-      // With Cunning Action, Dash / Disengage / Hide colour as Bonus Action
-      // (blue) and their eligibility flows through the server's `canDash` /
-      // `canDisengage` / `canHide` (which permit either economy when the
-      // feature is known and at least one of the two is free).
       const dashDisColor = hasCunningAction ? BONUS_BLUE : GREEN;
+      const econ = (): HTMLButtonElement[] => (hasCunningAction ? groups.bonus : groups.action);
 
-      const disEl = this.makeBtn('DISENGAGE', dashDisColor, this.callbacks.onDisengage);
-      disEl.disabled = !aa.canDisengage;
-      this.actionArea.prepend(disEl);
+      const atk = this.makeTwoLineBtn('ATTACK', state.mainAttackName, GREEN, aa.canAttack ? this.callbacks.onAttack : () => {});
+      atk.disabled = !aa.canAttack;
+      groups.action.push(atk);
 
-      if (aa.canDetach) {
-        const detEl = this.makeBtn('DETACH', GREEN, this.callbacks.onDetach);
-        this.actionArea.prepend(detEl);
+      if (state.throwableItems.length > 0) {
+        const th = this.makeBtn('THROW', GREEN, !actionUsed ? () => { this.pickerOpen = true; this.refreshActions(state); } : () => {});
+        th.disabled = actionUsed;
+        groups.action.push(th);
       }
 
-      const dodEl = this.makeBtn('DODGE', GREEN, this.callbacks.onDodge);
-      dodEl.disabled = actionUsed;
-      this.actionArea.prepend(dodEl);
+      const dod = this.makeBtn('DODGE', GREEN, this.callbacks.onDodge);
+      dod.disabled = actionUsed;
+      groups.action.push(dod);
 
-      const dashEl = this.makeBtn('DASH', dashDisColor, this.callbacks.onDash);
-      dashEl.disabled = !aa.canDash;
-      this.actionArea.prepend(dashEl);
+      const dash = this.makeBtn('DASH', dashDisColor, this.callbacks.onDash);
+      dash.disabled = !aa.canDash;
+      econ().push(dash);
 
-      // Class-specific features — iterate the character's known features and
-      // render one button per feature that has a button UI. The server's
-      // `usableFeatureIds` decides which are clickable; the rest grey out.
+      const dis = this.makeBtn('DISENGAGE', dashDisColor, this.callbacks.onDisengage);
+      dis.disabled = !aa.canDisengage;
+      econ().push(dis);
+
+      if (aa.canDetach) groups.action.push(this.makeBtn('DETACH', GREEN, this.callbacks.onDetach));
+
+      // Class-specific features — the server's `usableFeatureIds` decides which
+      // are clickable; the rest grey out.
       const usable = new Set(aa.usableFeatureIds);
       for (const feat of state.features) {
         if (!feat.buttonLabel) continue;
-        const featEl = this.makeBtn(feat.buttonLabel, feat.buttonColor, () => this.callbacks.onUseFeature(feat.id));
-        featEl.disabled = !usable.has(feat.id);
-        this.actionArea.prepend(featEl);
+        const f = this.makeBtn(feat.buttonLabel, feat.buttonColor, () => this.callbacks.onUseFeature(feat.id));
+        f.disabled = !usable.has(feat.id);
+        groups.action.push(f);
       }
 
-      // Player-owned summons (Mage Hand, Unseen Servant, Flaming Sphere).
-      // One DIRECT button per summon. Most summons cost an Action; Flaming
-      // Sphere costs a Bonus Action (the SRD specifies the sphere is
-      // moved with a Bonus Action).
+      // Player-owned summons. Flaming Sphere costs a Bonus Action (→ bonus group).
       for (const summon of state.summons) {
-        const sEl = this.makeBtn(`DIRECT ${summon.name.toUpperCase()}`, '#2a3a55', () => this.callbacks.onCommandSummon(summon.id));
-        sEl.disabled = summon.costsBonusAction ? state.bonusActionUsed : actionUsed;
-        this.actionArea.prepend(sEl);
+        const s = this.makeBtn(`DIRECT ${summon.name.toUpperCase()}`, '#2a3a55', () => this.callbacks.onCommandSummon(summon.id));
+        s.disabled = summon.costsBonusAction ? state.bonusActionUsed : actionUsed;
+        (summon.costsBonusAction ? groups.bonus : groups.action).push(s);
       }
 
-      if (aa.canHide) {
-        const hideColor = hasCunningAction ? BONUS_BLUE : '#1a3a1a';
-        this.actionArea.prepend(btn('HIDE', hideColor, this.callbacks.onHide));
-      }
+      if (aa.canHide) econ().push(this.makeBtn('HIDE', hasCunningAction ? BONUS_BLUE : '#1a3a1a', this.callbacks.onHide));
 
-      // SEARCH — green Action button. Costs a full Action in combat (no
-      // Cunning Action fast-track per SRD); greys out once the Action has
-      // been spent this turn.
-      const searchEl = btn('SEARCH', GREEN, this.callbacks.onSearch);
-      searchEl.disabled = !aa.canSearch;
-      this.actionArea.prepend(searchEl);
+      const search = this.makeBtn('SEARCH', GREEN, this.callbacks.onSearch);
+      search.disabled = !aa.canSearch;
+      groups.action.push(search);
 
-      const moveEl = this.makeBtn('MOVE', moveMode ? '#5a4800' : '#3a3000', this.callbacks.onToggleMoveMode);
-      moveEl.disabled = movesLeft <= 0;
-      this.actionArea.appendChild(moveEl);
+      const move = this.makeBtn('MOVE', moveMode ? '#5a4800' : '#3a3000', this.callbacks.onToggleMoveMode);
+      move.disabled = movesLeft <= 0;
+      groups.move.push(move);
 
-      // TALK — no action-economy cost (free-action speech). Mirrors the
-      // exploring-mode placement above the MOVE button; disabled when no
-      // target is selected so the line has somewhere to route.
-      const talkEl = this.makeBtn('TALK', '#1a3a4a', this.callbacks.onTalk);
-      talkEl.disabled = !state.hasSelectedTarget;
-      this.actionArea.appendChild(talkEl);
-
-      // CAST — opens the Spells tab directly. Same teal as TALK; placed
-      // above it. Caster-only. The Spells tab itself enforces action
-      // economy + slot availability, so we don't pre-disable the button.
-      if (this.playerDef.spellcastingAbility) {
-        this.actionArea.appendChild(this.makeBtn('CAST', '#1a3a4a', this.callbacks.onOpenSpells));
-      }
-      // RELEASE — drops the active concentration spell at will. SRD: ending
-      // concentration is free (no action), so this stays free of the
-      // action-economy gates. Visible only when concentrating.
-      if (state.concentratingOn) {
-        const label = state.concentratingOnName
-          ? `RELEASE ${state.concentratingOnName.toUpperCase()}`
-          : 'RELEASE CONCENTRATION';
-        this.actionArea.appendChild(this.makeBtn(label, '#3a2a4a', this.callbacks.onReleaseConcentration));
-      }
+      if (state.hasSelectedTarget) groups.free.push(this.makeBtn('TALK', '#1a3a4a', this.callbacks.onTalk));
+      if (this.playerDef.spellcastingAbility) groups.free.push(this.makeBtn('CAST', '#1a3a4a', this.callbacks.onOpenSpells));
+      if (state.concentratingOn) groups.free.push(this.makeReleaseBtn(state));
 
     } else if (mode === 'death_saves') {
-      this.actionArea.prepend(btn('ROLL DEATH SAVE', '#5a1a1a', this.callbacks.onDeathSave));
+      groups.action.push(this.makeBtn('ROLL DEATH SAVE', '#5a1a1a', this.callbacks.onDeathSave));
     }
 
-    // COMPANION chip — surfaces whenever a companion NPC exists on the
-    // map, regardless of phase. Behaviour depends on context:
-    //   • Exploration: tap cycles FOLLOW ↔ WAIT.
-    //   • Combat with a target selected: tap = "attack this target".
-    //   • Combat without a target: chip is informational (greyed) — clicking
-    //     it has no effect; it just confirms which NPC is bound.
-    // Rendered last so it lands at the BOTTOM visually (the action area
-    // uses column-reverse, so DOM-last == top-visible — we want this
-    // BELOW combat buttons so the action stack stays familiar).
-    const companion = state.companion;
-    if (companion) {
-      if (mode === 'exploring') {
-        // Two chips stacked for companions in exploration:
-        //   (1) the FOLLOW/WAIT toggle chip (existing behaviour), and
-        //   (2) a smaller "→ POSITION" chip that enters tile-pick mode
-        //       so the player can send the companion to a specific tile
-        //       (set up a formation before a fight, unstick a companion
-        //       that's pathed into a chokepoint, etc.).
-        // When the scene is already in tile-pick mode, the position
-        // chip flips to a CANCEL-style label so the player can back out
-        // without picking a tile.
-        if (state.companionPickingTile) {
-          this.actionArea.prepend(this.makeBtn(
-            `${companion.displayName.toUpperCase()}: PICK TILE — ESC TO CANCEL`,
-            '#3a2a55',
-            () => this.callbacks.onCompanionPickTile(companion.npcId),
-          ));
-        } else {
-          this.actionArea.prepend(this.makeBtn(
-            `${companion.displayName.toUpperCase()}: → POSITION`,
-            '#2a2a3a',
-            () => this.callbacks.onCompanionPickTile(companion.npcId),
-          ));
-        }
+    this.collectCompanionChips(state, groups.companion);
+    this.renderGroups(groups, mode === 'player_turn');
+  }
 
-        const label = companion.currentMode === 'wait'
-          ? `${companion.displayName.toUpperCase()}: WAIT`
+  /** RELEASE-concentration button (free action). */
+  private makeReleaseBtn(state: PlayerPanelActionState): HTMLButtonElement {
+    const label = state.concentratingOnName
+      ? `RELEASE ${state.concentratingOnName.toUpperCase()}`
+      : 'RELEASE CONCENTRATION';
+    return this.makeBtn(label, '#3a2a4a', this.callbacks.onReleaseConcentration);
+  }
+
+  /** Push the companion chip(s) into the companion group. Exploration shows a
+   *  FOLLOW/WAIT toggle + a "→ POSITION" tile-pick chip; combat shows an
+   *  ATTACK-TARGET chip (or a dim "select a target" hint). */
+  private collectCompanionChips(state: PlayerPanelActionState, out: HTMLButtonElement[]): void {
+    const companion = state.companion;
+    if (!companion) return;
+    const name = companion.displayName.toUpperCase();
+
+    if (state.mode === 'exploring') {
+      const label = companion.currentMode === 'wait'
+        ? `${name}: WAIT`
+        : companion.currentMode === 'move_to'
+          ? `${name}: MOVING…`
+          : `${name}: FOLLOW`;
+      const color = companion.currentMode === 'wait' ? '#3a3a4a'
+        : companion.currentMode === 'move_to' ? '#2a3a55'
+          : '#1a3a3a';
+      out.push(this.makeBtn(label, color, () => {
+        // Toggle wait ↔ follow; MOVE TO is one-shot via the POSITION chip, so
+        // tapping the status chip while moving cancels back to FOLLOW.
+        const nextCommand = companion.currentMode === 'wait'
+          ? { kind: 'follow' as const, mode: 'loose' as const }
           : companion.currentMode === 'move_to'
-            ? `${companion.displayName.toUpperCase()}: MOVING…`
-            : `${companion.displayName.toUpperCase()}: FOLLOW`;
-        const color = companion.currentMode === 'wait' ? '#3a3a4a'
-                      : companion.currentMode === 'move_to' ? '#2a3a55'
-                      : '#1a3a3a';
-        this.actionArea.prepend(this.makeBtn(label, color, () => {
-          // Toggle: wait ↔ follow. MOVE TO is one-shot via the
-          // POSITION chip, so tapping the status chip while in MOVE TO
-          // cancels back to FOLLOW.
-          const nextCommand = companion.currentMode === 'wait'
             ? { kind: 'follow' as const, mode: 'loose' as const }
-            : companion.currentMode === 'move_to'
-              ? { kind: 'follow' as const, mode: 'loose' as const }
-              : { kind: 'wait' as const };
-          this.callbacks.onCompanionCommand(companion.npcId, nextCommand);
+            : { kind: 'wait' as const };
+        this.callbacks.onCompanionCommand(companion.npcId, nextCommand);
+      }));
+
+      if (state.companionPickingTile) {
+        out.push(this.makeBtn(`${name}: PICK TILE — ESC TO CANCEL`, '#3a2a55', () => this.callbacks.onCompanionPickTile(companion.npcId)));
+      } else {
+        out.push(this.makeBtn(`${name}: → POSITION`, '#2a2a3a', () => this.callbacks.onCompanionPickTile(companion.npcId)));
+      }
+    } else if (state.mode === 'player_turn') {
+      const targetId = state.selectedTargetId;
+      if (targetId) {
+        out.push(this.makeBtn(`${name}: ATTACK TARGET`, '#5a2a2a', () => {
+          this.callbacks.onCompanionCommand(companion.npcId, { kind: 'attack', targetId });
         }));
-      } else if (mode === 'player_turn') {
-        const targetId = state.selectedTargetId;
-        if (targetId) {
-          this.actionArea.prepend(this.makeBtn(`${companion.displayName.toUpperCase()}: ATTACK TARGET`, '#5a2a2a', () => {
-            this.callbacks.onCompanionCommand(companion.npcId, { kind: 'attack', targetId });
-          }));
-        } else {
-          // Informational chip — confirms a companion is bound even when
-          // there's no actionable command available right now.
-          const dim = this.makeBtn(`${companion.displayName.toUpperCase()} — SELECT A TARGET`, '#2a2a2a', () => {});
-          dim.disabled = true;
-          this.actionArea.prepend(dim);
-        }
+      } else {
+        const dim = this.makeBtn(`${name} — SELECT A TARGET`, '#2a2a2a', () => {});
+        dim.disabled = true;
+        out.push(dim);
       }
     }
   }
 
-  /** Render the unified status row beneath HP / slots / features —
-   *  conditions, buffs, debuffs, ongoing effects, concentration. Hides the
-   *  row entirely when nothing applies. */
-  private renderStatusChips(chips: import("./PlayerStatus").PlayerStatusChip[]): void {
-    if (!chips || chips.length === 0) {
-      this.statusEl.style.display = 'none';
-      this.statusEl.replaceChildren();
-      return;
+  /** Lay the collected groups into the action area, top → bottom: ACTION,
+   *  BONUS, MOVE, FREE, the collapsible MORE, then COMPANION. Economy headers
+   *  only show in combat (`showEconomy`); exploration stays header-light. */
+  private renderGroups(groups: Record<ActionGroup, HTMLButtonElement[]>, showEconomy: boolean): void {
+    const header = (text: string): HTMLElement => {
+      const h = document.createElement('div');
+      h.textContent = text;
+      h.style.cssText = 'font-size:9px;letter-spacing:1.5px;color:#556677;padding:5px 2px 0;';
+      return h;
+    };
+
+    if (groups.action.length > 0) {
+      if (showEconomy && (groups.bonus.length > 0 || groups.action.length > 1)) this.actionArea.appendChild(header('ACTION'));
+      for (const el of groups.action) this.actionArea.appendChild(el);
     }
-    this.statusEl.style.display = 'flex';
-    // Wipe + rebuild rather than diffing: chip count is tiny (single-digit
-    // typically) and any pop-in is invisible at panel render cadence.
-    this.statusEl.replaceChildren();
-    for (const c of chips) {
-      const palette = STATUS_TONE_COLOR[c.tone];
-      const chip = document.createElement('span');
-      chip.textContent = c.label;
-      if (c.tooltip) chip.title = c.tooltip;
-      chip.style.cssText = `
-        background:${palette.bg};
-        color:${palette.text};
-        border:1px solid ${palette.border};
-        padding:1px 6px;
-        font-size:9px;
-        line-height:1.5;
-        white-space:nowrap;
-      `;
-      this.statusEl.appendChild(chip);
+    if (groups.bonus.length > 0) {
+      if (showEconomy) this.actionArea.appendChild(header('BONUS ACTION'));
+      for (const el of groups.bonus) this.actionArea.appendChild(el);
     }
+    for (const el of groups.move) this.actionArea.appendChild(el);
+    for (const el of groups.free) this.actionArea.appendChild(el);
+
+    if (groups.more.length > 0) {
+      const toggle = document.createElement('button');
+      toggle.className = 'gui-btn';
+      toggle.style.cssText = 'background:#15151f;color:#8899aa;font-size:10px;margin-bottom:0;';
+      toggle.textContent = this.moreOpen ? '⋯ LESS' : `⋯ MORE (${groups.more.length})`;
+      toggle.onclick = () => {
+        this.moreOpen = !this.moreOpen;
+        if (this.lastActionState) this.refreshActions(this.lastActionState);
+      };
+      this.actionArea.appendChild(toggle);
+      if (this.moreOpen) for (const el of groups.more) this.actionArea.appendChild(el);
+    }
+
+    for (const el of groups.companion) this.actionArea.appendChild(el);
+  }
+
+  /** Build the unified resource strip: spell slots, feature pools, and status
+   *  chips (conditions / buffs / concentration) on one wrap-flow row, each with
+   *  a hover tooltip. Hidden when nothing applies. */
+  private renderResources(state: PlayerPanelActionState): void {
+    this.resourcesEl.replaceChildren();
+    const chip = (label: string, bg: string, border: string, text: string, tooltip?: string): void => {
+      const s = document.createElement('span');
+      s.textContent = label;
+      if (tooltip) s.title = tooltip;
+      s.style.cssText = `background:${bg};color:${text};border:1px solid ${border};padding:1px 6px;font-size:9px;line-height:1.5;white-space:nowrap;`;
+      this.resourcesEl.appendChild(s);
+    };
+
+    // Spell slots — one chip per tier the character has.
+    const maxSlots = this.playerDef.defaultSpellSlots ?? [];
+    for (let i = 0; i < maxSlots.length; i++) {
+      if (maxSlots[i] > 0) {
+        chip(`◆ L${i + 1} ${state.spellSlots[i] ?? 0}/${maxSlots[i]}`, '#10202e', '#2a4a66', '#8eb8e0', `Level ${i + 1} spell slots`);
+      }
+    }
+    // Class-feature resource pools (Second Wind, Rage, Channel Divinity, …).
+    for (const f of state.features) {
+      if (f.resourceChipText) chip(f.resourceChipText, '#1a1830', '#3a3060', '#b8a8e8', f.name);
+    }
+    // Conditions / buffs / ongoing effects / concentration.
+    for (const c of state.statusChips ?? []) {
+      const p = STATUS_TONE_COLOR[c.tone];
+      chip(c.label, p.bg, p.border, p.text, c.tooltip);
+    }
+
+    this.resourcesEl.style.display = this.resourcesEl.childElementCount > 0 ? 'flex' : 'none';
   }
 
   private renderPicker(): void {
     const items = this.lastActionState!.throwableItems.slice(0, MAX_PICKER_SLOTS);
-    for (const item of [...items].reverse()) {
-      this.actionArea.prepend(this.makeBtn(item.name, '#1e2e1e', () => {
+    for (const item of items) {
+      this.actionArea.appendChild(this.makeBtn(item.name, '#1e2e1e', () => {
         this.pickerOpen = false;
         this.callbacks.onThrow(item.id);
         if (this.lastActionState) this.refreshActions(this.lastActionState);
       }, '10px'));
     }
-    this.actionArea.prepend(this.makeBtn('↩ CANCEL', '#2a1a1a', () => {
+    this.actionArea.appendChild(this.makeBtn('↩ CANCEL', '#2a1a1a', () => {
       this.pickerOpen = false;
       if (this.lastActionState) this.refreshActions(this.lastActionState);
     }));
@@ -695,7 +641,8 @@ export class PlayerPanel {
   private makeBtn(label: string, bg: string, onClick: () => void, fontSize = '11px'): HTMLButtonElement {
     const b = document.createElement('button');
     b.className = 'gui-btn';
-    b.textContent = label;
+    const icon = iconFor(label);
+    b.textContent = icon ? `${icon}  ${label}` : label;
     b.style.background = bg;
     b.style.fontSize = fontSize;
     b.style.marginBottom = '0';
@@ -717,7 +664,8 @@ export class PlayerPanel {
     b.style.whiteSpace = 'normal';
     b.style.lineHeight = '1.2';
     b.style.padding = '4px 0';
-    b.innerHTML = `${escHtml(label)}<br><span style="font-size:9px;color:#bbccdd;opacity:0.85;">(${escHtml(subtitle)})</span>`;
+    const icon = iconFor(label);
+    b.innerHTML = `${icon ? icon + ' ' : ''}${escHtml(label)}<br><span style="font-size:9px;color:#bbccdd;opacity:0.85;">(${escHtml(subtitle)})</span>`;
     b.onclick = onClick;
     return b;
   }

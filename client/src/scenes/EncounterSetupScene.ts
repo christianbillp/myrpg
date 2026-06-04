@@ -2,8 +2,10 @@ import Phaser from "phaser";
 import { PlayerDef } from "../../../shared/types";
 import { ItemDef } from "../../../shared/types";
 import { EncounterDef } from "../../../shared/types";
-import type { AdventureDef } from "../../../shared/types";
+import type { AdventureDef, MonsterDef, NPCDef } from "../../../shared/types";
 import { SavedMapDef } from "../../../shared/types";
+import { XP_FOR_LEVEL } from "../../../shared/xpTable";
+import { stripTileFlipBits } from "../../../shared/tileGid";
 import { gameClient } from "../net/GameClient";
 import type { GameState, EquipmentSlots, EncounterRecord, StorylogEntry } from "../../../shared/types";
 import { StorylogOverlay } from "../ui/StorylogOverlay";
@@ -24,14 +26,17 @@ const H = GRID_ROWS * TILE_SIZE + HUD_HEIGHT;
 
 const CHAR_DIVIDER_X = 920;
 
-const ENC_CARD_W = 360;
-const ENC_CARD_H = 155;
-const ENC_COL1_CX = 1120;
-const ENC_COL2_CX = 1500;
+const ENC_CARD_W = 336;
+const ENC_CARD_H = 116;
+/** Column centres. Tuned so the right column's right edge (1472 + 168 = 1640)
+ *  clears the scrollbar at x = W − 28 = 1672, and the left column's left edge
+ *  (1108 − 168 = 940) stays right of the character/encounter divider (920). */
+const ENC_COL1_CX = 1108;
+const ENC_COL2_CX = 1472;
 /** Vertical centre of the first row of cards. */
-const ENC_ROW_FIRST_CY = 211;
-/** Vertical spacing between successive row centres. */
-const ENC_ROW_SPACING = 169;
+const ENC_ROW_FIRST_CY = 207;
+/** Vertical spacing between successive row centres (card height + gap). */
+const ENC_ROW_SPACING = 128;
 /** Visible band: top + bottom Y bounds (scene-space) the scroller clamps
  *  card positions into. Anything fully outside this rect is hidden so it
  *  doesn't bleed into the bottom-bar or character column. */
@@ -49,6 +54,7 @@ const ENC_CARD_VGAP = ENC_ROW_SPACING - ENC_CARD_H;
 
 
 const LAST_CHAR_KEY = 'myrpg_last_character';
+const LAST_ENC_KEY = 'myrpg_last_encounter';
 const saveKey = (id: string) => `myrpg_save_${id}`;
 
 interface LocalSave {
@@ -79,7 +85,7 @@ interface EncCardElems {
 }
 
 interface EncHeaderElems {
-  handle: HtmlTextHandle;
+  handle: HtmlButtonHandle;
   /** Content-space y (top edge) at scroll offset 0. */
   top: number;
 }
@@ -105,6 +111,19 @@ export class EncounterSetupScene extends Phaser.Scene {
   private characters: PlayerDef[] = [];
   private encounters: EncounterDef[] = [];
   private adventures: AdventureDef[] = [];
+  private monsters: MonsterDef[] = [];
+  private npcs: NPCDef[] = [];
+  private maps: SavedMapDef[] = [];
+  /** Active text filter (lowercased) applied to the encounter list. */
+  private encFilter = '';
+  /** Active quick-filter chip: all encounters, generated-only, or unplayed. */
+  private encFilterMode: 'all' | 'generated' | 'unplayed' = 'all';
+  /** Sort within each section: authored order, or alphabetical. */
+  private encSort: 'default' | 'az' = 'default';
+  /** Section labels the player has collapsed (folded) in the list. */
+  private collapsedSections = new Set<string>();
+  /** Quick-filter chip handles, for highlighting the active one. */
+  private filterChips: Array<{ mode: 'all' | 'generated' | 'unplayed'; btn: HtmlButtonHandle }> = [];
   private allSaves: Map<string, LocalSave> = new Map();
   private selectedSave: LocalSave | null = null;
   /** Vertical scroll offset (in scene-space pixels) applied to every
@@ -139,6 +158,9 @@ export class EncounterSetupScene extends Phaser.Scene {
     this.characters = this.registry.get("characters") as PlayerDef[];
     this.encounters = this.registry.get("encounters") as EncounterDef[];
     this.adventures = (this.registry.get("adventures") as AdventureDef[]) ?? [];
+    this.monsters = (this.registry.get("monsters") as MonsterDef[]) ?? [];
+    this.npcs = (this.registry.get("npcs") as NPCDef[]) ?? [];
+    this.maps = (this.registry.get("maps") as SavedMapDef[]) ?? [];
 
     if (this.pendingEncounterId && !this.encounters.find((e) => e.id === this.pendingEncounterId)) {
       Promise.all([gameClient.listEncounters(), gameClient.listMaps()]).then(([encs, maps]) => {
@@ -243,6 +265,7 @@ export class EncounterSetupScene extends Phaser.Scene {
     // section the cards fill a 2-column grid; surplus content scrolls into view
     // via the wheel handler installed by `installEncScroll`.
     this.encScrollOffset = 0;
+    this.buildFilterBar();
     this.buildEncounterSections();
     this.installEncScroll();
     this.applyEncScrollOffset();
@@ -256,10 +279,18 @@ export class EncounterSetupScene extends Phaser.Scene {
     const lastId = localStorage.getItem(LAST_CHAR_KEY);
     if (lastId) this.characterCarousel?.setSelectedId(lastId);
 
-    if (this.pendingEncounterId) {
-      const enc = this.encounters.find((e) => e.id === this.pendingEncounterId);
+    // Preselect: an explicit preset (e.g. just-authored map) wins, else fall
+    // back to the last encounter the player picked.
+    const preId = this.pendingEncounterId ?? localStorage.getItem(LAST_ENC_KEY);
+    if (preId) {
+      const enc = this.encounters.find((e) => e.id === preId);
       if (enc) this.selectEncounter(enc);
     }
+
+    // Keyboard: ↑/↓ move the selection through the visible cards, Enter begins.
+    this.input.keyboard?.on("keydown-UP", () => this.moveSelection(-1));
+    this.input.keyboard?.on("keydown-DOWN", () => this.moveSelection(1));
+    this.input.keyboard?.on("keydown-ENTER", () => this.beginEncounter());
 
     for (const char of this.characters) {
       gameClient.loadSave(char.id).then((data) => {
@@ -318,6 +349,7 @@ export class EncounterSetupScene extends Phaser.Scene {
   }
 
   private selectChar(def: PlayerDef): void {
+    const changed = this.selectedPlayer?.id !== def.id;
     this.selectedPlayer = def;
     this.selectedSave = this.allSaves.get(def.id) ?? null;
     localStorage.setItem(LAST_CHAR_KEY, def.id);
@@ -325,6 +357,28 @@ export class EncounterSetupScene extends Phaser.Scene {
     this.characterDetail?.setSave(this.selectedSave);
     this.refreshBeginButton();
     this.refreshPromoteButton();
+    // Difficulty + outcome chips depend on the selected character, so re-render
+    // the encounter cards when the character changes.
+    if (changed) this.rebuildEncounterList();
+  }
+
+  /** Tear down the current encounter cards/headers and rebuild from the
+   *  current filter + selection state. Called after the character changes or a
+   *  filter toggles. Cheaper than it looks — a few dozen DOM nodes. */
+  private rebuildEncounterList(): void {
+    for (const c of this.encCards) c.cardBtn.dispose();
+    for (const h of this.encHeaders) h.handle.dispose();
+    this.encCards = [];
+    this.encHeaders = [];
+    this.buildEncounterSections();
+    this.setEncScrollOffset(this.encScrollOffset); // clamp to new content height
+    this.applyEncScrollOffset();
+    // Keep the highlight + begin/promote state consistent with the selection.
+    if (this.selectedEncounter && this.encCards.some((c) => c.defId === this.selectedEncounter!.id)) {
+      for (const elems of this.encCards) {
+        elems.cardBtn.el.style.borderColor = elems.defId === this.selectedEncounter!.id ? "#e2b96f" : "#334455";
+      }
+    }
   }
 
   /** Group the encounters into sections and lay them out top-to-bottom:
@@ -338,6 +392,7 @@ export class EncounterSetupScene extends Phaser.Scene {
       if (sIdx > 0) y += ENC_GAP_ABOVE_HEADER;
       this.buildSectionHeader(section.label, y);
       y += ENC_HEADER_H + ENC_GAP_BELOW_HEADER;
+      if (this.collapsedSections.has(section.label)) return; // folded — header only
       section.encounters.forEach((def, i) => {
         const cx = i % 2 === 0 ? ENC_COL1_CX : ENC_COL2_CX;
         const top = y + Math.floor(i / 2) * (ENC_CARD_H + ENC_CARD_VGAP);
@@ -353,13 +408,20 @@ export class EncounterSetupScene extends Phaser.Scene {
    *  the adventure but NOT across adventures; then OTHER for whatever authored
    *  encounter no adventure claimed. Empty sections are dropped. */
   private computeEncounterSections(): { label: string; encounters: EncounterDef[] }[] {
-    const byId = new Map(this.encounters.map((e) => [e.id, e]));
+    // Apply the active quick-filter first; sections are built from the visible
+    // set so empty ones drop out naturally.
+    const visible = this.encounters.filter((e) => this.passesFilter(e));
+    const sortEncs = (arr: EncounterDef[]): EncounterDef[] =>
+      this.encSort === "az"
+        ? [...arr].sort((a, b) => a.encounterTitle.localeCompare(b.encounterTitle))
+        : arr;
+    const byId = new Map(visible.map((e) => [e.id, e]));
     const sections: { label: string; encounters: EncounterDef[] }[] = [];
     const claimed = new Set<string>();
 
-    const generated = this.encounters.filter((e) => (e as { generated?: boolean }).generated);
+    const generated = visible.filter((e) => (e as { generated?: boolean }).generated);
     if (generated.length > 0) {
-      sections.push({ label: "Generated", encounters: generated });
+      sections.push({ label: "Generated", encounters: sortEncs(generated) });
       for (const e of generated) claimed.add(e.id);
     }
 
@@ -377,25 +439,115 @@ export class EncounterSetupScene extends Phaser.Scene {
       add(adv.restEncounterId);
       if (encs.length === 0) continue;
       for (const e of encs) claimed.add(e.id);
-      sections.push({ label: adv.title, encounters: encs });
+      sections.push({ label: adv.title, encounters: sortEncs(encs) });
     }
 
-    const other = this.encounters.filter((e) => !claimed.has(e.id));
-    if (other.length > 0) sections.push({ label: "Other", encounters: other });
+    const other = visible.filter((e) => !claimed.has(e.id));
+    if (other.length > 0) sections.push({ label: "Other", encounters: sortEncs(other) });
 
     return sections;
   }
 
-  /** A section header spanning both card columns, scrolled with the cards. */
+  /** Quick-filter chips (ALL / GENERATED / UNPLAYED) + a sort toggle, sat above
+   *  the encounter list. Toggling rebuilds the list. */
+  private buildFilterBar(): void {
+    this.filterChips = [];
+    const y = 98;
+    let x = ENC_COL1_CX - ENC_CARD_W / 2;
+    const h = 22, gap = 6;
+    const modes: Array<{ mode: 'all' | 'generated' | 'unplayed'; label: string; w: number }> = [
+      { mode: "all", label: "ALL", w: 64 },
+      { mode: "generated", label: "✦ GEN", w: 78 },
+      { mode: "unplayed", label: "UNPLAYED", w: 96 },
+    ];
+    for (const { mode, label, w } of modes) {
+      const btn = createHtmlButton({
+        scene: this, sceneWidth: W, x, y, w, h,
+        label, variant: "secondary", fontSize: 10,
+        onClick: () => { this.encFilterMode = mode; this.refreshFilterChips(); this.rebuildEncounterList(); },
+      });
+      this.filterChips.push({ mode, btn });
+      this.htmlButtons.push(btn);
+      x += w + gap;
+    }
+    const sortBtn = createHtmlButton({
+      scene: this, sceneWidth: W, x: x + gap, y, w: 130, h,
+      label: "SORT: DEFAULT", variant: "secondary", fontSize: 10,
+      onClick: () => {
+        this.encSort = this.encSort === "default" ? "az" : "default";
+        sortBtn.setLabel(this.encSort === "az" ? "SORT: A–Z" : "SORT: DEFAULT");
+        this.rebuildEncounterList();
+      },
+    });
+    this.htmlButtons.push(sortBtn);
+
+    // ✦ GENERATE — roll a fresh AI encounter, reload the list, and land on it.
+    const rightEdge = ENC_COL2_CX + ENC_CARD_W / 2;
+    const genBtn = createHtmlButton({
+      scene: this, sceneWidth: W, x: rightEdge - 124, y, w: 124, h,
+      label: "✦ GENERATE", variant: "primary", fontSize: 10,
+      onClick: async () => {
+        genBtn.setDisabled(true);
+        genBtn.setLabel("GENERATING…");
+        try {
+          const { encounterId } = await gameClient.generateEncounter({
+            prompt: "Surprise me — a fresh skirmish on suitable terrain.",
+            playerName: this.selectedPlayer?.name,
+            playerClassName: this.selectedPlayer?.className,
+          });
+          const fresh = await gameClient.listEncounters();
+          this.registry.set("encounters", fresh);
+          this.scene.restart({ presetEncounterId: encounterId });
+        } catch (err) {
+          console.error("[generate encounter] failed", err);
+          genBtn.setLabel("✦ GENERATE");
+          genBtn.setDisabled(false);
+        }
+      },
+    });
+    this.htmlButtons.push(genBtn);
+    this.refreshFilterChips();
+  }
+
+  /** Highlight the active quick-filter chip. */
+  private refreshFilterChips(): void {
+    for (const { mode, btn } of this.filterChips) btn.setActive(mode === this.encFilterMode);
+  }
+
+  /** Whether an encounter passes the active quick-filter (ALL / GENERATED /
+   *  UNPLAYED). UNPLAYED hides anything the selected character has a recorded
+   *  result for. */
+  private passesFilter(def: EncounterDef): boolean {
+    if (this.encFilterMode === "generated" && !(def as { generated?: boolean }).generated) return false;
+    if (this.encFilterMode === "unplayed" && this.encounterOutcome(def)) return false;
+    return true;
+  }
+
+  /** A clickable section header spanning both card columns, scrolled with the
+   *  cards. Clicking folds/unfolds the section (▾ open, ▸ collapsed). */
   private buildSectionHeader(label: string, top: number): void {
     const left = ENC_COL1_CX - ENC_CARD_W / 2;
     const width = (ENC_COL2_CX + ENC_CARD_W / 2) - left;
-    const handle = createHtmlText({
+    const collapsed = this.collapsedSections.has(label);
+    const handle = createHtmlButton({
       scene: this, sceneWidth: W,
       x: left, y: ENC_CONTENT_TOP + top, w: width, h: ENC_HEADER_H,
-      text: label.toUpperCase(),
-      fontSize: 12, color: "#e2b96f", align: "left", letterSpacing: 2,
+      label: `${collapsed ? "▸" : "▾"} ${label.toUpperCase()}`,
+      variant: "ghost", fontSize: 12,
+      onClick: () => {
+        if (this.collapsedSections.has(label)) this.collapsedSections.delete(label);
+        else this.collapsedSections.add(label);
+        this.rebuildEncounterList();
+      },
     });
+    // Restyle the button to read as a left-aligned header, not a pill.
+    handle.el.style.background = "transparent";
+    handle.el.style.border = "none";
+    handle.el.style.color = "#e2b96f";
+    handle.el.style.textAlign = "left";
+    handle.el.style.letterSpacing = "2px";
+    handle.el.style.justifyContent = "flex-start";
+    handle.el.style.padding = "0 2px";
     this.encHeaders.push({ handle, top });
   }
 
@@ -409,6 +561,8 @@ export class EncounterSetupScene extends Phaser.Scene {
       label: "", variant: "ghost",
       onClick: () => this.selectEncounter(def),
     });
+    // Double-click a card to select + begin in one gesture.
+    cardBtn.el.addEventListener("dblclick", () => { this.selectEncounter(def); this.beginEncounter(); });
     cardBtn.el.textContent = "";
     cardBtn.el.style.padding = "0";
     cardBtn.el.style.background = "#111122";
@@ -418,35 +572,156 @@ export class EncounterSetupScene extends Phaser.Scene {
 
     const inner = document.createElement("div");
     inner.style.cssText = `
-      position: relative; display: flex; flex-direction: column;
-      width: 100%; height: 100%; padding: 10px 14px; box-sizing: border-box;
+      position: relative; display: flex; gap: 8px;
+      width: 100%; height: 100%; padding: 8px 10px; box-sizing: border-box;
       font-family: monospace; color: #aabbcc; pointer-events: none;
     `;
     cardBtn.el.appendChild(inner);
 
-    const mapTag = document.createElement("div");
-    mapTag.textContent = def.mapId.toUpperCase();
-    mapTag.style.cssText = "font-size: 9px; color: #445566; letter-spacing: 1px;";
-    inner.appendChild(mapTag);
+    // Minimap thumbnail (left) — a cheap gid-coloured silhouette of the map.
+    const mini = this.buildMinimap(def.mapId, 60, 60);
+    if (mini) inner.appendChild(mini);
 
-    if ((def as { generated?: boolean }).generated) {
-      const tag = document.createElement("div");
-      tag.textContent = "✦ GENERATED";
-      tag.style.cssText = "position: absolute; right: 14px; top: 10px; font-size: 9px; color: #88ccaa; letter-spacing: 1px;";
-      inner.appendChild(tag);
-    }
+    const col = document.createElement("div");
+    col.style.cssText = "flex: 1; display: flex; flex-direction: column; min-width: 0;";
+    inner.appendChild(col);
 
     const title = document.createElement("div");
     title.textContent = def.encounterTitle;
-    title.style.cssText = "margin-top: 6px; text-align: center; font-size: 14px; color: #e8e8f8;";
-    inner.appendChild(title);
+    title.style.cssText = "font-size: 13px; color: #e8e8f8; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;";
+    col.appendChild(title);
+
+    const mapTag = document.createElement("div");
+    mapTag.textContent = def.mapId.toUpperCase();
+    mapTag.style.cssText = "font-size: 8px; color: #445566; letter-spacing: 1px;";
+    col.appendChild(mapTag);
+
+    // Chip row: enemies, difficulty, environment, last outcome.
+    const chipRow = document.createElement("div");
+    chipRow.style.cssText = "display: flex; flex-wrap: wrap; gap: 3px; margin-top: 5px;";
+    for (const c of this.encounterChips(def)) {
+      const chip = document.createElement("span");
+      chip.textContent = c.label;
+      if (c.title) chip.title = c.title;
+      chip.style.cssText = `background:${c.bg};color:${c.color};border:1px solid ${c.border};padding:0 5px;font-size:8.5px;line-height:1.55;white-space:nowrap;`;
+      chipRow.appendChild(chip);
+    }
+    col.appendChild(chipRow);
 
     const desc = document.createElement("div");
     desc.textContent = def.description;
-    desc.style.cssText = "margin-top: 10px; font-size: 10px; color: #8899aa; line-height: 1.5;";
-    inner.appendChild(desc);
+    desc.style.cssText = "margin-top: 5px; font-size: 9.5px; color: #8899aa; line-height: 1.45; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;";
+    col.appendChild(desc);
+
+    if ((def as { generated?: boolean }).generated) {
+      const tag = document.createElement("div");
+      tag.textContent = "✦";
+      tag.title = "AI-generated encounter";
+      tag.style.cssText = "position: absolute; right: 8px; top: 6px; font-size: 12px; color: #88ccaa;";
+      inner.appendChild(tag);
+    }
 
     this.encCards.push({ cardBtn, defId: def.id, top, cx });
+  }
+
+  /** A cheap gid-coloured minimap: one pixel per tile, scaled up with nearest-
+   *  neighbour. Gives each map a recognisable silhouette without the cost of a
+   *  full tileset render. Returns null when the map isn't loaded. */
+  private buildMinimap(mapId: string, w: number, h: number): HTMLCanvasElement | null {
+    const map = this.maps.find((m) => m.id === mapId);
+    if (!map || !map.gidGrid?.length) return null;
+    const canvas = document.createElement("canvas");
+    canvas.width = map.cols;
+    canvas.height = map.rows;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return null;
+    const paint = (grid: number[][] | undefined): void => {
+      if (!grid) return;
+      for (let y = 0; y < grid.length; y++) {
+        const row = grid[y];
+        for (let x = 0; x < row.length; x++) {
+          const gid = stripTileFlipBits(row[x] ?? 0);
+          if (!gid) continue;
+          ctx.fillStyle = `hsl(${(gid * 47) % 360},28%,${28 + (gid % 5) * 6}%)`;
+          ctx.fillRect(x, y, 1, 1);
+        }
+      }
+    };
+    paint(map.gidGrid);
+    paint(map.objectGidGrid);
+    canvas.style.cssText = `width:${w}px;height:${h}px;flex-shrink:0;image-rendering:pixelated;border:1px solid #2a3a4a;background:#0a0a14;`;
+    return canvas;
+  }
+
+  /** Resolve an enemy/ally def id to a display name (NPC roster → its
+   *  monsterClass → monster roster, else the raw monster). */
+  private creatureName(defId: string): string {
+    const npc = this.npcs.find((n) => n.id === defId);
+    if (npc) return npc.name;
+    return this.monsters.find((m) => m.id === defId)?.name ?? defId;
+  }
+
+  /** XP value of an enemy def id (for the difficulty estimate). */
+  private creatureXp(defId: string): number {
+    const npc = this.npcs.find((n) => n.id === defId);
+    const monId = npc ? npc.monsterClass : defId;
+    return this.monsters.find((m) => m.id === monId)?.xp ?? 0;
+  }
+
+  /** Rough difficulty pip from total enemy XP vs the selected character's
+   *  level. Heuristic, not the full SRD budget — just a relative steer. Null
+   *  when no character is selected or the encounter has no enemies. */
+  private encounterDifficulty(def: EncounterDef): { label: string; color: string } | null {
+    if (!this.selectedPlayer) return null;
+    const enemyXp = (def.enemyIds ?? []).reduce((sum, id) => sum + this.creatureXp(id), 0);
+    if (enemyXp <= 0) return null;
+    const effLevel = this.selectedPlayer.level + (this.selectedSave?.levelUps?.length ?? 0);
+    const budget = 75 * Math.max(1, effLevel); // ~one "fair" fight's worth per level
+    const ratio = enemyXp / budget;
+    if (ratio < 0.75) return { label: "EASY", color: "#88cc99" };
+    if (ratio < 1.75) return { label: "FAIR", color: "#d9c07a" };
+    return { label: "DEADLY", color: "#e08a6a" };
+  }
+
+  /** The selected character's last recorded result for this encounter (matched
+   *  by title — the saved record carries the title, not the def id). */
+  private encounterOutcome(def: EncounterDef): { label: string; color: string } | null {
+    const rec = (this.selectedSave?.encounterLog ?? []).find((r) => r.encounterTitle === def.encounterTitle);
+    if (!rec) return null;
+    return rec.outcome === "survived"
+      ? { label: "✓ CLEARED", color: "#88cc99" }
+      : { label: "✗ DEFEATED", color: "#cc8888" };
+  }
+
+  /** Build the metadata chips for a card: enemies, difficulty, environment,
+   *  last outcome. Difficulty + outcome depend on the selected character, so
+   *  the list rebuilds when the character changes. */
+  private encounterChips(def: EncounterDef): Array<{ label: string; color: string; bg: string; border: string; title?: string }> {
+    const out: Array<{ label: string; color: string; bg: string; border: string; title?: string }> = [];
+
+    const enemies = def.enemyIds ?? [];
+    if (enemies.length > 0) {
+      const counts = new Map<string, number>();
+      for (const id of enemies) {
+        const n = this.creatureName(id);
+        counts.set(n, (counts.get(n) ?? 0) + 1);
+      }
+      const entries = [...counts];
+      const shown = entries.slice(0, 2).map(([n, c]) => (c > 1 ? `${c} ${n}` : n)).join(", ");
+      const extra = entries.length > 2 ? ` +${entries.length - 2}` : "";
+      out.push({ label: `⚔ ${shown}${extra}`, color: "#d8a0a0", bg: "#2a1818", border: "#4a2a2a", title: `${enemies.length} enemy${enemies.length > 1 ? "ies" : "y"}` });
+    }
+
+    const diff = this.encounterDifficulty(def);
+    if (diff) out.push({ label: diff.label, color: diff.color, bg: "#16161e", border: "#33333f", title: "Estimated difficulty for the selected character" });
+
+    const env = (def.environment ?? {}) as Record<string, unknown>;
+    if (env.sunlit) out.push({ label: "☀ sunlit", color: "#d8c88a", bg: "#26240f", border: "#4a4520" });
+
+    const oc = this.encounterOutcome(def);
+    if (oc) out.push({ label: oc.label, color: oc.color, bg: "#10161a", border: "#2a3a3a", title: "Your last result here" });
+
+    return out;
   }
 
   // ── Scrolling ──────────────────────────────────────────────────────────
@@ -502,20 +777,24 @@ export class EncounterSetupScene extends Phaser.Scene {
    *  scroll offset and hide anything fully outside the visible band. Also
    *  positions the scrollbar thumb. */
   private applyEncScrollOffset(): void {
+    // Only show cards/headers that fit *fully* inside the band — a partially
+    // scrolled card is hidden rather than allowed to bleed over the filter bar
+    // above or the footer buttons below (these are free-floating DOM elements
+    // with no clipping container).
     for (const elems of this.encCards) {
       const top = ENC_CONTENT_TOP + elems.top - this.encScrollOffset;
       const left = elems.cx - ENC_CARD_W / 2;
-      const offscreen = top + ENC_CARD_H < ENC_VIEWPORT_TOP || top > ENC_VIEWPORT_BOTTOM;
+      const fullyInside = top >= ENC_VIEWPORT_TOP && top + ENC_CARD_H <= ENC_VIEWPORT_BOTTOM;
       elems.cardBtn.setBounds(left, top, ENC_CARD_W, ENC_CARD_H);
-      elems.cardBtn.setVisible(!offscreen);
+      elems.cardBtn.setVisible(fullyInside);
     }
     const headerLeft = ENC_COL1_CX - ENC_CARD_W / 2;
     const headerW = (ENC_COL2_CX + ENC_CARD_W / 2) - headerLeft;
     for (const h of this.encHeaders) {
       const top = ENC_CONTENT_TOP + h.top - this.encScrollOffset;
-      const offscreen = top + ENC_HEADER_H < ENC_VIEWPORT_TOP || top > ENC_VIEWPORT_BOTTOM;
+      const fullyInside = top >= ENC_VIEWPORT_TOP && top + ENC_HEADER_H <= ENC_VIEWPORT_BOTTOM;
       h.handle.setBounds(headerLeft, top, headerW, ENC_HEADER_H);
-      h.handle.setVisible(!offscreen);
+      h.handle.setVisible(fullyInside);
     }
     // Position the scrollbar thumb. Thumb height = visible fraction of the
     // total content; thumb y = lerped against the scroll offset.
@@ -539,9 +818,25 @@ export class EncounterSetupScene extends Phaser.Scene {
       elems.cardBtn.el.style.borderColor = elems.defId === def.id ? "#e2b96f" : "#334455";
     }
     this.selectedEncounter = def;
+    localStorage.setItem(LAST_ENC_KEY, def.id);
     this.scrollEncounterIntoView(def);
     this.refreshBeginButton();
     this.refreshPromoteButton();
+  }
+
+  /** Move the selection up/down through the visible cards (keyboard nav). */
+  private moveSelection(delta: number): void {
+    if (this.encCards.length === 0) return;
+    // De-dupe to the first card per encounter id, in layout order.
+    const seen = new Set<string>();
+    const order: string[] = [];
+    for (const c of this.encCards) {
+      if (!seen.has(c.defId)) { seen.add(c.defId); order.push(c.defId); }
+    }
+    const cur = this.selectedEncounter ? order.indexOf(this.selectedEncounter.id) : -1;
+    const next = cur < 0 ? (delta > 0 ? 0 : order.length - 1) : (cur + delta + order.length) % order.length;
+    const enc = this.encounters.find((e) => e.id === order[next]);
+    if (enc) this.selectEncounter(enc);
   }
 
   /** Ensure a card for `def` is fully visible in the encounter viewport. Used
@@ -587,17 +882,23 @@ export class EncounterSetupScene extends Phaser.Scene {
       label: "BEGIN ENCOUNTER",
       variant: "primary",
       fontSize: 14,
-      onClick: () => {
-        if (!this.isReady()) return;
-        this.beginBtn.setDisabled(true);
+      onClick: () => this.beginEncounter(),
+    });
+    this.htmlButtons.push(this.beginBtn);
+  }
 
-        const enc = this.selectedEncounter!;
-        const player = this.selectedPlayer!;
-        const maps = this.registry.get("maps") as SavedMapDef[];
-        const savedMap = maps.find((m) => m.id === enc.mapId);
-        const save = this.selectedSave;
+  /** Launch the selected encounter. Shared by the BEGIN button, double-click
+   *  on a card, and the Enter key. */
+  private beginEncounter(): void {
+    if (!this.isReady()) return;
+    this.beginBtn.setDisabled(true);
 
-        const createRequest = {
+    const enc = this.selectedEncounter!;
+    const player = this.selectedPlayer!;
+    const savedMap = this.maps.find((m) => m.id === enc.mapId);
+    const save = this.selectedSave;
+
+    const createRequest = {
           mapType: "saved" as const,
           playerDefId: player.id,
           savedMapId: enc.mapId,
@@ -626,19 +927,16 @@ export class EncounterSetupScene extends Phaser.Scene {
           resumeEquippedSlots: save?.equippedSlots,
           resumeResources:     save?.resources,
         };
-        gameClient.createSession(createRequest).then(({ state, playerDef }) => {
-          // Use the server-returned PlayerDef rather than the registry's L1
-          // copy — it already has the character's level-up history applied.
-          // `createRequest` is threaded through so the DevTools panel's
-          // Reload Encounter button can recreate the same session.
-          this.scene.start("GameScene", { sessionId: state.sessionId, playerDef, createRequest });
-        }).catch((err: unknown) => {
-          console.error('Failed to create session:', err);
-          this.beginBtn.setDisabled(false);
-        });
-      },
+    gameClient.createSession(createRequest).then(({ state, playerDef }) => {
+      // Use the server-returned PlayerDef rather than the registry's L1
+      // copy — it already has the character's level-up history applied.
+      // `createRequest` is threaded through so the DevTools panel's
+      // Reload Encounter button can recreate the same session.
+      this.scene.start("GameScene", { sessionId: state.sessionId, playerDef, createRequest });
+    }).catch((err: unknown) => {
+      console.error('Failed to create session:', err);
+      this.beginBtn.setDisabled(false);
     });
-    this.htmlButtons.push(this.beginBtn);
   }
 
   /**
