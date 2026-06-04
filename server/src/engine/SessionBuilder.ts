@@ -253,6 +253,7 @@ export function buildSessionState(
       enemyZone,
       npcZone,
       placements,
+      conversationOverrides: req.conversationOverrides,
     },
   );
 
@@ -317,6 +318,7 @@ export function buildSessionState(
     logScrollOffset: 0,
     mapName: req.encounterContext.mapName ?? 'Unknown',
     encounterTitle: req.encounterTitle ?? '',
+    currentEncounterId: req.encounterId,
     objective: req.encounterContext.objective ?? '',
     selectedTargetId: null,
     activeNpcIndex: 0,

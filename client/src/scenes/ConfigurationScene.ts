@@ -313,6 +313,11 @@ export class ConfigurationScene extends Phaser.Scene {
         description: "Show a small bottom-anchored DevTools bar to the right of the Player Panel during play. Hosts dev-only tools (Reload Encounter, Complete Objective, …) so they don't clutter the Player Panel.",
         flag: "showDevToolsPanel",
       },
+      {
+        label: "Clean Mode (wipe saves on server restart) ⚠ DESTRUCTIVE",
+        description: "When ON, the server deletes every player-progress artefact under each setting's saves/ directory the moment it boots: world saves, character saves, persistent NPC saves, adventure saves. The flag stays on across restarts — every boot wipes everything. Useful for iterating on encounters from a clean slate. Turn it OFF in this screen when you're done; until then nothing you save will survive the next restart.",
+        flag: "cleanModeOnStart",
+      },
     ];
 
     for (const t of toggles) {
@@ -515,13 +520,14 @@ export class ConfigurationScene extends Phaser.Scene {
     DevMode.allowRetryChecks     = !!flags.allowRetryChecks;
     DevMode.completePrimaryObjective = !!flags.completePrimaryObjective;
     DevMode.showDevToolsPanel    = !!flags.showDevToolsPanel;
+    DevMode.cleanModeOnStart     = !!flags.cleanModeOnStart;
   }
 
   /** True when there is a pending change waiting on CONFIRM — either a
    *  different setting id, or any dev-flag toggle that differs from saved. */
   private hasPendingChanges(): boolean {
     if (this.pendingId !== this.activeId) return true;
-    const fields: (keyof DevFlags)[] = ['disableSupertitle', 'unlimitedSpellSlots', 'unlockAllSpells', 'unlimitedActions', 'showDeleteSaveButton', 'allowRetryChecks', 'completePrimaryObjective', 'showDevToolsPanel'];
+    const fields: (keyof DevFlags)[] = ['disableSupertitle', 'unlimitedSpellSlots', 'unlockAllSpells', 'unlimitedActions', 'showDeleteSaveButton', 'allowRetryChecks', 'completePrimaryObjective', 'showDevToolsPanel', 'cleanModeOnStart'];
     return fields.some((k) => !!this.pendingDevFlags[k] !== !!this.savedDevFlags[k]);
   }
 

@@ -1,3 +1,10 @@
+// Wall-clock at the very top of index.ts. Used by the "Ready in Xms"
+// line printed once the server is listening. Includes everything from
+// transpile-tax + module load through `loadDefs` and `server.listen`,
+// so the number you see is what a developer waiting at the terminal
+// actually waited.
+const startupT0 = performance.now();
+
 import { config as loadEnv } from "dotenv";
 import { resolve } from "path";
 loadEnv({
@@ -8,12 +15,21 @@ import cors from "@fastify/cors";
 import websocket from "@fastify/websocket";
 import { z } from "zod";
 import Anthropic from "@anthropic-ai/sdk";
-import { readFile, readdir, writeFile, mkdir, unlink, access } from "fs/promises";
+import { readFile, readdir, writeFile, mkdir, unlink, access, rm } from "fs/promises";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
 import { randomUUID } from "crypto";
 import { buildEncounter } from "./encounterService.js";
 import { generateEncounter, generateMap } from "./encounterGenerator.js";
+import { generateMission } from "./mission/missionGenerator.js";
+import {
+  getMission, recordMission, isGeneratedMissionId,
+  setGeneratedMapTilesets, setGeneratedMapDisabledScribble,
+  getGeneratedMapTilesets, getGeneratedMapDisabledScribble,
+  serialiseForSave as serialiseMissionsForSave,
+  restoreFromSave as restoreMissionsFromSave,
+  dropMission,
+} from "./mission/missionRegistry.js";
 import { registerGenerateRoutes } from "./routes/generate.js";
 import { processAIGMChat, AIGMChatRequest } from "./aigm.js";
 import { loadSettings, settingPromptBlock } from "./settings.js";
@@ -226,6 +242,12 @@ async function loadDefs(): Promise<void> {
   }
   defs.maps = await Promise.all(rawMaps.map(loadTiledMap));
   defs.tileLegend = await loadTileLegends();
+  // Snapshot the scribble + water tileset metadata for the mission
+  // generator. Any outdoor map references both; we pick the first one
+  // that has the union of needed tilesets. Procedural missions reuse
+  // these refs unchanged so the generated maps render with the same
+  // tiles as authored content.
+  cacheGeneratedMapTilesetsFromDefs(defs.maps);
   // Token Creator parts library. Loaded once at boot — fragments don't
   // change without a server restart, so caching them in memory is fine and
   // makes each compose request a pure CPU op.
@@ -407,6 +429,97 @@ async function loadTiledMap(file: TiledMapFile) {
     tilesets: tilesetInfo,
     zones: file.zones,
   };
+}
+
+/**
+ * Capture the scribble + water tileset metadata once at startup so the
+ * mission generator can attach them to procedurally-composed maps
+ * without re-reading .tsj files on every roll.
+ *
+ * Strategy: pick the first authored map whose tileset list is a
+ * superset of what an outdoor procedural map will reference. Failing
+ * that, fall back to the first map's tilesets — the renderer will only
+ * see GIDs that map to one of these, so missing the water tileset
+ * (used by coastline features which procedural missions don't request)
+ * is harmless.
+ */
+/**
+ * Clean Mode — when `devFlags.cleanModeOnStart` is on in the server
+ * config, wipe every save artefact under each setting's `saves/`
+ * directory before the server starts accepting requests. The flag
+ * stays on across restarts; an operator disables it from the
+ * Configuration screen when they're done iterating.
+ *
+ * What gets wiped (per setting):
+ *   • `saves/world.json`          — in-progress encounter state
+ *   • `saves/<charId>.json`        — character HP / XP / inventory / level-ups
+ *   • `saves/<charId>_adventure.json` — adventure-level progress
+ *   • `saves/<charId>_npcs/`       — persistent NPC saves
+ *
+ * Note: the `saves/` directory itself is preserved (recreated when
+ * absent during first save write). Settings without a `saves/` dir
+ * yet are skipped silently.
+ *
+ * Off-flag short-circuit — when the flag is unset, the function
+ * returns immediately without touching disk.
+ */
+async function wipeAllSavesIfCleanMode(): Promise<void> {
+  const flags = (await loadServerConfig(DATA_DIR)).devFlags ?? {};
+  if (!flags.cleanModeOnStart) return;
+
+  const settingsDir = join(DATA_DIR, "settings");
+  let settings: string[];
+  try {
+    settings = await readdir(settingsDir);
+  } catch {
+    Logger.log('server.clean_mode_wipe', { skipped: 'no settings dir' }, 'warn');
+    return;
+  }
+
+  const wiped: string[] = [];
+  for (const setting of settings) {
+    const savesDir = join(settingsDir, setting, "saves");
+    let entries: string[];
+    try {
+      entries = await readdir(savesDir);
+    } catch {
+      // No saves dir for this setting — nothing to wipe.
+      continue;
+    }
+    for (const name of entries) {
+      // Skip dotfiles — `.gitkeep` sentinels are committed to keep
+      // empty saves/ directories alive in git and should survive
+      // Clean Mode. The wipe is about player progress, not VCS plumbing.
+      if (name.startsWith('.')) continue;
+      const full = join(savesDir, name);
+      try {
+        await rm(full, { recursive: true, force: true });
+        wiped.push(`${setting}/saves/${name}`);
+      } catch (err) {
+        Logger.log('server.clean_mode_wipe_failed', { path: full, error: String(err) }, 'warn');
+      }
+    }
+  }
+
+  console.warn(`[clean-mode] wiped ${wiped.length} save artefact(s):`);
+  for (const p of wiped) console.warn(`  • ${p}`);
+  Logger.log('server.clean_mode_wipe', { count: wiped.length, paths: wiped });
+}
+
+function cacheGeneratedMapTilesetsFromDefs(maps: GameDefs['maps']): void {
+  if (maps.length === 0) return;
+  // Prefer a map that includes both scribble and water tilesets; else
+  // any outdoor map; else the first map.
+  const outdoor = maps.find((m) => m.tilesets.length >= 2)
+    ?? maps.find((m) => /road|woods|ward|field|ruin/.test(m.id))
+    ?? maps[0];
+  setGeneratedMapTilesets(outdoor.tilesets);
+  // Disabled-scribble: same source the encounter generator uses —
+  // server-side config keeps a set of GIDs the user has flagged out.
+  // Read the active setting's disabled list if present.
+  const active = defs.activeSetting?.id;
+  const list = active ? (cachedDisabledTiles[active] ?? []) : [];
+  setGeneratedMapDisabledScribble(new Set(list));
 }
 
 // ── Server setup ───────────────────────────────────────────────────────────────
@@ -679,6 +792,7 @@ server.put<{ Body: { activeSettingId?: string | null; devFlags?: import("../../s
     if (body.devFlags.allowRetryChecks)     sanitised.allowRetryChecks = true;
     if (body.devFlags.completePrimaryObjective) sanitised.completePrimaryObjective = true;
     if (body.devFlags.showDevToolsPanel)    sanitised.showDevToolsPanel = true;
+    if (body.devFlags.cleanModeOnStart)     sanitised.cleanModeOnStart = true;
     next.devFlags = sanitised;
   }
   if (body.disabledTiles !== undefined) {
@@ -1207,6 +1321,11 @@ type WorldSave = Omit<GameState, "player"> & {
    *  in `loadWorldSave` so saves written before the rename still resume. */
   chapterComplete?: boolean;
   aigmHistory?: AigmMessage[];
+  /** Procedurally-generated missions live for the duration of one Vask
+   *  contract cycle. Without this they'd evaporate on cold reload —
+   *  the registry is in-memory only. Persisted as opaque blobs; the
+   *  loader hands them straight back to `restoreMissionsFromSave`. */
+  inFlightMissions?: import("./mission/missionGenerator.js").GeneratedMission[];
 };
 
 interface CharSave {
@@ -1245,7 +1364,12 @@ async function saveWorldState(
     preparedSpellIds: _ps,
     ...sessionPlayer
   } = state.player;
-  const worldSave: WorldSave = { ...state, player: sessionPlayer, aigmHistory };
+  const worldSave: WorldSave = {
+    ...state,
+    player: sessionPlayer,
+    aigmHistory,
+    inFlightMissions: serialiseMissionsForSave(),
+  };
   await mkdir(savesDir(), { recursive: true });
   const path = worldSavePath();
   await writeFile(path, JSON.stringify(worldSave));
@@ -1554,6 +1678,10 @@ interface EncounterDefJson {
   environment?: import("./engine/types.js").EncounterEnvironment;
   /** Optional per-encounter override for the global faction-relation matrix. */
   factionRelations?: Record<string, Record<string, number>>;
+  /** Optional per-encounter conversation override — see
+   *  `EncounterDef.conversationOverrides`. Threaded into the session via
+   *  `CreateSessionRequest.conversationOverrides`. */
+  conversationOverrides?: Record<string, string>;
 }
 
 async function loadAdventureDef(adventureId: string): Promise<AdventureDef | null> {
@@ -1624,6 +1752,7 @@ async function startAdventureChapter(
     mapType: "saved",
     playerDefId: playerDef.id,
     savedMapId: savedMap?.id,
+    encounterId: encDef.id,
     encounterTitle: encDef.encounterTitle,
     savedMapName: savedMap?.name,
     savedMapDescription: savedMap?.mapdescription,
@@ -1639,6 +1768,7 @@ async function startAdventureChapter(
     placementMode: encDef.placementMode,
     placements: encDef.placements,
     triggers: encDef.triggers,
+    conversationOverrides: encDef.conversationOverrides,
     adventureSeed,
     resumeHp: charSave?.hp,
     resumeXp: charSave?.xp,
@@ -1792,6 +1922,7 @@ async function startAdventureRest(
     placementMode: encDef.placementMode,
     placements: encDef.placements,
     triggers: encDef.triggers,
+    conversationOverrides: encDef.conversationOverrides,
     adventureSeed,
     resumeHp: charSave?.hp,
     resumeXp: charSave?.xp,
@@ -1881,6 +2012,28 @@ server.get("/world", async (_req, reply) => {
   if (!loaded) return reply.code(404).send({ error: "No world save" });
 
   const { state, aigmHistory } = loaded;
+  // Restore the procedural-mission registry from the saved snapshot.
+  // A player who quit mid-mission will find Vask's contract + the
+  // generated map intact when they reload.
+  const savedMissions = (state as unknown as WorldSave).inFlightMissions;
+  restoreMissionsFromSave(savedMissions);
+  // Re-derive per-NPC conversationId from the encounter def on load.
+  // World saves written before `conversationOverrides` was wired (or
+  // saved against an encounter whose overrides were later edited)
+  // would otherwise carry stale `npc.conversationId` values — usually
+  // undefined, which makes the TALK button silently fall through to
+  // the AIGM free-text chat. Re-resolving here is idempotent: the
+  // override always wins, the NPC def is the fallback.
+  if (state.currentEncounterId) {
+    const encDef = await loadEncounterDef(state.currentEncounterId);
+    if (encDef) {
+      for (const npc of state.npcs) {
+        const cid = encDef.conversationOverrides?.[npc.defId]
+          ?? defs.npcs.find((n) => n.id === npc.defId)?.conversationId;
+        if (cid) npc.conversationId = cid;
+      }
+    }
+  }
   // Re-use the existing engine if the session is still alive (e.g. hot-reload),
   // otherwise restore from the saved GameState.
   let engine = getEngine(state.sessionId);
@@ -2016,6 +2169,167 @@ server.post("/game/session", async (req, reply) => {
  * whenever the player focuses the GM chat box or opens a blocking overlay —
  * so the world doesn't advance under typing time or while a modal is up.
  */
+/**
+ * Mission/hub transition — swap the current session for one running a
+ * different encounter, **preserving** player state (HP, XP, inventory,
+ * equipped slots, resources, level-ups) AND world-scope state (worldFlags,
+ * factionRelations, factionStandings, discoveredFactions, rumors). The
+ * old session is deleted; the new session's id replaces it on the client.
+ *
+ * Used by the BUREAU OFFICE → MISSION → BUREAU OFFICE cycle: the player
+ * accepts a contract, the client POSTs here with the mission encounter id,
+ * the server stands up a new session for the mission with all the player's
+ * state carried over, and the client redirects to the new session id.
+ *
+ * Distinct from the adventure-chapter-advance path because:
+ *   - it doesn't write or read an AdventureSave (the cycle is in-session,
+ *     not adventure-scope);
+ *   - it doesn't require an AdventureDef (the player can swap to any
+ *     encounter, not just an authored chapter sequence);
+ *   - it preserves the full world-flag map verbatim so the bureau-office
+ *     conversation tree can read `mission_complete` and `mission_pending`
+ *     to drive its branches.
+ */
+server.post<{
+  Params: { id: string };
+  Body: { encounterId?: string };
+}>("/game/session/:id/transition", async (req, reply) => {
+  const { id } = req.params;
+  const { encounterId } = req.body ?? {};
+  if (typeof encounterId !== 'string' || encounterId.length === 0) {
+    return reply.code(400).send({ error: "transition requires { encounterId: string }" });
+  }
+  const oldEngine = getEngine(id);
+  if (!oldEngine) return reply.code(404).send({ error: "Session not found" });
+
+  // Procedural missions live in the in-memory registry, not on disk.
+  // The mission id pattern (`mission_gen_<uuid>`) is the discriminator —
+  // hand-authored encounters take the loadEncounterDef path; generated
+  // ones short-circuit to the registry. Both return the same
+  // EncounterDef shape so downstream code is unchanged.
+  let encDef: EncounterDefJson;
+  let savedMap: GameDefs['maps'][number] | undefined;
+  if (isGeneratedMissionId(encounterId)) {
+    const m = getMission(encounterId);
+    if (!m) return reply.code(404).send({ error: `Generated mission "${encounterId}" not in registry (expired or never rolled)` });
+    encDef = m.encounterDef as unknown as EncounterDefJson;
+    savedMap = m.savedMap;
+  } else {
+    const loaded = await loadEncounterDef(encounterId);
+    if (!loaded) return reply.code(404).send({ error: `Unknown encounterId "${encounterId}"` });
+    encDef = loaded;
+    savedMap = encDef.mapId ? defs.maps.find((m) => m.id === encDef.mapId) : undefined;
+  }
+
+  const oldState = oldEngine.getState();
+  const playerDef = oldEngine.getPlayerDef();
+
+  // Build the new encounter's context using the target encounter's
+  // authored fields (npcs, enemies, allies, prose, placements).
+  const encounterContext = buildEncounter({
+    mapType: "saved",
+    playerDefId: playerDef.id,
+    playerName: playerDef.name,
+    playerSpeciesName: playerDef.speciesName,
+    playerClassName: playerDef.className,
+    playerLevel: playerDef.level,
+    playerMaxHp: oldState.player.hp,  // carry HP through
+    playerAc: playerDef.ac,
+    savedMapName: savedMap?.name,
+    savedMapDescription: savedMap?.mapdescription,
+    npcIds: encDef.npcIds,
+    allyIds: encDef.allyIds,
+    enemyIds: encDef.enemyIds,
+    customIntroduction: encDef.customIntroduction,
+    customContext: encDef.customContext,
+    customObjective: encDef.objective,
+    startingZones: encDef.startingZones,
+    placementMode: encDef.placementMode,
+    placements: encDef.placements,
+    environment: encDef.environment,
+    factionRelations: encDef.factionRelations,
+    allowsLongRest: encDef.allowsLongRest,
+  });
+
+  // Seed world-scope state into the new session via the same
+  // `adventureSeed.seedWorldFlags` path the chapter-advance flow uses.
+  // No actual adventure context is set — this is a per-session cycle.
+  const seed: NonNullable<CreateSessionRequest['adventureSeed']> = {
+    adventureId: oldState.adventureContext?.adventureId ?? '',
+    adventureTitle: oldState.adventureContext?.adventureTitle ?? '',
+    chapterId: encDef.id,
+    chapterTitle: encDef.encounterTitle ?? encDef.id,
+    chapterIndex: 0,
+    totalChapters: 1,
+    priorChapterSummaries: oldState.adventureContext?.priorChapterSummaries ?? [],
+    seedWorldFlags: { ...oldState.worldFlags },
+    seedFactionStandings: { ...oldState.factionStandings },
+    seedFactionRelations: { ...oldState.factionRelations },
+    seedDiscoveredFactions: [...oldState.discoveredFactions],
+    seedRumors: [...oldState.rumors],
+  };
+
+  const newSessionId = randomUUID();
+  const req2: CreateSessionRequest = {
+    mapType: "saved",
+    playerDefId: playerDef.id,
+    savedMapId: savedMap?.id,
+    encounterId: encDef.id,
+    encounterTitle: encDef.encounterTitle,
+    savedMapName: savedMap?.name,
+    savedMapDescription: savedMap?.mapdescription,
+    npcIds: encDef.npcIds,
+    allyIds: encDef.allyIds,
+    enemyIds: encDef.enemyIds,
+    customIntroduction: encDef.customIntroduction,
+    customContext: encDef.customContext,
+    customObjective: encDef.objective,
+    completionFlag: encDef.completionFlag,
+    tileProperties: encDef.tileProperties,
+    startingZones: encDef.startingZones,
+    placementMode: encDef.placementMode,
+    placements: encDef.placements,
+    triggers: encDef.triggers,
+    allowsLongRest: encDef.allowsLongRest,
+    adventureSeed: seed,
+    // Player state carry-over. Inventory + equipment + spell slots +
+    // resources + level-up history all ride through.
+    resumeHp: oldState.player.hp,
+    resumeXp: oldState.player.xp,
+    resumeCp: oldState.player.balanceCp,
+    resumeInventoryIds: oldState.player.inventoryIds,
+    resumeEquippedSlots: oldState.player.equippedSlots,
+    resumeResources: oldState.player.resources,
+    resumeSpellSlots: oldState.player.spellSlots,
+    resumePreparedSpellIds: oldState.player.preparedSpellIds,
+    resumeConcentratingOn: oldState.player.concentratingOn,
+    resumeMageArmor: oldState.player.mageArmor,
+    devFlags: await resolveDevFlags(undefined),
+  };
+
+  // Flush any persistent NPC saves from the old session BEFORE we tear
+  // it down — otherwise their stateOverrides (HP, conditions, etc.)
+  // don't survive the swap.
+  await flushSessionNpcSaves(id);
+  deleteSession(id);
+
+  const newEngine = GameEngine.createSession(
+    newSessionId,
+    { ...req2, encounterContext },
+    defs,
+    savedMap,
+  );
+  await attachPersistentNpcSaves(newEngine, playerDef.id);
+  createSession(newSessionId, newEngine);
+  installWorldTick(newSessionId, newEngine);
+
+  return reply.send({
+    sessionId: newSessionId,
+    state: newEngine.getState(),
+    playerDef: newEngine.getPlayerDef(),
+  });
+});
+
 server.post("/game/session/:id/world-paused", async (req, reply) => {
   const { id } = req.params as { id: string };
   const body = req.body as { paused?: boolean };
@@ -2406,5 +2720,7 @@ server.get("/game/session/:id/ws", { websocket: true }, (socket, req) => {
 
 await loadDefs();
 cachedDisabledTiles = (await loadServerConfig(DATA_DIR)).disabledTiles ?? {};
+await wipeAllSavesIfCleanMode();
 await server.listen({ port: 3000, host: "0.0.0.0" });
-console.log("Server listening on http://localhost:3000");
+const readyMs = Math.round(performance.now() - startupT0);
+console.log(`Server listening on http://localhost:3000  ready in ${readyMs}ms`);

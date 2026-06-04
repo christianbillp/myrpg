@@ -7,6 +7,7 @@ import { MapItem } from "../entities/MapItem";
 import { PlayerPanel, PlayerPanelActionState } from "../ui/PlayerPanel";
 import { buildPlayerStatusChips } from "../ui/PlayerStatus";
 import { TargetPanel } from "../ui/TargetPanel";
+import { MissionTopBar } from "../ui/MissionTopBar";
 import { DevToolsPanel } from "../ui/DevToolsPanel";
 import { HUD, HUDState } from "../ui/HUD";
 import { LevelUpOverlay } from "../ui/LevelUpOverlay";
@@ -86,6 +87,7 @@ export class GameScene extends Phaser.Scene {
   private uiScale!: UIScale;
   private playerPanel!: PlayerPanel;
   private targetPanel!: TargetPanel;
+  private missionTopBar!: MissionTopBar;
   private devToolsPanel: DevToolsPanel | null = null;
   private hud!: HUD;
   /** Captured `CreateSessionRequest` payload — stored so the DevTools panel's
@@ -126,6 +128,12 @@ export class GameScene extends Phaser.Scene {
   private moveMode = false;
   private moveDist: number[][] = [];
   private movePrev: Array<Array<[number, number] | null>> = [];
+  /** Companion-move-to targeting mode. Set when the player hits the
+   *  "→ POSITION" chip on the Player Panel; the next tile click sends
+   *  a `companionCommand` with `kind: 'move_to'`. ESC cancels. Mutually
+   *  exclusive with `moveMode` and `spellTargetMode` — entering one
+   *  exits the others. */
+  private companionMoveToMode: { npcId: string } | null = null;
   /** Spell-targeting mode — set after CAST on a spell that needs a target.
    *   - `kind: "creature"` waits for a creature click (attack-roll / auto-hit).
    *   - `kind: "aoe"`      waits for a tile click. The area shape determines
@@ -368,6 +376,7 @@ export class GameScene extends Phaser.Scene {
       this.hud.destroy();
       this.playerPanel.destroy();
       this.targetPanel.destroy();
+      this.missionTopBar.destroy();
       this.devToolsPanel?.destroy();
       this.speechBubbles.destroy();
       this.screenEffects.destroy();
@@ -552,6 +561,7 @@ export class GameScene extends Phaser.Scene {
 
   private applyState(state: GameState): void {
     this.animating = false;
+    this.refreshMissionTopBar(state);
 
     if (!this.mapDrawn) {
       this.gridView.container.addAt(this.drawMapTiles(state.map), 0);
@@ -723,6 +733,25 @@ export class GameScene extends Phaser.Scene {
       return;
     }
 
+    // Companion move-to: any in-bounds passable tile that isn't the
+    // player's own square is a valid destination. The server's
+    // WalkToTask greedily walks the companion there; if the tile is
+    // occupied at arrival time the walker stops adjacent. We don't
+    // pre-pathfind on the client — it's just a destination ping.
+    if (this.companionMoveToMode) {
+      const npcId = this.companionMoveToMode.npcId;
+      this.exitCompanionMoveToMode();
+      const { passable } = this.gameState.map;
+      const isPlayerTile = this.gameState.player.tileX === tileX && this.gameState.player.tileY === tileY;
+      if (!passable[tileY]?.[tileX] || isPlayerTile) return;
+      gameClient.sendAction({
+        type: "companionCommand",
+        npcId,
+        command: { kind: "move_to", tileX, tileY },
+      });
+      return;
+    }
+
     const { player: ps, npcs } = this.gameState;
     const nState = npcs.find(n => n.hp > 0 && n.tileX === tileX && n.tileY === tileY)
       ?? npcs.find(n => n.tileX === tileX && n.tileY === tileY);
@@ -821,6 +850,8 @@ export class GameScene extends Phaser.Scene {
       this.exitMoveMode();
     if (this.spellTargetMode && Phaser.Input.Keyboard.JustDown(this.escKey))
       this.exitSpellTargetMode();
+    if (this.companionMoveToMode && Phaser.Input.Keyboard.JustDown(this.escKey))
+      this.exitCompanionMoveToMode();
 
     const phase = this.gameState.phase;
     if (phase !== "exploring" && phase !== "player_turn") return;
@@ -876,8 +907,16 @@ export class GameScene extends Phaser.Scene {
       onDevCompleteObjective: () => gameClient.sendAction({ type: "devCompleteEncounter" }),
       onLeaveEncounter: () => this.leaveEncounter(),
       onCompanionCommand: (npcId, command) => gameClient.sendAction({ type: "companionCommand", npcId, command }),
+      onCompanionPickTile: (npcId) => {
+        if (this.companionMoveToMode?.npcId === npcId) {
+          this.exitCompanionMoveToMode();
+        } else {
+          this.enterCompanionMoveToMode(npcId);
+        }
+      },
     });
     this.targetPanel = new TargetPanel(this.uiScale);
+    this.missionTopBar = new MissionTopBar(this.uiScale, (encounterId) => this.transitionToEncounter(encounterId));
     if (DevMode.showDevToolsPanel) {
       this.devToolsPanel = new DevToolsPanel(this.uiScale, {
         onReloadEncounter:    () => void this.reloadEncounter(),
@@ -1046,20 +1085,28 @@ export class GameScene extends Phaser.Scene {
       statusChips: buildPlayerStatusChips(state.player, concSpell?.name ?? null),
       companion: (() => {
         // Single-companion assumption for step 2 — pick the first companion
-        // we see on the map. The chip surfaces this NPC's id + display
-        // name; future steps (party support) generalise via a roster
-        // selector. The mode read is "wait" iff the active sim task is
-        // `wait_here`; otherwise the companion is autonomously following.
+        // we see on the map. Mode is read off the live sim state so the
+        // chip reflects what the sim is actually doing:
+        //   • activeTaskId === 'wait_here'           → WAIT
+        //   • activeTaskId === 'companion_move_to'   → MOVING…
+        //   • override.kind === 'move_to' (pending)  → MOVING…
+        //   • otherwise                              → FOLLOW
         const c = state.npcs.find((n) => n.companion && n.hp > 0);
         if (!c || !c.companion) return null;
-        const mode: 'follow' | 'wait' =
-          c.companion.simState?.activeTaskId === 'wait_here' ? 'wait' : 'follow';
+        const active = c.companion.simState?.activeTaskId;
+        const override = c.companion.override?.kind;
+        const mode: 'follow' | 'wait' | 'move_to' =
+          active === 'wait_here' ? 'wait'
+          : active === 'companion_move_to' ? 'move_to'
+          : override === 'move_to' ? 'move_to'
+          : 'follow';
         return {
           npcId: c.id,
           displayName: c.revealedName ?? c.name ?? 'COMPANION',
           currentMode: mode,
         };
       })(),
+      companionPickingTile: this.companionMoveToMode !== null,
     };
   }
 
@@ -1219,6 +1266,90 @@ export class GameScene extends Phaser.Scene {
     this.closeMultiProjectilePanel();
     this.clearMultiProjectileBadges();
     if (this.gameState) this.playerPanel.refreshActions(this.buildActionState(this.gameState));
+  }
+
+  /** Enter companion-move-to mode. Cancels the other targeting modes
+   *  so they don't conflict. Re-renders the Player Panel so the chip
+   *  flips to its "PICK TILE" state. */
+  private enterCompanionMoveToMode(npcId: string): void {
+    if (this.moveMode) this.exitMoveMode();
+    if (this.spellTargetMode) this.exitSpellTargetMode();
+    this.companionMoveToMode = { npcId };
+    if (this.gameState) this.playerPanel.refreshActions(this.buildActionState(this.gameState));
+  }
+
+  private exitCompanionMoveToMode(): void {
+    if (!this.companionMoveToMode) return;
+    this.companionMoveToMode = null;
+    if (this.gameState) this.playerPanel.refreshActions(this.buildActionState(this.gameState));
+  }
+
+  /**
+   * Refresh the MissionTopBar mode from the current state. The bar
+   * surfaces the Bureau-office mission cycle:
+   *
+   *   • At the Bureau (`currentEncounterId === 'bureau_office'`) and
+   *     a contract is pending (`worldFlags.mission_pending` resolves
+   *     truthy and is a string identifying which mission) → TO MISSION
+   *     button targeting that encounter id.
+   *
+   *   • Inside a mission encounter (currentEncounterId starts with
+   *     `mission_`) → LEAVE MISSION button targeting `bureau_office`.
+   *
+   *   • Anywhere else → hidden.
+   *
+   * Convention over configuration: the encounter id naming pattern
+   * (`mission_<flavour>`) drives the in-mission detection. Add a new
+   * mission encounter = no UI changes; the bar finds it automatically.
+   */
+  private refreshMissionTopBar(state: GameState): void {
+    const here = state.currentEncounterId;
+    const flags = state.worldFlags ?? {};
+    const pending = flags['mission_pending'];
+    if (here === 'bureau_office' && typeof pending === 'string' && pending.length > 0) {
+      this.missionTopBar.setMode({ kind: 'to-mission', encounterId: pending });
+    } else if (typeof here === 'string' && here.startsWith('mission_')) {
+      this.missionTopBar.setMode({ kind: 'leave-mission' });
+    } else {
+      this.missionTopBar.setMode({ kind: 'hidden' });
+    }
+  }
+
+  /**
+   * POST `/game/session/:id/transition` with the target encounter id,
+   * then swap the live session id in place. The server preserves world
+   * flags + player state across the swap so the mission cycle's
+   * `mission_pending` / `mission_complete` / `mission_reward_claimed`
+   * read consistently from both sides of the transition.
+   *
+   * Keep this surface minimal — error handling is a single in-fiction
+   * log line; the user is in a hub/spoke flow that rarely fails.
+   */
+  private async transitionToEncounter(encounterId: string): Promise<void> {
+    const sessionId = gameClient.getSessionId();
+    if (!sessionId) return;
+    this.missionTopBar.setMode({ kind: 'hidden' });
+    try {
+      const resp = await fetch(`${API_URL}/game/session/${sessionId}/transition`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ encounterId }),
+      });
+      if (!resp.ok) {
+        console.warn('[transition] failed:', resp.status, await resp.text());
+        return;
+      }
+      const { sessionId: newSessionId, playerDef } = await resp.json() as { sessionId: string; playerDef: PlayerDef };
+      // Tell GameClient about the new session BEFORE tearing down the
+      // scene so the WS reconnect in the next scene mounts on the
+      // right session. `preserveSessionOnShutdown` keeps the existing
+      // shutdown path from DELETEing the new session by mistake.
+      this.preserveSessionOnShutdown = true;
+      gameClient.resumeSession(newSessionId);
+      this.scene.restart({ sessionId: newSessionId, playerDef, isResume: true });
+    } catch (err) {
+      console.warn('[transition] error:', err);
+    }
   }
 
   /** Build the floating "Select Targets" HUD shown during
@@ -2286,10 +2417,14 @@ export class GameScene extends Phaser.Scene {
     // scripted conversation.
     const target = this.gameState.npcs.find((n) => n.id === this.selectedEntityId);
     if (target && this.gameState.phase === "exploring") {
-      const npcDefs = this.defs.npcs();
-      const def = npcDefs.find((n) => n.id === target.defId);
-      if (def?.conversationId) {
-        gameClient.sendAction({ type: "startConversation", npcRef: `npc_${target.id}`, conversationId: def.conversationId });
+      // Effective conversation id is resolved server-side at spawn time
+      // (encounter override → NPCDef.conversationId) and stored on the
+      // NpcState. The client reads the live value so the same NPC can
+      // carry different conversations across encounters.
+      const conversationId = target.conversationId
+        ?? this.defs.npcs().find((n) => n.id === target.defId)?.conversationId;
+      if (conversationId) {
+        gameClient.sendAction({ type: "startConversation", npcRef: `npc_${target.id}`, conversationId });
         return;
       }
     }

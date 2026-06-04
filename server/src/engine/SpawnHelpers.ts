@@ -112,6 +112,11 @@ export function spawnNpc(
    */
   dupOrdinal?: number,
   dupCount?: number,
+  /** Effective conversation graph id for this spawn — encounter override
+   *  resolved by the caller against `EncounterDef.conversationOverrides`.
+   *  Lands on `NpcState.conversationId` when present; the TALK button
+   *  reads it directly from the state instead of from `NPCDef.conversationId`. */
+  conversationOverride?: string,
 ): void {
   // Resolve the def: NPC roster first (named characters with personas),
   // then the monster roster (raw creature stats). This lets the
@@ -185,6 +190,10 @@ export function spawnNpc(
         isActive: false,
         reactionUsed: false, conditions: [], inventoryIds: [], ongoingEffects: [],
         ...(npcDef?.routine && npcDef.routine.length > 0 ? { routine: npcDef.routine } : {}),
+        ...(() => {
+          const cid = conversationOverride ?? npcDef?.conversationId;
+          return cid ? { conversationId: cid } : {};
+        })(),
       });
       return;
     }
@@ -230,6 +239,10 @@ export function spawnNpc(
     isActive: false,
     reactionUsed: false, conditions: [], inventoryIds: [], ongoingEffects: [],
     ...(npcDef?.routine && npcDef.routine.length > 0 ? { routine: npcDef.routine } : {}),
+    ...(() => {
+      const cid = conversationOverride ?? npcDef?.conversationId;
+      return cid ? { conversationId: cid } : {};
+    })(),
   });
 }
 
@@ -281,6 +294,10 @@ export interface PopulateNpcsInput {
    * back to the zone path if the tile is blocked/occupied.
    */
   placements?: import('../../../shared/types.js').EncounterPlacement[];
+  /** Per-defId conversation override map — see `EncounterDef.conversationOverrides`.
+   *  Threaded through to `spawnNpc` so the resolved `conversationId` lands
+   *  on each spawned `NpcState`. */
+  conversationOverrides?: Record<string, string>;
 }
 
 export function populateNpcs(
@@ -290,7 +307,7 @@ export function populateNpcs(
   input: PopulateNpcsInput,
 ): void {
   const { allyIds, enemyIds, npcIds, secretDefs,
-          playerX, playerY, allyZone, enemyZone, npcZone, placements } = input;
+          playerX, playerY, allyZone, enemyZone, npcZone, placements, conversationOverrides } = input;
 
   // Build a per-role lookup: index → [x, y]. Faster than scanning the array
   // for every spawn (encounters with many NPCs would otherwise be O(n²)).
@@ -310,17 +327,18 @@ export function populateNpcs(
   const lists = { allyIds: allyIds ?? [], enemyIds: enemyIds ?? [], npcIds: npcIds ?? [] };
   const dupCount = (defId: string): number => totalSpawnCount(defId, lists);
 
+  const overrideFor = (defId: string): string | undefined => conversationOverrides?.[defId];
   (allyIds ?? []).forEach((defId, i) => {
     spawnNpc(out.npcs, map, defs.npcs, defs.monsters, defId, playerX, playerY, 'ally', allyZone,
-      exactFor('ally', i), spawnOrdinalForSlot('ally', i, lists), dupCount(defId));
+      exactFor('ally', i), spawnOrdinalForSlot('ally', i, lists), dupCount(defId), overrideFor(defId));
   });
   (enemyIds ?? []).forEach((defId, i) => {
     spawnNpc(out.npcs, map, defs.npcs, defs.monsters, defId, playerX, playerY, 'enemy', enemyZone,
-      exactFor('enemy', i), spawnOrdinalForSlot('enemy', i, lists), dupCount(defId));
+      exactFor('enemy', i), spawnOrdinalForSlot('enemy', i, lists), dupCount(defId), overrideFor(defId));
   });
   (npcIds ?? []).forEach((defId, i) => {
     spawnNpc(out.npcs, map, defs.npcs, defs.monsters, defId, playerX, playerY, 'neutral', npcZone,
-      exactFor('neutral', i), spawnOrdinalForSlot('neutral', i, lists), dupCount(defId));
+      exactFor('neutral', i), spawnOrdinalForSlot('neutral', i, lists), dupCount(defId), overrideFor(defId));
   });
   if ((enemyIds ?? []).length > 0) {
     spawnItems(out.mapItems, map, defs.equipment, playerX, playerY, out.npcs);

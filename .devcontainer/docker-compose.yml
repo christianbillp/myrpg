@@ -1,5 +1,26 @@
 version: "3.9"
 
+# node_modules notes:
+#
+# Each `node_modules` directory is backed by a Docker-managed named
+# volume rather than riding along the workspace bind mount. Three
+# wins from this:
+#
+#   1. Speed — file-heavy npm operations stay inside the container's
+#      native filesystem instead of crossing the bind-mount boundary
+#      (the big I/O hit on macOS / Windows hosts).
+#   2. Isolation — `npm install` run from the host won't pollute the
+#      container's tree (and vice versa). Eliminates the "native
+#      binary built for the wrong platform" class of bug.
+#   3. Faster container rebuilds — Docker keeps the cache volume
+#      across container recreations, so a postCreateCommand `npm install`
+#      after a rebuild is a fast no-op if package-lock didn't change.
+#
+# Trade-off: `node_modules` directories are invisible to the host. The
+# host-side VS Code instance can't resolve modules until it attaches to
+# the dev container. If you `npm install` on the host, those installs
+# disappear once VS Code reconnects to the container.
+
 services:
   app:
     build:
@@ -7,6 +28,9 @@ services:
       dockerfile: Dockerfile
     volumes:
       - ..:/workspace:cached
+      - node_modules_root:/workspace/node_modules
+      - node_modules_client:/workspace/client/node_modules
+      - node_modules_server:/workspace/server/node_modules
     command: sleep infinity
     environment:
       - NODE_ENV=development
@@ -53,6 +77,11 @@ services:
 volumes:
   postgres-data:
   redis-data:
+  # Container-managed node_modules — see the comment above the `app`
+  # service for the rationale.
+  node_modules_root:
+  node_modules_client:
+  node_modules_server:
 
 networks:
   rpg-net:

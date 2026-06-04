@@ -20,6 +20,7 @@ const KEY_SHOW_DELETE_SAVE  = 'myrpg_dev_show_delete_save';
 const KEY_ALLOW_RETRY_CHECKS = 'myrpg_dev_allow_retry_checks';
 const KEY_COMPLETE_PRIMARY_OBJECTIVE = 'myrpg_dev_complete_primary_objective';
 const KEY_SHOW_DEVTOOLS_PANEL = 'myrpg_dev_show_devtools_panel';
+const KEY_CLEAN_MODE_ON_START = 'myrpg_dev_clean_mode_on_start';
 
 function readUrlParam(name: string): boolean | null {
   const param = new URLSearchParams(window.location.search).get(name);
@@ -74,6 +75,13 @@ export const DevMode = {
   set completePrimaryObjective(v: boolean)  { writeBoolStorage(KEY_COMPLETE_PRIMARY_OBJECTIVE, v); },
   get showDevToolsPanel(): boolean          { return readBoolStorage(KEY_SHOW_DEVTOOLS_PANEL); },
   set showDevToolsPanel(v: boolean)         { writeBoolStorage(KEY_SHOW_DEVTOOLS_PANEL, v); },
+  /** Clean Mode — server-side effect (wipes saves on boot). Mirrored
+   *  to localStorage so the Configuration screen renders the toggle
+   *  in its saved state without an extra GET. The actual wipe happens
+   *  on the server when its persisted `devFlags.cleanModeOnStart` is
+   *  true; this client flag is purely UI-state. */
+  get cleanModeOnStart(): boolean           { return readBoolStorage(KEY_CLEAN_MODE_ON_START); },
+  set cleanModeOnStart(v: boolean)          { writeBoolStorage(KEY_CLEAN_MODE_ON_START, v); },
 
   /** Snapshot the current flags for inclusion in a `CreateSessionRequest`.
    *  Only set fields that are TRUE so the request stays lean. Returns
@@ -89,6 +97,8 @@ export const DevMode = {
     if (this.allowRetryChecks)     flags.allowRetryChecks = true;
     if (this.completePrimaryObjective) flags.completePrimaryObjective = true;
     if (this.showDevToolsPanel)    flags.showDevToolsPanel = true;
+    // cleanModeOnStart is intentionally NOT snapshotted into per-session
+    // devFlags — it's a server-startup flag, not a per-session override.
     return Object.keys(flags).length === 0 ? undefined : flags;
   },
 };

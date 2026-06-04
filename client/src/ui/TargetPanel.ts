@@ -344,6 +344,7 @@ export class TargetPanel {
     const overrideText = override?.kind === 'wait' ? ' · HOLDING'
       : override?.kind === 'attack' ? ' · ATTACKING'
       : override?.kind === 'cast' ? ' · CASTING'
+      : override?.kind === 'move_to' ? ` · MOVING TO (${override.tileX},${override.tileY})`
       : '';
     this.companionEl.innerHTML = `<span style="color:#778899">COMPANION</span>  <span style="color:#5fb37a;text-transform:uppercase;letter-spacing:1px;">FOLLOW ${modeText}${overrideText}</span>`;
   }

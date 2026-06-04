@@ -9,6 +9,14 @@ import { setRelation, adjustRelation } from './FactionRelations.js';
 import { PLAYER_FACTION_ID } from '../../../shared/types.js';
 import { formatCoins as formatCoinsTrigger } from '../../../shared/currency.js';
 import { Logger } from '../Logger.js';
+import { generateMission } from '../mission/missionGenerator.js';
+import {
+  recordMission,
+  dropMission,
+  isGeneratedMissionId,
+  getGeneratedMapTilesets,
+  getGeneratedMapDisabledScribble,
+} from '../mission/missionRegistry.js';
 import {
   startConversation, endConversation, setConversationNode,
   applyNpcRemember, applyNpcForget, applyNpcAdjustRelationship,
@@ -296,6 +304,57 @@ const TRIGGER_ACTIONS: TriggerRegistry = {
     ctx.state.worldFlags[a.name] = a.value;
     // Publishing flag_set lets other triggers fan out off a flag change.
     ctx.publish({ type: 'flag_set', name: a.name, value: a.value });
+  },
+  pick_random_value: (ctx, a) => {
+    if (!Array.isArray(a.values) || a.values.length === 0) return;
+    const pick = a.values[Math.floor(Math.random() * a.values.length)];
+    ctx.state.worldFlags[a.name] = pick;
+    ctx.publish({ type: 'flag_set', name: a.name, value: pick });
+  },
+  award_mission_reward: (ctx) => {
+    const cp = ctx.state.worldFlags['mission_offer_reward_cp'];
+    const xp = ctx.state.worldFlags['mission_offer_reward_xp'];
+    if (typeof cp === 'number' && cp > 0) {
+      ctx.state.player.balanceCp += cp;
+      ctx.addLog({
+        left: `Received ${formatCoinsTrigger(cp)} (Bureau contract pay).`,
+        style: 'heal',
+      });
+    }
+    if (typeof xp === 'number' && xp > 0) {
+      ctx.state.player.xp += xp;
+      ctx.addLog({ left: `+${xp} XP`, style: 'status' });
+    }
+    // Reward paid — the procedurally-generated mission has done its
+    // job. Drop it from the registry so a long Bureau-office session
+    // doesn't accumulate stale entries. `pending` is the LAST one
+    // that was rolled (still set until the conversation's "Got
+    // another?" branch generates the next).
+    const pending = ctx.state.worldFlags['mission_pending'];
+    if (typeof pending === 'string' && isGeneratedMissionId(pending)) {
+      dropMission(pending);
+    }
+  },
+  generate_mission_contract: (ctx) => {
+    // Lazy import to avoid pulling fs / map composer into every code
+    // path that imports TriggerSystem (especially the test harness).
+    const last = ctx.state.worldFlags['mission_last_flavour'];
+    const excludeFlavour = (last === 'bandit' || last === 'goblin' || last === 'skeleton') ? last : undefined;
+    const tilesets = getGeneratedMapTilesets();
+    const disabledScribble = getGeneratedMapDisabledScribble();
+    const mission = generateMission({ tilesets, disabledScribble, excludeFlavour });
+    recordMission(mission);
+    // Set every flag the conversation prose / TO MISSION button read.
+    const setFlag = (name: string, value: number | string | boolean): void => {
+      ctx.state.worldFlags[name] = value;
+      ctx.publish({ type: 'flag_set', name, value });
+    };
+    setFlag('mission_pending', mission.missionId);
+    setFlag('mission_offer_flavour', mission.flavour);
+    setFlag('mission_offer_count', mission.enemyCount);
+    setFlag('mission_offer_reward_cp', mission.reward.cpDelta);
+    setFlag('mission_offer_reward_xp', mission.reward.xp);
+    setFlag('mission_last_flavour', mission.flavour);
   },
   apply_condition_to_player: (ctx, a) => {
     if (!ctx.state.player.conditions.includes(a.condition)) {

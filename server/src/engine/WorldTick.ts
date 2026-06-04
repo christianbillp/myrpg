@@ -32,7 +32,7 @@ import { tickSpellConditionExpiries } from './CombatFlow.js';
 import { Logger } from '../Logger.js';
 import {
   NpcTickRunner, SimRng, FollowPlayerTask, WaitHereTask, IdleTask,
-  InvestigateTask, AlertTask,
+  InvestigateTask, AlertTask, WalkToTask,
   tasksForRoutine,
 } from './npcSim/index.js';
 import { ALERT_DECAY_TICKS, DAY_PHASE_CYCLE, TICKS_PER_DAY_PHASE } from '../../../shared/types.js';
@@ -252,14 +252,105 @@ function runSimNpcTicks(ctx: GameContext, tickId: number, events: GameEvent[]): 
   }
 }
 
-function runCompanionTick(ctx: GameContext, npc: import('./types.js').NpcState, tickId: number, events: GameEvent[]): void {
+/**
+ * Tile-movement budget per world tick = floor(speed_ft / 5). Mirrors
+ * the SRD round-based movement budget (one world tick = one SRD round =
+ * 6 seconds = full speed allowance). A speed-30 creature gets 6 tiles
+ * per tick; speed-25 gets 5; speed-40 gets 8. Minimum 1 so an exhausted
+ * speed-0 NPC still gets one attempted action per tick.
+ */
+function tilesPerTick(ctx: GameContext, npc: import('./types.js').NpcState): number {
+  const def = ctx.resolveMonsterDef(npc.defId);
+  return Math.max(1, Math.floor((def?.speed ?? 30) / 5));
+}
+
+/**
+ * Pump the runner up to `tilesPerTick(npc)` times per world tick, so
+ * sim NPCs cover their full SRD speed (30 ft = 6 tiles for a typical
+ * creature). Breaks early when:
+ *   • the active task signals 'done' (activeTaskId cleared), or
+ *   • the NPC didn't actually move in the iteration — a stationary
+ *     task (Idle, WaitHere) won the scorer, or the next step was
+ *     blocked. Either way there's no point burning more budget.
+ *
+ * The runner's RNG is keyed by (tickId, npcId), so all iterations
+ * within a tick share the same seed. Tasks today don't consume RNG
+ * during nextAction, so this is deterministic and stable.
+ */
+function pumpSpeedBudget(
+  ctx: GameContext,
+  npc: import('./types.js').NpcState,
+  tickId: number,
+  events: GameEvent[],
+  registry: import('./npcSim/index.js').NpcTaskRegistry,
+  simState: { activeTaskId: string | null; lastTickId: number },
+): void {
+  const budget = tilesPerTick(ctx, npc);
+  for (let i = 0; i < budget; i++) {
+    const beforeX = npc.tileX;
+    const beforeY = npc.tileY;
+    const sim = { ctx, npc, rng: SimRng.forNpcTick(tickId, npc.id), events, tickId };
+    NpcTickRunner.run(sim, registry, simState);
+    if (simState.activeTaskId === null) break;
+    if (npc.tileX === beforeX && npc.tileY === beforeY) break;
+  }
+}
+
+/**
+ * Run one sim tick for a single companion NPC. Exported so the
+ * `companionCommand` player action can fire it synchronously after
+ * setting the override — without this, the player waits up to 6 s
+ * (one world-tick interval) before the companion starts moving. Pumps
+ * the runner against the NPC's full speed budget so the first move
+ * burst covers a full SRD round of distance.
+ */
+export function runCompanionTick(ctx: GameContext, npc: import('./types.js').NpcState, tickId: number, events: GameEvent[]): void {
   if (!npc.companion) return;
-  const tasks = [IdleTask, new FollowPlayerTask(npc.companion.followMode), WaitHereTask];
-  const registry = { tasks, override: npc.companion.override };
-  const sim = { ctx, npc, rng: SimRng.forNpcTick(tickId, npc.id), events, tickId };
-  NpcTickRunner.run(sim, registry, npc.companion.simState);
-  if (npc.companion.override && npc.companion.simState.activeTaskId === null) {
-    npc.companion.override = undefined;
+  const tasks: import('./npcSim/index.js').NpcTask[] = [
+    IdleTask,
+    new FollowPlayerTask(npc.companion.followMode),
+    WaitHereTask,
+  ];
+  // MOVE TO override carries the destination on the override itself —
+  // build the matching WalkToTask on the fly so the runner can find it
+  // by id (`companion_move_to`) without us having to store another
+  // task instance on the companion state.
+  const override = npc.companion.override;
+  if (override?.kind === 'move_to') {
+    tasks.push(new WalkToTask(override.tileX, override.tileY, 'companion_move_to'));
+  }
+  const registry = { tasks, override };
+  pumpSpeedBudget(ctx, npc, tickId, events, registry, npc.companion.simState);
+  // Override-end handling. The runner clears `activeTaskId` when the
+  // active task returns 'done'. What happens next depends on which
+  // override was running:
+  //   • move_to → convert to WAIT so the companion stays positioned
+  //               where the player put them. This is what makes
+  //               "set up positions" actually feel like positioning
+  //               (otherwise FollowPlayerTask immediately drags them
+  //               back to the player on the very next tick).
+  //   • wait    → KEEP the override. WaitHereTask returns 'done' every
+  //               tick by design (it has nothing to do), but the
+  //               player's command to wait persists until they cancel
+  //               it with another command. Without this branch the
+  //               companion would bolt after the player on the very
+  //               next tick.
+  //   • everything else → clear the override so the next tick
+  //               re-enters the autonomous scorer.
+  if (override && npc.companion.simState.activeTaskId === null) {
+    if (override.kind === 'move_to') {
+      npc.companion.override = { kind: 'wait' };
+    } else if (override.kind === 'wait' || override.kind === 'attack' || override.kind === 'cast') {
+      // Persist:
+      //   • wait — the player's hold command lasts until they cancel it.
+      //   • attack / cast — combat-only overrides; not actionable in
+      //     exploration (no matching task in the registry), so the
+      //     exploration tick must leave them alone for the combat path
+      //     in NpcTurnRunners to consume on the companion's next turn.
+    } else {
+      // follow — companion has caught up; autonomous scorer takes over.
+      npc.companion.override = undefined;
+    }
   }
 }
 
@@ -271,8 +362,7 @@ function runRoutineTick(ctx: GameContext, npc: import('./types.js').NpcState, ti
   if (!npc.simState) npc.simState = { activeTaskId: null, lastTickId: 0 };
   const tasks = tasksForRoutine(npc, ctx.state.dayPhase);
   const registry = { tasks };
-  const sim = { ctx, npc, rng: SimRng.forNpcTick(tickId, npc.id), events, tickId };
-  NpcTickRunner.run(sim, registry, npc.simState);
+  pumpSpeedBudget(ctx, npc, tickId, events, registry, npc.simState);
 }
 
 /**
@@ -286,8 +376,7 @@ function runAlertedAmbientTick(ctx: GameContext, npc: import('./types.js').NpcSt
   if (!npc.simState) npc.simState = { activeTaskId: null, lastTickId: 0 };
   const tasks = [IdleTask, InvestigateTask, AlertTask];
   const registry = { tasks };
-  const sim = { ctx, npc, rng: SimRng.forNpcTick(tickId, npc.id), events, tickId };
-  NpcTickRunner.run(sim, registry, npc.simState);
+  pumpSpeedBudget(ctx, npc, tickId, events, registry, npc.simState);
 }
 
 /**

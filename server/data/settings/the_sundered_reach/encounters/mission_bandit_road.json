@@ -1,0 +1,50 @@
+{
+  "id": "mission_bandit_road",
+  "encounterTitle": "Bandit Raid — East Road",
+  "description": "A small Bureau contract: clear a reported bandit raid on the east road. One or two bandits. No story, no hooks — just a fight. When it's done the player has the option to walk back to Vask for the payout.\n\nTriggers:\n1. On encounter start (mission_intro — aigm): brief beat establishing the road and the bandits coming into sight. Single short paragraph; do not stall the fight.\n2. When the last enemy dies (mission_done — set_flag): sets `mission_complete=true`, clears `mission_pending`, and tells the player to take the LEAVE MISSION button back to Vask.\n3. (mission_done_aigm — aigm): pairs with the flag-set above so the AIGM gives the cleanup beat (\"road is quiet again\") and points the player to Vask without lingering.",
+  "mapId": "the_open_road",
+  "npcIds": [],
+  "allyIds": [],
+  "enemyIds": ["bandit", "bandit"],
+  "customIntroduction": "The east road runs straight out of the station and into open ground. About a quarter-mile out you spot them — two figures crouched at the side of the road, watching the wagon-track. They mark you the moment you mark them. There is no cover and no time to talk this through.",
+  "customContext": "BANDIT MISSION — SIMPLE CONTRACT FIGHT. Two bandits, hostile from the start, no parley, no surrender, no reinforcements. Player completes when both are dead — engine fires the LEAVE MISSION beat automatically via the trigger. Do NOT narrate the player walking back to the station; the LEAVE MISSION button handles the transition.",
+  "objective": "Defeat the bandits. Return to Vask.",
+  "allowsLongRest": false,
+  "placementMode": "exact",
+  "placements": [
+    { "role": "player",  "x": 2,  "y": 6 },
+    { "role": "enemy", "index": 0, "x": 17, "y": 5 },
+    { "role": "enemy", "index": 1, "x": 17, "y": 7 }
+  ],
+  "triggers": [
+    {
+      "id": "mission_intro",
+      "when": { "event": "encounter_started" },
+      "then": [
+        { "type": "send_aigm_message", "message": "Open at the east road. Two bandits ahead. One short paragraph, then the fight starts on the player's next move." }
+      ],
+      "once": true
+    },
+    {
+      "id": "mission_done",
+      "when": { "event": "npc_killed" },
+      "if": [
+        { "type": "enemies_alive", "op": "eq", "count": 0 }
+      ],
+      "then": [
+        { "type": "set_flag", "name": "mission_complete", "value": true },
+        { "type": "set_flag", "name": "mission_pending", "value": false },
+        { "type": "show_log", "message": "Contract complete. Return to Vask to turn it in." }
+      ],
+      "once": true
+    },
+    {
+      "id": "mission_done_aigm",
+      "when": { "event": "flag_set", "name": "mission_complete" },
+      "then": [
+        { "type": "send_aigm_message", "message": "Both bandits are down. The road is quiet. Narrate a one-sentence cleanup beat, then point the player to the LEAVE MISSION button at the top of the screen so they can walk it back to Vask." }
+      ],
+      "once": true
+    }
+  ]
+}

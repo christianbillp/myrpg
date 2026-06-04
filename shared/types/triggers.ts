@@ -69,6 +69,48 @@ export type TriggerAction =
   /** Picks a canned variant from `server/data/narration/{narrationId}.json` and pushes it into the Event Log. The picker avoids repeating the last-used variant per id. */
   | { type: 'narrate'; narrationId: string }
   | { type: 'set_flag'; name: string; value: WorldFlagValue }
+  /**
+   * Set a world flag to a value picked uniformly at random from `values`.
+   * Publishes `flag_set` just like `set_flag`. Use to inject one-of-N
+   * variety into conversation flow — e.g. Vask's "Ask for a contract"
+   * choice rolls a random mission encounter id from the pool. The
+   * specific pick is observable through `flag_equals` guards (or
+   * `flag_set` event listeners) so authored content can branch on it.
+   *
+   * Note: uses `Math.random()`, not the sim-deterministic `SimRng`. The
+   * choice is intentionally non-reproducible so the same conversation
+   * gives different results on re-roll.
+   */
+  | { type: 'pick_random_value'; name: string; values: WorldFlagValue[] }
+  /**
+   * Roll a fresh procedural mission, register it server-side, and set
+   * five world flags the Bureau-office conversation reads to quote
+   * the contract terms BEFORE the player accepts:
+   *
+   *   • `mission_pending`         — the mission id (`mission_gen_<uuid>`)
+   *   • `mission_offer_flavour`   — `"bandit" | "goblin" | "skeleton"`
+   *   • `mission_offer_count`     — 1 or 2
+   *   • `mission_offer_reward_cp` — total cp paid out on completion
+   *   • `mission_offer_reward_xp` — total xp awarded on completion
+   *
+   * The transition endpoint serves the generated encounter + map from
+   * the in-memory MissionRegistry when the id starts with `mission_gen_`.
+   * Reads `worldFlags.mission_last_flavour` automatically to avoid
+   * re-rolling the same flavour twice in a row.
+   *
+   * Authored in `bureau_office_chat.json`. Not surfaced in the editor.
+   */
+  | { type: 'generate_mission_contract' }
+  /**
+   * Pay out the procedurally-generated mission reward stored in
+   * `worldFlags.mission_offer_reward_cp` and `mission_offer_reward_xp`.
+   * Awards the cp through the same `adjust_player_balance_cp` path so
+   * the Event Log shows the line item; awards xp through the same path
+   * as `award_xp`. No-op when either flag is unset or non-numeric.
+   * Used by the Bureau turn-in node so the player gets paid the
+   * specific amount Vask quoted when the contract was offered.
+   */
+  | { type: 'award_mission_reward' }
   /** Applies a 5e condition to the player. Future scope: arbitrary target selectors. */
   | { type: 'apply_condition_to_player'; condition: string }
   /** Re-publishes a custom event on the bus, allowing one trigger to fan out into others. Only `custom` events are allowed — engine-canonical events (`npc_killed`, `damage_dealt`, …) cannot be forged from authored data. */

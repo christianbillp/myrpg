@@ -18,6 +18,10 @@ export interface CreateSessionRequest {
   mapType: 'open' | 'rooms' | 'saved';
   playerDefId: string;
   savedMapId?: string;
+  /** Id of the authored EncounterDef this session is built from, when
+   *  one exists. Carried onto `GameState.currentEncounterId` for the
+   *  client to consult. Procedurally-generated sessions omit this. */
+  encounterId?: string;
   encounterTitle?: string;
   savedMapName?: string;
   savedMapDescription?: string;
@@ -39,6 +43,13 @@ export interface CreateSessionRequest {
   /** Mirrors `EncounterDef.placements`. */
   placements?: EncounterPlacement[];
   triggers?: EncounterTrigger[];
+  /** Per-encounter conversation override: NPC defId → conversation id.
+   *  Resolved at spawn time and set on the NpcState. Lets the same NPC
+   *  open different conversations across encounters (e.g. Vask defaults
+   *  to no chat in field encounters but opens `bureau_office_chat`
+   *  when spawned in the Bureau hub). Mirrors
+   *  `EncounterDef.conversationOverrides`. */
+  conversationOverrides?: Record<string, string>;
   /** Seed adventure-scope state on session creation. Set when the new session is a chapter of an in-progress adventure. */
   adventureSeed?: AdventureSessionContext & {
     seedWorldFlags?: Record<string, WorldFlagValue>;

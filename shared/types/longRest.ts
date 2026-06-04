@@ -130,6 +130,13 @@ export interface NpcState {
   initiativeRoll?: number;
   /** Currently active periodic effects (DoTs, attach bites, …). See OngoingEffectsSystem. */
   ongoingEffects: OngoingEffect[];
+  /** Effective conversation graph id for the player's TALK button.
+   *  Resolved at spawn time from the encounter's
+   *  `conversationOverrides[defId]` first, then `NPCDef.conversationId`.
+   *  Letting the same NPC carry different conversations across
+   *  encounters (e.g. Vask defaults to no chat in the field but opens
+   *  `bureau_office_chat` when spawned in the bureau hub). */
+  conversationId?: string;
   /** Companion state — present only on NPCs the player has explicit command
    *  over. Drives the COMPANION chip in the Player Panel + opts this NPC
    *  into the `NpcTickRunner` exploration loop. Absent on every other NPC. */
@@ -173,12 +180,17 @@ export interface CompanionState {
 }
 
 /** Player-issued command for a companion. Step 2 supports `follow` and
- *  `wait`; `attack` and `cast` ship with step 3. */
+ *  `wait`; `attack` and `cast` ship with step 3. `move_to` (step 6) lets
+ *  the player direct the companion to a specific tile — useful for set
+ *  positioning before a fight or unsticking a companion that's pathed
+ *  itself into a chokepoint. Cleared once the destination tile is
+ *  reached; the companion then falls back to autonomous follow. */
 export type CompanionCommand =
   | { kind: 'follow'; mode: 'tight' | 'loose' }
   | { kind: 'wait' }
   | { kind: 'attack'; targetId: string }
-  | { kind: 'cast'; spellId: string; targetId?: string };
+  | { kind: 'cast'; spellId: string; targetId?: string }
+  | { kind: 'move_to'; tileX: number; tileY: number };
 
 /** Coarse-grained day phase the world tick advances. Routine entries are
  *  keyed by phase, so a tavern keeper's `morning` row activates when the
@@ -363,6 +375,12 @@ export interface GameState {
   logScrollOffset: number;
   mapName: string;
   encounterTitle: string;
+  /** Id of the authored `EncounterDef` driving this session, when one
+   *  exists. Procedurally-generated / ad-hoc sessions leave this
+   *  undefined. The client reads it to drive encounter-aware UI such
+   *  as the Mission Top Bar (TO MISSION / LEAVE MISSION buttons in the
+   *  Bureau-office mission cycle). */
+  currentEncounterId?: string;
   /** Player-facing one-line goal for this encounter. */
   objective: string;
   selectedTargetId: string | null;
@@ -514,6 +532,22 @@ export interface DevFlags {
    *  Complete Objective, …). Off by default so non-developers never see
    *  the panel. Client-only — server ignores this field. */
   showDevToolsPanel?: boolean;
+  /**
+   * Clean Mode — when on, the server wipes every player progress
+   * artefact under `server/data/settings/<setting>/saves/` at startup:
+   *   • the world save (`saves/world.json`)
+   *   • every character save (`saves/<characterId>.json`)
+   *   • every persistent NPC save tree (`saves/<characterId>_npcs/`)
+   *   • every adventure save (`saves/*_adventure.json`)
+   * Logged loudly via `Logger.log('server.clean_mode_wipe', { … })`
+   * and to stdout. The flag stays ON across restarts — disable it
+   * explicitly from the Configuration screen when done.
+   *
+   * Server-only — the wipe runs in the startup path before any session
+   * restoration. Off by default so a normal player can't accidentally
+   * scrub their progress.
+   */
+  cleanModeOnStart?: boolean;
 }
 
 export interface AdventureSessionContext {

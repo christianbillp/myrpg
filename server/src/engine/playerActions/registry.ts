@@ -31,6 +31,7 @@ import { doResolveReaction as cfDoResolveReaction, endPlayerTurn as cfEndPlayerT
 import { doUseFeature } from '../FeatureRegistry.js';
 import { endConcentration } from '../ConcentrationSystem.js';
 import { startConversation as cnStartConversation, advanceConversation as cnAdvanceConversation, endConversation as cnEndConversation } from '../ConversationSystem.js';
+import { runCompanionTick } from '../WorldTick.js';
 
 /** The thin slice of `GameEngine` the handlers need. Keeping this
  *  explicit lets us test handlers without instantiating the whole
@@ -92,17 +93,26 @@ export const PLAYER_ACTIONS: Registry = {
   startConversation:    (ctx, a)         => cnStartConversation(ctx, a.npcRef, a.conversationId),
   conversationChoice:   (ctx, a)         => cnAdvanceConversation(ctx, a.choiceIndex),
   conversationEnd:      (ctx)            => cnEndConversation(ctx),
-  companionCommand:     (ctx, a)         => {
-    // Set the override on the named companion. The next world tick
-    // consumes it via `runCompanionTicks`. No-op when the id doesn't
-    // resolve or the npc isn't a companion — keeps the client safe to
-    // re-issue without state sync.
+  companionCommand:     (ctx, a, events) => {
+    // Set the override on the named companion, then fire ONE sim tick
+    // immediately so the companion starts acting on the new command in
+    // the same response frame the client receives. Without this, the
+    // player has to wait up to 6 s (the world-tick interval) before the
+    // companion notices the new command — a MOVE TO click feels broken.
+    //
+    // Only meaningful for movement-flavoured commands (move_to, follow)
+    // during exploration; wait / attack / cast don't need an immediate
+    // tick — wait is stationary by definition, and attack / cast are
+    // combat-only.
     const target = ctx.state.npcs.find((n) => n.id === a.npcId);
-    if (target?.companion) {
-      target.companion.override = a.command;
-      if (a.command.kind === 'follow') {
-        target.companion.followMode = a.command.mode;
-      }
+    if (!target?.companion) return;
+    target.companion.override = a.command;
+    if (a.command.kind === 'follow') {
+      target.companion.followMode = a.command.mode;
+    }
+    if (ctx.state.phase === 'exploring'
+      && (a.command.kind === 'move_to' || a.command.kind === 'follow')) {
+      runCompanionTick(ctx, target, ctx.state.worldTickCount, events);
     }
   },
   devCompleteEncounter: (_ctx, _a, events, engine) => engine.devCompleteEncounter(events),

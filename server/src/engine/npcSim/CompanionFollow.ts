@@ -37,8 +37,12 @@ export function registerCompanionFollowHooks(ctx: GameContext): void {
     for (const npc of s.npcs) {
       if (npc.hp <= 0) continue;
       if (!npc.companion) continue;
-      // Player-issued WAIT keeps the companion pinned to their tile.
-      if (npc.companion.override?.kind === 'wait') continue;
+      // Player-issued WAIT keeps the companion pinned to their tile;
+      // MOVE TO sends them to an authored tile, so the responsive
+      // follow shouldn't tug them off-course either. Either override
+      // skips this hook — the world tick still ticks the active task.
+      const override = npc.companion.override?.kind;
+      if (override === 'wait' || override === 'move_to') continue;
       stepCompanionToward(ctx, npc, e.x, e.y);
     }
   }, /*priority*/ 10);

@@ -59,7 +59,12 @@ export interface PlayerPanelActionState {
   /** The companion NPC currently in scope (single-companion assumption
    *  for step 2). Null when the player has no companion on the map.
    *  Drives the COMPANION chip. */
-  companion: { npcId: string; displayName: string; currentMode: 'follow' | 'wait' } | null;
+  companion: { npcId: string; displayName: string; currentMode: 'follow' | 'wait' | 'move_to' } | null;
+  /** True while the GameScene's companion-move-to mode is active — the
+   *  player has pressed "→ POSITION" and the next tile click sends the
+   *  move_to command. The chip flips to a "PICK TILE / CANCEL" state
+   *  while this is true. */
+  companionPickingTile?: boolean;
 }
 
 export interface PlayerPanelCallbacks {
@@ -102,6 +107,11 @@ export interface PlayerPanelCallbacks {
    *  `npcId` is the companion's id (the panel only shows the chip when
    *  exactly one companion is on the map for now). */
   onCompanionCommand: (npcId: string, command: import('../../../shared/types').CompanionCommand) => void;
+  /** Enter companion-move-to mode — the scene paints a cursor overlay
+   *  and the next tile click sends a `move_to` companion command. ESC
+   *  cancels. The Player Panel only knows about the entry; the scene
+   *  owns the targeting mode lifecycle. */
+  onCompanionPickTile: (npcId: string) => void;
 }
 
 function waitMs(ms: number): Promise<void> {
@@ -568,14 +578,46 @@ export class PlayerPanel {
     const companion = state.companion;
     if (companion) {
       if (mode === 'exploring') {
+        // Two chips stacked for companions in exploration:
+        //   (1) the FOLLOW/WAIT toggle chip (existing behaviour), and
+        //   (2) a smaller "→ POSITION" chip that enters tile-pick mode
+        //       so the player can send the companion to a specific tile
+        //       (set up a formation before a fight, unstick a companion
+        //       that's pathed into a chokepoint, etc.).
+        // When the scene is already in tile-pick mode, the position
+        // chip flips to a CANCEL-style label so the player can back out
+        // without picking a tile.
+        if (state.companionPickingTile) {
+          this.actionArea.prepend(this.makeBtn(
+            `${companion.displayName.toUpperCase()}: PICK TILE — ESC TO CANCEL`,
+            '#3a2a55',
+            () => this.callbacks.onCompanionPickTile(companion.npcId),
+          ));
+        } else {
+          this.actionArea.prepend(this.makeBtn(
+            `${companion.displayName.toUpperCase()}: → POSITION`,
+            '#2a2a3a',
+            () => this.callbacks.onCompanionPickTile(companion.npcId),
+          ));
+        }
+
         const label = companion.currentMode === 'wait'
           ? `${companion.displayName.toUpperCase()}: WAIT`
-          : `${companion.displayName.toUpperCase()}: FOLLOW`;
-        const color = companion.currentMode === 'wait' ? '#3a3a4a' : '#1a3a3a';
+          : companion.currentMode === 'move_to'
+            ? `${companion.displayName.toUpperCase()}: MOVING…`
+            : `${companion.displayName.toUpperCase()}: FOLLOW`;
+        const color = companion.currentMode === 'wait' ? '#3a3a4a'
+                      : companion.currentMode === 'move_to' ? '#2a3a55'
+                      : '#1a3a3a';
         this.actionArea.prepend(this.makeBtn(label, color, () => {
+          // Toggle: wait ↔ follow. MOVE TO is one-shot via the
+          // POSITION chip, so tapping the status chip while in MOVE TO
+          // cancels back to FOLLOW.
           const nextCommand = companion.currentMode === 'wait'
             ? { kind: 'follow' as const, mode: 'loose' as const }
-            : { kind: 'wait' as const };
+            : companion.currentMode === 'move_to'
+              ? { kind: 'follow' as const, mode: 'loose' as const }
+              : { kind: 'wait' as const };
           this.callbacks.onCompanionCommand(companion.npcId, nextCommand);
         }));
       } else if (mode === 'player_turn') {

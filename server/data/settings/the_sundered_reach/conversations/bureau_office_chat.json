@@ -1,0 +1,172 @@
+{
+  "id": "bureau_office_chat",
+  "defaultParticipants": ["player", "npc_self"],
+  "startNode": "intro",
+  "nodes": [
+    {
+      "id": "intro",
+      "lines": [
+        "Vask glances up. The pen does not stop moving. \"What do you need?\""
+      ],
+      "choices": [
+        {
+          "label": "I'm here for work.",
+          "visibleIf": [
+            { "type": "flag_unset", "name": "mission_pending" },
+            { "type": "flag_unset", "name": "mission_complete" }
+          ],
+          "actions": [
+            { "type": "generate_mission_contract" }
+          ],
+          "next": "contract_offered"
+        },
+        {
+          "label": "I'm back. The contract's done.",
+          "visibleIf": [
+            { "type": "flag_set", "name": "mission_complete" }
+          ],
+          "next": "turn_in"
+        },
+        {
+          "label": "(You already have a contract pending — get out there.)",
+          "visibleIf": [
+            { "type": "flag_set", "name": "mission_pending" }
+          ],
+          "next": "already_have_contract"
+        },
+        { "label": "Nothing — just passing through.", "next": "goodbye" }
+      ]
+    },
+
+    {
+      "id": "contract_offered",
+      "lines": [
+        "Vask sets the pen down. Pulls a slip off the contract pile, runs a thumb along the seal, and slides it across the desk."
+      ],
+      "choices": [
+        {
+          "label": "(Read the slip.)",
+          "visibleIf": [{ "type": "flag_equals", "name": "mission_offer_flavour", "value": "bandit" }],
+          "next": "offer_bandit"
+        },
+        {
+          "label": "(Read the slip.)",
+          "visibleIf": [{ "type": "flag_equals", "name": "mission_offer_flavour", "value": "goblin" }],
+          "next": "offer_goblin"
+        },
+        {
+          "label": "(Read the slip.)",
+          "visibleIf": [{ "type": "flag_equals", "name": "mission_offer_flavour", "value": "skeleton" }],
+          "next": "offer_skeleton"
+        }
+      ]
+    },
+
+    {
+      "id": "offer_bandit",
+      "lines": [
+        "\"Bandit raid on the east road. Wagon-track ambush — we lost a courier last week. Drop them and bring me the proof.\"",
+        "She taps the bottom of the slip where the rate is inked. \"Hired-Blade rate. Per the contract terms.\""
+      ],
+      "choices": [
+        { "label": "Understood. I'll take it.", "next": "contract_taken" },
+        { "label": "(Hand the slip back.)", "next": "decline_contract" }
+      ]
+    },
+    {
+      "id": "offer_goblin",
+      "lines": [
+        "\"Goblin sighting in the wardstone wood. Came down hungry and they're not leaving on their own. Skirmishers — they'll harry, then run.\"",
+        "She taps the rate. \"Hired-Blade rate. Per the contract terms.\""
+      ],
+      "choices": [
+        { "label": "Understood. I'll take it.", "next": "contract_taken" },
+        { "label": "(Hand the slip back.)", "next": "decline_contract" }
+      ]
+    },
+    {
+      "id": "offer_skeleton",
+      "lines": [
+        "\"Risen at the broken ward. Two, maybe more — patrol couldn't get close enough to count. Bring bludgeon, they shrug off a blade.\"",
+        "She taps the rate. \"Hired-Blade rate plus a hazard line, since they don't tire and they don't talk.\""
+      ],
+      "choices": [
+        { "label": "Understood. I'll take it.", "next": "contract_taken" },
+        { "label": "(Hand the slip back.)", "next": "decline_contract" }
+      ]
+    },
+
+    {
+      "id": "contract_taken",
+      "lines": [
+        "She marks the slip and slides it to the corner of the desk. \"Don't be slow about it.\"",
+        "She nods at the door. \"TO MISSION up top when you're ready.\""
+      ],
+      "choices": [
+        { "label": "On my way.", "next": "goodbye" }
+      ]
+    },
+
+    {
+      "id": "decline_contract",
+      "lines": [
+        "She slides the slip back into the pile without comment. Picks the pen up. \"Come back when you're ready to work.\""
+      ],
+      "onEnter": [
+        { "type": "set_flag", "name": "mission_pending", "value": false },
+        { "type": "set_flag", "name": "mission_offer_flavour", "value": false },
+        { "type": "set_flag", "name": "mission_offer_count", "value": 0 },
+        { "type": "set_flag", "name": "mission_offer_reward_cp", "value": 0 },
+        { "type": "set_flag", "name": "mission_offer_reward_xp", "value": 0 }
+      ],
+      "choices": [
+        { "label": "(Step away.)", "end": true }
+      ]
+    },
+
+    {
+      "id": "already_have_contract",
+      "lines": [
+        "She glances at the pile. \"You've got a slip with your name on it. Run THAT one. Don't bring me work-in-progress and ask for more.\""
+      ],
+      "choices": [
+        { "label": "Right. On my way.", "next": "goodbye" }
+      ]
+    },
+
+    {
+      "id": "turn_in",
+      "lines": [
+        "She closes the ledger. Folds her hands on it. \"Show me.\"",
+        "She nods once at whatever proof you give her — she's seen enough to know — and counts coin onto the desk. \"Per the contract. Ledger entry's yours.\""
+      ],
+      "onEnter": [
+        { "type": "award_mission_reward" },
+        { "type": "set_flag", "name": "mission_reward_claimed", "value": true }
+      ],
+      "choices": [
+        {
+          "label": "Got another contract for me?",
+          "actions": [
+            { "type": "set_flag", "name": "mission_complete", "value": false },
+            { "type": "set_flag", "name": "mission_reward_claimed", "value": false },
+            { "type": "set_flag", "name": "mission_pending", "value": false },
+            { "type": "generate_mission_contract" }
+          ],
+          "next": "contract_offered"
+        },
+        { "label": "I'll be back.", "next": "goodbye" }
+      ]
+    },
+
+    {
+      "id": "goodbye",
+      "lines": [
+        "Vask gives you the half-nod that passes for a goodbye in this office and bends back over the ledger."
+      ],
+      "choices": [
+        { "label": "(Step away.)", "end": true }
+      ]
+    }
+  ]
+}

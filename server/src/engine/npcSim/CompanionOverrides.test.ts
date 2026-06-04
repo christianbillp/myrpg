@@ -36,7 +36,7 @@ function withCompanion(npc: Partial<NpcState> & { id: string }): NpcState {
 }
 
 describe('companion override persistence', () => {
-  it.skip('WAIT override survives 5 world ticks with a moving player', () => {
+  it('WAIT override survives 5 world ticks with a moving player', () => {
     // Regression test for the bug I flagged: WaitHereTask.nextAction
     // returns 'done', which makes the runner clear activeTaskId, and
     // runCompanionTick's auto-clear then strips the override. Result:
@@ -85,6 +85,84 @@ describe('companion override persistence', () => {
     runOffCameraTick(ctx);
     // Within tolerance → task ends 'done' → override cleared.
     expect(state.npcs[0].companion?.override).toBeUndefined();
+  });
+
+  it('MOVE TO moves up to speed/5 tiles per world tick (SRD round budget)', () => {
+    // Speed 30 ft = 6 tiles per round = 6 tiles per world tick. The
+    // companion starts 6 tiles east of the target so a single tick
+    // should cover the entire trip.
+    const { ctx, state } = buildTestContext({
+      player: { tileX: 0, tileY: 0 },
+      npcs: [withCompanion({
+        id: 'c',
+        tileX: 2, tileY: 5,
+        companion: {
+          followMode: 'loose',
+          override: { kind: 'move_to', tileX: 8, tileY: 5 },
+          simState: { activeTaskId: null, lastTickId: 0 },
+        },
+      })],
+      monsters: [{ id: 'commoner', speed: 30 } as never],
+    });
+    // Ensure the companion uses the commoner stat block (speed 30).
+    state.npcs[0].defId = 'commoner';
+    runOffCameraTick(ctx);
+    // Six tiles of movement should land them exactly on the target.
+    expect(state.npcs[0].tileX).toBe(8);
+    expect(state.npcs[0].tileY).toBe(5);
+  });
+
+  it('MOVE TO walks the companion to the target tile and pins them there with WAIT', () => {
+    const { ctx, state } = buildTestContext({
+      player: { tileX: 0, tileY: 0 },
+      npcs: [withCompanion({
+        id: 'c',
+        tileX: 5, tileY: 5,
+        companion: {
+          followMode: 'loose',
+          override: { kind: 'move_to', tileX: 8, tileY: 5 },
+          simState: { activeTaskId: null, lastTickId: 0 },
+        },
+      })],
+    });
+    // First tick: companion moves one tile toward the target.
+    runOffCameraTick(ctx);
+    expect(state.npcs[0].tileX).toBeGreaterThan(5);
+    expect(state.npcs[0].tileX).toBeLessThanOrEqual(8);
+    // Run more ticks until the companion arrives.
+    for (let i = 0; i < 10; i++) runOffCameraTick(ctx);
+    expect(state.npcs[0].tileX).toBe(8);
+    expect(state.npcs[0].tileY).toBe(5);
+    // Auto-converted to WAIT — the companion stays positioned where
+    // the player put them instead of bolting back to the player. The
+    // player presses the FOLLOW chip to resume autonomous following.
+    expect(state.npcs[0].companion?.override?.kind).toBe('wait');
+    // Even when the player walks far away, the companion holds tile.
+    ctx.state.player.tileX = 20;
+    runOffCameraTick(ctx);
+    expect(state.npcs[0].tileX).toBe(8);
+  });
+
+  it('MOVE TO override suppresses responsive follow on player_moved', () => {
+    const { ctx, state, events } = buildTestContext({
+      player: { tileX: 0, tileY: 0 },
+      npcs: [withCompanion({
+        id: 'c',
+        tileX: 5, tileY: 5,
+        companion: {
+          followMode: 'loose',
+          override: { kind: 'move_to', tileX: 5, tileY: 10 },
+          simState: { activeTaskId: null, lastTickId: 0 },
+        },
+      })],
+    });
+    registerCompanionFollowHooks(ctx);
+    // Player walks far away — the responsive follow hook should NOT
+    // tug the companion off-course.
+    ctx.publish({ type: 'player_moved', x: 20, y: 0 });
+    expect(state.npcs[0].tileX).toBe(5);
+    expect(state.npcs[0].tileY).toBe(5);
+    expect(events).toHaveLength(0);
   });
 
   it('ATTACK override clears when target dies', () => {

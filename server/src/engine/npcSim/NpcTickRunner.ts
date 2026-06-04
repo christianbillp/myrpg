@@ -54,7 +54,8 @@ export type CommandOverride =
   | { kind: 'follow'; mode: 'tight' | 'loose' }
   | { kind: 'wait' }
   | { kind: 'attack'; targetId: string }
-  | { kind: 'cast'; spellId: string; targetId?: string };
+  | { kind: 'cast'; spellId: string; targetId?: string }
+  | { kind: 'move_to'; tileX: number; tileY: number };
 
 /**
  * Per-NPC runtime state the runner owns across ticks. Persisted as part
@@ -191,10 +192,11 @@ function runOneTick(
 function findOverrideTask(registry: NpcTaskRegistry, override: CommandOverride): NpcTask | null {
   const id = (() => {
     switch (override.kind) {
-      case 'follow': return 'follow_player';
-      case 'wait':   return 'wait_here';
-      case 'attack': return 'attack_target';
-      case 'cast':   return 'cast_spell';
+      case 'follow':  return 'follow_player';
+      case 'wait':    return 'wait_here';
+      case 'attack':  return 'attack_target';
+      case 'cast':    return 'cast_spell';
+      case 'move_to': return 'companion_move_to';
     }
   })();
   return registry.tasks.find((t) => t.id === id) ?? null;
