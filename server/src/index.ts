@@ -31,6 +31,7 @@ import {
   dropMission,
 } from "./mission/missionRegistry.js";
 import { registerGenerateRoutes } from "./routes/generate.js";
+import { safeId, asString, asArray, InvalidPathSegmentError } from "./util/requestValidation.js";
 import { processAIGMChat, AIGMChatRequest } from "./aigm.js";
 import { loadSettings, settingPromptBlock } from "./settings.js";
 import { loadServerConfig, saveServerConfig } from "./serverConfig.js";
@@ -528,6 +529,15 @@ const server = Fastify({ logger: false });
 await server.register(cors, { origin: "http://localhost:5173" });
 await server.register(websocket);
 
+// A rejected path segment (crafted id that fails the slug allowlist) is a bad
+// request, not a server fault — map it to 400 so callers get a clear error.
+server.setErrorHandler((err, _req, reply) => {
+  if (err instanceof InvalidPathSegmentError) {
+    return reply.code(400).send({ error: err.message });
+  }
+  return reply.send(err);
+});
+
 // ── Static data routes — see routes/defs.ts ───────────────────────────────────
 //
 // `/characters`, `/monsters`, `/npcs`, …, `/maps`, `/health` plus the
@@ -583,7 +593,7 @@ server.post<{
   }
   try {
     await mkdir(dir, { recursive: true });
-    await writeFile(join(dir, `${body.id}.json`), JSON.stringify(body, null, 2));
+    await writeFile(join(dir, `${safeId(body.id)}.json`), JSON.stringify(body, null, 2));
     await loadDefs();
     return reply.send({ adventureId: body.id });
   } catch (err) {
@@ -678,8 +688,11 @@ server.post<{
   if (!draft || typeof draft !== "object") {
     return reply.code(400).send({ error: "draft must be an object" });
   }
-  if (!prompt || prompt.trim().length === 0) {
+  if (typeof prompt !== "string" || prompt.trim().length === 0) {
     return reply.code(400).send({ error: "prompt is required" });
+  }
+  if (!Array.isArray(history)) {
+    return reply.code(400).send({ error: "history must be an array" });
   }
   if (!draft.persona || draft.persona.trim().length === 0) {
     return reply.code(400).send({ error: "draft.persona is required for a test chat" });
@@ -1293,10 +1306,10 @@ function worldSavePath(): string {
   return join(savesDir(), "world.json");
 }
 function saveFilePath(characterId: string): string {
-  return join(savesDir(), `${characterId}.json`);
+  return join(savesDir(), `${safeId(characterId)}.json`);
 }
 function adventureSaveFilePath(characterId: string): string {
-  return join(savesDir(), `${characterId}_adventure.json`);
+  return join(savesDir(), `${safeId(characterId)}_adventure.json`);
 }
 
 // Persistent player stats live in the character save; the world save only keeps
@@ -1810,8 +1823,8 @@ async function attachPersistentNpcSaves(engine: GameEngine, characterId: string)
     const def = defs.npcs.find((n) => n.id === npc.defId);
     if (!def?.persistent) continue;
     // Use the parent setting dir (settingSubDir("") returns the trailing slash)
-    const settingDataDir = join(DATA_DIR, "settings", defs.activeSetting!.id);
-    saves.push(await loadOrCreateNpcSave(settingDataDir, characterId, def));
+    const settingDataDir = join(DATA_DIR, "settings", safeId(defs.activeSetting!.id));
+    saves.push(await loadOrCreateNpcSave(settingDataDir, safeId(characterId), def));
   }
   engine.attachNpcSaves(saves);
   // Apply stateOverrides onto the spawned NpcStates so prior HP / conditions /
@@ -1834,7 +1847,7 @@ async function attachPersistentNpcSaves(engine: GameEngine, characterId: string)
 async function flushSessionNpcSaves(sessionId: string): Promise<void> {
   const engine = getEngine(sessionId);
   if (!engine || !defs.activeSetting) return;
-  const settingDataDir = join(DATA_DIR, "settings", defs.activeSetting.id);
+  const settingDataDir = join(DATA_DIR, "settings", safeId(defs.activeSetting.id));
   const saves = engine.collectNpcSavesForFlush();
   if (saves.length === 0) return;
   await flushNpcSaves(settingDataDir, saves);
@@ -1999,8 +2012,8 @@ server.delete("/save/:characterId", async (req, reply) => {
   // Also wipe every persistent NPC's memory tree scoped to this character so
   // a replay with the same character id starts each NPC from a clean slate.
   if (defs.activeSetting) {
-    const settingDataDir = join(DATA_DIR, "settings", defs.activeSetting.id);
-    await deleteAllNpcSavesForCharacter(settingDataDir, characterId);
+    const settingDataDir = join(DATA_DIR, "settings", safeId(defs.activeSetting.id));
+    await deleteAllNpcSavesForCharacter(settingDataDir, safeId(characterId));
   }
   return reply.code(200).send({ ok: true });
 });
@@ -2556,7 +2569,7 @@ server.post("/game/session/:id/aigm", async (req, reply) => {
   if (!engine) return reply.code(404).send({ error: "Session not found" });
 
   const body = req.body as AIGMChatRequest;
-  if (!body.playerMessage)
+  if (typeof body.playerMessage !== "string" || body.playerMessage.length === 0)
     return reply.code(400).send({ error: "Missing playerMessage" });
 
   const history = getAigmHistory(id);

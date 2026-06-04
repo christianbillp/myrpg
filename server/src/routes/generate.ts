@@ -27,6 +27,7 @@ import { refineAdventure, type AdventureDraftForRefine, type EncounterPoolEntry 
 import { refineNpc, type NpcDraftForRefine } from "../npcRefiner.js";
 import type { GameDefs } from "../engine/types.js";
 import { STARTING_ZONE_PLAYER } from "../../../shared/startingZones.js";
+import { safeId, asString, asArray } from "../util/requestValidation.js";
 
 type EditorActionKind =
   | "perception" | "log" | "aigm" | "combat" | "xp"
@@ -85,7 +86,7 @@ interface EditorComposedTrigger extends EditorComposedAction {
   extraActions?: EditorComposedAction[];
 }
 
-const sanitiseFlagName = (s: string): string => s.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 48);
+const sanitiseFlagName = (s: unknown): string => asString(s).toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 48);
 
 /**
  * Expand a single author-facing action into one or more TriggerAction
@@ -323,11 +324,11 @@ export function registerGenerateRoutes(server: FastifyInstance, ctx: GenerateRou
     try {
       let mapId: string;
       if (existingMapId) {
-        mapId = existingMapId;
+        mapId = safeId(existingMapId);
       } else {
         const stamp = Date.now();
         const slug = (name ?? '').toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 32) || 'map';
-        mapId = `gen_${stamp}_${slug}`;
+        mapId = safeId(`gen_${stamp}_${slug}`);
       }
       await writeMapJson(dataDir(), {
         id: mapId,
@@ -365,7 +366,7 @@ export function registerGenerateRoutes(server: FastifyInstance, ctx: GenerateRou
     try {
       const encDir = join(dataDir(), "encounters");
       const mapDir = join(dataDir(), "maps");
-      const encPath = join(encDir, `${encounterId}.json`);
+      const encPath = join(encDir, `${safeId(encounterId)}.json`);
       const encJson = JSON.parse(await readFile(encPath, "utf-8")) as Record<string, unknown> & {
         id: string; encounterTitle?: string; mapId?: string; generated?: boolean;
       };
@@ -393,7 +394,7 @@ export function registerGenerateRoutes(server: FastifyInstance, ctx: GenerateRou
         const mapPath = join(mapDir, `${oldMapId}.json`);
         const mapJson = JSON.parse(await readFile(mapPath, "utf-8")) as Record<string, unknown>;
         mapJson.id = mapSlug;
-        await writeFile(join(mapDir, `${mapSlug}.json`), JSON.stringify(mapJson, null, 2));
+        await writeFile(join(mapDir, `${safeId(mapSlug)}.json`), JSON.stringify(mapJson, null, 2));
         await unlink(mapPath);
         newMapId = mapSlug;
       }
@@ -403,7 +404,7 @@ export function registerGenerateRoutes(server: FastifyInstance, ctx: GenerateRou
       encJson.id = encSlug;
       if (newMapId !== oldMapId) encJson.mapId = newMapId;
       delete encJson.generated;
-      await writeFile(join(encDir, `${encSlug}.json`), JSON.stringify(encJson, null, 2));
+      await writeFile(join(encDir, `${safeId(encSlug)}.json`), JSON.stringify(encJson, null, 2));
       await unlink(encPath);
       await loadDefs();
       return reply.send({ encounterId: encSlug, mapId: newMapId });
@@ -515,7 +516,7 @@ export function registerGenerateRoutes(server: FastifyInstance, ctx: GenerateRou
       const hasPlayerPlacement = placementMode === 'exact'
         && (placements ?? []).some((p) => p.role === 'player');
       let zoneData: number[];
-      if (startingZonesData && startingZonesData.length > 0) {
+      if (Array.isArray(startingZonesData) && startingZonesData.length > 0) {
         if (startingZonesData.length !== cells) {
           return reply.code(400).send({ error: `startingZonesData length ${startingZonesData.length} ≠ width*height (${cells})` });
         }
@@ -562,23 +563,23 @@ export function registerGenerateRoutes(server: FastifyInstance, ctx: GenerateRou
 
       const encounterJson = {
         id: encounterId,
-        encounterTitle: customTitle?.trim() || mapName,
+        encounterTitle: asString(customTitle).trim() || mapName,
         // Player-facing card summary. Author's `description` wins; we fall
         // back to the map's mapdescription so generated encounters still
         // have something on the card before the author touches it.
-        description: description?.trim() || mapDescription,
+        description: asString(description).trim() || mapDescription,
         mapId,
-        npcIds: (neutralIds ?? []).filter((id) => validIds.has(id)),
-        allyIds: (allyIds ?? []).filter((id) => validIds.has(id)),
-        enemyIds: (enemyIds ?? []).filter((id) => validIds.has(id)),
-        customIntroduction: customIntroduction?.trim() ?? "",
-        customContext: aigmContext?.trim() ?? "",
-        objective: customObjective?.trim() || (aigmContext?.trim() ? aigmContext.trim().split(/[.!?]/)[0].slice(0, 80) : (hasEnemies ? "Defeat the hostile creatures." : "Explore the area.")),
-        completionFlag: completionFlag?.trim() ? sanitiseFlag(completionFlag) : (hasEnemies ? undefined : `${slug}_resolved`),
+        npcIds: asArray<string>(neutralIds).filter((id) => validIds.has(id)),
+        allyIds: asArray<string>(allyIds).filter((id) => validIds.has(id)),
+        enemyIds: asArray<string>(enemyIds).filter((id) => validIds.has(id)),
+        customIntroduction: asString(customIntroduction).trim(),
+        customContext: asString(aigmContext).trim(),
+        objective: asString(customObjective).trim() || (asString(aigmContext).trim() ? asString(aigmContext).trim().split(/[.!?]/)[0].slice(0, 80) : (hasEnemies ? "Defeat the hostile creatures." : "Explore the area.")),
+        completionFlag: asString(completionFlag).trim() ? sanitiseFlag(completionFlag) : (hasEnemies ? undefined : `${slug}_resolved`),
         generated: true,
         startingZones: { width: mapWidth, height: mapHeight, data: zoneData },
         ...(placementMode === 'exact' ? { placementMode: 'exact' as const } : {}),
-        ...(placements && placements.length > 0 ? { placements } : {}),
+        ...(Array.isArray(placements) && placements.length > 0 ? { placements } : {}),
         ...(triggers.length > 0 ? { triggers } : {}),
       };
 
@@ -640,7 +641,7 @@ export function registerGenerateRoutes(server: FastifyInstance, ctx: GenerateRou
     const defs = getDefs();
     try {
       const encDir = join(dataDir(), "encounters");
-      const encPath = join(encDir, `${encounterId}.json`);
+      const encPath = join(encDir, `${safeId(encounterId)}.json`);
       let existing: Record<string, unknown>;
       try {
         existing = JSON.parse(await readFile(encPath, "utf-8")) as Record<string, unknown>;
@@ -675,7 +676,7 @@ export function registerGenerateRoutes(server: FastifyInstance, ctx: GenerateRou
       // start is required: in zones mode that means a painted PLAYER cell;
       // in exact mode an explicit `player` placement satisfies it instead.
       let zonesLayer: { width: number; height: number; data: number[] };
-      if (startingZonesData && startingZonesData.length > 0) {
+      if (Array.isArray(startingZonesData) && startingZonesData.length > 0) {
         if (startingZonesData.length !== cells) {
           return reply.code(400).send({ error: `startingZonesData length ${startingZonesData.length} ≠ width*height (${cells})` });
         }
@@ -706,19 +707,19 @@ export function registerGenerateRoutes(server: FastifyInstance, ctx: GenerateRou
         mapId,
         startingZones: zonesLayer,
       };
-      if (customTitle !== undefined)        updated.encounterTitle    = customTitle.trim() || (existing.encounterTitle ?? encounterId);
-      if (customIntroduction !== undefined) updated.customIntroduction = customIntroduction.trim();
-      if (aigmContext !== undefined)        updated.customContext     = aigmContext.trim();
-      if (description !== undefined)        updated.description       = description.trim();
-      if (customObjective !== undefined)    updated.objective         = customObjective.trim() || (existing.objective ?? "Complete the encounter.");
+      if (customTitle !== undefined)        updated.encounterTitle    = asString(customTitle).trim() || (existing.encounterTitle ?? encounterId);
+      if (customIntroduction !== undefined) updated.customIntroduction = asString(customIntroduction).trim();
+      if (aigmContext !== undefined)        updated.customContext     = asString(aigmContext).trim();
+      if (description !== undefined)        updated.description       = asString(description).trim();
+      if (customObjective !== undefined)    updated.objective         = asString(customObjective).trim() || (existing.objective ?? "Complete the encounter.");
       if (completionFlag !== undefined) {
-        const cf = completionFlag.trim();
+        const cf = asString(completionFlag).trim();
         if (cf) updated.completionFlag = sanitiseFlag(cf);
         else delete updated.completionFlag;
       }
-      if (allyIds    !== undefined) updated.allyIds = allyIds.filter((id) => validIds.has(id));
-      if (enemyIds   !== undefined) updated.enemyIds = enemyIds.filter((id) => validIds.has(id));
-      if (neutralIds !== undefined) updated.npcIds  = neutralIds.filter((id) => validIds.has(id));
+      if (allyIds    !== undefined) updated.allyIds = asArray<string>(allyIds).filter((id) => validIds.has(id));
+      if (enemyIds   !== undefined) updated.enemyIds = asArray<string>(enemyIds).filter((id) => validIds.has(id));
+      if (neutralIds !== undefined) updated.npcIds  = asArray<string>(neutralIds).filter((id) => validIds.has(id));
       if (placementMode !== undefined) {
         // Persist 'exact' explicitly; collapse 'zones' (the default) back to
         // omitting the field so existing-encounter JSON stays diff-clean.
@@ -726,7 +727,7 @@ export function registerGenerateRoutes(server: FastifyInstance, ctx: GenerateRou
         else delete updated.placementMode;
       }
       if (placements !== undefined) {
-        if (placements.length > 0) updated.placements = placements;
+        if (Array.isArray(placements) && placements.length > 0) updated.placements = placements;
         else delete updated.placements;
       }
       if (composedTriggers !== undefined) {
@@ -784,7 +785,7 @@ export function registerGenerateRoutes(server: FastifyInstance, ctx: GenerateRou
     Body: { prompt: string };
   }>("/generate/map", async (req, reply) => {
     const { prompt } = req.body;
-    if (!prompt || prompt.trim().length < 8) {
+    if (typeof prompt !== "string" || prompt.trim().length < 8) {
       return reply.code(400).send({ error: "prompt must be at least 8 characters" });
     }
     try {
@@ -807,7 +808,7 @@ export function registerGenerateRoutes(server: FastifyInstance, ctx: GenerateRou
     Body: { prompt: string; playerName?: string; playerClassName?: string };
   }>("/generate/encounter", async (req, reply) => {
     const { prompt, playerName, playerClassName } = req.body;
-    if (!prompt || prompt.trim().length < 8) {
+    if (typeof prompt !== "string" || prompt.trim().length < 8) {
       return reply.code(400).send({ error: "prompt must be at least 8 characters" });
     }
     try {
@@ -834,7 +835,7 @@ export function registerGenerateRoutes(server: FastifyInstance, ctx: GenerateRou
     if (!draft || typeof draft !== "object") {
       return reply.code(400).send({ error: "draft must be an object" });
     }
-    if (!prompt || prompt.trim().length < 4) {
+    if (typeof prompt !== "string" || prompt.trim().length < 4) {
       return reply.code(400).send({ error: "prompt must be at least 4 characters" });
     }
     try {
@@ -861,7 +862,7 @@ export function registerGenerateRoutes(server: FastifyInstance, ctx: GenerateRou
     if (!draft || typeof draft !== "object") {
       return reply.code(400).send({ error: "draft must be an object" });
     }
-    if (!prompt || prompt.trim().length < 4) {
+    if (typeof prompt !== "string" || prompt.trim().length < 4) {
       return reply.code(400).send({ error: "prompt must be at least 4 characters" });
     }
     try {
@@ -888,7 +889,7 @@ export function registerGenerateRoutes(server: FastifyInstance, ctx: GenerateRou
     if (!draft || typeof draft !== "object") {
       return reply.code(400).send({ error: "draft must be an object" });
     }
-    if (!prompt || prompt.trim().length < 4) {
+    if (typeof prompt !== "string" || prompt.trim().length < 4) {
       return reply.code(400).send({ error: "prompt must be at least 4 characters" });
     }
     try {

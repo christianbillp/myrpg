@@ -6,6 +6,7 @@ import { z } from "zod";
 import type { GameDefs } from "./engine/types.js";
 import { buildMapJson as sharedBuildMapJson } from "./engine/MapPersistence.js";
 import { settingPromptBlock } from "./settings.js";
+import { safeId } from "./util/requestValidation.js";
 
 /** zod schemas for the two tool-output payload shapes Claude returns. The
  *  parsed result is narrowed back to the inferred interface so the rest of
@@ -126,7 +127,7 @@ export async function generateEncounter(
 
   const stamp = Date.now();
   const slug = slugify(payload.encounterTitle).slice(0, 32) || "scene";
-  const generatedId = `gen_${stamp}_${slug}`;
+  const generatedId = safeId(`gen_${stamp}_${slug}`);
 
   const mapJson = buildMapJson(generatedId, payload);
   const encounterJson = buildEncounterJson(generatedId, payload);
@@ -185,7 +186,7 @@ export async function generateMap(
 
   const stamp = Date.now();
   const slug = slugify(payload.name).slice(0, 32) || "map";
-  const mapId = `gen_${stamp}_${slug}`;
+  const mapId = safeId(`gen_${stamp}_${slug}`);
 
   const mapJson = buildMapJson(mapId, {
     encounterTitle: payload.name,

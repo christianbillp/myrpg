@@ -9,6 +9,7 @@
 import { mkdir, writeFile } from "fs/promises";
 import { join } from "path";
 import type { MapZone } from "./mapTypes.js";
+import { safeId } from "../util/requestValidation.js";
 
 /**
  * Persisted shape for an author-time named tile region. The in-memory
@@ -71,5 +72,5 @@ export function buildMapJson(p: MapJsonPayload): Record<string, unknown> {
 export async function writeMapJson(dataDir: string, p: MapJsonPayload): Promise<void> {
   const json = buildMapJson(p);
   await mkdir(join(dataDir, 'maps'), { recursive: true });
-  await writeFile(join(dataDir, 'maps', `${p.id}.json`), JSON.stringify(json, null, 2));
+  await writeFile(join(dataDir, 'maps', `${safeId(p.id)}.json`), JSON.stringify(json, null, 2));
 }

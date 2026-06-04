@@ -1,6 +1,7 @@
 import { readFile, writeFile, mkdir, readdir, unlink, rmdir } from "fs/promises";
 import { join } from "path";
 import type { NpcSave, NPCDef, NpcFactValue, EntityRef } from "../../../shared/types.js";
+import { safeId } from "../util/requestValidation.js";
 
 /**
  * NpcSavePersistence — disk layer for per-character, per-NPC save files.
@@ -20,7 +21,7 @@ const JOURNAL_CAP = 20;
 
 /** Resolve the directory holding one character's NPC saves. */
 function npcSavesDir(settingDataDir: string, characterId: string): string {
-  return join(settingDataDir, "saves", `${characterId}_npcs`);
+  return join(settingDataDir, "saves", `${safeId(characterId)}_npcs`);
 }
 
 /** Build a blank save for an NPC the engine just spawned for the first
@@ -43,7 +44,7 @@ export function createDefaultNpcSave(npcDef: NPCDef, characterId: string): NpcSa
 
 /** Read an NPC save from disk. Returns `null` when no file exists yet. */
 export async function loadNpcSave(settingDataDir: string, characterId: string, npcId: string): Promise<NpcSave | null> {
-  const path = join(npcSavesDir(settingDataDir, characterId), `${npcId}.json`);
+  const path = join(npcSavesDir(settingDataDir, characterId), `${safeId(npcId)}.json`);
   try {
     const raw = await readFile(path, "utf-8");
     return JSON.parse(raw) as NpcSave;
@@ -70,7 +71,7 @@ export async function loadOrCreateNpcSave(
 export async function writeNpcSave(settingDataDir: string, save: NpcSave): Promise<void> {
   const dir = npcSavesDir(settingDataDir, save.characterId);
   await mkdir(dir, { recursive: true });
-  const path = join(dir, `${save.npcId}.json`);
+  const path = join(dir, `${safeId(save.npcId)}.json`);
   await writeFile(path, JSON.stringify(save, null, 2) + "\n", "utf-8");
 }
 
