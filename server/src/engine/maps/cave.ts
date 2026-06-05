@@ -1,62 +1,76 @@
 /**
- * Cave composer — a natural cavern of organic rock chambers linked by winding
- * passages, with the occasional pool or chasm hazard. Built on the shared
- * `MapCanvas` + op toolbox (the same primitives the agentic AI generator uses),
+ * Cave composer — a natural cavern built as a HUB-AND-SPOKE: one large central
+ * chamber with several small side chambers around it, each linked back to the
+ * centre by a short passage. This silhouette is deliberately distinct from the
+ * dungeon's grid of similar rooms. Built on the shared `MapCanvas` + op toolbox
  * so deterministic and AI-authored caves render identically.
  *
- * Carves 4–6 non-overlapping chambers of varied cave floor out of a void map,
- * connects consecutive chamber centres with corridors, walls the result, then
- * drops 1–2 hazards. Deterministic from the seed.
+ * Carves varied cave floor out of a void map, walls the result, then drops a
+ * pool + chasm hazard. Deterministic from the seed.
  */
 import { BIOME_PALETTES, pickGroundGid } from '../../../../shared/biomePalettes.js';
 import type { ComposedMap } from '../mapTypes.js';
 import { MapCanvas } from './MapCanvas.js';
 import { carveCorridor, placeHazard, wallAroundFloor, paintRegion, defineZone } from './mapOps.js';
 
+interface CaveRoom { x: number; y: number; w: number; h: number; cx: number; cy: number; }
+
 export interface ComposeCaveOpts { width: number; height: number; seed: number; large?: boolean; stairs?: boolean; }
 
 export function composeCave(opts: ComposeCaveOpts): ComposedMap {
   const c = new MapCanvas({ width: opts.width, height: opts.height, seed: opts.seed });
   const palette = BIOME_PALETTES.cave;
-  const want = opts.large ? 6 : 4;
 
-  const rooms: Array<{ x: number; y: number; w: number; h: number; cx: number; cy: number }> = [];
+  const carveRoom = (x: number, y: number, w: number, h: number): CaveRoom => {
+    for (let r = y; r < y + h; r++) for (let col = x; col < x + w; col++) { c.setGround(col, r, pickGroundGid(palette, c.rng)); c.reserve(col, r); }
+    return { x, y, w, h, cx: x + (w >> 1), cy: y + (h >> 1) };
+  };
+
+  // Large central chamber, roughly centred and filling ~45% of each axis.
+  const cw = Math.max(6, Math.min(opts.width - 8, Math.floor(opts.width * (0.42 + c.rng() * 0.1))));
+  const ch = Math.max(5, Math.min(opts.height - 6, Math.floor(opts.height * (0.42 + c.rng() * 0.1))));
+  const central = carveRoom(Math.floor((opts.width - cw) / 2), Math.floor((opts.height - ch) / 2), cw, ch);
+  const rooms: CaveRoom[] = [central];
+
+  // Small side chambers in the border ring, each tunnelled back to the centre.
+  const sideWant = opts.large ? 7 : 5;
   let attempts = 0;
-  while (rooms.length < want && attempts < 120) {
+  while (rooms.length < sideWant + 1 && attempts < 250) {
     attempts++;
-    const w = 4 + Math.floor(c.rng() * 5);
-    const h = 4 + Math.floor(c.rng() * 4);
+    const w = 3 + Math.floor(c.rng() * 3);   // 3..5
+    const h = 3 + Math.floor(c.rng() * 3);
     const x = 2 + Math.floor(c.rng() * Math.max(1, opts.width - w - 4));
     const y = 2 + Math.floor(c.rng() * Math.max(1, opts.height - h - 4));
     if (rooms.some((r) => x < r.x + r.w + 2 && x + w + 2 > r.x && y < r.y + r.h + 2 && y + h + 2 > r.y)) continue;
-    // Carve the chamber with varied cave floor for a natural rock look.
-    for (let r = y; r < y + h; r++) for (let col = x; col < x + w; col++) { c.setGround(col, r, pickGroundGid(palette, c.rng)); c.reserve(col, r); }
-    rooms.push({ x, y, w, h, cx: x + (w >> 1), cy: y + (h >> 1) });
+    const side = carveRoom(x, y, w, h);
+    rooms.push(side);
+    carveCorridor(c, { from: { x: side.cx, y: side.cy }, to: { x: central.cx, y: central.cy }, floor: 'cave_gravel' });
   }
 
-  // Connect NW→SE so the chain reads as a route through the cave.
-  rooms.sort((a, b) => (a.cy + a.cx) - (b.cy + b.cx));
-  for (let i = 1; i < rooms.length; i++) carveCorridor(c, { from: { x: rooms[i - 1].cx, y: rooms[i - 1].cy }, to: { x: rooms[i].cx, y: rooms[i].cy }, floor: 'cave_gravel' });
-
-  // The southernmost chamber is the entrance. Without the stairs feature the
-  // cave opens at the map edge (a passage carved straight down to the bottom);
-  // with stairs the entrance is a stairs tile inside that chamber instead.
-  const entranceRoom = rooms.length ? rooms.reduce((lo, r) => (r.cy > lo.cy ? r : lo), rooms[0]) : null;
+  // The southernmost side chamber is the entrance. Without the stairs feature
+  // the cave opens at the map edge (a passage carved straight down to the
+  // bottom); with stairs the entrance is a stairs tile inside that chamber.
+  const sideRooms = rooms.slice(1);
+  const entranceRoom = sideRooms.length ? sideRooms.reduce((lo, r) => (r.cy > lo.cy ? r : lo), sideRooms[0]) : central;
   if (entranceRoom && !opts.stairs) {
     carveCorridor(c, { from: { x: entranceRoom.cx, y: entranceRoom.cy }, to: { x: entranceRoom.cx, y: opts.height - 1 }, floor: 'cave_gravel' });
   }
 
   wallAroundFloor(c);
 
-  // Hazards: a pool in one chamber, a chasm in another (never the entrance).
-  if (rooms.length >= 2) {
-    const pool = rooms[1];
-    placeHazard(c, { rect: { x: pool.cx - 1, y: pool.cy - 1, w: 2, h: 2 }, material: 'pool' });
-  }
-  if (rooms.length >= 3) {
-    const chasm = rooms[rooms.length - 1];
-    placeHazard(c, { cells: [{ x: chasm.cx, y: chasm.cy }, { x: chasm.cx + 1, y: chasm.cy }], material: 'chasm' });
-  }
+  // Hazards live in opposite corners of the central chamber, clear of its
+  // centre (the corridor hub) so the spokes stay connected.
+  placeHazard(c, { rect: { x: central.x + 1, y: central.y + 1, w: 2, h: 2 }, material: 'pool' });
+  placeHazard(c, { cells: [{ x: central.x + central.w - 2, y: central.y + central.h - 2 }, { x: central.x + central.w - 3, y: central.y + central.h - 2 }], material: 'chasm' });
+
+  // Author-time zones: the central cavern + each side chamber.
+  const rectCells = (r: CaveRoom): string[] => {
+    const out: string[] = [];
+    for (let y = r.y; y < r.y + r.h; y++) for (let x = r.x; x < r.x + r.w; x++) out.push(`${x},${y}`);
+    return out;
+  };
+  c.addZone('cavern', 'central cavern', '#aa8866', rectCells(central));
+  sideRooms.forEach((r, i) => c.addZone('chamber', `chamber ${i + 1}`, '#88aa99', rectCells(r)));
 
   if (entranceRoom) {
     c.anchors.entrance = { x: entranceRoom.cx, y: entranceRoom.cy };
@@ -73,7 +87,7 @@ export function composeCave(opts: ComposeCaveOpts): ComposedMap {
   const entryDesc = opts.stairs ? 'a stairway descends into it from above' : 'an opening breaches the cavern wall at the map edge';
   return c.toComposedMap(
     caveName(rooms.length, c.rng),
-    `A natural cavern of ${rooms.length} rock chamber${rooms.length === 1 ? '' : 's'} linked by winding passages, with still pools and a bottomless chasm in the dark; ${entryDesc}.`,
+    `A great central cavern ringed by ${sideRooms.length} smaller chamber${sideRooms.length === 1 ? '' : 's'}, each tunnelled back to the hall; a still pool and a bottomless chasm lie in the dark; ${entryDesc}.`,
   );
 }
 

@@ -18,7 +18,7 @@
  * visitor steps onto the porch.
  */
 import type { ComposedMap, MapAnchors, MapZone } from '../mapTypes.js';
-import { FURNITURE_GIDS, TERRAIN_GIDS, WALL_GIDS } from '../mapTiles.js';
+import { EDGE_ROTATION, FURNITURE_GIDS, TERRAIN_GIDS, WALL_GIDS } from '../mapTiles.js';
 import { SCRIBBLE_TILESET, flatten } from './shared.js';
 
 export interface ComposeTavernOpts {
@@ -96,19 +96,20 @@ export function composeTavern(opts: ComposeTavernOpts): ComposedMap {
       }
       let chairsPlaced = 0;
       const wantChairs = 1 + Math.floor(rng() * 2);
-      const reservedChairs: Array<[number, number]> = [];
+      const reservedChairs: Array<[number, number, number, number]> = [];
       for (const [dx, dy] of sides) {
         if (chairsPlaced >= wantChairs) break;
         const nx = cx + dx, ny = cy + dy;
         if (nx <= tx || nx >= tx + tw - 1 || ny <= ty || ny >= ty + th - 1) continue;
         if (objectGrid[ny][nx] !== 0) continue;
-        reservedChairs.push([nx, ny]);
+        reservedChairs.push([nx, ny, dx, dy]);
         chairsPlaced++;
       }
       if (chairsPlaced === 0) continue;
       objectGrid[cy][cx] = FURNITURE_GIDS.WOODEN_PLANK;
       tableCells.push(`${cx},${cy}`);
-      for (const [nx, ny] of reservedChairs) objectGrid[ny][nx] = FURNITURE_GIDS.CHAIR;
+      // The chair tile faces north by default; rotate it to face the table it sits beside.
+      for (const [nx, ny, dx, dy] of reservedChairs) objectGrid[ny][nx] = FURNITURE_GIDS.CHAIR + chairFacing(dx, dy);
       break;
     }
   }
@@ -131,6 +132,15 @@ export function composeTavern(opts: ComposeTavernOpts): ComposedMap {
     anchors,
     zones,
   };
+}
+
+/** Rotation flag for a chair at table-offset (dx,dy) so it faces the table.
+ *  The chair art faces north (toward −y) by default. */
+function chairFacing(dx: number, dy: number): number {
+  if (dy === 1) return 0;                 // chair south of table → face north (default)
+  if (dy === -1) return EDGE_ROTATION.S;  // chair north of table → face south
+  if (dx === -1) return EDGE_ROTATION.E;  // chair west of table → face east
+  return EDGE_ROTATION.W;                  // chair east of table → face west
 }
 
 const TAVERN_NAMES_SMALL = ['Roadside Tavern', 'The Old Inn', 'The Wayside Keg', 'The Quiet Hearth'];

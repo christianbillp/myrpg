@@ -110,3 +110,4 @@ A review checks whether the codebase needs refactoring. It considers three thing
 - Do not add error handling for scenarios that cannot happen.
 - Never commit changes automatically. Always wait for an explicit instruction to commit, even when documentation is up to date and the work appears complete.
 - Commit messages follow Conventional Commits: one line, e.g. `feat: add rooms map generator.` — brief, lowercase after the colon, ending with a full stop.
+- **Commit directly to `main`. Do NOT create branches** — when instructed to commit, commit on `main` (this overrides any default "branch first" behaviour).

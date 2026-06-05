@@ -1,16 +1,16 @@
 // Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
 
-exports[`composeMap seed stability > cave/large is byte-stable 1`] = `"4a9428b2"`;
+exports[`composeMap seed stability > cave/large is byte-stable 1`] = `"5dbf02da"`;
 
-exports[`composeMap seed stability > cave/small is byte-stable 1`] = `"8a464167"`;
+exports[`composeMap seed stability > cave/small is byte-stable 1`] = `"30cd7481"`;
 
-exports[`composeMap seed stability > cave/stairs is byte-stable 1`] = `"119f94a4"`;
+exports[`composeMap seed stability > cave/stairs is byte-stable 1`] = `"6ad692e9"`;
 
-exports[`composeMap seed stability > dungeon/3-room is byte-stable 1`] = `"5f693951"`;
+exports[`composeMap seed stability > dungeon/3-room is byte-stable 1`] = `"6f7edd3e"`;
 
-exports[`composeMap seed stability > dungeon/5-room is byte-stable 1`] = `"404fbcd5"`;
+exports[`composeMap seed stability > dungeon/5-room is byte-stable 1`] = `"619e1a04"`;
 
-exports[`composeMap seed stability > dungeon/stairs is byte-stable 1`] = `"5b532f46"`;
+exports[`composeMap seed stability > dungeon/stairs is byte-stable 1`] = `"c28e3353"`;
 
 exports[`composeMap seed stability > forest/bare is byte-stable 1`] = `"04cb6629"`;
 
@@ -40,6 +40,6 @@ exports[`composeMap seed stability > grassland/ruins is byte-stable 1`] = `"27a0
 
 exports[`composeMap seed stability > grassland/small is byte-stable 1`] = `"4c85f137"`;
 
-exports[`composeMap seed stability > tavern is byte-stable 1`] = `"bf71d848"`;
+exports[`composeMap seed stability > tavern is byte-stable 1`] = `"27859c6d"`;
 
-exports[`composeMap seed stability > urban is byte-stable 1`] = `"c3991b31"`;
+exports[`composeMap seed stability > urban is byte-stable 1`] = `"a7f041cd"`;

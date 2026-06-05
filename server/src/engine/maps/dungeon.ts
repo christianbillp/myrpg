@@ -119,21 +119,36 @@ export function composeDungeon(opts: ComposeDungeonOpts): ComposedMap {
 
   const anchors: MapAnchors = { rooms };
   const zones: MapZone[] = [];
+  // Identify the entrance + vault rooms so their zones can be named distinctly.
+  let vaultRoom = entryRoom;
   if (entryRoom) {
-    anchors.entrance = { x: entryRoom.x + Math.floor(entryRoom.w / 2), y: entryRoom.y + Math.floor(entryRoom.h / 2) };
-    // Stairs entrance: drop the stairs tile on the entry-room centre and tag it.
-    if (useStairs) {
-      const { x: ex, y: ey } = anchors.entrance;
-      objectGrid[ey][ex] = FURNITURE_GIDS.STAIRS_UP;
-      zones.push({ id: allocZoneId('entrance_stairs'), name: 'Entrance Stairs', color: '#e2b96f', cells: [`${ex},${ey}`] });
-    }
-    let vaultRoom = entryRoom;
+    anchors.entrance = { x: entryRoom.cx, y: entryRoom.cy };
     let bestDist = -1;
     for (const r of rooms) {
       const d = Math.abs(r.cx - anchors.entrance.x) + Math.abs(r.cy - anchors.entrance.y);
       if (d > bestDist) { bestDist = d; vaultRoom = r; }
     }
     if (vaultRoom !== entryRoom) anchors.vault = { x: vaultRoom.cx, y: vaultRoom.cy };
+  }
+
+  // One author-time zone per room: the entrance and vault named distinctly, the
+  // rest "room <n>".
+  let roomN = 0;
+  for (const r of rooms) {
+    const cells: string[] = [];
+    for (let yy = r.y; yy < r.y + r.h; yy++) for (let xx = r.x; xx < r.x + r.w; xx++) cells.push(`${xx},${yy}`);
+    const isEntrance = r === entryRoom;
+    const isVault = r === vaultRoom && vaultRoom !== entryRoom;
+    const name = isEntrance ? 'entrance' : isVault ? 'vault' : `room ${++roomN}`;
+    const color = isEntrance ? '#88cc88' : isVault ? '#cc8866' : '#6688aa';
+    zones.push({ id: allocZoneId(name.replace(' ', '_')), name, color, cells: cells.sort() });
+  }
+
+  // Stairs entrance: drop the stairs tile on the entry-room centre and tag it.
+  if (entryRoom && useStairs) {
+    const ex = entryRoom.cx, ey = entryRoom.cy;
+    objectGrid[ey][ex] = FURNITURE_GIDS.STAIRS_UP;
+    zones.push({ id: allocZoneId('entrance_stairs'), name: 'Entrance Stairs', color: '#e2b96f', cells: [`${ex},${ey}`] });
   }
 
   return {
