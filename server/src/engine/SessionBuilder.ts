@@ -1,7 +1,7 @@
 import {
   GameState, GameMap, GameDefs, EquipmentSlots, NpcState, MapItemState,
   SecretState, NpcPersona, CreateSessionRequest, EncounterTileProperty,
-  MapTilesetInfo, LogEntry,
+  MapTilesetInfo, LogEntry, TrapState,
 } from './types.js';
 import { PLAYER_FACTION_ID } from '../../../shared/types.js';
 import type { EncounterContext } from '../encounterService.js';
@@ -294,6 +294,30 @@ export function buildSessionState(
   const mapItems: MapItemState[] = [];
   const secrets: SecretState[] = [];
 
+  // Concealed tile traps authored on the encounter (EncounterDef.traps).
+  const traps: TrapState[] = (req.traps ?? []).map((t, i) => ({
+    id: `trap_${t.id || i}`,
+    name: t.name,
+    tileX: t.x,
+    tileY: t.y,
+    armed: true,
+    discovered: t.hidden === false,
+    detectDC: t.detectDC,
+    disarmDC: t.disarmDC ?? 15,
+    trigger: {
+      saveAbility: t.trigger.saveAbility ?? 'dex',
+      saveDC: t.trigger.saveDC,
+      damageDice: t.trigger.damageDice,
+      damageSides: t.trigger.damageSides,
+      damageBonus: t.trigger.damageBonus ?? 0,
+      damageType: t.trigger.damageType,
+      halfOnSave: t.trigger.halfOnSave ?? true,
+      condition: t.trigger.condition,
+    },
+    triggeredMessage: t.triggeredMessage,
+    tintHex: t.tintHex,
+  }));
+
   populateNpcs(
     { npcs, mapItems, secrets },
     map,
@@ -392,6 +416,8 @@ export function buildSessionState(
       canDetach: false,
       canLevelUp: false,
       canLongRest: false,
+      disarmableTrapTiles: [],
+      deployableGearIds: [],
     },
     pendingReaction: null,
     activeConversation: null,
@@ -403,6 +429,7 @@ export function buildSessionState(
     worldTickCount: 0,
     dayPhase: 'morning',
     activeZones: [],
+    traps,
     factionRelations,
     // Legacy projection kept in sync with the matrix at boot. Pass 2 will
     // re-project after every mutation so existing readers stay correct.

@@ -165,4 +165,10 @@ export interface AvailableActions {
   canLevelUp: boolean;
   /** True when the current encounter permits Long Rest (`GameState.allowsLongRest`) AND the player is in the exploration phase. */
   canLongRest: boolean;
+  /** Tiles holding a discovered, still-armed trap within reach (≤1 tile) that
+   *  the player could attempt to Disarm right now. Drives the DISARM button. */
+  disarmableTrapTiles: Array<{ x: number; y: number }>;
+  /** Inventory ids of area-denial gear (caltrops, ball bearings) the player
+   *  could Deploy right now. Drives the SET TRAP / DEPLOY button. */
+  deployableGearIds: string[];
 }

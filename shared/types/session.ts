@@ -6,7 +6,7 @@
  */
 
 // Cross-domain imports — keep these explicit so the dependency graph is visible.
-import type { EncounterDef, EncounterPlacement, EncounterTileProperty, StartingZonesLayer } from "./encounter.js";
+import type { EncounterDef, EncounterPlacement, EncounterTileProperty, EncounterTrapDef, StartingZonesLayer } from "./encounter.js";
 import type { WorldFlagValue } from "./engineEvents.js";
 import type { EquipmentSlots } from "./entities.js";
 import type { Rumor } from "./factions.js";
@@ -43,6 +43,8 @@ export interface CreateSessionRequest {
   /** Mirrors `EncounterDef.placements`. */
   placements?: EncounterPlacement[];
   triggers?: EncounterTrigger[];
+  /** Mirrors `EncounterDef.traps` — concealed tile traps for this encounter. */
+  traps?: EncounterTrapDef[];
   /** Per-encounter conversation override: NPC defId → conversation id.
    *  Resolved at spawn time and set on the NpcState. Lets the same NPC
    *  open different conversations across encounters (e.g. Vask defaults

@@ -23,6 +23,7 @@ import { combatantDisplayName } from './CombatFlow.js';
 import { emitNoise, NOISE_SPELL_VERBAL } from './Sound.js';
 import { Logger } from '../Logger.js';
 import { canSee as visCanSee } from './Vision.js';
+import { SPEED_ZERO_CONDITIONS } from './ConditionSystem.js';
 import {
   tilesInArea, playerInArea, creaturesInArea,
   sphereRadiusTiles, chebyshevDiscTiles,
@@ -842,9 +843,14 @@ export function tickZoneEnterSaves(ctx: GameContext, subjectId: 'player' | strin
       if (subject.isPlayer) {
         if (!s.player.conditions.includes(z.condition)) s.player.conditions.push(z.condition);
         z.affectedPlayer = true;
+        // Caltrops-style Speed 0: halt the rest of this turn's movement so the
+        // player can't keep walking through the hazard once snared.
+        if (SPEED_ZERO_CONDITIONS.includes(z.condition)) s.player.movesLeft = 0;
+        if (z.enterDamage) ctx.applyDamageToPlayer(z.enterDamage.amount, ctx.eventSink ?? []);
       } else {
         if (!subject.npc.conditions.includes(z.condition)) subject.npc.conditions.push(z.condition);
         if (!z.affectedNpcIds.includes(subject.npc.id)) z.affectedNpcIds.push(subject.npc.id);
+        if (z.enterDamage) applyDamageToNpc(ctx, subject.npc, z.enterDamage.amount, z.enterDamage.type);
       }
     }
   }

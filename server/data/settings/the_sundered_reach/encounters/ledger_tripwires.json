@@ -1,0 +1,78 @@
+{
+  "id": "ledger_tripwires",
+  "encounterTitle": "Tripwires & Tinkers",
+  "description": "Chapter 2 of The Moon's Ledger. The store-room corridor is rigged. Spot the traps, disarm what you can, and get past the lone watchman to the inner rooms.",
+  "mapId": "broken_ward",
+  "npcIds": [],
+  "allyIds": [],
+  "enemyIds": ["bandit"],
+  "customIntroduction": "Past the door, the way-house turns careful. A long store-room corridor runs ahead, stacked with crates and smelling of lamp-oil and old rope. The Circus taught Wren the first rule of a room like this when she was small enough to walk a tightrope between two balconies: the floor is never just a floor. Somewhere along this corridor are the wires. At the far end, a watchman dozes against a crate, a ring of keys at his belt.",
+  "customContext": "MOON'S LEDGER — CHAPTER 2 of 4. TRAP DETECTION + DISARM TUTORIAL for Wren. The corridor holds three concealed traps (a tripwire snare and two dart traps). Teach the loop: passive Perception or the SEARCH action spots them; the DISARM TRAP button removes them (Dexterity / Sleight of Hand — Wren has Expertise AND Thieves' Tools, granting Advantage). A botched disarm springs the trap, so caution pays. One bandit watchman dozes at the far end; the chapter ends when he is dealt with. Encourage care over speed; this is a puzzle of nerves, not a brawl.",
+  "objective": "Cross the rigged corridor — spot and disarm the traps — and deal with the watchman.",
+  "allowsLongRest": false,
+  "placementMode": "exact",
+  "placements": [
+    { "role": "player", "x": 4, "y": 11 },
+    { "role": "enemy", "index": 0, "x": 22, "y": 10 }
+  ],
+  "traps": [
+    {
+      "id": "corridor_snare",
+      "name": "Tripwire Snare",
+      "x": 6,
+      "y": 10,
+      "hidden": true,
+      "detectDC": 12,
+      "disarmDC": 13,
+      "trigger": {
+        "saveAbility": "dex", "saveDC": 12,
+        "damageDice": 1, "damageSides": 4, "damageType": "piercing",
+        "halfOnSave": true, "condition": "restrained"
+      },
+      "triggeredMessage": "A wire snaps taut and a noose of cord whips around your ankle!",
+      "tintHex": "#a05a2c"
+    },
+    {
+      "id": "corridor_darts_1",
+      "name": "Dart Trap",
+      "x": 12,
+      "y": 11,
+      "hidden": true,
+      "detectDC": 14,
+      "disarmDC": 15,
+      "trigger": {
+        "saveAbility": "dex", "saveDC": 13,
+        "damageDice": 2, "damageSides": 4, "damageType": "piercing",
+        "halfOnSave": true
+      },
+      "triggeredMessage": "A pressure plate clicks — darts hiss from a seam in the wall!",
+      "tintHex": "#d24a3a"
+    },
+    {
+      "id": "corridor_darts_2",
+      "name": "Spring-Spike",
+      "x": 17,
+      "y": 11,
+      "hidden": true,
+      "detectDC": 15,
+      "disarmDC": 15,
+      "trigger": {
+        "saveAbility": "dex", "saveDC": 13,
+        "damageDice": 2, "damageSides": 6, "damageType": "piercing",
+        "halfOnSave": true
+      },
+      "triggeredMessage": "A floorboard gives — a spike snaps up from the gap!",
+      "tintHex": "#d24a3a"
+    }
+  ],
+  "triggers": [
+    {
+      "id": "corridor_intro",
+      "when": { "event": "encounter_started" },
+      "then": [
+        { "type": "send_aigm_message", "message": "Open in the rigged store-room corridor. Crates, lamp-oil, old rope; a watchman dozing at the far end. Remind Wren — in the fiction — of the Circus rule that the floor is never just a floor: she can SEARCH for wires and use DISARM (with her Thieves' Tools) to clear them. One short paragraph, then hand control to the player." }
+      ],
+      "once": true
+    }
+  ]
+}

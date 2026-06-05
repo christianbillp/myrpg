@@ -1,0 +1,7 @@
+{
+  "id": "thieves_tools",
+  "name": "Thieves' Tools",
+  "type": "gear",
+  "description": "This set of tools includes a small file, a set of lock picks, a small mirror on a handle, a set of narrow-bladed scissors, and pliers. Proficiency with them lets you add your Proficiency Bonus to checks to pick locks (DC 15) and disarm traps (DC 15) — a Dexterity (Sleight of Hand) check.",
+  "costCp": 2500
+}

@@ -41,6 +41,7 @@ import {
 } from './ExplorationActions.js';
 import { doEquip as ivDoEquip, doUnequip as ivDoUnequip } from './InventoryActions.js';
 import { doCastSpell as spDoCastSpell } from './SpellSystem.js';
+import { isDeployableGear } from './TrapSystem.js';
 import { doCommandSummon, checkSummonTether, registerSummonHooks } from './SummonSystem.js';
 import { registerSoundHooks } from './Sound.js';
 import { registerAwarenessHooks, registerCompanionFollowHooks } from './npcSim/index.js';
@@ -1120,6 +1121,24 @@ export class GameEngine {
       });
     }
 
+    // Trap actions are usable during exploration, or on the player's turn while
+    // an Action remains (both Disarm and Deploy cost the full Action in combat).
+    const canActNow = phase === 'exploring' || (phase === 'player_turn' && !p.actionUsed);
+    const disarmableTrapTiles = canActNow
+      ? s.traps
+          .filter((t) => t.armed && t.discovered && chebyshev(p.tileX, p.tileY, t.tileX, t.tileY) <= 1)
+          .map((t) => ({ x: t.tileX, y: t.tileY }))
+      : [];
+    let deployableGearIds: string[] = [];
+    if (canActNow) {
+      const seen = new Set<string>();
+      deployableGearIds = p.inventoryIds.filter((id) => {
+        if (seen.has(id)) return false;
+        seen.add(id);
+        return isDeployableGear(this.defs.equipment.find((i) => i.id === id));
+      });
+    }
+
     s.availableActions = {
       canAttack: Guard.canAttackTarget(this.ctx),
       throwableItemIds,
@@ -1138,6 +1157,8 @@ export class GameEngine {
       // LONG REST is gated by the encounter — only safehouses / taverns set
       // `allowsLongRest`. Combat phases block it outright.
       canLongRest: phase === 'exploring' && s.allowsLongRest === true,
+      disarmableTrapTiles,
+      deployableGearIds,
     };
   }
 

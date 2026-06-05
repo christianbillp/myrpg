@@ -82,8 +82,10 @@ export interface ComposedActionWire {
 /** Subset of the editor's `ComposedTrigger` carried over the wire. */
 export interface RefinerTrigger {
   id: string;
-  whenEvent?: 'player_moved' | 'encounter_started' | 'encounter_completed' | 'flag_set';
+  whenEvent?: 'player_moved' | 'enter_zone' | 'encounter_started' | 'encounter_completed' | 'flag_set';
   region: { x: number; y: number; w: number; h: number };
+  /** Named map zone for the `enter_zone` WHEN. */
+  whenZone?: { name: string; cells: string[] };
   kind: TriggerActionKindWire;
   dc?: number;
   passMessage?: string;

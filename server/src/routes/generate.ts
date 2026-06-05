@@ -72,8 +72,9 @@ interface EditorComposedAction {
 interface EditorComposedTrigger extends EditorComposedAction {
   id: string;
   region: { x: number; y: number; w: number; h: number };
-  whenEvent?: "player_moved" | "encounter_started" | "encounter_completed" | "flag_set";
+  whenEvent?: "player_moved" | "enter_zone" | "encounter_started" | "encounter_completed" | "flag_set";
   whenFlagName?: string;
+  whenZone?: { name: string; cells: string[] };
   // Required-on-trigger versions of the fields that are optional on
   // ComposedAction — keeps the original schemas accepting payloads from
   // existing clients without breaking.
@@ -220,10 +221,13 @@ function expandComposedTrigger(t: EditorComposedTrigger, fallbackId: string): Re
   const whenEvent = t.whenEvent ?? "player_moved";
   const when: Record<string, unknown> = whenEvent === "player_moved"
     ? { event: "player_moved", in_area: t.region }
-    : whenEvent === "flag_set"
-      ? { event: "flag_set", ...(t.whenFlagName && t.whenFlagName.trim() ? { name: sanitiseFlagName(t.whenFlagName) } : {}) }
-      : { event: whenEvent };
-  const guards = whenEvent === "player_moved"
+    : whenEvent === "enter_zone"
+      ? { event: "player_moved", in_zone: t.whenZone ?? { name: "", cells: [] } }
+      : whenEvent === "flag_set"
+        ? { event: "flag_set", ...(t.whenFlagName && t.whenFlagName.trim() ? { name: sanitiseFlagName(t.whenFlagName) } : {}) }
+        : { event: whenEvent };
+  // Enter-zone triggers are also movement-gated to the exploration phase.
+  const guards = (whenEvent === "player_moved" || whenEvent === "enter_zone")
     ? [{ type: "phase" as const, in: ["exploring"] as const }]
     : [];
   const then = [

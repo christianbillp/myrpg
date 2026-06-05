@@ -23,11 +23,14 @@
  */
 import Phaser from "phaser";
 import { decodeTileGid, TILE_VOID_GID } from "../../../../shared/tileGid";
-import type { MapPreviewData } from "../EmbeddedMapPreview";
+import type { MapPreviewData, MapZone } from "../EmbeddedMapPreview";
 import { createHtmlButton, type HtmlButtonHandle } from "../htmlButtons";
 import type { EncounterPlacement } from "../../../../shared/types";
 
 export type PlacementMode = "zones" | "exact";
+
+/** Toggleable preview layers in the encounter editor's map viewport. */
+type LayerKey = 'zones' | 'triggers' | 'monsters' | 'mapZones';
 
 /** Per-kind outline colour for trigger-region overlays. */
 const TRIGGER_COLOR: Record<TriggerRegion["kind"], number> = {
@@ -106,6 +109,13 @@ export class ZonePainter {
   private readonly neutralCells = new Set<string>();
   private readonly zoneOverlayCells = new Map<string, Phaser.GameObjects.Rectangle>();
   private readonly triggerOverlay: Phaser.GameObjects.Graphics;
+  /** Named map zones authored in the Map Creator (`SavedMapDef.zones`). Drawn
+   *  as translucent colour-coded cell fills with a centred label, toggled by
+   *  the MAP ZONES layer button. Distinct from the player/ally/enemy/neutral
+   *  starting zones the painter edits. */
+  private mapZonesOverlay!: Phaser.GameObjects.Graphics;
+  private mapZoneLabels: Phaser.GameObjects.Text[] = [];
+  private mapZones: MapZone[] = [];
   private paintMode: PaintMode = null;
   private paintBtns: Array<{ mode: PaintMode; handle: HtmlButtonHandle }> = [];
   // Placement-mode state. Empty / unused in zones mode.
@@ -121,8 +131,8 @@ export class ZonePainter {
    *  inspecting (zones / triggers / monsters). Newly-created cells +
    *  markers honour the current flag at creation time so toggles persist
    *  across paint / placement changes. */
-  private layerVisible = { zones: true, triggers: true, monsters: true };
-  private layerToggleBtns: Array<{ key: 'zones' | 'triggers' | 'monsters'; handle: HtmlButtonHandle }> = [];
+  private layerVisible = { zones: true, triggers: true, monsters: true, mapZones: true };
+  private layerToggleBtns: Array<{ key: LayerKey; handle: HtmlButtonHandle }> = [];
   /** Callback so the scene can persist placement changes (mirrors onZonesChanged). */
   private onPlacementsChanged: () => void = () => {};
 
@@ -185,6 +195,12 @@ export class ZonePainter {
     this.mapContainer.setMask(this.maskShape.createGeometryMask());
 
     this.buildThumbnail();
+    // Named map-zone overlay sits above the tiles but below the trigger
+    // outlines + placement markers, so authored regions read as a ground tint.
+    this.mapZonesOverlay = scene.add.graphics();
+    this.mapZonesOverlay.setVisible(this.layerVisible.mapZones);
+    this.mapContainer.add(this.mapZonesOverlay);
+    this.setMapZones(opts.map.zones ?? []);
     // Graphics layer on top of the zone overlay cells for trigger-region
     // outlines. Empty until `setTriggerRegions` is called.
     this.triggerOverlay = scene.add.graphics();
@@ -310,6 +326,40 @@ export class ZonePainter {
     }
   }
 
+  /** Replace the drawn named map-zone overlay. Each zone fills its cells with
+   *  its colour at low alpha and stamps a centred label. */
+  setMapZones(zones: MapZone[]): void {
+    this.mapZones = zones;
+    const { thumbX: x, thumbY: y, tileSize } = this.opts;
+    this.mapZonesOverlay.clear();
+    for (const t of this.mapZoneLabels) t.destroy();
+    this.mapZoneLabels = [];
+    for (const z of zones) {
+      const color = parseCssHex(z.color, 0x88ccaa);
+      let sx = 0, sy = 0, n = 0;
+      for (const cell of z.cells) {
+        const [cx, cy] = cell.split(",").map(Number);
+        if (Number.isNaN(cx) || Number.isNaN(cy)) continue;
+        const px = x + cx * tileSize;
+        const py = y + cy * tileSize;
+        this.mapZonesOverlay.fillStyle(color, 0.22).fillRect(px, py, tileSize, tileSize);
+        this.mapZonesOverlay.lineStyle(1, color, 0.6).strokeRect(px + 0.5, py + 0.5, tileSize - 1, tileSize - 1);
+        sx += cx; sy += cy; n++;
+      }
+      if (n > 0 && z.name) {
+        const label = this.opts.scene.add.text(
+          x + (sx / n + 0.5) * tileSize,
+          y + (sy / n + 0.5) * tileSize,
+          z.name,
+          { fontFamily: "monospace", fontSize: "10px", color: "#ffffff", backgroundColor: "#000000aa", padding: { x: 3, y: 1 } },
+        ).setOrigin(0.5, 0.5);
+        label.setVisible(this.layerVisible.mapZones);
+        this.mapContainer.add(label);
+        this.mapZoneLabels.push(label);
+      }
+    }
+  }
+
   /** Live reference — readers see edits as they happen. */
   getPlayerZones(): Set<string> { return this.playerCells; }
   getAllyZones(): Set<string> { return this.allyCells; }
@@ -413,7 +463,7 @@ export class ZonePainter {
    * placements) so the view doesn't overclutter when all three are dense.
    * Newly-painted cells / re-rendered placements honour the current flag.
    */
-  setLayerVisibility(layers: { zones?: boolean; triggers?: boolean; monsters?: boolean }): void {
+  setLayerVisibility(layers: Partial<Record<LayerKey, boolean>>): void {
     if (layers.zones !== undefined) {
       this.layerVisible.zones = layers.zones;
       for (const cell of this.zoneOverlayCells.values()) cell.setVisible(layers.zones);
@@ -429,37 +479,46 @@ export class ZonePainter {
         label.setVisible(layers.monsters);
       }
     }
+    if (layers.mapZones !== undefined) {
+      this.layerVisible.mapZones = layers.mapZones;
+      this.mapZonesOverlay.setVisible(layers.mapZones);
+      for (const t of this.mapZoneLabels) t.setVisible(layers.mapZones);
+    }
     this.refreshLayerToggleButtons();
   }
 
-  getLayerVisibility(): { zones: boolean; triggers: boolean; monsters: boolean } {
+  getLayerVisibility(): Record<LayerKey, boolean> {
     return { ...this.layerVisible };
   }
 
   /**
-   * Build the three-button visibility toolbar — ZONES / TRIGGERS / MONSTERS.
+   * Build the visibility toolbar — ZONES / TRIGGERS / MONSTERS / MAP ZONES.
    * Each button toggles its layer's visibility on/off. Sits above the
    * paint-mode toolbar; the host scene picks the y-coordinate so the chip
    * row fits in whatever leftover space is available.
    */
   buildLayerToggleButtons(x: number, y: number, totalW: number): void {
-    const btnW = (totalW - 16) / 3;
+    const slots: Array<{ key: LayerKey; label: string }> = [
+      { key: 'zones',    label: 'ZONES' },
+      { key: 'triggers', label: 'TRIGGERS' },
+      { key: 'monsters', label: 'MONSTERS' },
+      { key: 'mapZones', label: 'MAP ZONES' },
+    ];
+    const cols = slots.length;
+    const gap = 8;
+    const btnW = (totalW - gap * (cols - 1)) / cols;
     const btnH = 22;
-    const make = (key: 'zones' | 'triggers' | 'monsters', label: string, slot: number): HtmlButtonHandle => {
-      const bx = x + slot * (btnW + 8);
+    const make = (key: LayerKey, label: string, slot: number): HtmlButtonHandle => {
+      const bx = x + slot * (btnW + gap);
       return createHtmlButton({
         scene: this.opts.scene,
         sceneWidth: this.opts.sceneWidth,
         x: bx, y, w: btnW, h: btnH,
         label, variant: 'secondary', fontSize: 10,
-        onClick: () => this.setLayerVisibility({ [key]: !this.layerVisible[key] } as Record<typeof key, boolean>),
+        onClick: () => this.setLayerVisibility({ [key]: !this.layerVisible[key] }),
       });
     };
-    this.layerToggleBtns = [
-      { key: 'zones',    handle: make('zones',    'ZONES',    0) },
-      { key: 'triggers', handle: make('triggers', 'TRIGGERS', 1) },
-      { key: 'monsters', handle: make('monsters', 'MONSTERS', 2) },
-    ];
+    this.layerToggleBtns = slots.map((s, i) => ({ key: s.key, handle: make(s.key, s.label, i) }));
     this.refreshLayerToggleButtons();
   }
 
@@ -746,4 +805,14 @@ export class ZonePainter {
       this.placementMarkers.set(`${p.role}:${p.x},${p.y}`, { rect, label });
     }
   }
+}
+
+/** Parse a `#rrggbb` (or `#rgb`) CSS hex string to a Phaser numeric colour,
+ *  falling back to `fallback` on anything unparseable. */
+function parseCssHex(hex: string, fallback: number): number {
+  const m = /^#?([0-9a-f]{6}|[0-9a-f]{3})$/i.exec(hex?.trim() ?? "");
+  if (!m) return fallback;
+  let h = m[1];
+  if (h.length === 3) h = h.split("").map((c) => c + c).join("");
+  return parseInt(h, 16);
 }

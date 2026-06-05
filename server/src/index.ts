@@ -1724,6 +1724,7 @@ async function loadWorldState(): Promise<{
     worldFlags: worldSave.worldFlags ?? {},
     narrationLastUsed: worldSave.narrationLastUsed ?? {},
     activeZones: worldSave.activeZones ?? [],
+    traps: worldSave.traps ?? [],
     factionStandings: worldSave.factionStandings ?? {},
     // New in Pass 1 — older saves migrate by projecting the legacy `factionStandings`
     // into the party row of an otherwise-empty matrix. Pass 2 will use this matrix
@@ -1915,6 +1916,7 @@ interface EncounterDefJson {
   placementMode?: 'zones' | 'exact';
   placements?: import("./engine/types.js").EncounterPlacement[];
   triggers?: import("./engine/types.js").EncounterTrigger[];
+  traps?: import("./engine/types.js").EncounterTrapDef[];
   environment?: import("./engine/types.js").EncounterEnvironment;
   /** Optional per-encounter override for the global faction-relation matrix. */
   factionRelations?: Record<string, Record<string, number>>;
@@ -2008,6 +2010,7 @@ async function startAdventureChapter(
     placementMode: encDef.placementMode,
     placements: encDef.placements,
     triggers: encDef.triggers,
+    traps: encDef.traps,
     conversationOverrides: encDef.conversationOverrides,
     adventureSeed,
     resumeHp: charSave?.hp,
@@ -2162,6 +2165,7 @@ async function startAdventureRest(
     placementMode: encDef.placementMode,
     placements: encDef.placements,
     triggers: encDef.triggers,
+    traps: encDef.traps,
     conversationOverrides: encDef.conversationOverrides,
     adventureSeed,
     resumeHp: charSave?.hp,

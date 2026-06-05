@@ -1,5 +1,7 @@
 import Phaser from "phaser";
 import { createHtmlButton, createHtmlText, type HtmlButtonHandle, type HtmlTextHandle } from "../ui/htmlButtons";
+import { gameClient } from "../net/GameClient";
+import type { PlayerDef } from "../../../shared/types";
 
 /**
  * MainMenuScene — top-level entry point shown after Boot completes when there
@@ -88,6 +90,9 @@ export class MainMenuScene extends Phaser.Scene {
     this.makeMenuButton(playCx, playY(1), "SINGLE ENCOUNTER", "Play a one-off scenario", () => {
       this.scene.start("EncounterSetupScene");
     });
+    // RESUME sits at the bottom of the PLAY column and only appears when a world
+    // save exists — it jumps straight back into the last active session.
+    this.addResumeButton(playCx, playY(2));
 
     // ── CREATE column ────────────────────────────────────────────
     this.makeMenuButton(createCx, createY(0), "ADVENTURE CREATOR", "String encounters into an adventure with overarching story, AI context, and a rest stop", () => {
@@ -96,7 +101,7 @@ export class MainMenuScene extends Phaser.Scene {
     this.makeMenuButton(createCx, createY(1), "ENCOUNTER CREATOR", "Build an encounter manually or with AI assistance — title, monsters, zones, triggers", () => {
       this.scene.start("EncounterCreatorScene");
     });
-    this.makeMenuButton(createCx, createY(2), "MAP EDITOR", "Generate and save maps; the Encounter Creator picks them up", () => {
+    this.makeMenuButton(createCx, createY(2), "MAP CREATOR", "Generate and save maps; the Encounter Creator picks them up", () => {
       this.scene.start("MapEditorScene");
     });
     this.makeMenuButton(createCx, createY(3), "NPC CREATOR", "Author an NPC on top of an existing monster — name, faction, persona, token", () => {
@@ -114,6 +119,28 @@ export class MainMenuScene extends Phaser.Scene {
 
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => this.teardown());
     this.events.once(Phaser.Scenes.Events.DESTROY, () => this.teardown());
+  }
+
+  /** Resume the latest session. Queries the world save asynchronously and only
+   *  renders the button when one exists, so a fresh install shows no RESUME. */
+  private async addResumeButton(cx: number, cy: number): Promise<void> {
+    const world = await gameClient.loadWorld().catch(() => null);
+    if (!world) return;
+    // Scene may have shut down while the request was in flight.
+    if (!this.scene.isActive()) return;
+    const characters = (this.registry.get("characters") as PlayerDef[]) ?? [];
+    const playerDef = world.playerDef
+      ?? characters.find((c) => c.id === world.state.player.defId)
+      ?? characters[0];
+    this.makeMenuButton(cx, cy, "RESUME", "Continue your latest session where you left off", () => {
+      gameClient.resumeSession(world.sessionId);
+      this.scene.start("GameScene", {
+        sessionId: world.sessionId,
+        playerDef,
+        gmHistory: world.gmHistory,
+        isResume: true,
+      });
+    });
   }
 
   /** Small ⚙ button anchored in the lower-right corner so the front page

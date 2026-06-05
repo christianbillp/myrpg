@@ -26,6 +26,7 @@ import { PLAYER_FACTION_ID } from '../../../shared/types.js';
 import { isIncapacitated, isVisible, TURN_CONDITIONS } from './ConditionSystem.js';
 import { doNpcOpportunityAttack } from './CombatActions.js';
 import { applyNpcAttackHit } from './NpcDamage.js';
+import { publishNpcDamage } from './ThresholdPublisher.js';
 import { chooseNpcBehavior, fleeFromThreat, isMapEdge } from './NpcBrain.js';
 import { Logger } from '../Logger.js';
 import { endConcentration } from './ConcentrationSystem.js';
@@ -85,9 +86,25 @@ function applyZoneStepEffects(ctx: GameContext, npc: NpcState, tx: number, ty: n
     if (!success) {
       npc.conditions.push(z.condition);
       if (!z.affectedNpcIds.includes(npc.id)) z.affectedNpcIds.push(npc.id);
+      if (z.enterDamage) applyTrapZoneDamageToNpc(ctx, npc, z.enterDamage.amount, z.enterDamage.type);
     }
   }
   return cost;
+}
+
+/** Apply a deployed-gear zone's flat enter-damage (caltrops: 1 Piercing) to an
+ *  NPC that failed its save, routing kills through the player-reward path since
+ *  the player deployed the hazard. */
+function applyTrapZoneDamageToNpc(ctx: GameContext, npc: NpcState, amount: number, damageType: string): void {
+  if (amount <= 0 || npc.hp <= 0) return;
+  const def = ctx.resolveMonsterDef(npc.defId);
+  if (!def) return;
+  const { finalDamage, log } = ctx.resistMod(amount, damageType, def, npc.name);
+  if (log) ctx.addLog(log);
+  const hpBefore = npc.hp;
+  npc.hp = Math.max(0, npc.hp - finalDamage);
+  publishNpcDamage(ctx, npc, hpBefore, npc.hp);
+  if (npc.hp <= 0) ctx.killWithReward(npc, def, `☠ ${combatantDisplayName(npc, ctx.state.npcs)} is slain!`);
 }
 
 function incapacitatedFlavor(conditions: string[]): string {

@@ -1,0 +1,70 @@
+{
+  "id": "ledger_the_ledger_room",
+  "encounterTitle": "The Ledger Room",
+  "description": "Chapter 4 of The Moon's Ledger. The vault. A Circus enforcer waits in the dark, the ledger case is trapped, and every trick Wren has learned tonight is on the table.",
+  "mapId": "broken_ward",
+  "npcIds": [],
+  "allyIds": [],
+  "enemyIds": ["guard"],
+  "customIntroduction": "The ledger room is small and cold and smells of candle-smoke and dust. On a plinth at its centre sits the case — iron-bound, hinged, and rigged, because the Circus rigs everything that matters. And in the dark, between Wren and the page with her name on it, something is waiting that has waited like this before: an enforcer, still as a held breath, who was sent to a place where being found would hurt the most. Everything she has done tonight — the quiet feet, the disarmed wires, the seeded ground — comes down to this room.",
+  "customContext": "MOON'S LEDGER — CHAPTER 4 of 4, FINALE. Combines all three mechanics. A Circus ENFORCER (guard) lies HIDDEN at the start (revealable by passive Perception or SEARCH, hideDC ~15) — a stealth/ambush beat that cuts BOTH ways: Wren can spot and pre-empt it, or be ambushed if careless. The ledger case is a trapped object (a concealed trap on its tile) teaching one last DETECT/DISARM. Wren can also SET caltrops/ball bearings to control the enforcer's approach. Chapter ends when the enforcer is defeated and Wren can take the page. Tone: the quiet, total focus of a runner finishing the job — and the thematic close that she is using the Circus's own training to escape the Circus.",
+  "objective": "Spot the waiting enforcer, get past the trapped ledger case, and take back the page.",
+  "allowsLongRest": false,
+  "placementMode": "exact",
+  "placements": [
+    { "role": "player", "x": 19, "y": 21 },
+    { "role": "enemy", "index": 0, "x": 6, "y": 10 }
+  ],
+  "traps": [
+    {
+      "id": "ledger_case",
+      "name": "Trapped Ledger Case",
+      "x": 5,
+      "y": 10,
+      "hidden": true,
+      "detectDC": 14,
+      "disarmDC": 15,
+      "trigger": {
+        "saveAbility": "dex", "saveDC": 14,
+        "damageDice": 2, "damageSides": 4, "damageType": "piercing",
+        "halfOnSave": true, "condition": "poisoned"
+      },
+      "triggeredMessage": "A needle springs from the case's hinge as you reach for it!",
+      "tintHex": "#7a4a8a"
+    },
+    {
+      "id": "ledger_floor_snare",
+      "name": "Tripwire Snare",
+      "x": 4,
+      "y": 9,
+      "hidden": true,
+      "detectDC": 13,
+      "disarmDC": 13,
+      "trigger": {
+        "saveAbility": "dex", "saveDC": 12,
+        "damageDice": 1, "damageSides": 4, "damageType": "piercing",
+        "halfOnSave": true, "condition": "restrained"
+      },
+      "triggeredMessage": "A wire by the plinth snaps taut around your ankle!",
+      "tintHex": "#a05a2c"
+    }
+  ],
+  "triggers": [
+    {
+      "id": "enforcer_hidden_at_start",
+      "when": { "event": "encounter_started" },
+      "then": [
+        { "type": "set_npc_hidden", "defId": "guard", "hidden": true, "hideDC": 15 }
+      ],
+      "once": true
+    },
+    {
+      "id": "ledger_room_intro",
+      "when": { "event": "encounter_started" },
+      "then": [
+        { "type": "send_aigm_message", "message": "Open in the cold, candle-smoke ledger room. The trapped iron case waits on its plinth; somewhere in the dark an enforcer is holding still. Remind Wren — in the fiction — to SEARCH the dark before she crosses (the enforcer can be spotted and pre-empted), to mind the trapped case, and that she may SET hazards to control the approach. One short paragraph, then hand control to the player." }
+      ],
+      "once": true
+    }
+  ]
+}

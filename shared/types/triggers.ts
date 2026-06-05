@@ -20,7 +20,11 @@ import type { NpcFactValue, NpcSave } from "./npcSave.js";
 // so once-only semantics survive save/load.
 
 export type WhenClause =
-  | { event: 'player_moved'; in_area?: { x: number; y: number; w: number; h: number }; tile?: { x: number; y: number } }
+  | { event: 'player_moved'; in_area?: { x: number; y: number; w: number; h: number }; tile?: { x: number; y: number };
+      /** Fires when the player steps onto any cell of a named map zone. `cells`
+       *  is the zone's `"x,y"` cell list, resolved from the map at authoring
+       *  time so the runtime is self-contained; `name` is for display. */
+      in_zone?: { name: string; cells: string[] } }
   | { event: 'npc_killed'; defId?: string }
   | { event: 'item_picked_up'; defId?: string }
   | { event: 'turn_started'; combatantId?: 'player' | string }

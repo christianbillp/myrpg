@@ -55,14 +55,41 @@ export interface AmmunitionDef {
   costCp?: number;
 }
 
+// Area-denial gear (caltrops, ball bearings) is *deployed* onto the map as a
+// persistent `ActiveZone` — the same primitive spells use — so it renders like
+// a spell effect and shows up in tile info. A creature that enters the zone
+// rolls `enterSave`; on a failure it suffers `condition` and/or `enterDamage`.
+// SRD: caltrops → 5-ft square, DC 15 Dex, 1 Piercing + Speed 0 (hobbled);
+// ball bearings → 10-ft square, DC 10 Dex, Prone.
+export interface AreaDenialDef {
+  /** Zone label rendered on the map (e.g. "Caltrops"). */
+  zoneName: string;
+  /** Side length of the (square) covered area in feet — 5 = one tile. */
+  sizeFeet: number;
+  /** How far from the deployer the area can be placed, in feet. */
+  rangeFeet: number;
+  /** Save rolled the first time a creature enters the area on its turn. */
+  enterSave: { ability: 'str' | 'dex' | 'con' | 'int' | 'wis' | 'cha'; dc: number };
+  /** Condition applied on a failed save (e.g. 'prone', 'hobbled'). */
+  condition?: string;
+  /** Flat damage applied on a failed save (caltrops: 1 Piercing). */
+  enterDamage?: { amount: number; type: string };
+  /** Rounds the area persists before it's spent (SRD recovery is 10 min). */
+  durationRounds: number;
+  /** Visual tint (CSS hex). Falls back to a default if absent. */
+  tintHex?: string;
+}
+
 // Gear is a catch-all for non-functional inventory items — class artifacts
 // like a wizard's spellbook, holy symbols, tools, books, etc. They appear in
 // the inventory as flavour/lore objects with no UI action button. Distinct
 // from ammunition (which is auto-consumed) and consumables (which have USE).
+// `areaDenial` upgrades a piece of gear into a deployable trap (see above).
 export interface GearDef {
   id: string; name: string; type: 'gear';
   description?: string;
   costCp?: number;
+  areaDenial?: AreaDenialDef;
 }
 
 export type EquipmentDef = ArmorDef | ShieldDef | WeaponDef;

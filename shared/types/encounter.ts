@@ -239,6 +239,33 @@ export type EncounterPlacement =
   | { role: 'ally';    index: number; x: number; y: number }
   | { role: 'neutral'; index: number; x: number; y: number };
 
+/**
+ * Authored trap placement in an encounter JSON. SessionBuilder turns each one
+ * into a runtime `TrapState`. `hidden` (default true) starts the trap concealed
+ * so it must be detected; `disarmDC` defaults to the SRD Thieves' Tools DC 15.
+ */
+export interface EncounterTrapDef {
+  id: string;
+  name: string;
+  x: number;
+  y: number;
+  hidden?: boolean;
+  detectDC: number;
+  disarmDC?: number;
+  trigger: {
+    saveAbility?: 'str' | 'dex' | 'con' | 'int' | 'wis' | 'cha';
+    saveDC: number;
+    damageDice: number;
+    damageSides: number;
+    damageBonus?: number;
+    damageType: string;
+    halfOnSave?: boolean;
+    condition?: string;
+  };
+  triggeredMessage?: string;
+  tintHex?: string;
+}
+
 // Encounter card definition (the JSON files in server/data/encounters/).
 export interface EncounterDef {
   id: string;
@@ -317,6 +344,12 @@ export interface EncounterDef {
    * See `server/src/engine/TriggerSystem.ts` for the runtime evaluator.
    */
   triggers?: EncounterTrigger[];
+  /**
+   * Concealed tile traps placed in this encounter. Each is spotted via
+   * Perception, removed via the Disarm action, or springs when the player
+   * steps onto its tile. Instantiated into `GameState.traps` by SessionBuilder.
+   */
+  traps?: EncounterTrapDef[];
   /**
    * Player-facing one-line objective for this encounter
    * ("OBJECTIVE: Defeat the bandits", "OBJECTIVE: Investigate the dungeon").

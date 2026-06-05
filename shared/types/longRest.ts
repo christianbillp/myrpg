@@ -353,6 +353,10 @@ export interface ActiveZone {
    *  the zone's `condition` is applied. Absent for auto-tag zones (Fog
    *  Cloud — heavily-obscured applies on entry without a save). */
   enterSave?: { ability: 'str' | 'dex' | 'con' | 'int' | 'wis' | 'cha'; dc: number };
+  /** Flat damage dealt on a failed `enterSave` (deployed caltrops: 1
+   *  Piercing). Applied in addition to `condition`. Absent for non-damaging
+   *  zones. */
+  enterDamage?: { amount: number; type: string };
   /** True when the zone's tiles are Difficult Terrain (Web, Spike Growth,
    *  Plant Growth, Sleet Storm). Movement consumed by a tile inside the
    *  zone is doubled for the moving creature. */
@@ -373,6 +377,51 @@ export interface ActiveZone {
    *  absent. Lets each spell pick its own atmosphere — fog grey, web white,
    *  darkness near-black. */
   tintHex?: string;
+}
+
+/**
+ * A first-class trap placed on a tile. Distinct from area-denial gear zones
+ * (those are `ActiveZone`s): a trap is a single concealed hazard that must be
+ * spotted (Perception vs `detectDC`), disarmed (Dexterity / Sleight of Hand
+ * with Thieves' Tools vs `disarmDC`, SRD default 15), or it springs when a
+ * creature steps on its tile — rolling `trigger.saveAbility` vs `trigger.saveDC`
+ * for damage (half on save when `halfOnSave`) and an optional `condition`.
+ *
+ * SRD basis: detecting/understanding traps is Intelligence (Investigation) /
+ * Wisdom (Perception); disarming a trap with Thieves' Tools is a DC 15
+ * Dexterity (Sleight of Hand) check (Tools.md, Rogue L1).
+ */
+export interface TrapState {
+  id: string;
+  name: string;
+  tileX: number;
+  tileY: number;
+  /** False once disarmed or sprung — an inert trap never triggers again. */
+  armed: boolean;
+  /** False while concealed; flips true once detected (passive or Search). */
+  discovered: boolean;
+  /** Passive/active Perception needed to notice the trap. */
+  detectDC: number;
+  /** Dexterity (Sleight of Hand) DC to disarm with Thieves' Tools (SRD 15). */
+  disarmDC: number;
+  trigger: TrapTrigger;
+  /** One-line flavour shown when the trap springs. */
+  triggeredMessage?: string;
+  /** Visual tint (CSS hex) for the map marker; falls back to a default. */
+  tintHex?: string;
+}
+
+export interface TrapTrigger {
+  saveAbility: 'str' | 'dex' | 'con' | 'int' | 'wis' | 'cha';
+  saveDC: number;
+  damageDice: number;
+  damageSides: number;
+  damageBonus: number;
+  damageType: string;
+  /** Half damage on a successful save (SRD trap convention). */
+  halfOnSave: boolean;
+  /** Condition applied on a failed save (e.g. 'restrained', 'poisoned'). */
+  condition?: string;
 }
 
 export interface GameState {
@@ -486,6 +535,10 @@ export interface GameState {
    *  visible cloud stays on the map until its duration expires so the player
    *  can plan around it. Rendered on the client as a tile overlay. */
   activeZones: ActiveZone[];
+  /** Concealed tile traps placed by the encounter. Detected via Perception,
+   *  removed via the Disarm action, or sprung when a creature steps onto the
+   *  trap tile. Rendered on the client once `discovered`. */
+  traps: TrapState[];
   /** Dev-mode overrides for the active session, copied from the
    *  `CreateSessionRequest` at session boot. Engine consumers consult these
    *  on every state push (see `GameEngine.getState`) to keep resources

@@ -28,8 +28,10 @@ export const ADVANTAGE_AGAINST_CONDITIONS = ['blinded', 'paralyzed', 'restrained
  *  does). Future per-attack stat tagging would let us restrict to STR. */
 export const ATTACK_DISADVANTAGE_CONDITIONS = ['blinded', 'frightened', 'grappled', 'poisoned', 'restrained', 'prone', 'vexed', 'heavily-obscured', 'enfeebled'];
 
-/** Conditions that reduce the creature's speed to 0. */
-export const SPEED_ZERO_CONDITIONS = ['grappled', 'paralyzed', 'restrained', 'unconscious'];
+/** Conditions that reduce the creature's speed to 0. `hobbled` is the
+ *  caltrops effect — Speed 0 until the start of the creature's next turn
+ *  (it is also a TURN_CONDITION so it clears then). */
+export const SPEED_ZERO_CONDITIONS = ['grappled', 'paralyzed', 'restrained', 'unconscious', 'hobbled'];
 
 /** Conditions on a target that give attackers Disadvantage (regardless of range).
  *  SRD 5.2.1: a creature in a Heavily Obscured area is functionally Blinded
@@ -43,8 +45,9 @@ export const GRANTS_ATTACKER_DISADVANTAGE_CONDITIONS = ['invisible', 'heavily-ob
 /** Conditions where a hit from within 1 tile is an automatic Critical Hit. */
 export const AUTO_CRIT_CONDITIONS = ['paralyzed', 'unconscious'];
 
-/** Conditions that expire at the end of the creature's own turn. */
-export const TURN_CONDITIONS = ['dodging', 'disengaged', 'dashing', 'slowed'];
+/** Conditions that expire at the end of the creature's own turn. `hobbled`
+ *  (caltrops) lasts only "until the start of its next turn" per SRD. */
+export const TURN_CONDITIONS = ['dodging', 'disengaged', 'dashing', 'slowed', 'hobbled'];
 
 /** True when the creature cannot take actions, bonus actions, or reactions. */
 export function isIncapacitated(conditions: string[]): boolean {

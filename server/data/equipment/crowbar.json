@@ -1,0 +1,7 @@
+{
+  "id": "crowbar",
+  "name": "Crowbar",
+  "type": "gear",
+  "description": "A Crowbar grants Advantage on Strength checks where its leverage can be applied.",
+  "costCp": 200
+}

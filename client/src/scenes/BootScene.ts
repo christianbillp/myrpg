@@ -2,7 +2,6 @@ import Phaser from "phaser";
 import { PlayerDef } from "../../../shared/types";
 import { SavedMapDef } from "../../../shared/types";
 import type { MonsterDef, NPCDef } from "../../../shared/types";
-import { gameClient } from "../net/GameClient";
 import { ConnectionMonitor } from "../net/ConnectionMonitor";
 import { TILE_SIZE } from "../constants";
 import { tokenAssetForPlayer, tokenAssetForMonster, tokenAssetForNpc } from "../data/tokens";
@@ -160,15 +159,11 @@ export class BootScene extends Phaser.Scene {
         });
       }
 
-      const world = await gameClient.loadWorld();
-      if (world) {
-        const playerDef = (characters as PlayerDef[]).find(c => c.id === world.state.player.defId)
-          ?? (characters as PlayerDef[])[0];
-        gameClient.resumeSession(world.sessionId);
-        this.scene.start("GameScene", { sessionId: world.sessionId, playerDef, gmHistory: world.gmHistory, isResume: true });
-      } else {
-        this.scene.start("MainMenuScene");
-      }
+      // Always land on the main menu. A persisted world save is NOT auto-resumed
+      // here — that would hijack every page load into the last active encounter.
+      // Resuming is an explicit choice via AdventureSetupScene's CONTINUE button
+      // (which calls loadWorld()/resumeSession()).
+      this.scene.start("MainMenuScene");
     } catch {
       ConnectionMonitor.notifyDisconnected();
     }

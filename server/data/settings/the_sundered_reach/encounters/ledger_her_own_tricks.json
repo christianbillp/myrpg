@@ -1,0 +1,29 @@
+{
+  "id": "ledger_her_own_tricks",
+  "encounterTitle": "Her Own Tricks",
+  "description": "Chapter 3 of The Moon's Ledger. The house has woken. Two of the troupe's hands are sweeping for the intruder — time for Wren to turn the room against them with caltrops and ball bearings.",
+  "mapId": "the_wardstone_in_the_wood",
+  "npcIds": [],
+  "allyIds": [],
+  "enemyIds": ["bandit", "goblin_minion"],
+  "customIntroduction": "Somewhere behind her a board creaked, and now the house is awake. Two of the troupe's hands are sweeping the back rooms with lanterns and bad intentions. Wren has been the hunted one before, and she knows the trick of it: you do not out-run a sweep, you make the ground itself an enemy. Her satchel is full of the small, mean tools of her trade — caltrops, ball bearings — and a doorway is only a doorway until you seed it.",
+  "customContext": "MOON'S LEDGER — CHAPTER 3 of 4. AREA-DENIAL / GEAR TUTORIAL for Wren. Two pursuers (a bandit and a goblin) sweep toward her. Teach OFFENSIVE gear use: the SET CALTROPS and SET BALL BEARINGS buttons deploy a hazard ZONE (rendered on the map like a spell effect) onto a chokepoint; a pursuer that enters rolls a Dexterity save or is slowed/knocked prone and takes a little damage — softening them before they reach her, or buying room to HIDE and re-position. Reward using terrain + gear over standing toe-to-toe. Chapter ends when both pursuers are down.",
+  "objective": "Shake the sweep. Use caltrops and ball bearings to control the approach, then deal with both pursuers.",
+  "allowsLongRest": false,
+  "placementMode": "exact",
+  "placements": [
+    { "role": "player", "x": 4, "y": 19 },
+    { "role": "enemy", "index": 0, "x": 18, "y": 9 },
+    { "role": "enemy", "index": 1, "x": 20, "y": 10 }
+  ],
+  "triggers": [
+    {
+      "id": "sweep_intro",
+      "when": { "event": "encounter_started" },
+      "then": [
+        { "type": "send_aigm_message", "message": "Open with the house awake — two of the troupe's hands sweeping toward Wren with lanterns. Remind her — in the fiction — that she does not out-run a sweep, she seeds the ground: SET CALTROPS or BALL BEARINGS in a doorway to make a hazard zone the pursuers must cross. One short paragraph, then hand control to the player." }
+      ],
+      "once": true
+    }
+  ]
+}

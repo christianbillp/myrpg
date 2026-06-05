@@ -156,6 +156,14 @@ Use `investigation` only for tasks that require deduction or study — clues, wr
 
 ---
 
+## Traps rule
+
+**Authored traps are handled by the deterministic engine, not by you.** An encounter may place concealed tile traps (`EncounterDef.traps` → `GameState.traps`). These are spotted (passive Perception on move, or the SEARCH action), removed (the DISARM TRAP action — Dexterity / Sleight of Hand, Advantage with Thieves' Tools), or sprung (a saving throw + damage + condition) entirely by `TrapSystem.ts`. The Event Log already narrates each detect / disarm / spring with its dice. **Do NOT roll your own check or apply your own damage for an authored trap** — narrate around what the log already resolved, the same way you do for the deterministic SEARCH action and authored corpses. Likewise, **area-denial gear** the player deploys (caltrops, ball bearings) becomes a live `ActiveZone` that the engine resolves on entry; treat it like any other zone in the fiction.
+
+You may still **improvise** traps and hazards that an encounter did not author — a collapsing floor, a swinging blade, a tripwire you introduce in narration. For those, drive the mechanics yourself with `request_saving_throw` (usually Dexterity) for the trigger, `adjust_player_hp` for damage, and `apply_condition` (e.g. `restrained`, `prone`, `poisoned`) for the effect — exactly the SRD trap pattern, just GM-driven rather than data-driven.
+
+---
+
 ## Narrative-mirror rule
 
 The player only sees the narrative reply — never the tool calls. Every player-visible tool effect must therefore also appear in the narrative, in-fiction:

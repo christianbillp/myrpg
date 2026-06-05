@@ -51,6 +51,10 @@ export interface PlayerPanelActionState {
    *  renders one DIRECT button per entry — clicking enters a "click a tile
    *  to move the summon" mode in the GameScene. */
   summons: Array<{ id: string; name: string; spellName: string; costsBonusAction?: boolean }>;
+  /** Area-denial gear the player could deploy right now (caltrops, ball
+   *  bearings) — resolved id→name from `availableActions.deployableGearIds`.
+   *  The panel renders one SET button per entry. */
+  deployableGear: Array<{ id: string; name: string }>;
   /** True when a creature is currently selected as the target. The TALK
    *  button needs a target so the line can be routed to a `sayto`. */
   hasSelectedTarget: boolean;
@@ -114,6 +118,11 @@ export interface PlayerPanelCallbacks {
    *  cancels. The Player Panel only knows about the entry; the scene
    *  owns the targeting mode lifecycle. */
   onCompanionPickTile: (npcId: string) => void;
+  /** Attempt to disarm the discovered, armed trap on the given tile. */
+  onDisarmTrap: (tileX: number, tileY: number) => void;
+  /** Enter deploy-gear targeting mode for the given area-denial item — the
+   *  scene paints a placement cursor and the next tile click deploys it. */
+  onDeployGear: (itemId: string) => void;
 }
 
 /** Which economy bucket an Action Button belongs to. Drives the grouped,
@@ -360,6 +369,18 @@ export class PlayerPanel {
     this.leaveBtn.textContent = inAdventure ? '⏏ LEAVE ADVENTURE' : '⏏ LEAVE ENCOUNTER';
   }
 
+  /** Append DISARM / SET-gear buttons. The server only populates the source
+   *  lists when the action is legal right now (reach + action economy), so a
+   *  rendered button is always clickable — no manual disable needed. */
+  private pushTrapButtons(state: PlayerPanelActionState, into: HTMLButtonElement[]): void {
+    for (const tile of state.availableActions.disarmableTrapTiles) {
+      into.push(this.makeBtn('DISARM TRAP', '#5a2a1a', () => this.callbacks.onDisarmTrap(tile.x, tile.y)));
+    }
+    for (const gear of state.deployableGear) {
+      into.push(this.makeBtn(`SET ${gear.name.toUpperCase()}`, '#4a3a1a', () => this.callbacks.onDeployGear(gear.id)));
+    }
+  }
+
   refreshActions(state: PlayerPanelActionState): void {
     this.lastActionState = state;
     this.actionArea.innerHTML = '';
@@ -416,6 +437,7 @@ export class PlayerPanel {
       search.disabled = !aa.canSearch;
       groups.more.push(search);
       if (aa.canHide) groups.more.push(this.makeBtn('HIDE', hasCunningAction ? BONUS_BLUE : '#1a3a1a', this.callbacks.onHide));
+      this.pushTrapButtons(state, groups.more);
       if (aa.canShortRest) groups.more.push(this.makeBtn('SHORT REST', '#1a2a3a', this.callbacks.onShortRest));
       for (const summon of state.summons) {
         groups.more.push(this.makeBtn(`DIRECT ${summon.name.toUpperCase()}`, '#2a3a55', () => this.callbacks.onCommandSummon(summon.id)));
@@ -480,6 +502,8 @@ export class PlayerPanel {
       const search = this.makeBtn('SEARCH', GREEN, this.callbacks.onSearch);
       search.disabled = !aa.canSearch;
       groups.action.push(search);
+
+      this.pushTrapButtons(state, groups.action);
 
       const move = this.makeBtn('MOVE', moveMode ? '#5a4800' : '#3a3000', this.callbacks.onToggleMoveMode);
       move.disabled = movesLeft <= 0;

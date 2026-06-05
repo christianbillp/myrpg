@@ -208,7 +208,7 @@ export class MapEditorScene extends Phaser.Scene {
     this.addToBucket("always", createHtmlText({
       scene: this, sceneWidth: W,
       x: 0, y: TITLE_Y, w: W, h: 28,
-      text: "MAP EDITOR",
+      text: "MAP CREATOR",
       fontSize: 22, color: "#e2b96f", align: "center", letterSpacing: 1,
     }));
     this.addToBucket("always", createHtmlText({

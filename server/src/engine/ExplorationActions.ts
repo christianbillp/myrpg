@@ -9,6 +9,7 @@ import { d, d20, mod } from './Dice.js';
 import { runPerceptionSweep, runPassivePerceptionSweep } from './Vision.js';
 import { canShortRest as guardCanShortRest, canSearch as guardCanSearch } from './ActionGuards.js';
 import { tickZoneEnterSaves } from './SpellSystem.js';
+import { checkTrapTriggers, runPassiveTrapDetection, detectAdjacentTraps } from './TrapSystem.js';
 import { formatCoins } from '../../../shared/currency.js';
 
 export function doMove(ctx: GameContext, dx: number, dy: number, events: GameEvent[]): void {
@@ -61,6 +62,11 @@ export function doMove(ctx: GameContext, dx: number, dy: number, events: GameEve
   // save does NOT re-roll on the same step.
   tickZoneEnterSaves(ctx, 'player');
 
+  // A concealed trap on the entered tile springs immediately. May down the
+  // player (death_saves / defeat), so bail before further turn processing.
+  checkTrapTriggers(ctx, events);
+  if ((s.phase as string) === 'death_saves' || (s.phase as string) === 'defeat') return;
+
   if (s.phase === 'player_turn') {
     s.player.movesLeft--;
     // OA gate (SRD): the reactor must see the moving creature. If the player is
@@ -87,6 +93,10 @@ export function doMove(ctx: GameContext, dx: number, dy: number, events: GameEve
   // gets spotted on the same step that triggers combat enters the fight
   // visible.
   runPassivePerceptionSweep(ctx);
+
+  // Same idea for concealed traps: a trap the player walks within ~10 ft of is
+  // noticed without a roll if its detectDC ≤ passive Perception.
+  runPassiveTrapDetection(ctx);
 
   // Publish player_moved on the bus BEFORE the combat-start proximity check
   // so an enter_area trigger that spawns enemies near the player can kick
@@ -196,6 +206,10 @@ export function doSearch(ctx: GameContext): void {
   );
   for (const h of hidersInRange) runPerceptionSweep(ctx, h.id);
 
+  // SRD Search — also probe for concealed traps adjacent to the player, using
+  // the same single Perception roll.
+  const trapLogs = detectAdjacentTraps(ctx, roll);
+
   // SRD Search [Action] — corpse rifling: any adjacent NPC with an authored
   // `corpseSearch` payload resolves against the same roll. Payload is
   // single-use — cleared on resolution so a second SEARCH while still
@@ -216,7 +230,8 @@ export function doSearch(ctx: GameContext): void {
   }
 
   if (adj.length === 0) {
-    if (corpseLogs.length > 0) ctx.addLogs(corpseLogs);
+    const pre = [...corpseLogs, ...trapLogs];
+    if (pre.length > 0) ctx.addLogs(pre);
     else if (hidersInRange.length === 0) ctx.addLog({ left: `Search (${roll}) — nothing found`, style: 'miss' });
     return;
   }
@@ -225,7 +240,7 @@ export function doSearch(ctx: GameContext): void {
   const success = roll >= secret.def.dc;
   s.secrets = s.secrets.filter((sec) => sec !== secret);
 
-  const logs: LogEntry[] = [...corpseLogs];
+  const logs: LogEntry[] = [...corpseLogs, ...trapLogs];
   if (success) {
     logs.push({ left: `Search (${roll} vs DC ${secret.def.dc}) — ${secret.def.successText}`, style: 'hit' });
     const r = secret.def.reward;

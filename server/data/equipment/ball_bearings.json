@@ -1,0 +1,16 @@
+{
+  "id": "ball_bearings",
+  "name": "Ball Bearings",
+  "type": "gear",
+  "description": "As a Utilize action, spill these to cover a level 10-foot-square area within 10 feet. A creature that enters the area for the first time on a turn must succeed on a DC 10 Dexterity save or have the Prone condition. Recovering them takes 10 minutes.",
+  "costCp": 100,
+  "areaDenial": {
+    "zoneName": "Ball Bearings",
+    "sizeFeet": 10,
+    "rangeFeet": 10,
+    "enterSave": { "ability": "dex", "dc": 10 },
+    "condition": "prone",
+    "durationRounds": 100,
+    "tintHex": "#8a8f98"
+  }
+}

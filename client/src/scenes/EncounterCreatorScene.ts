@@ -340,7 +340,7 @@ export class EncounterCreatorScene extends Phaser.Scene {
     } catch { /* fall back to whatever's in the registry */ }
     const maps = (this.registry.get("maps") as SavedMapDef[] | undefined) ?? [];
     if (maps.length === 0) {
-      if (this.statusEl) this.statusEl.textContent = "No saved maps available. Use the Map Editor first.";
+      if (this.statusEl) this.statusEl.textContent = "No saved maps available. Use the Map Creator first.";
       return;
     }
     this.setDomChromeVisible(false);
@@ -363,7 +363,7 @@ export class EncounterCreatorScene extends Phaser.Scene {
    *  no encounter id until the first SAVE persists it. */
   private startDraftFromMap(map: MapPreviewData): void {
     if (!map.mapId) {
-      if (this.statusEl) this.statusEl.textContent = "Selected map has no id — save it from the Map Editor first.";
+      if (this.statusEl) this.statusEl.textContent = "Selected map has no id — save it from the Map Creator first.";
       return;
     }
     this.loaded = {
@@ -700,6 +700,7 @@ export class EncounterCreatorScene extends Phaser.Scene {
       sceneWidth: W,
       mapW: geo.map.width,
       mapH: geo.map.height,
+      mapZones: (geo.map.zones ?? []).map((z) => ({ id: z.id, name: z.name, cells: z.cells })),
       initialTriggers: this.formSeed.triggers,
       onChange: () => this.syncTriggerRegionsToPreview(),
     });
@@ -1785,13 +1786,18 @@ function decodeStartingZones(
 function reverseMapTriggers(triggers: EncounterTrigger[]): ComposedTrigger[] {
   const out: ComposedTrigger[] = [];
   for (const t of triggers) {
+    const isZone = t.when.event === "player_moved" && "in_zone" in t.when && !!t.when.in_zone;
     const isRegion = t.when.event === "player_moved" && "in_area" in t.when && !!t.when.in_area;
-    const whenEvent = isRegion ? "player_moved"
+    const whenEvent = isZone ? "enter_zone"
+      : isRegion ? "player_moved"
       : t.when.event === "encounter_started" ? "encounter_started"
       : t.when.event === "encounter_completed" ? "encounter_completed"
       : t.when.event === "flag_set" ? "flag_set"
       : null;
     if (!whenEvent) continue;
+    const whenZone = (isZone && "in_zone" in t.when && t.when.in_zone)
+      ? { name: t.when.in_zone.name, cells: [...t.when.in_zone.cells] }
+      : undefined;
     // Region triggers carry their own bounds; lifecycle triggers have none —
     // use a sentinel 1×1 at origin so the editor's region inputs still have
     // a value (the row hides them anyway).
@@ -1852,6 +1858,7 @@ function reverseMapTriggers(triggers: EncounterTrigger[]): ComposedTrigger[] {
       whenEvent,
       region,
       whenFlagName,
+      whenZone,
       // Defaults for required-on-trigger fields the primary action may omit.
       dc: 10, passMessage: "", message: "", defId: "",
       // Spread the primary action's fields over the defaults.
@@ -1924,6 +1931,9 @@ function savedMapToPreview(saved: SavedMapDef): MapPreviewData {
     objectData,
     name: saved.name,
     description: saved.mapdescription,
+    // Carry the map's authored named zones so the editor's MAP ZONES layer can
+    // render them (and the enter-zone trigger can reference them).
+    zones: saved.zones,
     tilesets: saved.tilesets.map((t) => ({
       firstgid: t.firstgid,
       source: `../tilesets/${(t.imageUrl.split("/").pop() ?? "").replace(/\.png$/i, ".tsj")}`,

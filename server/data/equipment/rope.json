@@ -1,0 +1,7 @@
+{
+  "id": "rope",
+  "name": "Rope",
+  "type": "gear",
+  "description": "As a Utilize action, you can tie a knot with Rope if you succeed on a DC 10 Dexterity (Sleight of Hand) check. The Rope can be burst with a successful DC 20 Strength (Athletics) check.",
+  "costCp": 100
+}

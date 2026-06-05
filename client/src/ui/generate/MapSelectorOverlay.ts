@@ -81,10 +81,8 @@ export class MapSelectorOverlay {
     // ── Panel ──────────────────────────────────────────────────────────
     const panel = document.createElement("div");
     panel.style.cssText = `
-      width: 1100px; max-width: 92vw;
-      height: 700px; max-height: 88vh;
+      width: 100vw; height: 100vh;
       background: ${COLOR_PANEL};
-      border: 2px solid ${COLOR_PANEL_BORDER};
       display: flex; flex-direction: column;
       color: ${COLOR_TEXT};
       overflow: hidden;
@@ -121,7 +119,7 @@ export class MapSelectorOverlay {
 
     if (maps.length === 0) {
       const empty = document.createElement("div");
-      empty.textContent = "No saved maps yet. Use the Map Editor to author one.";
+      empty.textContent = "No saved maps yet. Use the Map Creator to author one.";
       empty.style.cssText = `
         font-size: 13px; color: ${COLOR_TEXT_DIM};
         text-align: center; padding: 80px 0;

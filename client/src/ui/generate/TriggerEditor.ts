@@ -27,7 +27,7 @@ export type TriggerActionKind =
   | "set_companion";
 
 export type TriggerWhenEvent =
-  | "player_moved" | "encounter_started" | "encounter_completed" | "flag_set";
+  | "player_moved" | "enter_zone" | "encounter_started" | "encounter_completed" | "flag_set";
 
 /**
  * One author-facing action inside a trigger. The shape is intentionally
@@ -91,6 +91,9 @@ export interface ComposedTrigger {
   announcementMode?: "focused" | "unfocused";
   /** Flag name the `flag_set` WHEN matcher listens for. Blank matches every flag write. */
   whenFlagName?: string;
+  /** Named map zone the `enter_zone` WHEN matcher fires on. `cells` is the
+   *  zone's `"x,y"` cell list (resolved from the map at authoring time). */
+  whenZone?: { name: string; cells: string[] };
   /** Flag name the `set_flag` THEN action writes (always to `true`). Required by the THEN action; ignored otherwise. */
   setFlagName?: string;
   // hide_npc fields (set_npc_hidden) — used when `kind === "hide_npc"`.
@@ -130,6 +133,9 @@ export interface TriggerEditorOptions {
   /** Map dimensions, used to clamp region inputs. */
   mapW: number;
   mapH: number;
+  /** Named map zones (`SavedMapDef.zones`) available for the ENTER MAP ZONE
+   *  trigger. Empty / omitted when the map has no authored zones. */
+  mapZones?: Array<{ id: string; name: string; cells: string[] }>;
   /** Called whenever triggers change. */
   onChange?: () => void;
   /** Pre-seed the editor with triggers. */
@@ -316,6 +322,7 @@ export class TriggerEditor {
         ...t,
         region: { ...t.region },
         defIds: t.defIds ? [...t.defIds] : undefined,
+        whenZone: t.whenZone ? { name: t.whenZone.name, cells: [...t.whenZone.cells] } : undefined,
       });
     }
     this.rebuildRows();
@@ -411,12 +418,13 @@ export class TriggerEditor {
 
     const regionRow   = this.buildRegionRow(trig, onChange);
     const whenFlagRow = this.buildWhenFlagRow(trig, onChange);
+    const whenZoneRow = this.buildWhenZoneRow(trig, onChange);
 
     // Build every per-kind block first so the chip-row's click handlers can
     // flip block visibility by reference.
     const blocks = this.buildKindBlocks(trig, onChange);
 
-    const whenRow = this.buildWhenSelector(trig, regionRow, whenFlagRow, onChange);
+    const whenRow = this.buildWhenSelector(trig, regionRow, whenFlagRow, whenZoneRow, onChange);
     const chipRow = this.buildChipRow(trig, blocks, onChange);
 
     // Extra-actions section — empty when the author hasn't added any. The
@@ -431,6 +439,7 @@ export class TriggerEditor {
     row.appendChild(whenRow);
     row.appendChild(chipRow);
     row.appendChild(regionRow);
+    row.appendChild(whenZoneRow);
     row.appendChild(whenFlagRow);
     for (const block of blocks.values()) row.appendChild(block);
     row.appendChild(extrasContainer);
@@ -624,6 +633,7 @@ export class TriggerEditor {
     trig: ComposedTrigger,
     regionRow: HTMLDivElement,
     whenFlagRow: HTMLDivElement,
+    whenZoneRow: HTMLDivElement,
     onChange: () => void,
   ): HTMLDivElement {
     const row = document.createElement("div");
@@ -653,17 +663,62 @@ export class TriggerEditor {
         trig.whenEvent = we;
         refresh(we);
         regionRow.style.display   = we === "player_moved" ? "" : "none";
+        whenZoneRow.style.display = we === "enter_zone"   ? "" : "none";
         whenFlagRow.style.display = we === "flag_set"     ? "" : "none";
         onChange();
       });
       buttons.set(we, btn);
       return btn;
     };
-    row.appendChild(make("player_moved",       "REGION",      "Fires when the player walks into the region defined below."));
+    row.appendChild(make("player_moved",       "REGION",      "Fires when the player walks into the rectangular region defined below."));
+    row.appendChild(make("enter_zone",         "MAP ZONE",    "Fires when the player steps onto a named zone authored on the map (Map Creator)."));
     row.appendChild(make("encounter_started",  "ON START",    "Fires once when the encounter begins."));
     row.appendChild(make("encounter_completed","ON COMPLETE", "Fires once when the encounter resolves (combat-victory or completionFlag set)."));
     row.appendChild(make("flag_set",           "ON FLAG",     "Fires when a world flag is set. Leave the flag-name blank to match every flag."));
     refresh(trig.whenEvent ?? "player_moved");
+    return row;
+  }
+
+  /** Map-zone selector row. Hidden unless WHEN is `enter_zone`. Lists the map's
+   *  named zones; selecting one stores its name + cell list on the trigger. */
+  private buildWhenZoneRow(trig: ComposedTrigger, onChange: () => void): HTMLDivElement {
+    const row = document.createElement("div");
+    row.style.cssText = "display: flex; gap: 6px; margin-bottom: 6px; align-items: center;";
+    if ((trig.whenEvent ?? "player_moved") !== "enter_zone") row.style.display = "none";
+    row.appendChild(this.makeLabel("MAP ZONE"));
+
+    const zones = this.opts.mapZones ?? [];
+    if (zones.length === 0) {
+      const hint = document.createElement("span");
+      hint.textContent = "(this map has no named zones — author them in the Map Creator)";
+      hint.style.cssText = "font-family: monospace; font-size: 9px; color: #886655;";
+      row.appendChild(hint);
+      return row;
+    }
+
+    const sel = document.createElement("select");
+    sel.style.cssText = `
+      flex: 1; background: #15151f; color: #cce4ff;
+      border: 1px solid #445566; padding: 2px 4px;
+      font-family: monospace; font-size: 10px;
+    `;
+    const placeholder = document.createElement("option");
+    placeholder.value = "";
+    placeholder.textContent = "— pick a zone —";
+    sel.appendChild(placeholder);
+    for (const z of zones) {
+      const opt = document.createElement("option");
+      opt.value = z.name;
+      opt.textContent = `${z.name}  (${z.cells.length} tiles)`;
+      sel.appendChild(opt);
+    }
+    sel.value = trig.whenZone?.name ?? "";
+    sel.addEventListener("change", () => {
+      const z = zones.find((zz) => zz.name === sel.value);
+      trig.whenZone = z ? { name: z.name, cells: [...z.cells] } : undefined;
+      onChange();
+    });
+    row.appendChild(sel);
     return row;
   }
 

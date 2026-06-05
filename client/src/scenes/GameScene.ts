@@ -125,6 +125,10 @@ export class GameScene extends Phaser.Scene {
    *  Kept separately from the graphics layer so we can destroy/recreate
    *  per zone without touching the rest of the map. */
   private activeZoneLabels: Phaser.GameObjects.Text[] = [];
+  /** Discovered traps rendered as a hazard marker (⚠) on their tile. Re-drawn
+   *  from `state.traps` each tick; armed traps glow, disarmed ones read faded. */
+  private trapLayer!: Phaser.GameObjects.Graphics;
+  private trapLabels: Phaser.GameObjects.Text[] = [];
   /** Floating HUD panel surfaced during `multi-projectile` spell-target
    *  mode (Magic Missile, Scorching Ray). Null when no such mode is
    *  active. Mirrors `state.spellTargetMode.assignments` on every click. */
@@ -177,6 +181,13 @@ export class GameScene extends Phaser.Scene {
         /** Movement allowance in tiles (Mage Hand 6, Unseen Servant 3). */
         moveRangeTiles: number;
         /** Summon's current tile — preview shows reachable tiles around this. */
+        fromTileX: number; fromTileY: number;
+      }
+    | {
+        kind: "deploy-gear"; itemId: string; gearName: string;
+        /** How far the gear can be placed (tiles) and the square it covers. */
+        rangeTiles: number; sideTiles: number;
+        /** Player's tile — preview shows reachable placement tiles around this. */
         fromTileX: number; fromTileY: number;
       }
     | null = null;
@@ -268,6 +279,7 @@ export class GameScene extends Phaser.Scene {
     this.spellAuraLayer = this.add.graphics();
     this.spellAoeLayer  = this.add.graphics();
     this.activeZoneLayer = this.add.graphics();
+    this.trapLayer = this.add.graphics();
     // VisionMask: fog-of-war veil + sound-ring overlay.
     this.visionMask = new VisionMask(this);
     this.gridView.container.add(this.highlightLayer);
@@ -276,6 +288,7 @@ export class GameScene extends Phaser.Scene {
     this.gridView.container.add(this.spellAuraLayer);
     this.gridView.container.add(this.spellAoeLayer);
     this.gridView.container.add(this.activeZoneLayer);
+    this.gridView.container.add(this.trapLayer);
     this.gridView.container.add(this.visionMask.fogLayer);
     this.gridView.container.add(this.visionMask.soundLayer);
 
@@ -774,6 +787,10 @@ export class GameScene extends Phaser.Scene {
         this.finishSummonDirectClick(tileX, tileY);
         return;
       }
+      if (this.spellTargetMode.kind === "deploy-gear") {
+        this.finishDeployGearClick(tileX, tileY);
+        return;
+      }
       if (this.spellTargetMode.kind === "multi-projectile") {
         // Click on an in-range hostile/neutral creature → assign one more
         // projectile to it. Click anywhere else → ignored (the panel's
@@ -922,11 +939,17 @@ export class GameScene extends Phaser.Scene {
     const cover = map.cover?.[y]?.[x] ? coverLabel[map.cover[y][x] as string] : null;
     const obscurance = map.obscurance?.[y]?.[x] ? cap(map.obscurance[y][x] as string) : null;
 
+    const trapsHere = (this.gameState!.traps ?? []).filter(
+      (t) => t.tileX === x && t.tileY === y && t.discovered);
+
     return {
       x, y, terrain, object, movement,
       lighting: cap(this.gameState!.environment?.lightLevel ?? 'bright'),
       cover, obscurance,
-      effects: zones.map((z) => z.name),
+      effects: [
+        ...zones.map((z) => z.name),
+        ...trapsHere.map((t) => `⚠ ${t.name} (${t.armed ? 'armed' : 'disarmed'})`),
+      ],
     };
   }
 
@@ -1008,6 +1031,8 @@ export class GameScene extends Phaser.Scene {
           this.enterCompanionMoveToMode(npcId);
         }
       },
+      onDisarmTrap: (tileX, tileY) => gameClient.sendAction({ type: "disarmTrap", tileX, tileY }),
+      onDeployGear: (itemId) => this.beginDeployGear(itemId),
     });
     this.targetPanel = new TargetPanel(this.uiScale);
     this.missionTopBar = new MissionTopBar(this.uiScale, {
@@ -1164,7 +1189,9 @@ export class GameScene extends Phaser.Scene {
       spellTargetPrompt: this.spellTargetMode
         ? (this.spellTargetMode.kind === "summon-direct"
             ? { spellName: `Direct ${this.spellTargetMode.summonName}`, asRitual: false }
-            : { spellName: this.spellTargetMode.spellName, asRitual: this.spellTargetMode.asRitual })
+            : this.spellTargetMode.kind === "deploy-gear"
+              ? { spellName: `Place ${this.spellTargetMode.gearName}`, asRitual: false }
+              : { spellName: this.spellTargetMode.spellName, asRitual: this.spellTargetMode.asRitual })
         : null,
       summons: state.npcs
         .filter((n) => n.summonSpellId && n.summonOwnerId === 'player' && n.hp > 0)
@@ -1177,6 +1204,10 @@ export class GameScene extends Phaser.Scene {
           // shipped summons (Mage Hand, Unseen Servant) cost an Action.
           costsBonusAction: n.summonSpellId === 'flaming-sphere',
         })),
+      deployableGear: state.availableActions.deployableGearIds
+        .map((id) => allItems.find((i) => i.id === id))
+        .filter((i): i is ItemDef => i !== undefined)
+        .map((i) => ({ id: i.id, name: i.name })),
       hasSelectedTarget: !!state.selectedTargetId,
       selectedTargetId: state.selectedTargetId,
       statusChips: buildPlayerStatusChips(state.player, concSpell?.name ?? null),
@@ -1611,7 +1642,7 @@ export class GameScene extends Phaser.Scene {
   /** Resolve a click while in spell-target mode. Single-target spells take a creature id; AOE spells take a tile. Any other click cancels. */
   private finishSpellTargetClick(targetNpcId: string | null, tileX: number, tileY: number): void {
     const stm = this.spellTargetMode;
-    if (!stm || stm.kind === "summon-direct") return;
+    if (!stm || stm.kind === "summon-direct" || stm.kind === "deploy-gear") return;
     const allSpells = this.defs.spells();
     const spell = allSpells.find(sp => sp.id === stm.spellId);
     if (!spell) { this.exitSpellTargetMode(); return; }
@@ -1745,6 +1776,39 @@ export class GameScene extends Phaser.Scene {
       fromTileY: summon.tileY,
     };
     this.playerPanel.refreshActions(this.buildActionState(this.gameState));
+  }
+
+  /** Enter deploy-gear mode — the next in-range tile click scatters the gear
+   *  there (creating an area-denial zone). Out-of-range clicks cancel. */
+  private beginDeployGear(itemId: string): void {
+    if (!this.gameState) return;
+    const def = this.defs.equipment().find((i) => i.id === itemId);
+    if (!def || def.type !== 'gear' || !def.areaDenial) return;
+    const ad = def.areaDenial;
+    this.spellTargetMode = {
+      kind: "deploy-gear",
+      itemId,
+      gearName: def.name,
+      rangeTiles: Math.max(1, Math.ceil(ad.rangeFeet / 5)),
+      sideTiles: Math.max(1, Math.ceil(ad.sizeFeet / 5)),
+      fromTileX: this.gameState.player.tileX,
+      fromTileY: this.gameState.player.tileY,
+    };
+    this.playerPanel.refreshActions(this.buildActionState(this.gameState));
+  }
+
+  /** Resolve a click while in deploy-gear mode. Out-of-range clicks cancel; in-range clicks fire `deployGear`. */
+  private finishDeployGearClick(tileX: number, tileY: number): void {
+    const stm = this.spellTargetMode;
+    if (!stm || stm.kind !== "deploy-gear") return;
+    const dx = Math.abs(tileX - stm.fromTileX);
+    const dy = Math.abs(tileY - stm.fromTileY);
+    if (Math.max(dx, dy) > stm.rangeTiles) {
+      this.exitSpellTargetMode();
+      return;
+    }
+    gameClient.sendAction({ type: "deployGear", itemId: stm.itemId, tileX, tileY });
+    this.exitSpellTargetMode();
   }
 
   /** Resolve a click while in summon-direct mode. Out-of-range clicks cancel; in-range clicks fire `commandSummon`. */
@@ -2066,6 +2130,34 @@ export class GameScene extends Phaser.Scene {
     this.drawHighlights(state);
     this.drawSpellAura(state);
     this.drawActiveZones(state);
+    this.drawTraps(state);
+  }
+
+  /**
+   * Paint a hazard marker on every DISCOVERED trap tile. Concealed traps are
+   * not drawn — the player has to spot them first. Armed traps use the trap's
+   * tint at full strength; disarmed ones render dim so the player can see the
+   * threat is neutralised. Mirrors `drawActiveZones`' layer/label lifecycle.
+   */
+  private drawTraps(state: GameState): void {
+    this.trapLayer.clear();
+    for (const t of this.trapLabels) t.destroy();
+    this.trapLabels = [];
+    for (const trap of state.traps ?? []) {
+      if (!trap.discovered) continue;
+      const tint = trap.tintHex ? parseInt(trap.tintHex.replace('#', ''), 16) : 0xd24a3a;
+      const alpha = trap.armed ? 0.9 : 0.35;
+      this.trapLayer.lineStyle(2, tint, alpha);
+      this.trapLayer.strokeRect(trap.tileX * TILE_SIZE + 2, trap.tileY * TILE_SIZE + 2, TILE_SIZE - 4, TILE_SIZE - 4);
+      const label = this.add.text(
+        (trap.tileX + 0.5) * TILE_SIZE,
+        (trap.tileY + 0.5) * TILE_SIZE,
+        trap.armed ? '⚠' : '✓',
+        { fontFamily: 'monospace', fontSize: '18px', color: trap.armed ? '#ffdca8' : '#9ad08a' },
+      ).setOrigin(0.5, 0.5).setAlpha(alpha + 0.1);
+      this.gridView.container.add(label);
+      this.trapLabels.push(label);
+    }
   }
 
   // ── Map drawing ───────────────────────────────────────────────────────────
@@ -2294,6 +2386,26 @@ export class GameScene extends Phaser.Scene {
       for (let dy = -r; dy <= r; dy++) {
         for (let dx = -r; dx <= r; dx++) {
           paintRect(stm.fromTileX + dx, stm.fromTileY + dy);
+        }
+      }
+      return;
+    }
+
+    // Deploy-gear mode: amber reach disc for valid placement tiles, plus the
+    // square the gear will cover under the cursor (when in range).
+    if (stm.kind === "deploy-gear") {
+      this.spellAoeLayer.fillStyle(0xc9a23b, 0.18);
+      const r = stm.rangeTiles;
+      for (let dy = -r; dy <= r; dy++) {
+        for (let dx = -r; dx <= r; dx++) paintRect(stm.fromTileX + dx, stm.fromTileY + dy);
+      }
+      if (Math.max(Math.abs(tileX - stm.fromTileX), Math.abs(tileY - stm.fromTileY)) <= r) {
+        this.spellAoeLayer.fillStyle(0xd24a3a, 0.34);
+        const side = stm.sideTiles;
+        const rr = side % 2 === 1 ? (side - 1) / 2 : 0;
+        const x0 = tileX - rr, y0 = tileY - rr;
+        for (let yy = 0; yy < side; yy++) {
+          for (let xx = 0; xx < side; xx++) paintRect(x0 + xx, y0 + yy);
         }
       }
       return;

@@ -1,7 +1,6 @@
 import Phaser from "phaser";
-import { tilesetTextureKey } from "../../scenes/BootScene";
 import type { EncounterDef, SavedMapDef } from "../../../../shared/types";
-import { decodeTileGid, TILE_VOID_GID } from "../../../../shared/tileGid";
+import { decodeTileGid } from "../../../../shared/tileGid";
 
 /**
  * Modal overlay listing every encounter in the registry as clickable cards.
@@ -21,16 +20,12 @@ import { decodeTileGid, TILE_VOID_GID } from "../../../../shared/tileGid";
 const COLOR_BG_BACKDROP   = "rgba(0,0,0,0.75)";
 const COLOR_PANEL         = "#141426";
 const COLOR_PANEL_BORDER  = "#88ccaa";
-const COLOR_CARD          = "#1a1a2e";
 const COLOR_CARD_HOVER    = "#23233a";
 const COLOR_CARD_BORDER   = "#334455";
-const COLOR_TITLE         = "#e2b96f";
 const COLOR_SUBLABEL      = "#88ccaa";
 const COLOR_TEXT          = "#aabbcc";
 const COLOR_TEXT_DIM      = "#667788";
-const COLOR_PROSE         = "#8899aa";
 const COLOR_ERR           = "#883333";
-const COLOR_THUMB_BG      = "#0a0e16";
 
 const CARD_THUMB_MAX_PX   = 6;
 
@@ -40,21 +35,17 @@ interface PickerCallbacks {
 }
 
 export class EncounterPickerOverlay {
-  private readonly scene: Phaser.Scene;
   private readonly mapsById: Map<string, SavedMapDef>;
-  private readonly fallbackTilesetKey: string;
   private root: HTMLDivElement | null = null;
   private onKeyDown: ((e: KeyboardEvent) => void) | null = null;
 
   constructor(
-    scene: Phaser.Scene,
+    _scene: Phaser.Scene,
     encounters: EncounterDef[],
     maps: SavedMapDef[],
     callbacks: PickerCallbacks,
   ) {
-    this.scene = scene;
     this.mapsById = new Map(maps.map((m) => [m.id, m]));
-    this.fallbackTilesetKey = pickTilesetKey(scene);
     this.buildOverlay(encounters, callbacks);
   }
 
@@ -89,13 +80,11 @@ export class EncounterPickerOverlay {
     this.onKeyDown = (e) => { if (e.key === "Escape") cb.onClose(); };
     window.addEventListener("keydown", this.onKeyDown);
 
-    // ── Panel ──────────────────────────────────────────────────────────
+    // ── Panel — full screen ────────────────────────────────────────────
     const panel = document.createElement("div");
     panel.style.cssText = `
-      width: 1100px; max-width: 92vw;
-      height: 700px; max-height: 88vh;
+      width: 100vw; height: 100vh;
       background: ${COLOR_PANEL};
-      border: 2px solid ${COLOR_PANEL_BORDER};
       display: flex; flex-direction: column;
       color: ${COLOR_TEXT};
       overflow: hidden;
@@ -142,8 +131,8 @@ export class EncounterPickerOverlay {
       const grid = document.createElement("div");
       grid.style.cssText = `
         display: grid;
-        grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
-        gap: 16px;
+        grid-template-columns: repeat(auto-fill, minmax(336px, 1fr));
+        gap: 12px;
       `;
       for (const enc of encounters) {
         grid.appendChild(this.buildCard(enc, cb.onSelect));
@@ -177,15 +166,22 @@ export class EncounterPickerOverlay {
     document.body.appendChild(root);
   }
 
+  /**
+   * Card laid out to match the Encounter Setup selector: a small gid-coloured
+   * minimap silhouette on the left, then a column of title, map tag, a chip
+   * row (enemies / environment), and a 2-line description.
+   */
   private buildCard(encounter: EncounterDef, onSelect: (encounter: EncounterDef) => void): HTMLDivElement {
     const card = document.createElement("div");
     card.style.cssText = `
-      background: ${COLOR_CARD};
+      background: #111122;
       border: 1px solid ${COLOR_CARD_BORDER};
-      display: flex; flex-direction: column;
+      position: relative; display: flex; gap: 8px;
+      box-sizing: border-box; padding: 8px 10px;
+      min-height: 116px;
       cursor: pointer;
-      padding: 10px;
-      transition: border-color 0.1s;
+      transition: border-color 0.1s, background 0.1s;
+      font-family: monospace; color: ${COLOR_TEXT};
     `;
     card.addEventListener("mouseenter", () => {
       card.style.borderColor = COLOR_PANEL_BORDER;
@@ -193,165 +189,108 @@ export class EncounterPickerOverlay {
     });
     card.addEventListener("mouseleave", () => {
       card.style.borderColor = COLOR_CARD_BORDER;
-      card.style.background = COLOR_CARD;
+      card.style.background = "#111122";
     });
     card.addEventListener("click", () => onSelect(encounter));
 
-    // Thumbnail — canvas if the map exists, otherwise a stub line.
-    const thumbWrap = document.createElement("div");
-    thumbWrap.style.cssText = `
-      width: 100%; height: 132px;
-      background: ${COLOR_THUMB_BG};
-      border: 1px solid #2a3340;
-      display: flex; align-items: center; justify-content: center;
-      box-sizing: border-box;
-      margin-bottom: 8px;
-    `;
-    const map = this.mapsById.get(encounter.mapId);
-    if (map) {
-      const canvas = document.createElement("canvas");
-      this.drawThumbnail(canvas, map);
-      canvas.style.cssText = `image-rendering: pixelated;`;
-      thumbWrap.appendChild(canvas);
+    // Minimap thumbnail (left) — a cheap gid-coloured silhouette of the map.
+    const mini = this.buildMinimap(encounter.mapId, 60, 60);
+    if (mini) {
+      card.appendChild(mini);
     } else {
-      const missing = document.createElement("div");
-      missing.textContent = `(missing map: ${encounter.mapId})`;
-      missing.style.cssText = `font-size: 10px; color: ${COLOR_ERR};`;
-      thumbWrap.appendChild(missing);
+      const stub = document.createElement("div");
+      stub.textContent = "(map?)";
+      stub.style.cssText = `width:60px;height:60px;flex-shrink:0;display:flex;align-items:center;justify-content:center;border:1px solid #2a3a4a;background:#0a0a14;font-size:8px;color:${COLOR_ERR};`;
+      card.appendChild(stub);
     }
-    card.appendChild(thumbWrap);
 
-    // Title.
+    const col = document.createElement("div");
+    col.style.cssText = "flex: 1; display: flex; flex-direction: column; min-width: 0;";
+    card.appendChild(col);
+
     const title = document.createElement("div");
     title.textContent = encounter.encounterTitle;
-    title.style.cssText = `
-      font-size: 13px; color: ${COLOR_TITLE};
-      margin-bottom: 4px;
-      word-wrap: break-word;
-    `;
-    card.appendChild(title);
+    title.style.cssText = "font-size: 13px; color: #e8e8f8; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;";
+    col.appendChild(title);
 
-    // Subtitle — id, with a generated marker when applicable.
-    const subEl = document.createElement("div");
-    subEl.textContent = `${encounter.id}${encounter.generated ? " ✦ generated" : ""}`;
-    subEl.style.cssText = `
-      font-size: 9px; color: ${COLOR_TEXT_DIM};
-      margin-bottom: 6px;
-      word-wrap: break-word;
-    `;
-    card.appendChild(subEl);
+    const mapTag = document.createElement("div");
+    mapTag.textContent = encounter.mapId.toUpperCase();
+    mapTag.style.cssText = "font-size: 8px; color: #445566; letter-spacing: 1px;";
+    col.appendChild(mapTag);
 
-    // Description, prose style. Empty descriptions get nothing rather than
-    // an empty paragraph so the card height stays compact.
+    // Chip row: enemies + environment (character-independent — the creator
+    // context has no selected player, so no difficulty / outcome chips).
+    const chipRow = document.createElement("div");
+    chipRow.style.cssText = "display: flex; flex-wrap: wrap; gap: 3px; margin-top: 5px;";
+    for (const c of encounterChips(encounter)) {
+      const chip = document.createElement("span");
+      chip.textContent = c.label;
+      if (c.title) chip.title = c.title;
+      chip.style.cssText = `background:${c.bg};color:${c.color};border:1px solid ${c.border};padding:0 5px;font-size:8.5px;line-height:1.55;white-space:nowrap;`;
+      chipRow.appendChild(chip);
+    }
+    col.appendChild(chipRow);
+
     if (encounter.description) {
       const desc = document.createElement("div");
       desc.textContent = encounter.description;
-      desc.style.cssText = `
-        font-size: 10px; color: ${COLOR_PROSE};
-        font-family: sans-serif;
-        line-height: 1.5;
-        word-wrap: break-word;
-        overflow: hidden;
-        display: -webkit-box;
-        -webkit-line-clamp: 3;
-        -webkit-box-orient: vertical;
-      `;
-      card.appendChild(desc);
+      desc.style.cssText = "margin-top: 5px; font-size: 9.5px; color: #8899aa; line-height: 1.45; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;";
+      col.appendChild(desc);
+    }
+
+    if (encounter.generated) {
+      const tag = document.createElement("div");
+      tag.textContent = "✦";
+      tag.title = "AI-generated encounter";
+      tag.style.cssText = `position: absolute; right: 8px; top: 6px; font-size: 12px; color: ${COLOR_SUBLABEL};`;
+      card.appendChild(tag);
     }
 
     return card;
   }
 
-  /**
-   * Paint a map preview into a canvas using the same tilesets the Phaser
-   * scene loaded. We pull each tileset's underlying HTMLImageElement off the
-   * texture cache and draw spritesheet frames directly. Rotations and flips
-   * are honoured via canvas transform around the tile's centre, matching
-   * Tiled's flip-bit semantics.
-   */
-  private drawThumbnail(canvas: HTMLCanvasElement, map: SavedMapDef): void {
-    const maxW = 220;
-    const maxH = 132;
-    const tileSize = Math.min(
-      Math.floor(maxW / map.cols),
-      Math.floor(maxH / map.rows),
-      CARD_THUMB_MAX_PX,
-    );
-    const thumbW = tileSize * map.cols;
-    const thumbH = tileSize * map.rows;
-    canvas.width = thumbW;
-    canvas.height = thumbH;
+  /** A cheap gid-coloured minimap: one pixel per tile, scaled up with nearest-
+   *  neighbour. Mirrors `EncounterSetupScene.buildMinimap` so the picker and the
+   *  setup selector render identical silhouettes. Returns null when the map
+   *  isn't loaded. */
+  private buildMinimap(mapId: string, w: number, h: number): HTMLCanvasElement | null {
+    const map = this.mapsById.get(mapId);
+    if (!map || !map.gidGrid?.length) return null;
+    const canvas = document.createElement("canvas");
+    canvas.width = map.cols;
+    canvas.height = map.rows;
     const ctx = canvas.getContext("2d");
-    if (!ctx) return;
-    ctx.imageSmoothingEnabled = false;
-
-    const routing = (map.tilesets ?? [])
-      .map((ts) => ({ firstgid: ts.firstgid, key: tilesetTextureKey(ts.imageUrl) }))
-      .sort((a, b) => b.firstgid - a.firstgid);
-    const owners = routing.length > 0
-      ? routing
-      : [{ firstgid: 1, key: this.fallbackTilesetKey }];
-
-    for (let r = 0; r < map.rows; r++) {
-      for (let c = 0; c < map.cols; c++) {
-        const x = c * tileSize;
-        const y = r * tileSize;
-        const groundGid = map.gidGrid[r]?.[c] ?? 0;
-        if (groundGid !== 0) this.drawTileToCanvas(ctx, x, y, tileSize, groundGid, owners);
-        const objectGid = map.objectGidGrid?.[r]?.[c] ?? 0;
-        if (objectGid !== 0) this.drawTileToCanvas(ctx, x, y, tileSize, objectGid, owners);
+    if (!ctx) return null;
+    const paint = (grid: number[][] | undefined): void => {
+      if (!grid) return;
+      for (let y = 0; y < grid.length; y++) {
+        const row = grid[y];
+        for (let x = 0; x < row.length; x++) {
+          const gid = decodeTileGid(row[x] ?? 0).gid;
+          if (!gid) continue;
+          ctx.fillStyle = `hsl(${(gid * 47) % 360},28%,${28 + (gid % 5) * 6}%)`;
+          ctx.fillRect(x, y, 1, 1);
+        }
       }
-    }
-  }
-
-  private drawTileToCanvas(
-    ctx: CanvasRenderingContext2D,
-    x: number, y: number, size: number, rawGid: number,
-    owners: Array<{ firstgid: number; key: string }>,
-  ): void {
-    const dec = decodeTileGid(rawGid);
-    if (dec.gid === TILE_VOID_GID) {
-      ctx.fillStyle = "#000000";
-      ctx.fillRect(x, y, size, size);
-      return;
-    }
-    const owner = owners.find((t) => dec.gid >= t.firstgid);
-    if (!owner) return;
-    const texture = this.scene.textures.get(owner.key);
-    if (!texture || texture.key === "__MISSING") return;
-    const source = texture.getSourceImage() as HTMLImageElement | HTMLCanvasElement;
-    if (!source) return;
-
-    // Spritesheet frame layout: Phaser's texture frame `frameWidth`/Height
-    // are stored on the source object during load. Pull the first frame to
-    // resolve them; all frames share the same dimensions.
-    const frame = dec.gid - owner.firstgid;
-    const frameObj = texture.get(frame);
-    if (!frameObj) return;
-    const sx = frameObj.cutX;
-    const sy = frameObj.cutY;
-    const sw = frameObj.cutWidth;
-    const sh = frameObj.cutHeight;
-
-    // Apply rotation / flip around the tile centre, then draw.
-    const cx = x + size / 2;
-    const cy = y + size / 2;
-    ctx.save();
-    ctx.translate(cx, cy);
-    if (dec.angle !== 0) ctx.rotate((dec.angle * Math.PI) / 180);
-    const fx = dec.flipX ? -1 : 1;
-    const fy = dec.flipY ? -1 : 1;
-    if (fx !== 1 || fy !== 1) ctx.scale(fx, fy);
-    ctx.drawImage(source, sx, sy, sw, sh, -size / 2, -size / 2, size, size);
-    ctx.restore();
+    };
+    paint(map.gidGrid);
+    paint(map.objectGidGrid);
+    canvas.style.cssText = `width:${w}px;height:${h}px;flex-shrink:0;image-rendering:pixelated;border:1px solid #2a3a4a;background:#0a0a14;`;
+    return canvas;
   }
 }
 
-function pickTilesetKey(scene: Phaser.Scene): string {
-  const maps = (scene.registry.get("maps") as SavedMapDef[] | undefined) ?? [];
-  for (const m of maps) {
-    const url = m.tilesets?.[0]?.imageUrl;
-    if (url) return tilesetTextureKey(url);
+/** Character-independent encounter chips (enemy count + environment), matching
+ *  the style of `EncounterSetupScene.encounterChips`. The creator has no
+ *  selected character or monster roster, so difficulty / outcome / named-enemy
+ *  chips are omitted. */
+function encounterChips(def: EncounterDef): Array<{ label: string; color: string; bg: string; border: string; title?: string }> {
+  const out: Array<{ label: string; color: string; bg: string; border: string; title?: string }> = [];
+  const enemies = def.enemyIds ?? [];
+  if (enemies.length > 0) {
+    out.push({ label: `⚔ ${enemies.length} ${enemies.length > 1 ? "enemies" : "enemy"}`, color: "#d8a0a0", bg: "#2a1818", border: "#4a2a2a" });
   }
-  return tilesetTextureKey("/tilesets/scribble.png");
+  const env = (def.environment ?? {}) as Record<string, unknown>;
+  if (env.sunlit) out.push({ label: "☀ sunlit", color: "#d8c88a", bg: "#26240f", border: "#4a4520" });
+  return out;
 }

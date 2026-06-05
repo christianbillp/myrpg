@@ -1,0 +1,17 @@
+{
+  "id": "caltrops",
+  "name": "Caltrops",
+  "type": "gear",
+  "description": "As a Utilize action, spread these to cover a 5-foot-square area within 5 feet. A creature that enters the area for the first time on a turn must succeed on a DC 15 Dexterity save or take 1 Piercing damage and have its Speed reduced to 0 until the start of its next turn. Recovering them takes 10 minutes.",
+  "costCp": 100,
+  "areaDenial": {
+    "zoneName": "Caltrops",
+    "sizeFeet": 5,
+    "rangeFeet": 5,
+    "enterSave": { "ability": "dex", "dc": 15 },
+    "condition": "hobbled",
+    "enterDamage": { "amount": 1, "type": "piercing" },
+    "durationRounds": 100,
+    "tintHex": "#b5651d"
+  }
+}

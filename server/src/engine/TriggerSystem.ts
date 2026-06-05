@@ -161,6 +161,7 @@ function whenMatches(when: WhenClause, event: EngineEvent): boolean {
         if (e.x < a.x || e.x >= a.x + a.w || e.y < a.y || e.y >= a.y + a.h) return false;
       }
       if (when.tile && (when.tile.x !== e.x || when.tile.y !== e.y)) return false;
+      if (when.in_zone && !when.in_zone.cells.includes(`${e.x},${e.y}`)) return false;
       return true;
     }
     case 'npc_killed': {

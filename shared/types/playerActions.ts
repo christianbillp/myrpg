@@ -35,6 +35,13 @@ export type PlayerAction =
   | { type: 'rollDeathSave' }
   | { type: 'shortRest' }
   | { type: 'search' }
+  /** Attempt to disarm the trap on the given tile (must be discovered, armed,
+   *  and within reach). Rolls Dexterity (Sleight of Hand) vs the trap's
+   *  `disarmDC`; Thieves' Tools grant Advantage. Failure by 5+ springs it. */
+  | { type: 'disarmTrap'; tileX: number; tileY: number }
+  /** Deploy a piece of area-denial gear (caltrops, ball bearings) onto `tile`,
+   *  creating an `ActiveZone`. Consumes one of the item from inventory. */
+  | { type: 'deployGear'; itemId: string; tileX: number; tileY: number }
   | { type: 'usePotion' }
   | { type: 'equip'; slot: 'armor' | 'weapon' | 'shield'; itemId: string }
   | { type: 'unequip'; slot: 'armor' | 'weapon' | 'shield' }
