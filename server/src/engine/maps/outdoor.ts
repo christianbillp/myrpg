@@ -18,8 +18,8 @@
  * never overlaps a building and vice versa.
  */
 import { BIOME_PALETTES, pickGroundGid, rollObjectGid, type BiomePalette } from '../../../../shared/biomePalettes.js';
-import type { ComposedMap, ComposedTilesetRef, Feature, MapAnchors, MapZone, Terrain } from '../mapTypes.js';
-import { DECOR_GIDS, PATH_GIDS, TERRAIN_GIDS, WALL_GIDS, WATER_FIRSTGID, WATER_GIDS } from '../mapTiles.js';
+import type { ComposedMap, ComposedTilesetRef, Feature, MapAnchors, MapZone, StructureSpec, Terrain } from '../mapTypes.js';
+import { DECOR_GIDS, EDGE_ROTATION, FURNITURE_GIDS, PATH_GIDS, RUIN_WALL_GIDS, TERRAIN_GIDS, WALL_GIDS, WATER_FIRSTGID, WATER_GIDS } from '../mapTiles.js';
 import { SCRIBBLE_TILESET, WATER_TILESET, flatten } from './shared.js';
 
 export interface ComposeOutdoorOpts {
@@ -27,7 +27,7 @@ export interface ComposeOutdoorOpts {
   height: number;
   terrain: 'grassland' | 'forest';
   features: Feature[];
-  buildingsCount?: number;
+  structures?: StructureSpec[];
   rng: () => number;
   allocZoneId: (kind: string) => string;
 }
@@ -60,8 +60,12 @@ export function composeOutdoor(opts: ComposeOutdoorOpts): ComposedMap {
       coastline: usesWater,
     });
   }
-  if (features.includes('buildings')) {
-    placeBuildings(terrainGrid, objectGrid, rng, width, height, opts.buildingsCount ?? 1, anchors, zones, reserved, allocZoneId);
+  // Structures — each configured spec stamped as a connected multi-room
+  // building / ruin, numbered per type for its zone label.
+  let buildingIdx = 0, ruinIdx = 0;
+  for (const spec of opts.structures ?? []) {
+    const idx = spec.type === 'ruin' ? ++ruinIdx : ++buildingIdx;
+    stampStructure(terrainGrid, objectGrid, rng, width, height, spec, anchors, zones, reserved, allocZoneId, idx);
   }
   if (features.includes('campsites')) placeCampsites(terrainGrid, objectGrid, rng, width, height, anchors);
 
@@ -72,8 +76,8 @@ export function composeOutdoor(opts: ComposeOutdoorOpts): ComposedMap {
     width, height,
     terrainData: flatten(terrainGrid),
     objectData: flatten(objectGrid),
-    name: composeOutdoorName(terrain, features),
-    description: composeOutdoorDescription(terrain, features, anchors, width, height),
+    name: composeOutdoorName(terrain, features, opts.structures ?? []),
+    description: composeOutdoorDescription(terrain, features, opts.structures ?? [], anchors, width, height),
     tilesets,
     anchors,
     ...(zones.length > 0 ? { zones } : {}),
@@ -294,80 +298,153 @@ function placePath(
   }
 }
 
-// ── Building placer ────────────────────────────────────────────────────────
+// ── Structure stamper (configurable multi-room buildings + ruins) ───────────
 
-function placeBuildings(
+interface Rect { x: number; y: number; w: number; h: number; }
+
+/** Per non-corner ruin wall segment: a band for "broken out" (a gap), then a
+ *  band each for a cracked wall and a rubble wall — ruins are mostly solid with
+ *  crumbling segments here and there. */
+const RUIN_BREAK_CHANCE = 0.12;
+const RUIN_VARIANT_BAND = 0.12;
+/** Probability a ruin floor cell is cracked stone rather than clean. */
+const RUIN_CRACK_CHANCE = 0.35;
+
+/** Doorway rotation for a wall cell, from which sides have floor. */
+function doorRotation(fN: boolean, fS: boolean, fE: boolean, fW: boolean): number {
+  if (fE && fW) return EDGE_ROTATION.W;   // vertical wall between two rooms
+  if (fN && fS) return EDGE_ROTATION.S;   // horizontal wall between two rooms
+  if (fN) return EDGE_ROTATION.S;          // floor to the north → south-facing wall
+  if (fS) return EDGE_ROTATION.N;
+  if (fE) return EDGE_ROTATION.W;
+  return EDGE_ROTATION.E;
+}
+
+/**
+ * Stamp one configurable structure: `spec.rooms` (1..5) rectangular rooms laid
+ * in a row (horizontal or vertical), separated by a single shared wall and
+ * linked through it by a doorway, plus one external entrance doorway. Walls are
+ * rendered from an 8-neighbour floor mask (like the dungeon), so single rooms
+ * and multi-room junctions both get correct corner/straight tiles. A `ruin`
+ * cracks its floor and crumbles some straight wall segments.
+ *
+ * Degrades gracefully: if `rooms` can't fit, it retries with fewer. Emits a
+ * `building <idx>` / `ruin <idx>` zone and records room footprints on `anchors`.
+ */
+function stampStructure(
   terrain: number[][],
   objects: number[][],
   rng: () => number,
   W: number, H: number,
-  count: number,
+  spec: StructureSpec,
   anchors: MapAnchors,
   zones: MapZone[],
   reserved: Set<string>,
   allocZoneId: (kind: string) => string,
+  idx: number,
 ): void {
-  const want = Math.max(1, Math.min(5, Math.floor(count)));
-  const placed: Array<{ x: number; y: number; w: number; h: number }> = [];
+  const ruined = spec.type === 'ruin';
+  const floorGid = (): number => ruined && rng() < RUIN_CRACK_CHANCE ? TERRAIN_GIDS.STONE_FLOOR_CRACKED : TERRAIN_GIDS.STONE_FLOOR;
 
-  const fits = (x: number, y: number, w: number, h: number): boolean => {
-    if (x < 1 || y < 1 || x + w > W - 1 || y + h > H - 1) return false;
-    for (let r = y; r < y + h; r++) {
-      for (let c = x; c < x + w; c++) {
-        if (isWaterCell(terrain, r, c, W, H)) return false;
-        if (reserved.has(`${c},${r}`)) return false;
+  /** Whole-footprint (+1 border) free of bounds/water/reserved. */
+  const boxFree = (x: number, y: number, w: number, h: number): boolean => {
+    for (let r = y - 1; r <= y + h; r++) {
+      for (let c = x - 1; c <= x + w; c++) {
+        if (c < 0 || c >= W || r < 0 || r >= H) return false;
+        if (isWaterCell(terrain, r, c, W, H) || reserved.has(`${c},${r}`)) return false;
       }
     }
     return true;
   };
 
-  for (let i = 0; i < want; i++) {
-    let attempt = 0;
-    let stamped = false;
-    while (attempt < 40 && !stamped) {
-      attempt++;
-      const w = 4 + Math.floor(rng() * 4);
-      const h = 4 + Math.floor(rng() * 3);
-      const x = 1 + Math.floor(rng() * Math.max(1, W - w - 2));
-      const y = 1 + Math.floor(rng() * Math.max(1, H - h - 2));
-      if (!fits(x, y, w, h)) continue;
+  for (let want = Math.max(1, Math.min(5, Math.floor(spec.rooms))); want >= 1; want--) {
+    // Arrange the rooms in a compact grid (uniform room size so shared walls
+    // line up) rather than a single long row — so even 5 rooms fit on the map.
+    const rw = 4 + Math.floor(rng() * 3);  // 4..6 (uniform within this structure)
+    const rh = 4 + Math.floor(rng() * 2);  // 4..5
+    const cols = Math.ceil(Math.sqrt(want));
+    const gridRows = Math.ceil(want / cols);
+    const bw = cols * (rw + 1) - 1;        // +1 shared wall between columns
+    const bh = gridRows * (rh + 1) - 1;
+    if (bw > W - 2 || bh > H - 2) continue;
 
-      // One non-corner cell on a random side becomes the doorway.
-      const side = Math.floor(rng() * 4);
-      let doorR = -1, doorC = -1;
-      if (side === 0)      { doorR = y;           doorC = x + 1 + Math.floor(rng() * (w - 2)); }
-      else if (side === 1) { doorR = y + h - 1;   doorC = x + 1 + Math.floor(rng() * (w - 2)); }
-      else if (side === 2) { doorC = x;           doorR = y + 1 + Math.floor(rng() * (h - 2)); }
-      else                 { doorC = x + w - 1;   doorR = y + 1 + Math.floor(rng() * (h - 2)); }
-
-      const cells: string[] = [];
-      for (let r = y; r < y + h; r++) {
-        for (let c = x; c < x + w; c++) {
-          terrain[r][c] = TERRAIN_GIDS.STONE_FLOOR;
-          reserved.add(`${c},${r}`);
-          cells.push(`${c},${r}`);
-
-          const isN = r === y, isS = r === y + h - 1;
-          const isW = c === x, isE = c === x + w - 1;
-          if (!(isN || isS || isW || isE)) continue;
-          if (r === doorR && c === doorC) continue;
-
-          if (isN && isW)      objects[r][c] = WALL_GIDS.CORNER_TL;
-          else if (isN && isE) objects[r][c] = WALL_GIDS.CORNER_TR;
-          else if (isS && isW) objects[r][c] = WALL_GIDS.CORNER_BL;
-          else if (isS && isE) objects[r][c] = WALL_GIDS.CORNER_BR;
-          else if (isN)        objects[r][c] = WALL_GIDS.NORTH;
-          else if (isS)        objects[r][c] = WALL_GIDS.SOUTH;
-          else if (isW)        objects[r][c] = WALL_GIDS.WEST;
-          else                 objects[r][c] = WALL_GIDS.EAST;
-        }
-      }
-      placed.push({ x, y, w, h });
-      zones.push({ id: allocZoneId(`building_${placed.length}`), name: `building ${placed.length}`, color: '#8866cc', cells: cells.sort() });
-      stamped = true;
+    let bx = -1, by = -1;
+    for (let a = 0; a < 50; a++) {
+      const tx = 1 + Math.floor(rng() * (W - bw - 1));
+      const ty = 1 + Math.floor(rng() * (H - bh - 1));
+      if (boxFree(tx, ty, bw, bh)) { bx = tx; by = ty; break; }
     }
+    if (bx < 0) continue;
+
+    // Lay rooms row-major; link each to its left neighbour (or the room above
+    // when it starts a new grid row) through a shared-wall doorway → a spanning
+    // tree that keeps every room reachable.
+    const rooms: Rect[] = [];
+    const doorSet = new Set<string>();
+    for (let i = 0; i < want; i++) {
+      const col = i % cols, row = Math.floor(i / cols);
+      const rx = bx + col * (rw + 1), ry = by + row * (rh + 1);
+      rooms.push({ x: rx, y: ry, w: rw, h: rh });
+      if (i > 0 && col > 0) {
+        // door in the vertical shared wall to the left neighbour
+        doorSet.add(`${rx - 1},${ry + 1 + Math.floor(rng() * (rh - 2))}`);
+      } else if (i > 0) {
+        // first room of a new row: door in the horizontal shared wall above
+        doorSet.add(`${rx + 1 + Math.floor(rng() * (rw - 2))},${ry - 1}`);
+      }
+    }
+    // External entrance: a doorway in room 0's north outer wall.
+    const r0 = rooms[0];
+    doorSet.add(`${r0.x + (r0.w >> 1)},${r0.y - 1}`);
+
+    const floor = new Set<string>();
+    for (const r of rooms) for (let y = r.y; y < r.y + r.h; y++) for (let x = r.x; x < r.x + r.w; x++) floor.add(`${x},${y}`);
+    const isFloor = (x: number, y: number): boolean => floor.has(`${x},${y}`);
+
+    // Render floor + walls over the footprint (rooms plus their 1-cell border).
+    const cells: string[] = [];
+    for (let y = by - 1; y <= by + bh; y++) {
+      for (let x = bx - 1; x <= bx + bw; x++) {
+        const key = `${x},${y}`;
+        if (isFloor(x, y)) { terrain[y][x] = floorGid(); reserved.add(key); cells.push(key); continue; }
+        const fN = isFloor(x, y - 1), fS = isFloor(x, y + 1), fE = isFloor(x + 1, y), fW = isFloor(x - 1, y);
+        const fNW = isFloor(x - 1, y - 1), fNE = isFloor(x + 1, y - 1), fSW = isFloor(x - 1, y + 1), fSE = isFloor(x + 1, y + 1);
+        if (!(fN || fS || fE || fW || fNW || fNE || fSW || fSE)) continue; // not a wall of this structure
+        terrain[y][x] = floorGid();
+        reserved.add(key);
+        cells.push(key);
+        if (doorSet.has(key)) { objects[y][x] = FURNITURE_GIDS.DOORWAY + doorRotation(fN, fS, fE, fW); continue; }
+        // Concave (room wraps two perpendicular sides) — solid junction corner.
+        if (fS && fE)      { objects[y][x] = WALL_GIDS.PARTIAL_CORNER_UL; continue; }
+        if (fS && fW)      { objects[y][x] = WALL_GIDS.PARTIAL_CORNER_UR; continue; }
+        if (fN && fE)      { objects[y][x] = WALL_GIDS.PARTIAL_CORNER_LL; continue; }
+        if (fN && fW)      { objects[y][x] = WALL_GIDS.PARTIAL_CORNER_LR; continue; }
+        // Straight wall — one orthogonal floor neighbour. Ruins vary these.
+        if (fN || fS || fE || fW) {
+          const rot = fS ? EDGE_ROTATION.N : fN ? EDGE_ROTATION.S : fE ? EDGE_ROTATION.W : EDGE_ROTATION.E;
+          if (ruined) {
+            const roll = rng();
+            if (roll < RUIN_BREAK_CHANCE) continue;                                                  // broken out → gap
+            if (roll < RUIN_BREAK_CHANCE + RUIN_VARIANT_BAND)     { objects[y][x] = RUIN_WALL_GIDS.CRACKED + rot; continue; }
+            if (roll < RUIN_BREAK_CHANCE + 2 * RUIN_VARIANT_BAND) { objects[y][x] = RUIN_WALL_GIDS.BROKEN + rot; continue; }
+          }
+          objects[y][x] = fS ? WALL_GIDS.NORTH : fN ? WALL_GIDS.SOUTH : fE ? WALL_GIDS.WEST : WALL_GIDS.EAST;
+          continue;
+        }
+        // Convex outer corner — diagonal-only floor neighbour.
+        if (fSE)      objects[y][x] = WALL_GIDS.CORNER_TL;
+        else if (fSW) objects[y][x] = WALL_GIDS.CORNER_TR;
+        else if (fNE) objects[y][x] = WALL_GIDS.CORNER_BL;
+        else          objects[y][x] = WALL_GIDS.CORNER_BR;
+      }
+    }
+
+    anchors.buildings = [...(anchors.buildings ?? []), ...rooms];
+    const kind = ruined ? 'ruin' : 'building';
+    const color = ruined ? '#776655' : '#8866cc';
+    zones.push({ id: allocZoneId(`${kind}_${idx}`), name: `${kind} ${idx}`, color, cells: cells.sort() });
+    return;
   }
-  if (placed.length > 0) anchors.buildings = placed;
 }
 
 // ── Campsites ──────────────────────────────────────────────────────────────
@@ -409,17 +486,22 @@ const FEATURE_ADJ: Partial<Record<Feature, string>> = {
   coastline:    'Coastal',
   path:         'Wayside',
   intersection: 'Crossroads',
-  buildings:    'Settled',
 };
 
-function composeOutdoorName(terrain: 'grassland' | 'forest', features: Feature[]): string {
+function composeOutdoorName(terrain: 'grassland' | 'forest', features: Feature[], structures: StructureSpec[]): string {
   const t = terrain === 'forest' ? 'Forest' : 'Field';
-  if (features.length === 0) return t;
-  const adj = FEATURE_ADJ[features[0]];
-  return adj ? `${adj} ${t}` : t;
+  if (features.length > 0) {
+    const adj = FEATURE_ADJ[features[0]];
+    if (adj) return `${adj} ${t}`;
+  }
+  if (structures.length > 0) {
+    const onlyRuins = structures.every((s) => s.type === 'ruin');
+    return `${onlyRuins ? 'Ruined' : 'Settled'} ${t}`;
+  }
+  return t;
 }
 
-function composeOutdoorDescription(terrain: Terrain, features: Feature[], anchors: MapAnchors, W: number, H: number): string {
+function composeOutdoorDescription(terrain: Terrain, features: Feature[], structures: StructureSpec[], anchors: MapAnchors, W: number, H: number): string {
   const base = terrain === 'forest'
     ? 'A wooded clearing under thick canopy.'
     : 'Open grassland stretches across the map.';
@@ -432,11 +514,10 @@ function composeOutdoorDescription(terrain: Terrain, features: Feature[], anchor
       layout.push('a dirt path runs across the map');
     }
   }
-  if (features.includes('buildings')) {
-    const n = anchors.buildings?.length ?? 0;
-    const where = listPositions(anchors.buildings, W, H);
-    layout.push(`${plural(n, 'building')}${where ? ` at the ${where}` : ''}`);
-  }
+  const nBuild = structures.filter((s) => s.type === 'building').length;
+  const nRuin = structures.filter((s) => s.type === 'ruin').length;
+  if (nBuild > 0) layout.push(plural(nBuild, 'building'));
+  if (nRuin > 0) layout.push(plural(nRuin, 'ruin'));
   if (features.includes('campsites')) {
     const n = anchors.campfires?.length ?? 0;
     const where = listPositions(anchors.campfires, W, H);

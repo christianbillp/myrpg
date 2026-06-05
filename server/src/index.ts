@@ -20,7 +20,7 @@ import { join, dirname } from "path";
 import { fileURLToPath } from "url";
 import { randomUUID } from "crypto";
 import { buildEncounter } from "./encounterService.js";
-import { generateEncounter, generateMap } from "./encounterGenerator.js";
+import { generateEncounter } from "./encounterGenerator.js";
 import { generateTile, GENERATED_TILE_SIZE, GENERATED_TILE_COLUMNS } from "./tileGenerator.js";
 import { generateMission } from "./mission/missionGenerator.js";
 import {

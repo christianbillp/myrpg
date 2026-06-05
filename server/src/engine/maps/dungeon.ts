@@ -16,8 +16,8 @@
  * the `vault`.
  */
 import { BIOME_PALETTES, pickGroundGid } from '../../../../shared/biomePalettes.js';
-import type { ComposedMap, Feature, MapAnchors } from '../mapTypes.js';
-import { WALL_GIDS } from '../mapTiles.js';
+import type { ComposedMap, Feature, MapAnchors, MapZone } from '../mapTypes.js';
+import { WALL_GIDS, FURNITURE_GIDS } from '../mapTiles.js';
 import { SCRIBBLE_TILESET, flatten } from './shared.js';
 
 export interface ComposeDungeonOpts {
@@ -25,10 +25,15 @@ export interface ComposeDungeonOpts {
   height: number;
   features: Feature[];
   rng: () => number;
+  allocZoneId: (kind: string) => string;
 }
 
 export function composeDungeon(opts: ComposeDungeonOpts): ComposedMap {
-  const { width: W, height: H, features, rng } = opts;
+  const { width: W, height: H, features, rng, allocZoneId } = opts;
+  // Stairs feature: the dungeon entrance is a stairs tile inside the entry room
+  // (covered by an "Entrance Stairs" zone) instead of a corridor punched out to
+  // the south map edge.
+  const useStairs = features.includes('stairs');
   const terrainGrid: number[][] = [];
   const objectGrid: number[][]  = [];
   for (let r = 0; r < H; r++) {
@@ -69,7 +74,7 @@ export function composeDungeon(opts: ComposeDungeonOpts): ComposedMap {
 
   let entryRoom = rooms[0];
   for (const r of rooms) if (r.y + r.h > entryRoom.y + entryRoom.h) entryRoom = r;
-  if (entryRoom) {
+  if (entryRoom && !useStairs) {
     const entryX = entryRoom.x + Math.floor(entryRoom.w / 2);
     for (let r = entryRoom.y + entryRoom.h; r < H; r++) floor[r][entryX] = true;
   }
@@ -113,8 +118,15 @@ export function composeDungeon(opts: ComposeDungeonOpts): ComposedMap {
   }
 
   const anchors: MapAnchors = { rooms };
+  const zones: MapZone[] = [];
   if (entryRoom) {
     anchors.entrance = { x: entryRoom.x + Math.floor(entryRoom.w / 2), y: entryRoom.y + Math.floor(entryRoom.h / 2) };
+    // Stairs entrance: drop the stairs tile on the entry-room centre and tag it.
+    if (useStairs) {
+      const { x: ex, y: ey } = anchors.entrance;
+      objectGrid[ey][ex] = FURNITURE_GIDS.STAIRS_UP;
+      zones.push({ id: allocZoneId('entrance_stairs'), name: 'Entrance Stairs', color: '#e2b96f', cells: [`${ex},${ey}`] });
+    }
     let vaultRoom = entryRoom;
     let bestDist = -1;
     for (const r of rooms) {
@@ -129,9 +141,10 @@ export function composeDungeon(opts: ComposeDungeonOpts): ComposedMap {
     terrainData: flatten(terrainGrid),
     objectData: flatten(objectGrid),
     name: dungeonName(rooms.length, rng),
-    description: dungeonDescription(rooms.length),
+    description: dungeonDescription(rooms.length, useStairs),
     tilesets: [SCRIBBLE_TILESET],
     anchors,
+    ...(zones.length > 0 ? { zones } : {}),
   };
 }
 
@@ -162,6 +175,9 @@ function dungeonName(roomCount: number, rng: () => number): string {
   return variants[Math.floor(rng() * variants.length)];
 }
 
-function dungeonDescription(roomCount: number): string {
-  return `A stone dungeon of ${roomCount} room${roomCount === 1 ? '' : 's'} linked by short corridors. The entrance opens onto the southern edge of the map.`;
+function dungeonDescription(roomCount: number, stairs: boolean): string {
+  const entry = stairs
+    ? 'A flight of stairs in the entry chamber descends from above.'
+    : 'The entrance opens onto the southern edge of the map.';
+  return `A stone dungeon of ${roomCount} room${roomCount === 1 ? '' : 's'} linked by short corridors. ${entry}`;
 }

@@ -1,0 +1,45 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`composeMap seed stability > cave/large is byte-stable 1`] = `"4a9428b2"`;
+
+exports[`composeMap seed stability > cave/small is byte-stable 1`] = `"8a464167"`;
+
+exports[`composeMap seed stability > cave/stairs is byte-stable 1`] = `"119f94a4"`;
+
+exports[`composeMap seed stability > dungeon/3-room is byte-stable 1`] = `"5f693951"`;
+
+exports[`composeMap seed stability > dungeon/5-room is byte-stable 1`] = `"404fbcd5"`;
+
+exports[`composeMap seed stability > dungeon/stairs is byte-stable 1`] = `"5b532f46"`;
+
+exports[`composeMap seed stability > forest/bare is byte-stable 1`] = `"04cb6629"`;
+
+exports[`composeMap seed stability > forest/path+campsites is byte-stable 1`] = `"6df17725"`;
+
+exports[`composeMap seed stability > grassland/bare is byte-stable 1`] = `"322f168d"`;
+
+exports[`composeMap seed stability > grassland/buildings3 is byte-stable 1`] = `"d1b2c570"`;
+
+exports[`composeMap seed stability > grassland/campsites is byte-stable 1`] = `"931449ea"`;
+
+exports[`composeMap seed stability > grassland/coastline is byte-stable 1`] = `"b40c3ee1"`;
+
+exports[`composeMap seed stability > grassland/coastline+intersection is byte-stable 1`] = `"a63ba03b"`;
+
+exports[`composeMap seed stability > grassland/everything is byte-stable 1`] = `"5fa3b46e"`;
+
+exports[`composeMap seed stability > grassland/intersection is byte-stable 1`] = `"4e1d5683"`;
+
+exports[`composeMap seed stability > grassland/multiroom is byte-stable 1`] = `"a0c0b48c"`;
+
+exports[`composeMap seed stability > grassland/path is byte-stable 1`] = `"33b230c3"`;
+
+exports[`composeMap seed stability > grassland/ruin-multiroom is byte-stable 1`] = `"2da82939"`;
+
+exports[`composeMap seed stability > grassland/ruins is byte-stable 1`] = `"27a0c839"`;
+
+exports[`composeMap seed stability > grassland/small is byte-stable 1`] = `"4c85f137"`;
+
+exports[`composeMap seed stability > tavern is byte-stable 1`] = `"bf71d848"`;
+
+exports[`composeMap seed stability > urban is byte-stable 1`] = `"c3991b31"`;

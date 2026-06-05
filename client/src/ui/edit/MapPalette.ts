@@ -90,6 +90,10 @@ export interface MapPaletteContext {
   getMap: () => MapPreviewData | null;
   /** Tell the embedded preview to re-render against the mutated map data. */
   repaintPreview: () => void;
+  /** Re-seat the preview on the current map data (via `setData`) — needed after
+   *  a resize, since the map's dimensions/arrays changed and the preview must
+   *  re-fit and re-route, not just re-render in place. */
+  reloadPreview: () => void;
   /** Surface a one-line feedback message (the editor's status div). */
   setStatus: (text: string) => void;
   /** Called when the map is mutated so the scene can clear `savedMapId` and
@@ -229,8 +233,32 @@ export class MapPalette {
     push(wrap(this.mirrorVChip));
     this.styleMirrorChips();
 
+    // ── Grow map (add a row / column on any edge) ──────────────────────────
+    const growLabelY = mirrorRowY + 36;
+    push(wrap(createHtmlText({
+      scene, sceneWidth: W,
+      x, y: growLabelY, w, h: 14,
+      text: "GROW MAP — add row (N/S) or column (W/E)",
+      fontSize: 10, color: "#778899", letterSpacing: 1,
+    })));
+    const growRowY = growLabelY + 18;
+    const growW = Math.floor((w - 12) / 4);
+    const growGap = (w - 4 * growW) / 3;
+    const growSides: Array<{ side: 'N' | 'S' | 'W' | 'E'; label: string }> = [
+      { side: 'N', label: '+N ↑' }, { side: 'S', label: '+S ↓' },
+      { side: 'W', label: '+W ←' }, { side: 'E', label: '+E →' },
+    ];
+    growSides.forEach(({ side, label }, i) => {
+      push(wrap(createHtmlButton({
+        scene, sceneWidth: W,
+        x: x + i * (growW + growGap), y: growRowY, w: growW, h: 26,
+        label, variant: "secondary", fontSize: 10,
+        onClick: () => this.growMap(side),
+      })));
+    });
+
     // Scrollable thumbnail palette div.
-    const paletteY = mirrorRowY + 36;
+    const paletteY = growRowY + 36;
     const paletteH = Math.max(160, y + h - paletteY - 4);
     const palette = document.createElement("div");
     palette.style.cssText = `
@@ -294,6 +322,25 @@ export class MapPalette {
     if (this.mirrorV) xform.push("↕");
     const xformLabel = xform.length > 0 ? ` (${xform.join(" ")})` : "";
     this.ctx.setStatus(`${what}${xformLabel} at (${col},${row}). Press SAVE MAP to persist.`);
+    this.ctx.refreshButtons();
+  }
+
+  /** Grow the loaded map by one row (N/S) or column (W/E). New ground cells
+   *  are filled with the map's most common ground tile (so a grass field grows
+   *  grass and a dungeon grows void); new object cells are empty. Author-time
+   *  zones shift to track the inserted edge. Mutates the live preview data in
+   *  place and re-renders. */
+  private growMap(side: 'N' | 'S' | 'W' | 'E'): void {
+    const data = this.ctx.getMap();
+    if (!data) { this.ctx.setStatus("Generate or load a map before resizing."); return; }
+    const MAX = 60;
+    const grewDim = side === 'N' || side === 'S' ? data.height : data.width;
+    if (grewDim >= MAX) { this.ctx.setStatus(`Map is at the maximum ${MAX}-tile size on that axis.`); return; }
+    growMapData(data, side, modeGid(data.terrainData));
+    this.ctx.markMapDirty();
+    this.ctx.reloadPreview();
+    const what = side === 'N' || side === 'S' ? 'row' : 'column';
+    this.ctx.setStatus(`Added ${what} (${side}). Map is now ${data.width}×${data.height}. Press SAVE MAP to persist.`);
     this.ctx.refreshButtons();
   }
 
@@ -527,5 +574,55 @@ export class MapPalette {
       mapTilesets.push(entry);
     }
     return this.encodeRotatedGid(entry.firstgid + this.localId - 1);
+  }
+}
+
+/** Most frequent value across a flat GID array (including 0/void). Used to pick
+ *  the fill for newly-added cells so a grown map matches its dominant terrain. */
+function modeGid(arr: number[]): number {
+  const counts = new Map<number, number>();
+  let best = arr[0] ?? 0, bestN = 0;
+  for (const g of arr) {
+    const n = (counts.get(g) ?? 0) + 1;
+    counts.set(g, n);
+    if (n > bestN) { bestN = n; best = g; }
+  }
+  return best;
+}
+
+/** Insert one row (N/S) or column (W/E) into the map data in place: resizes
+ *  `width`/`height`, rebuilds `terrainData`/`objectData`, and shifts every
+ *  author-time zone cell to track an inserted top/left edge. */
+function growMapData(d: MapPreviewData, side: 'N' | 'S' | 'W' | 'E', groundFill: number): void {
+  const { width: W, height: H } = d;
+  const nt: number[] = [];
+  const no: number[] = [];
+  if (side === 'N' || side === 'S') {
+    const rowT = new Array<number>(W).fill(groundFill);
+    const rowO = new Array<number>(W).fill(0);
+    if (side === 'N') { nt.push(...rowT, ...d.terrainData); no.push(...rowO, ...d.objectData); }
+    else { nt.push(...d.terrainData, ...rowT); no.push(...d.objectData, ...rowO); }
+    d.height = H + 1;
+  } else {
+    for (let y = 0; y < H; y++) {
+      const rt = d.terrainData.slice(y * W, (y + 1) * W);
+      const ro = d.objectData.slice(y * W, (y + 1) * W);
+      if (side === 'W') { nt.push(groundFill, ...rt); no.push(0, ...ro); }
+      else { nt.push(...rt, groundFill); no.push(...ro, 0); }
+    }
+    d.width = W + 1;
+  }
+  d.terrainData = nt;
+  d.objectData = no;
+  // Adding a top row or left column shifts all existing coordinates by +1.
+  const dx = side === 'W' ? 1 : 0;
+  const dy = side === 'N' ? 1 : 0;
+  if ((dx || dy) && d.zones) {
+    for (const z of d.zones) {
+      z.cells = z.cells.map((c) => {
+        const [cx, cy] = c.split(',').map(Number);
+        return `${cx + dx},${cy + dy}`;
+      });
+    }
   }
 }

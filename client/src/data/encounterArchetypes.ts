@@ -18,8 +18,8 @@
  *     entries weights toward common creature types.
  */
 
-export type Terrain = 'grassland' | 'forest' | 'dungeon' | 'tavern';
-export type Feature = 'campsites' | 'coastline' | 'path' | 'intersection' | 'buildings' | '3-room' | '5-room';
+export type Terrain = 'grassland' | 'forest' | 'dungeon' | 'tavern' | 'cave' | 'urban';
+export type Feature = 'campsites' | 'coastline' | 'path' | 'intersection' | '3-room' | '5-room' | 'stairs';
 
 /**
  * Anchors the randomizer can target for placement. The list is walked in order;

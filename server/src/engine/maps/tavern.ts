@@ -52,7 +52,9 @@ export function composeTavern(opts: ComposeTavernOpts): ComposedMap {
       const isN = r === ty, isS = r === ty + th - 1;
       const isW = c === tx, isE = c === tx + tw - 1;
       if (!(isN || isS || isW || isE)) continue;
-      if (isS && c === doorC) { objectGrid[r][c] = FURNITURE_GIDS.DOORWAY; continue; }
+      // South-wall doorway, rotated 180° so the open arch faces out the south
+      // edge (the tile's art opens to the top by default).
+      if (isS && c === doorC) { objectGrid[r][c] = FURNITURE_GIDS.DOORWAY + 0xC0000000; continue; }
       if (isN && isW)      objectGrid[r][c] = WALL_GIDS.CORNER_TL;
       else if (isN && isE) objectGrid[r][c] = WALL_GIDS.CORNER_TR;
       else if (isS && isW) objectGrid[r][c] = WALL_GIDS.CORNER_BL;

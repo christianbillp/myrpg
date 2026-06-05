@@ -5,23 +5,14 @@ import { fileURLToPath } from "url";
 import { z } from "zod";
 import type { GameDefs } from "./engine/types.js";
 import { buildMapJson as sharedBuildMapJson } from "./engine/MapPersistence.js";
+import { AI_PALETTE_TILESETS, tilesetsForGids, ownerTilesetName } from "./engine/maps/shared.js";
 import { settingPromptBlock } from "./settings.js";
 import { safeId } from "./util/requestValidation.js";
 
-/** zod schemas for the two tool-output payload shapes Claude returns. The
- *  parsed result is narrowed back to the inferred interface so the rest of
- *  the file keeps using the same name. A schema mismatch surfaces as a
- *  clear `ZodError` at the call site instead of a downstream undefined-field
- *  crash during validation. */
-const GeneratedMapPayloadSchema = z.object({
-  name:        z.string(),
-  description: z.string(),
-  width:       z.number().int(),
-  height:      z.number().int(),
-  terrainData: z.array(z.number()),
-  objectData:  z.array(z.number()),
-});
-
+/** zod schema for the tool-output payload Claude returns. The parsed result is
+ *  narrowed back to the inferred interface so the rest of the file keeps using
+ *  the same name. A schema mismatch surfaces as a clear `ZodError` at the call
+ *  site instead of a downstream undefined-field crash during validation. */
 const GeneratedPayloadSchema = z.object({
   encounterTitle:     z.string(),
   description:        z.string(),
@@ -67,20 +58,6 @@ export interface GeneratedScenario {
   encounterId: string;
 }
 
-export interface GeneratedMap {
-  mapId: string;
-  width: number;
-  height: number;
-  /** Flat row-major GID array for the terrain tile layer (length width*height). */
-  terrainData: number[];
-  /** Optional flat row-major GID array for the object tile layer. `0` = empty cell. Same length as `terrainData` when present. */
-  objectData: number[];
-  /** Display name authored by the model. */
-  name: string;
-  /** Short description authored by the model. */
-  description: string;
-}
-
 /**
  * Public entry point. Returns the new mapId + encounterId on success.
  * Throws Error with a descriptive message on validation failure.
@@ -92,12 +69,10 @@ export async function generateEncounter(
 ): Promise<GeneratedScenario> {
   const validMonsterIds = new Set(defs.monsters.map((m) => m.id));
   const validNpcIds = new Set(defs.npcs.map((n) => n.id));
-  const validTileGids = new Set<number>();
-  for (const k of Object.keys(defs.tileLegend.tiles)) {
-    validTileGids.add(parseInt(k, 10));
-  }
-  const groundLayerGids = layerGidSet(defs, 'ground');
-  const objectLayerGids = layerGidSet(defs, 'object');
+  const legend = globalTileLegend(defs);
+  const validTileGids = new Set<number>(legend.map((t) => t.gid));
+  const groundLayerGids = layerGidSet(legend, 'ground');
+  const objectLayerGids = layerGidSet(legend, 'object');
 
   const system = buildSystemPrompt(defs);
   const user = buildUserPrompt(req);
@@ -134,182 +109,10 @@ export async function generateEncounter(
   return { mapId: generatedId, encounterId: generatedId };
 }
 
-/**
- * Map-only generator — strips out NPCs, objective, intro / context prose,
- * and just returns a Tiled tile layout. Used by the "Generate Map" button
- * on `GenerateSetupScene`, which lets the player iterate on layouts before
- * committing. Still writes the map JSON to disk so it can be referenced
- * by future encounters.
- */
-export async function generateMap(
-  anthropic: Anthropic,
-  defs: GameDefs,
-  req: GenerateRequest,
-): Promise<GeneratedMap> {
-  const validTileGids = new Set<number>();
-  for (const k of Object.keys(defs.tileLegend.tiles)) {
-    validTileGids.add(parseInt(k, 10));
-  }
-  const groundLayerGids = layerGidSet(defs, 'ground');
-  const objectLayerGids = layerGidSet(defs, 'object');
-
-  const system = buildMapSystemPrompt(defs);
-  const user = buildUserPrompt(req);
-  const tool = buildMapResponseTool();
-
-  const resp = await anthropic.messages.create({
-    model: "claude-sonnet-4-6",
-    max_tokens: 4096,
-    system,
-    tools: [tool],
-    tool_choice: { type: "tool", name: "submit_map" },
-    messages: [{ role: "user", content: user }],
-  });
-
-  const block = resp.content.find((b) => b.type === "tool_use");
-  if (!block || block.type !== "tool_use") throw new Error("Model did not return a tool_use block.");
-  const payload = GeneratedMapPayloadSchema.parse(block.input) as GeneratedMapPayload;
-  validateMapPayload(payload, validTileGids, groundLayerGids, objectLayerGids);
-
-  const stamp = Date.now();
-  const slug = slugify(payload.name).slice(0, 32) || "map";
-  const mapId = safeId(`gen_${stamp}_${slug}`);
-
-  const mapJson = buildMapJson(mapId, {
-    encounterTitle: payload.name,
-    description: payload.description,
-    mapName: payload.name,
-    mapdescription: payload.description,
-    objective: "",
-    customIntroduction: "",
-    customContext: "",
-    width: payload.width,
-    height: payload.height,
-    terrainData: payload.terrainData,
-    objectData: payload.objectData,
-    startingZonesData: [],
-  });
-
-  await mkdir(join(DATA_DIR, "maps"), { recursive: true });
-  await writeFile(join(DATA_DIR, "maps", `${mapId}.json`), JSON.stringify(mapJson, null, 2));
-
-  return {
-    mapId,
-    width: payload.width,
-    height: payload.height,
-    terrainData: payload.terrainData,
-    objectData: payload.objectData,
-    name: payload.name,
-    description: payload.description,
-  };
-}
-
-interface GeneratedMapPayload {
-  name: string;
-  description: string;
-  width: number;
-  height: number;
-  terrainData: number[];
-  objectData: number[];
-}
-
-function buildMapSystemPrompt(defs: GameDefs): string {
-  const legendLines = Object.entries(defs.tileLegend.tiles)
-    .map(([gid, t]) => {
-      return `  GID ${gid} (${t.name}, ${t.layer}, ${t.blocksMovement ? "impassable" : "passable"}${t.blocksSight ? ", blocks sight" : ""}): ${t.description}`;
-    }).join("\n");
-  const setting = settingPromptBlock(defs.activeSetting, 'full');
-
-  return `${setting ? setting + '\n\n' : ''}You are a TILE MAP author for a 2D tile-based RPG. Given a player's free-text description of a PLACE, you produce a Tiled-compatible tile layout. Submit the result via the submit_map tool — no plain-text reply.
-
-YOUR JOB IS ARCHITECTURE, NOT STORY. You do NOT place NPCs, monsters, or any characters. You do NOT write dialogue or quest text. The map is a stage; another step authors who stands on it. If the player's prompt mentions creatures ("two bandits crouch in the rushes"), translate it into spatial features that *imply* the scene (the rushes, the ford) and IGNORE the creatures. Reeds, tents, campfires, broken walls — those go on the map. Bandits, hermits, wolves — those do not.
-
-TILE PALETTE (use only these GIDs, exact integers):
-${legendLines}
-
-LAYER MODEL — the map has TWO stacked layers and you must keep them strictly separate:
-- \`terrainData\` is the ground layer. Every entry MUST reference a \`layer: "ground"\` GID. No 0s; every cell has a floor.
-- \`objectData\` is the object overlay. Entries MUST be 0 (empty) OR a \`layer: "object"\` GID. Never put a ground-layer GID here, and never put an object-layer GID in \`terrainData\`.
-- Object-layer GIDs whose name ends in \`_transparent\` have NO floor of their own — place them on top of a varied ground tile (grass, stone_floor, …) to let the floor texture show through. Prefer these for decoration (trees, flowers, crates, …) so the ground variation underneath stays visible.
-- A cell is passable iff BOTH its ground tile AND its object tile (if non-zero) are passable.
-
-VARIATION — instead of authoring one floor texture per zone, sprinkle ground variants from the palette so the floor reads as natural surface:
-- Outdoor (grass biome): mostly \`grass\` (GID 8) with occasional \`terrain_bumpy\` (99) or \`stone_floor_cracked\` (71).
-- Dungeon/indoor: mostly \`stone_floor\` (15) with occasional \`stone_floor_cracked\` (71), \`stone_floor_diamond\` (43), or \`stone_floor_inlay\` (57).
-- Then layer transparent-twin objects (flowers 96, tree 110, …) on top.
-
-COMPOSITION — design like a level designer, not a painter:
-- Pick a clear focal feature in the centre or off-centre (the courtyard, the hall, the campfire) and arrange other features around it. Avoid uniform fields of one tile.
-- Use walls / impassable terrain to shape sightlines and chokepoints. Open clearings should still have edges (tree line, river bank, ruin wall) that give the space definition.
-- Doors / archways / bridges go where the prompt implies natural entry — usually the perimeter or between two distinct regions.
-- Vary tile choices within a feature: a building's interior floor should differ from the dirt path outside; a campfire should sit on bumpy or cracked ground, not pristine grass.
-- Place transparent-twin decoration (flowers, small rocks, single trees) sparingly across passable terrain so the eye lands on the actual gameplay-relevant features rather than busy noise.
-
-MAP RULES:
-- Width × height between 12×8 and 30×22 inclusive. Pick a size that fits the described place — a single room is small (12×8 to 14×10); a multi-room layout or outdoor scene goes larger.
-- Both arrays must have length exactly width*height, row-major (top row first, left to right).
-- The map perimeter (outer ring of cells) should be impassable unless you specifically want creatures to be able to exit off the edge.
-- At least one connected region of 24+ passable cells should exist for play to happen in.
-- For room-based layouts: build CONNECTED rooms — every room must be reachable from every other via passable corridors or doorways. Never leave a room sealed off.
-
-TONE: gritty, grounded fantasy. Avoid clichés. Match the player's prompt closely.${defs.activeSetting ? `
-
-SETTING-AWARE NAMING — when an active setting block is present at the top of this prompt, the map's \`name\` and \`description\` must read as part of that world. Prefer the setting's place names and glossary terms when they fit; match the setting's tone instead of defaulting to generic high fantasy.` : ''}
-
-NAMING:
-- \`name\` is a short 2-4 word PLACE name ("Old Mill Yard", "South Bridge Camp", "Three-Cell Crypt"). Not a scene title or quest name.
-- \`description\` is a 1-2 sentence flavour line describing the place. Describe what is THERE — terrain, structures, atmosphere — not what HAPPENS. No characters, no actions, no conflict.`;
-}
-
-function buildMapResponseTool() {
-  return {
-    name: "submit_map",
-    description: "Submit the generated map as a structured payload.",
-    input_schema: {
-      type: "object" as const,
-      properties: {
-        name: { type: "string" },
-        description: { type: "string" },
-        width:  { type: "integer", minimum: 12, maximum: 30 },
-        height: { type: "integer", minimum: 8,  maximum: 22 },
-        terrainData: { type: "array", items: { type: "integer" } },
-        objectData:  { type: "array", items: { type: "integer" } },
-      },
-      required: ["name", "description", "width", "height", "terrainData", "objectData"],
-    },
-  };
-}
-
-function validateMapPayload(
-  p: GeneratedMapPayload,
-  validTileGids: Set<number>,
-  groundLayerGids: Set<number>,
-  objectLayerGids: Set<number>,
-): void {
-  const cells = p.width * p.height;
-  if (p.terrainData.length !== cells) throw new Error(`terrainData length ${p.terrainData.length} ≠ width*height (${cells})`);
-  if (p.objectData.length !== cells)  throw new Error(`objectData length ${p.objectData.length} ≠ width*height (${cells})`);
-  for (const [i, gid] of p.terrainData.entries()) {
-    if (gid === 0) throw new Error(`terrainData[${i}] is 0 (empty) — every terrain cell must reference a valid GID`);
-    const base = gid & 0x1fffffff;
-    if (!validTileGids.has(base)) throw new Error(`terrainData[${i}] references unknown GID ${base}`);
-    if (!groundLayerGids.has(base)) throw new Error(`terrainData[${i}] (GID ${base}) is an object-layer tile — terrainData must contain only ground-layer GIDs`);
-  }
-  for (const [i, gid] of p.objectData.entries()) {
-    if (gid === 0) continue;
-    const base = gid & 0x1fffffff;
-    if (!validTileGids.has(base)) throw new Error(`objectData[${i}] references unknown GID ${base}`);
-    if (!objectLayerGids.has(base)) throw new Error(`objectData[${i}] (GID ${base}) is a ground-layer tile — objectData must contain only object-layer GIDs`);
-  }
-}
-
 // ── System prompt + user prompt ─────────────────────────────────────────────
 
 function buildSystemPrompt(defs: GameDefs): string {
-  const legendLines = Object.entries(defs.tileLegend.tiles)
-    .map(([gid, t]) => {
-      return `  GID ${gid} (${t.name}, ${t.layer}, ${t.blocksMovement ? "impassable" : "passable"}${t.blocksSight ? ", blocks sight" : ""}): ${t.description}`;
-    }).join("\n");
+  const legendText = legendLines(globalTileLegend(defs));
 
   const monsterLines = defs.monsters.map((m) => `  ${m.id} — ${m.name} (CR ${m.cr})`).join("\n");
   const npcLines = defs.npcs.map((n) => `  ${n.id} — ${n.name}`).join("\n");
@@ -326,7 +129,7 @@ SETTING-AWARE AUTHORING — the active setting block at the top of this prompt i
   return `${setting ? setting + '\n\n' : ''}You are an encounter author for a 2D tile-based SRD 5.2.1 RPG. Given a player's free-text scene description, you author a complete one-off scenario: a Tiled-compatible tile map AND an encounter definition that references it. Submit the result via the submit_scenario tool — no plain-text reply.${settingRules}
 
 TILE PALETTE (use only these GIDs, exact integers):
-${legendLines}
+${legendText}
 
 MONSTER ROSTER (use these exact ids in encounter.allyIds / for any combat NPCs the player should fight):
 ${monsterLines}
@@ -340,6 +143,8 @@ LAYER MODEL — the map has TWO stacked layers and you must keep them strictly s
 - Object-layer GIDs whose name ends in \`_transparent\` have NO floor of their own — place them on top of a varied ground tile (grass, stone_floor, …) so the floor texture shows through underneath. Prefer these for decoration.
 
 VARIATION — sprinkle ground variants from the palette so the floor reads as natural surface (mostly \`grass\` (8) outdoor with occasional \`terrain_bumpy\` (99); mostly \`stone_floor\` (15) indoor with occasional cracked / diamond / inlay variants). Then layer transparent-twin objects (flowers 96, tree 110, crate_transparent 13, …) on top.
+
+BIOME FLOORS — for caverns and settlements, prefer the themed floor families in the palette over the default scribble floors: the cave floors (cave_dust / cave_gravel / cave_rocky, plus impassable cave_pool water and sight-blocking chasm pits) for underground scenes, and the urban floors (urban_cobbles / urban_bricks / urban_large_slabs / plazas) for paved streets, courtyards, and interiors. Pick ONE primary floor family per region and accent with scribble objects on top.
 
 MAP RULES:
 - Width × height must be between 12×8 and 30×22 inclusive.
@@ -492,6 +297,7 @@ function buildMapJson(id: string, p: GeneratedPayload): unknown {
     height: p.height,
     terrainData: p.terrainData,
     objectData: p.objectData,
+    tilesets: tilesetsForGids([...p.terrainData, ...p.objectData]),
   });
 }
 
@@ -521,10 +327,59 @@ function slugify(s: string): string {
   return s.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
 }
 
-function layerGidSet(defs: GameDefs, layer: 'ground' | 'object'): Set<number> {
-  const out = new Set<number>();
-  for (const [gid, t] of Object.entries(defs.tileLegend.tiles)) {
-    if (t.layer === layer) out.add(parseInt(gid, 10));
+/**
+ * A single tile as the AI generator sees it: its GLOBAL gid (firstgid offset
+ * applied) plus the legend fields the prompt and validators need.
+ */
+interface GlobalTile {
+  gid: number;
+  name: string;
+  layer: 'ground' | 'object';
+  blocksMovement: boolean;
+  blocksSight: boolean;
+  description: string;
+}
+
+/**
+ * Flatten every AI-palette tileset's per-tileset legend into one list keyed by
+ * GLOBAL gid (firstgid + local id − 1). Unlike the merged `defs.tileLegend`
+ * (keyed by local id, so scribble shadows water/cave at the same low ids),
+ * this disambiguates tilesets so all three coexist in the prompt and pass
+ * validation. SessionBuilder resolves the same global gids back at play time.
+ */
+function globalTileLegend(defs: GameDefs): GlobalTile[] {
+  const out: GlobalTile[] = [];
+  for (const { name, ref } of AI_PALETTE_TILESETS) {
+    const tiles = defs.tileLegendsByTileset[name];
+    if (!tiles) continue;
+    for (const [localKey, t] of Object.entries(tiles)) {
+      const gid = ref.firstgid + (parseInt(localKey, 10) - 1);
+      // Only offer a gid this tileset genuinely owns. Drops scribble's high
+      // void sentinel (65534), which sits above water/cave firstgids and would
+      // otherwise mis-route to them at play time. The AI uses chasm tiles for
+      // pits instead.
+      if (ownerTilesetName(gid) !== name) continue;
+      out.push({
+        gid,
+        name: t.name,
+        layer: t.layer,
+        blocksMovement: t.blocksMovement,
+        blocksSight: t.blocksSight,
+        description: t.description,
+      });
+    }
   }
+  return out.sort((a, b) => a.gid - b.gid);
+}
+
+function legendLines(legend: GlobalTile[]): string {
+  return legend
+    .map((t) => `  GID ${t.gid} (${t.name}, ${t.layer}, ${t.blocksMovement ? "impassable" : "passable"}${t.blocksSight ? ", blocks sight" : ""}): ${t.description}`)
+    .join("\n");
+}
+
+function layerGidSet(legend: GlobalTile[], layer: 'ground' | 'object'): Set<number> {
+  const out = new Set<number>();
+  for (const t of legend) if (t.layer === layer) out.add(t.gid);
   return out;
 }

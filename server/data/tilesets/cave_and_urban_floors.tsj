@@ -1,0 +1,817 @@
+{
+  "name": "cave_and_urban_floors",
+  "type": "tileset",
+  "tiledversion": "1.11.0",
+  "version": "1.10",
+  "image": "cave_and_urban_floors.png",
+  "imagewidth": 1280,
+  "imageheight": 640,
+  "tilewidth": 128,
+  "tileheight": 128,
+  "columns": 10,
+  "tilecount": 50,
+  "margin": 0,
+  "spacing": 0,
+  "tiles": [
+    {
+      "id": 0,
+      "type": "cave_dust",
+      "properties": [
+        {
+          "name": "passable",
+          "type": "bool",
+          "value": true
+        },
+        {
+          "name": "layer",
+          "type": "string",
+          "value": "ground"
+        }
+      ]
+    },
+    {
+      "id": 1,
+      "type": "cave_pebbles_sparse",
+      "properties": [
+        {
+          "name": "passable",
+          "type": "bool",
+          "value": true
+        },
+        {
+          "name": "layer",
+          "type": "string",
+          "value": "ground"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "cave_rocky",
+      "properties": [
+        {
+          "name": "passable",
+          "type": "bool",
+          "value": true
+        },
+        {
+          "name": "layer",
+          "type": "string",
+          "value": "ground"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "cave_gravel",
+      "properties": [
+        {
+          "name": "passable",
+          "type": "bool",
+          "value": true
+        },
+        {
+          "name": "layer",
+          "type": "string",
+          "value": "ground"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "cave_rippled",
+      "properties": [
+        {
+          "name": "passable",
+          "type": "bool",
+          "value": true
+        },
+        {
+          "name": "layer",
+          "type": "string",
+          "value": "ground"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "type": "urban_plain",
+      "properties": [
+        {
+          "name": "passable",
+          "type": "bool",
+          "value": true
+        },
+        {
+          "name": "layer",
+          "type": "string",
+          "value": "ground"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "type": "urban_round_courtyard",
+      "properties": [
+        {
+          "name": "passable",
+          "type": "bool",
+          "value": true
+        },
+        {
+          "name": "layer",
+          "type": "string",
+          "value": "ground"
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "type": "urban_cobbles",
+      "properties": [
+        {
+          "name": "passable",
+          "type": "bool",
+          "value": true
+        },
+        {
+          "name": "layer",
+          "type": "string",
+          "value": "ground"
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "type": "urban_bricks",
+      "properties": [
+        {
+          "name": "passable",
+          "type": "bool",
+          "value": true
+        },
+        {
+          "name": "layer",
+          "type": "string",
+          "value": "ground"
+        }
+      ]
+    },
+    {
+      "id": 9,
+      "type": "urban_bricks_clean",
+      "properties": [
+        {
+          "name": "passable",
+          "type": "bool",
+          "value": true
+        },
+        {
+          "name": "layer",
+          "type": "string",
+          "value": "ground"
+        }
+      ]
+    },
+    {
+      "id": 10,
+      "type": "cave_rippled_alt",
+      "properties": [
+        {
+          "name": "passable",
+          "type": "bool",
+          "value": true
+        },
+        {
+          "name": "layer",
+          "type": "string",
+          "value": "ground"
+        }
+      ]
+    },
+    {
+      "id": 11,
+      "type": "cave_scattered_stones",
+      "properties": [
+        {
+          "name": "passable",
+          "type": "bool",
+          "value": true
+        },
+        {
+          "name": "layer",
+          "type": "string",
+          "value": "ground"
+        }
+      ]
+    },
+    {
+      "id": 12,
+      "type": "cave_pebbles_dense",
+      "properties": [
+        {
+          "name": "passable",
+          "type": "bool",
+          "value": true
+        },
+        {
+          "name": "layer",
+          "type": "string",
+          "value": "ground"
+        }
+      ]
+    },
+    {
+      "id": 13,
+      "type": "cave_gravel_dense",
+      "properties": [
+        {
+          "name": "passable",
+          "type": "bool",
+          "value": true
+        },
+        {
+          "name": "layer",
+          "type": "string",
+          "value": "ground"
+        }
+      ]
+    },
+    {
+      "id": 14,
+      "type": "cave_boulders_small",
+      "properties": [
+        {
+          "name": "passable",
+          "type": "bool",
+          "value": true
+        },
+        {
+          "name": "layer",
+          "type": "string",
+          "value": "ground"
+        }
+      ]
+    },
+    {
+      "id": 15,
+      "type": "urban_large_slabs",
+      "properties": [
+        {
+          "name": "passable",
+          "type": "bool",
+          "value": true
+        },
+        {
+          "name": "layer",
+          "type": "string",
+          "value": "ground"
+        }
+      ]
+    },
+    {
+      "id": 16,
+      "type": "urban_corner_slabs",
+      "properties": [
+        {
+          "name": "passable",
+          "type": "bool",
+          "value": true
+        },
+        {
+          "name": "layer",
+          "type": "string",
+          "value": "ground"
+        }
+      ]
+    },
+    {
+      "id": 17,
+      "type": "urban_tiles_small",
+      "properties": [
+        {
+          "name": "passable",
+          "type": "bool",
+          "value": true
+        },
+        {
+          "name": "layer",
+          "type": "string",
+          "value": "ground"
+        }
+      ]
+    },
+    {
+      "id": 18,
+      "type": "urban_tiles_grid",
+      "properties": [
+        {
+          "name": "passable",
+          "type": "bool",
+          "value": true
+        },
+        {
+          "name": "layer",
+          "type": "string",
+          "value": "ground"
+        }
+      ]
+    },
+    {
+      "id": 19,
+      "type": "urban_herringbone",
+      "properties": [
+        {
+          "name": "passable",
+          "type": "bool",
+          "value": true
+        },
+        {
+          "name": "layer",
+          "type": "string",
+          "value": "ground"
+        }
+      ]
+    },
+    {
+      "id": 20,
+      "type": "cave_cracked",
+      "properties": [
+        {
+          "name": "passable",
+          "type": "bool",
+          "value": true
+        },
+        {
+          "name": "layer",
+          "type": "string",
+          "value": "ground"
+        }
+      ]
+    },
+    {
+      "id": 21,
+      "type": "cave_stones_few",
+      "properties": [
+        {
+          "name": "passable",
+          "type": "bool",
+          "value": true
+        },
+        {
+          "name": "layer",
+          "type": "string",
+          "value": "ground"
+        }
+      ]
+    },
+    {
+      "id": 22,
+      "type": "cave_single_boulder",
+      "properties": [
+        {
+          "name": "passable",
+          "type": "bool",
+          "value": true
+        },
+        {
+          "name": "layer",
+          "type": "string",
+          "value": "ground"
+        }
+      ]
+    },
+    {
+      "id": 23,
+      "type": "cave_smooth",
+      "properties": [
+        {
+          "name": "passable",
+          "type": "bool",
+          "value": true
+        },
+        {
+          "name": "layer",
+          "type": "string",
+          "value": "ground"
+        }
+      ]
+    },
+    {
+      "id": 24,
+      "type": "cave_smooth_pebbled",
+      "properties": [
+        {
+          "name": "passable",
+          "type": "bool",
+          "value": true
+        },
+        {
+          "name": "layer",
+          "type": "string",
+          "value": "ground"
+        }
+      ]
+    },
+    {
+      "id": 25,
+      "type": "urban_round_cobbles",
+      "properties": [
+        {
+          "name": "passable",
+          "type": "bool",
+          "value": true
+        },
+        {
+          "name": "layer",
+          "type": "string",
+          "value": "ground"
+        }
+      ]
+    },
+    {
+      "id": 26,
+      "type": "urban_border_path",
+      "properties": [
+        {
+          "name": "passable",
+          "type": "bool",
+          "value": true
+        },
+        {
+          "name": "layer",
+          "type": "string",
+          "value": "ground"
+        }
+      ]
+    },
+    {
+      "id": 27,
+      "type": "urban_central_plaza",
+      "properties": [
+        {
+          "name": "passable",
+          "type": "bool",
+          "value": true
+        },
+        {
+          "name": "layer",
+          "type": "string",
+          "value": "ground"
+        }
+      ]
+    },
+    {
+      "id": 28,
+      "type": "urban_irregular_slabs",
+      "properties": [
+        {
+          "name": "passable",
+          "type": "bool",
+          "value": true
+        },
+        {
+          "name": "layer",
+          "type": "string",
+          "value": "ground"
+        }
+      ]
+    },
+    {
+      "id": 29,
+      "type": "urban_marker_grid",
+      "properties": [
+        {
+          "name": "passable",
+          "type": "bool",
+          "value": true
+        },
+        {
+          "name": "layer",
+          "type": "string",
+          "value": "ground"
+        }
+      ]
+    },
+    {
+      "id": 30,
+      "type": "cave_pool_1",
+      "properties": [
+        {
+          "name": "passable",
+          "type": "bool",
+          "value": false
+        },
+        {
+          "name": "layer",
+          "type": "string",
+          "value": "ground"
+        }
+      ]
+    },
+    {
+      "id": 31,
+      "type": "cave_pool_2",
+      "properties": [
+        {
+          "name": "passable",
+          "type": "bool",
+          "value": false
+        },
+        {
+          "name": "layer",
+          "type": "string",
+          "value": "ground"
+        }
+      ]
+    },
+    {
+      "id": 32,
+      "type": "cave_pool_3",
+      "properties": [
+        {
+          "name": "passable",
+          "type": "bool",
+          "value": false
+        },
+        {
+          "name": "layer",
+          "type": "string",
+          "value": "ground"
+        }
+      ]
+    },
+    {
+      "id": 33,
+      "type": "cave_pool_4",
+      "properties": [
+        {
+          "name": "passable",
+          "type": "bool",
+          "value": false
+        },
+        {
+          "name": "layer",
+          "type": "string",
+          "value": "ground"
+        }
+      ]
+    },
+    {
+      "id": 34,
+      "type": "cave_pool_5",
+      "properties": [
+        {
+          "name": "passable",
+          "type": "bool",
+          "value": false
+        },
+        {
+          "name": "layer",
+          "type": "string",
+          "value": "ground"
+        }
+      ]
+    },
+    {
+      "id": 35,
+      "type": "urban_mosaic_small",
+      "properties": [
+        {
+          "name": "passable",
+          "type": "bool",
+          "value": true
+        },
+        {
+          "name": "layer",
+          "type": "string",
+          "value": "ground"
+        }
+      ]
+    },
+    {
+      "id": 36,
+      "type": "urban_square_tiles",
+      "properties": [
+        {
+          "name": "passable",
+          "type": "bool",
+          "value": true
+        },
+        {
+          "name": "layer",
+          "type": "string",
+          "value": "ground"
+        }
+      ]
+    },
+    {
+      "id": 37,
+      "type": "urban_large_blocks",
+      "properties": [
+        {
+          "name": "passable",
+          "type": "bool",
+          "value": true
+        },
+        {
+          "name": "layer",
+          "type": "string",
+          "value": "ground"
+        }
+      ]
+    },
+    {
+      "id": 38,
+      "type": "urban_octagon_pattern",
+      "properties": [
+        {
+          "name": "passable",
+          "type": "bool",
+          "value": true
+        },
+        {
+          "name": "layer",
+          "type": "string",
+          "value": "ground"
+        }
+      ]
+    },
+    {
+      "id": 39,
+      "type": "urban_border_frame",
+      "properties": [
+        {
+          "name": "passable",
+          "type": "bool",
+          "value": true
+        },
+        {
+          "name": "layer",
+          "type": "string",
+          "value": "ground"
+        }
+      ]
+    },
+    {
+      "id": 40,
+      "type": "chasm_small",
+      "properties": [
+        {
+          "name": "passable",
+          "type": "bool",
+          "value": false
+        },
+        {
+          "name": "layer",
+          "type": "string",
+          "value": "ground"
+        }
+      ]
+    },
+    {
+      "id": 41,
+      "type": "chasm_medium",
+      "properties": [
+        {
+          "name": "passable",
+          "type": "bool",
+          "value": false
+        },
+        {
+          "name": "layer",
+          "type": "string",
+          "value": "ground"
+        }
+      ]
+    },
+    {
+      "id": 42,
+      "type": "chasm_large",
+      "properties": [
+        {
+          "name": "passable",
+          "type": "bool",
+          "value": false
+        },
+        {
+          "name": "layer",
+          "type": "string",
+          "value": "ground"
+        }
+      ]
+    },
+    {
+      "id": 43,
+      "type": "cave_gravel_alt",
+      "properties": [
+        {
+          "name": "passable",
+          "type": "bool",
+          "value": true
+        },
+        {
+          "name": "layer",
+          "type": "string",
+          "value": "ground"
+        }
+      ]
+    },
+    {
+      "id": 44,
+      "type": "blank",
+      "properties": [
+        {
+          "name": "passable",
+          "type": "bool",
+          "value": true
+        },
+        {
+          "name": "layer",
+          "type": "string",
+          "value": "ground"
+        }
+      ]
+    },
+    {
+      "id": 45,
+      "type": "urban_herringbone_alt",
+      "properties": [
+        {
+          "name": "passable",
+          "type": "bool",
+          "value": true
+        },
+        {
+          "name": "layer",
+          "type": "string",
+          "value": "ground"
+        }
+      ]
+    },
+    {
+      "id": 46,
+      "type": "urban_round_stones",
+      "properties": [
+        {
+          "name": "passable",
+          "type": "bool",
+          "value": true
+        },
+        {
+          "name": "layer",
+          "type": "string",
+          "value": "ground"
+        }
+      ]
+    },
+    {
+      "id": 47,
+      "type": "urban_square_grid",
+      "properties": [
+        {
+          "name": "passable",
+          "type": "bool",
+          "value": true
+        },
+        {
+          "name": "layer",
+          "type": "string",
+          "value": "ground"
+        }
+      ]
+    },
+    {
+      "id": 48,
+      "type": "urban_plain_alt",
+      "properties": [
+        {
+          "name": "passable",
+          "type": "bool",
+          "value": true
+        },
+        {
+          "name": "layer",
+          "type": "string",
+          "value": "ground"
+        }
+      ]
+    },
+    {
+      "id": 49,
+      "type": "urban_border_frame_alt",
+      "properties": [
+        {
+          "name": "passable",
+          "type": "bool",
+          "value": true
+        },
+        {
+          "name": "layer",
+          "type": "string",
+          "value": "ground"
+        }
+      ]
+    }
+  ]
+}

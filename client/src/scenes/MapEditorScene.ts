@@ -15,6 +15,7 @@ import {
   buildTextarea as sharedBuildTextarea,
 } from "../ui/sceneInputs";
 import { MapPalette } from "../ui/edit/MapPalette";
+import { StructureList, type StructureSpec } from "../ui/edit/StructureList";
 import {
   TILE_SIZE,
   GRID_COLS,
@@ -60,24 +61,29 @@ interface EditTabHandle {
   dispose(): void;
 }
 
-type Terrain = "grassland" | "forest" | "dungeon" | "tavern";
-type Feature = "campsites" | "coastline" | "path" | "intersection" | "buildings" | "3-room" | "5-room";
+type Terrain = "grassland" | "forest" | "dungeon" | "tavern" | "cave" | "urban";
+type Feature = "campsites" | "coastline" | "path" | "intersection" | "3-room" | "5-room" | "stairs";
 
-const OUTSIDE_TERRAINS: Terrain[] = ["grassland", "forest"];
-const INSIDE_TERRAINS:  Terrain[] = ["dungeon", "tavern"];
-const OUTSIDE_FEATURES: Feature[] = ["campsites", "coastline", "path", "intersection", "buildings"];
-const INSIDE_FEATURES:  Feature[] = ["3-room", "5-room"];
+const OUTSIDE_TERRAINS: Terrain[] = ["grassland", "forest", "urban"];
+const INSIDE_TERRAINS:  Terrain[] = ["dungeon", "tavern", "cave"];
+const OUTSIDE_FEATURES: Feature[] = ["campsites", "coastline", "path", "intersection"];
+const INSIDE_FEATURES:  Feature[] = ["3-room", "5-room", "stairs"];
+/** Terrains that take the configurable STRUCTURES editor (small buildings / ruins). */
+const STRUCTURE_TERRAINS: Terrain[] = ["grassland", "forest"];
 
 /** Per-terrain whitelist of features the composer actually consumes. The
  *  Map Editor's feature chips enable / disable themselves against this
  *  table — outdoor features only fire on `grassland` / `forest`, the
- *  room-count features only fire on `dungeon`, and tavern accepts no
+ *  room-count features only fire on `dungeon` / `cave` (small vs large),
+ *  `urban` only consumes the `buildings` count, and tavern accepts no
  *  features today (the composer generates a fixed-layout single room). */
 const TERRAIN_COMPATIBLE_FEATURES: Record<Terrain, Feature[]> = {
   grassland: OUTSIDE_FEATURES,
   forest:    OUTSIDE_FEATURES,
   dungeon:   INSIDE_FEATURES,
   tavern:    [],
+  cave:      INSIDE_FEATURES,
+  urban:     [],
 };
 
 const TERRAIN_LABEL: Record<Terrain, string> = {
@@ -85,15 +91,17 @@ const TERRAIN_LABEL: Record<Terrain, string> = {
   forest: "FOREST",
   dungeon: "DUNGEON",
   tavern: "TAVERN",
+  cave: "CAVE",
+  urban: "TOWN",
 };
 const FEATURE_LABEL: Record<Feature, string> = {
   campsites: "CAMPSITES",
   coastline: "COASTLINE",
   path: "PATH",
   intersection: "INTERSECTION",
-  buildings: "BUILDINGS",
   "3-room": "3 ROOMS",
   "5-room": "5 ROOMS",
+  stairs: "STAIRS",
 };
 function featureColumn(_f: Feature): "outside" | "inside" {
   return "outside";
@@ -108,12 +116,12 @@ interface PromptExample { title: string; body: string; }
 // own (story / objective / dialogue). The Encounter Creator handles those
 // later on top of a saved map.
 const PROMPT_EXAMPLES: PromptExample[] = [
-  { title: "Walled Courtyard",     body: "A square stone courtyard, ten by ten tiles, ringed by chest-high walls broken by a single archway on the south side. Cobblestone floor with a dry fountain at the centre and two benches against the east wall." },
-  { title: "Forest Clearing",      body: "An irregular clearing in a pine forest, roughly twenty tiles across. Grass in the centre fading to dirt at the tree line; a fallen log along the north edge and a circle of cold campfire stones near the west tree line." },
-  { title: "Three-Room Catacomb",  body: "Three small stone chambers connected by short corridors. Each chamber has flagstone floor and stone walls; the central chamber has a raised dais and the south chamber has a coffin-shaped object." },
-  { title: "Riverside Camp",       body: "A bend of a river runs through the map from north to south. Sandy bank on the east side with two tents and a cold firepit; the west bank is reeds and grass. A narrow plank bridge crosses the river near the centre." },
-  { title: "Ruined Watchtower",    body: "Open windswept moorland with a ruined stone tower base near the centre — three impassable wall segments forming an L, with passable floor inside. Scattered rubble and patches of bumpy terrain around the ruin." },
-  { title: "Tavern Common Room",   body: "Interior of a tavern: wooden plank floor, walls on all four sides with a single door on the south edge. A long bar along the north wall, three round tables with chairs spaced around the room, and a fireplace on the east wall." },
+  { title: "Flooded Cavern",       body: "A natural cave: an open cavern of dust and gravel floor with rocky walls all around. A still underground pool fills the north-east corner, and a narrow bottomless chasm splits the cave near the centre. A single passage exits to the south." },
+  { title: "Market Square",        body: "A paved town square of cobbles and large slabs, with a small plaza of finer stone at its centre. Three brick buildings face the square, each with a door onto it, linked by stone paths. Market stalls (crates and barrels) cluster near the centre." },
+  { title: "River Crossing",       body: "A river runs north to south across grassland, splitting the map. The east bank is open field with a campsite; the west bank is forest. A path leads down to the water on each side where a crossing meets the bank." },
+  { title: "Five-Room Dungeon",    body: "A stone dungeon of five chambers linked by corridors, carved from solid rock. The entrance room opens at the south edge; the deepest chamber to the north is a vault. Cracked-stone floors, a couple of pools as hazards." },
+  { title: "Forest Clearing",      body: "An irregular clearing in a pine forest, roughly twenty tiles across. Grass in the centre fading to dense trees at the edges, with scattered flowers. A cold campfire sits near the west tree line." },
+  { title: "Tavern Common Room",   body: "Interior of a tavern: wood-plank floor, walls on all four sides with a single door on the south edge. A long bar along the north wall and several tables with chairs spaced around the room." },
 ];
 
 const ACCENT = "#7aadcc";
@@ -146,10 +154,10 @@ export class MapEditorScene extends Phaser.Scene {
   private selectedFeatures: Set<Feature> = new Set();
   private terrainChips: Map<Terrain, HtmlButtonHandle> = new Map();
   private featureChips: Map<Feature, HtmlButtonHandle> = new Map();
-  /** Live count for the `buildings` feature. 0 = off (chip un-selected),
-   *  1..5 = chip selected, label reads "BUILDINGS: N". Click cycles
-   *  0 → 1 → 2 → 3 → 4 → 5 → 0. */
-  private buildingsCount: number = 0;
+  /** Configured outdoor structures (small buildings / ruins), each with a type
+   *  and connected-room count. Authored via the STRUCTURES list editor. */
+  private structures: StructureSpec[] = [];
+  private structureList: StructureList | null = null;
 
   // Generative AI tab state.
   private genPromptInput: HTMLTextAreaElement | null = null;
@@ -183,7 +191,7 @@ export class MapEditorScene extends Phaser.Scene {
     this.tab = "deterministic";
     this.selectedTerrain = "grassland";
     this.selectedFeatures.clear();
-    this.buildingsCount = 0;
+    this.structures = [];
     this.terrainChips.clear();
     this.featureChips.clear();
     this.buckets = { always: [], det: [], gen: [], edit: [], zones: [] };
@@ -281,7 +289,7 @@ export class MapEditorScene extends Phaser.Scene {
     const previewH = colY + colH - previewY;
     this.preview = new EmbeddedMapPreview(this, {
       x: colX, y: previewY, width: colW, height: previewH,
-    }, { busyText: "Generating map…" });
+    }, { busyText: "Building map… (the AI is placing features step by step)" });
 
     // LAYERS toggle — small chip in the top-right corner of the preview
     // viewport. Clicking it pops the per-layer checkboxes panel.
@@ -524,14 +532,32 @@ export class MapEditorScene extends Phaser.Scene {
       text: "FEATURES",
       fontSize: 10, color: "#778899", letterSpacing: 1,
     }));
-    let fcx = x;
-    let fcy = featuresLabelY + 22;
+    const featuresRowY = featuresLabelY + 22;
     allFeatures.forEach((f, j) => {
-      this.buildFeatureChip(f, fcx, fcy, chipW);
-      const col = (j + 1) % 2;
-      if (col === 0) { fcx = x; fcy += 32; }
-      else fcx += chipW + chipGap;
+      const cx = x + (j % 2) * (chipW + chipGap);
+      const cy = featuresRowY + Math.floor(j / 2) * 32;
+      this.buildFeatureChip(f, cx, cy, chipW);
     });
+    const featuresEndY = featuresRowY + Math.ceil(allFeatures.length / 2) * 32;
+
+    // Structures section — an add-and-configure list (small buildings / ruins,
+    // each with a connected-room count). Fills the rest of the column.
+    const structLabelY = featuresEndY + 14;
+    this.addToBucket("det", createHtmlText({
+      scene: this, sceneWidth: W,
+      x, y: structLabelY, w, h: 14,
+      text: "STRUCTURES",
+      fontSize: 10, color: "#778899", letterSpacing: 1,
+    }));
+    const listY = structLabelY + 20;
+    const listH = Math.max(96, y + h - listY);
+    this.structureList = new StructureList({
+      scene: this, sceneWidth: W,
+      get: () => this.structures,
+      set: (next) => { this.structures = next; this.refreshButtons(); },
+    });
+    this.addToBucket("det", this.structureList.build(x, listY, w, listH));
+    this.structureList.setApplicable(this.selectedTerrain !== null && STRUCTURE_TERRAINS.includes(this.selectedTerrain));
   }
 
   // ── Generative AI right-column controls ────────────────────────────────
@@ -547,7 +573,7 @@ export class MapEditorScene extends Phaser.Scene {
     this.addToBucket("gen", createHtmlText({
       scene: this, sceneWidth: W,
       x, y: hintY, w, h: 28,
-      text: "Click an example below, or write your own prompt.",
+      text: "Describe a place — caves, towns, rivers, dungeons. The AI builds it step by step (may take ~20s).",
       fontSize: 11, color: "#aabbcc", fontFamily: "sans-serif", align: "center",
     }));
 
@@ -617,6 +643,7 @@ export class MapEditorScene extends Phaser.Scene {
       sceneWidth: W,
       getMap: () => this.previewedMap,
       repaintPreview: () => { this.preview?.repaintInPlace(); },
+      reloadPreview: () => { if (this.preview && this.previewedMap) this.preview.setData(this.previewedMap); },
       setStatus: (text) => { if (this.statusEl) this.statusEl.textContent = text; },
       markMapDirty: () => { this.savedMapId = null; },
       refreshButtons: () => this.refreshButtons(),
@@ -678,6 +705,7 @@ export class MapEditorScene extends Phaser.Scene {
         this.selectedFeatures.clear();
         this.refreshTerrainChips();
         this.refreshFeatureChips();
+        this.structureList?.setApplicable(this.selectedTerrain !== null && STRUCTURE_TERRAINS.includes(this.selectedTerrain));
         this.refreshButtons();
       },
     });
@@ -694,15 +722,7 @@ export class MapEditorScene extends Phaser.Scene {
       label: FEATURE_LABEL[f], variant: "secondary", fontSize: 10,
       onClick: () => {
         if (!this.featureChipEnabled(f)) return;
-        if (f === "buildings") {
-          // BUILDINGS is a counter chip: click cycles 0 → 1 → 2 → ... → 5 → 0.
-          // The selectedFeatures set tracks the on/off; buildingsCount tracks
-          // the amount. Both flip together so the chip label can read off
-          // either source and stay consistent.
-          this.buildingsCount = (this.buildingsCount + 1) % 6;
-          if (this.buildingsCount === 0) this.selectedFeatures.delete(f);
-          else this.selectedFeatures.add(f);
-        } else if (featureColumn(f) === "inside") {
+        if (featureColumn(f) === "inside") {
           const wasOn = this.selectedFeatures.has(f);
           this.selectedFeatures.clear();
           if (!wasOn) this.selectedFeatures.add(f);
@@ -738,9 +758,6 @@ export class MapEditorScene extends Phaser.Scene {
     for (const [f, btn] of this.featureChips) {
       const enabled = this.featureChipEnabled(f);
       const on = enabled && this.selectedFeatures.has(f);
-      if (f === "buildings") {
-        btn.setLabel(this.buildingsCount > 0 ? `BUILDINGS: ${this.buildingsCount}` : "BUILDINGS");
-      }
       if (!enabled) {
         btn.el.style.background = "#14141e";
         btn.el.style.borderColor = "#2a3340";
@@ -925,7 +942,7 @@ export class MapEditorScene extends Phaser.Scene {
       const data = await gameClient.composeMap({
         terrain: this.selectedTerrain,
         features: Array.from(this.selectedFeatures),
-        buildingsCount: this.buildingsCount > 0 ? this.buildingsCount : undefined,
+        structures: this.structures.length > 0 ? this.structures : undefined,
       });
       if (this.statusEl) this.statusEl.textContent = "";
       this.applyPreviewData(data as MapPreviewData);

@@ -6,8 +6,16 @@
  * turn imports those modules).
  */
 
-export type Terrain = 'grassland' | 'forest' | 'dungeon' | 'tavern';
-export type Feature = 'campsites' | 'coastline' | 'path' | 'intersection' | 'buildings' | '3-room' | '5-room';
+export type Terrain = 'grassland' | 'forest' | 'dungeon' | 'tavern' | 'cave' | 'urban';
+export type Feature = 'campsites' | 'coastline' | 'path' | 'intersection' | '3-room' | '5-room' | 'stairs';
+
+/** One configurable structure the user adds to an outdoor map. `rooms` (clamped
+ *  1..5) are placed adjacent and linked by doorways through their shared walls;
+ *  a ruin additionally cracks its floor and crumbles some wall segments. */
+export interface StructureSpec {
+  type: 'building' | 'ruin';
+  rooms: number;
+}
 
 export interface ComposeOptions {
   width: number;
@@ -16,9 +24,11 @@ export interface ComposeOptions {
   features: Feature[];
   /** Optional seed for the RNG. Same seed + same opts → same map. Defaults to Date.now(). */
   seed?: number;
-  /** How many buildings to place when `features` includes `'buildings'`.
-   *  Clamped to 1..5. Defaults to 1. Ignored when the `buildings` feature
-   *  is not selected. */
+  /** Outdoor structures (small buildings / ruins) to stamp, each individually
+   *  configured. Replaces the old buildings/ruins feature counters. */
+  structures?: StructureSpec[];
+  /** Urban-only: how many buildings the town composer rings around its plaza
+   *  (1..6, default 4). Not used by the outdoor structures path. */
   buildingsCount?: number;
 }
 

@@ -18,6 +18,30 @@
 export const WATER_FIRSTGID = 200;
 const WL = WATER_FIRSTGID;
 
+/** First GID of the cave-and-urban floors tileset (50 ground-only tiles). Sits
+ *  above the water range so scribble (1–154), water (200–215) and this set
+ *  (300–349) never collide in a single map's global GID space. */
+export const CAVE_URBAN_FIRSTGID = 300;
+const CU = CAVE_URBAN_FIRSTGID;
+
+/** Cave / urban floor tiles (local ids 1–50 offset by `CAVE_URBAN_FIRSTGID`).
+ *  Ground-layer only; pair with scribble object tiles (walls, decor) for a
+ *  full map. Pools and chasms block movement; chasms also block sight. */
+export const CAVE_URBAN_GIDS = {
+  CAVE_DUST:        CU + 0,
+  CAVE_ROCKY:       CU + 2,
+  CAVE_GRAVEL:      CU + 3,
+  CAVE_SMOOTH:      CU + 23,
+  URBAN_PLAIN:      CU + 5,
+  URBAN_COBBLES:    CU + 7,
+  URBAN_BRICKS:     CU + 8,
+  URBAN_LARGE_SLABS: CU + 15,
+  CAVE_POOL:        CU + 30,
+  CHASM_SMALL:      CU + 40,
+  CHASM_MEDIUM:     CU + 41,
+  CHASM_LARGE:      CU + 42,
+} as const;
+
 /** Ground-layer terrain tiles. Painted onto `terrainData`. */
 export const TERRAIN_GIDS = {
   GRASS:               8,
@@ -45,6 +69,23 @@ export const WALL_GIDS = {
   PARTIAL_CORNER_LL: 66 + 0x60000000,
 } as const;
 
+/** Ruined straight-wall variants (both PASSABLE — they read as crumbling, give
+ *  cover, and don't block sight). Base art faces "top" (north); rotate with the
+ *  same flip bits as `WALL_GIDS` straights (N 0°, S 180°, E 90°CW, W 270°CW). */
+export const RUIN_WALL_GIDS = {
+  CRACKED: 39,   // half_wall_cracked_ul_transparent — cracked low wall
+  BROKEN:  81,   // wall_broken_top_transparent — rubble spilling inward
+} as const;
+
+/** Straight-wall rotation flag per edge, matching the `WALL_GIDS` straights.
+ *  Add to a "top"-facing base tile to orient it on that edge. */
+export const EDGE_ROTATION = {
+  N: 0,
+  S: 0xC0000000,
+  E: 0xA0000000,
+  W: 0x60000000,
+} as const;
+
 /** Object-layer path tiles. `V` connects N+S, `H` connects E+W, corners
  *  connect the two cardinal directions in the name. `INTERSECTION` is the
  *  4-way crossing; T-junctions fall back to it. */
@@ -65,6 +106,7 @@ export const FURNITURE_GIDS = {
   CHAIR:          28,
   BARRELS_THREE:  55,
   DOORWAY:        26,   // doorway_open_top_transparent (passable)
+  STAIRS_UP:      50,   // stairs_up — passable level-transition tile; used as a map entrance
 } as const;
 
 /** Outdoor decoration overlays scattered by the biome-palette pass and the

@@ -10,10 +10,56 @@
  */
 import type { BiomePalette } from '../../../../shared/biomePalettes.js';
 import type { ComposedTilesetRef } from '../mapTypes.js';
-import { WATER_FIRSTGID } from '../mapTiles.js';
+import { WATER_FIRSTGID, CAVE_URBAN_FIRSTGID } from '../mapTiles.js';
 
-export const SCRIBBLE_TILESET: ComposedTilesetRef = { firstgid: 1, source: '../tilesets/scribble.tsj' };
-export const WATER_TILESET:    ComposedTilesetRef = { firstgid: WATER_FIRSTGID, source: '../tilesets/water.tsj' };
+export const SCRIBBLE_TILESET:    ComposedTilesetRef = { firstgid: 1, source: '../tilesets/scribble.tsj' };
+export const WATER_TILESET:       ComposedTilesetRef = { firstgid: WATER_FIRSTGID, source: '../tilesets/water.tsj' };
+export const CAVE_URBAN_TILESET:  ComposedTilesetRef = { firstgid: CAVE_URBAN_FIRSTGID, source: '../tilesets/cave_and_urban_floors.tsj' };
+
+/**
+ * The tilesets the AI map generator may draw from, paired with the tileset
+ * name used to key `GameDefs.tileLegendsByTileset`. Order is the firstgid
+ * order; `tilesetsForGids` and the global-GID legend builder both rely on it.
+ * Adding a tileset here is all it takes to offer it to the generator.
+ */
+export const AI_PALETTE_TILESETS: ReadonlyArray<{ name: string; ref: ComposedTilesetRef }> = [
+  { name: 'scribble',              ref: SCRIBBLE_TILESET },
+  { name: 'water',                 ref: WATER_TILESET },
+  { name: 'cave_and_urban_floors', ref: CAVE_URBAN_TILESET },
+];
+
+/**
+ * Name of the AI-palette tileset that owns a (flag-stripped) GID — the entry
+ * with the largest firstgid ≤ gid. This is exactly how SessionBuilder routes
+ * a GID back to its legend, so anything that wants its tiles to resolve at
+ * play time must agree with it. Returns undefined for gid ≤ 0.
+ */
+export function ownerTilesetName(rawGid: number): string | undefined {
+  const gid = rawGid & 0x1fffffff; // strip Tiled flip/rotation flags
+  if (gid <= 0) return undefined;
+  let owner: { name: string; ref: ComposedTilesetRef } | undefined;
+  for (const entry of AI_PALETTE_TILESETS) {
+    if (entry.ref.firstgid <= gid && (!owner || entry.ref.firstgid > owner.ref.firstgid)) owner = entry;
+  }
+  return owner?.name;
+}
+
+/**
+ * Given every GID a map references, return the tileset refs whose global-GID
+ * range owns at least one of them — the `tilesets[]` a generated map must
+ * declare so each GID resolves to the right tile.
+ */
+export function tilesetsForGids(gids: Iterable<number>): ComposedTilesetRef[] {
+  const usedNames = new Set<string>();
+  for (const raw of gids) {
+    const name = ownerTilesetName(raw);
+    if (name) usedNames.add(name);
+  }
+  return AI_PALETTE_TILESETS
+    .filter((e) => usedNames.has(e.name))
+    .map((e) => e.ref)
+    .sort((a, b) => a.firstgid - b.firstgid);
+}
 
 /** Mulberry32 — small deterministic 32-bit PRNG. Returns a [0, 1) float per call. */
 export function mulberry32(seed: number): () => number {

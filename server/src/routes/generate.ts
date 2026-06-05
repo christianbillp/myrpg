@@ -19,9 +19,10 @@ import type Anthropic from "@anthropic-ai/sdk";
 import { mkdir, writeFile, readFile, readdir, unlink } from "fs/promises";
 import { join } from "path";
 import { Logger } from "../Logger.js";
-import { composeMap, type Terrain, type Feature } from "../engine/MapComposer.js";
+import { composeMap, type Terrain, type Feature, type StructureSpec } from "../engine/MapComposer.js";
 import { writeMapJson, isGeneratedId } from "../engine/MapPersistence.js";
-import { generateEncounter, generateMap } from "../encounterGenerator.js";
+import { generateEncounter } from "../encounterGenerator.js";
+import { generateMapAgentic } from "../engine/maps/mapAgent.js";
 import { refineEncounter, type EncounterDraftForRefine } from "../encounterRefiner.js";
 import { refineAdventure, type AdventureDraftForRefine, type EncounterPoolEntry } from "../adventureRefiner.js";
 import { refineNpc, type NpcDraftForRefine } from "../npcRefiner.js";
@@ -264,14 +265,15 @@ export function registerGenerateRoutes(server: FastifyInstance, ctx: GenerateRou
    * preview to disk and assign it a stable id.
    */
   server.post<{
-    Body: { terrain: Terrain; features: Feature[]; width?: number; height?: number; seed?: number; buildingsCount?: number };
+    Body: { terrain: Terrain; features: Feature[]; width?: number; height?: number; seed?: number; structures?: StructureSpec[] };
   }>("/generate/map/composed", async (req, reply) => {
-    const { terrain, features, width = 30, height = 22, seed, buildingsCount } = req.body;
-    if (!terrain || (terrain !== 'grassland' && terrain !== 'forest' && terrain !== 'dungeon' && terrain !== 'tavern')) {
-      return reply.code(400).send({ error: "terrain must be 'grassland', 'forest', 'dungeon', or 'tavern'" });
+    const { terrain, features, width = 30, height = 22, seed, structures } = req.body;
+    const VALID_TERRAINS = ['grassland', 'forest', 'dungeon', 'tavern', 'cave', 'urban'];
+    if (!terrain || !VALID_TERRAINS.includes(terrain)) {
+      return reply.code(400).send({ error: `terrain must be one of ${VALID_TERRAINS.join(', ')}` });
     }
     try {
-      const composed = composeMap({ width, height, terrain, features: features ?? [], seed, buildingsCount });
+      const composed = composeMap({ width, height, terrain, features: features ?? [], seed, structures });
       return reply.send({
         mapId: null,
         width: composed.width,
@@ -427,6 +429,7 @@ export function registerGenerateRoutes(server: FastifyInstance, ctx: GenerateRou
       height?: number;
       seed?: number;
       buildingsCount?: number;
+      structures?: StructureSpec[];
       /** Player-facing card summary (writes to the encounter's `description`). */
       description?: string;
       /** Long-form AIGM scene context (writes to `customContext`). */
@@ -452,7 +455,7 @@ export function registerGenerateRoutes(server: FastifyInstance, ctx: GenerateRou
       triggers?: EditorComposedTrigger[];
     };
   }>("/generate/encounter/composed", async (req, reply) => {
-    const { existingMapId, terrain, features, width = 30, height = 22, seed, buildingsCount, description, aigmContext, startingZonesData, placementMode, placements, allyIds, enemyIds, neutralIds, customTitle, customIntroduction, customObjective, completionFlag, triggers: composedTriggers } = req.body;
+    const { existingMapId, terrain, features, width = 30, height = 22, seed, buildingsCount, structures, description, aigmContext, startingZonesData, placementMode, placements, allyIds, enemyIds, neutralIds, customTitle, customIntroduction, customObjective, completionFlag, triggers: composedTriggers } = req.body;
     const defs = getDefs();
     const hasEnemies = (enemyIds ?? []).length > 0;
     try {
@@ -482,7 +485,7 @@ export function registerGenerateRoutes(server: FastifyInstance, ctx: GenerateRou
         if (!terrain || (terrain !== 'grassland' && terrain !== 'forest')) {
           return reply.code(400).send({ error: "terrain must be 'grassland' or 'forest'" });
         }
-        const composed = composeMap({ width, height, terrain, features: features ?? [], seed, buildingsCount });
+        const composed = composeMap({ width, height, terrain, features: features ?? [], seed, buildingsCount, structures });
         const stamp = Date.now();
         slug = composed.name.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 32) || 'scene';
         mapId = `gen_${stamp}_${slug}`;
@@ -775,7 +778,9 @@ export function registerGenerateRoutes(server: FastifyInstance, ctx: GenerateRou
 
   /**
    * Generate just a map (no encounter wrapper) via Claude. Used by the
-   * GENERATE MAP ONLY iterate-and-preview flow on `GenerateSetupScene`.
+   * GENERATE MAP ONLY iterate-and-preview flow on the Map Editor's GENERATIVE
+   * AI tab. Drives the agentic builder (`generateMapAgentic`): the model directs
+   * the deterministic op toolbox via tool-use rather than emitting raw tiles.
    */
   server.post<{
     Body: { prompt: string };
@@ -785,7 +790,7 @@ export function registerGenerateRoutes(server: FastifyInstance, ctx: GenerateRou
       return reply.code(400).send({ error: "prompt must be at least 8 characters" });
     }
     try {
-      const result = await generateMap(anthropic, getDefs(), { prompt });
+      const result = await generateMapAgentic(anthropic, getDefs(), { prompt });
       await loadDefs();
       return reply.send(result);
     } catch (err) {

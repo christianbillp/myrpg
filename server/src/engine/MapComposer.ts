@@ -20,12 +20,14 @@
 import { composeOutdoor } from './maps/outdoor.js';
 import { composeDungeon } from './maps/dungeon.js';
 import { composeTavern  } from './maps/tavern.js';
+import { composeCave    } from './maps/cave.js';
+import { composeUrban   } from './maps/urban.js';
 import { makeZoneIdAlloc, mulberry32 } from './maps/shared.js';
 import type { ComposedMap, ComposeOptions } from './mapTypes.js';
 
 // Re-export the types so existing call sites that import from
 // `engine/MapComposer.js` keep working without rerouting.
-export type { Terrain, Feature, ComposeOptions, ComposedMap, MapAnchors, MapZone, ComposedTilesetRef } from './mapTypes.js';
+export type { Terrain, Feature, StructureSpec, ComposeOptions, ComposedMap, MapAnchors, MapZone, ComposedTilesetRef } from './mapTypes.js';
 export { WATER_FIRSTGID } from './mapTiles.js';
 
 export function composeMap(opts: ComposeOptions): ComposedMap {
@@ -37,16 +39,22 @@ export function composeMap(opts: ComposeOptions): ComposedMap {
   const allocZoneId = makeZoneIdAlloc(seed);
 
   if (terrain === 'dungeon') {
-    return composeDungeon({ width, height, features: opts.features, rng });
+    return composeDungeon({ width, height, features: opts.features, rng, allocZoneId });
   }
   if (terrain === 'tavern') {
     return composeTavern({ width, height, rng, allocZoneId });
+  }
+  if (terrain === 'cave') {
+    return composeCave({ width, height, seed, large: opts.features.includes('5-room'), stairs: opts.features.includes('stairs') });
+  }
+  if (terrain === 'urban') {
+    return composeUrban({ width, height, seed, buildingsCount: opts.buildingsCount });
   }
   return composeOutdoor({
     width, height,
     terrain,
     features: opts.features,
-    buildingsCount: opts.buildingsCount,
+    structures: opts.structures,
     rng,
     allocZoneId,
   });

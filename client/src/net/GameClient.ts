@@ -613,12 +613,12 @@ export class GameClient {
    * by the rule-based composer in `engine/MapComposer.ts`.
    */
   async composeMap(args: {
-    terrain: 'grassland' | 'forest' | 'dungeon' | 'tavern';
-    features: Array<'campsites' | 'coastline' | 'path' | 'intersection' | 'buildings' | '3-room' | '5-room'>;
+    terrain: 'grassland' | 'forest' | 'dungeon' | 'tavern' | 'cave' | 'urban';
+    features: Array<'campsites' | 'coastline' | 'path' | 'intersection' | '3-room' | '5-room' | 'stairs'>;
     seed?: number;
-    /** When `features` includes `'buildings'`, this controls the count
-     *  (1..5). Clamped server-side; defaults to 1 when omitted. */
-    buildingsCount?: number;
+    /** Outdoor structures (small buildings / ruins), each with a type and a
+     *  connected-room count (1..5). Used on grassland / forest terrain. */
+    structures?: Array<{ type: 'building' | 'ruin'; rooms: number }>;
   }): Promise<{
     /** Always null for /generate/map/composed — the preview is not persisted. Call `saveMap` to persist. */
     mapId: null;
@@ -701,9 +701,9 @@ export class GameClient {
    */
   async composeEncounter(args: {
     existingMapId?: string;
-    terrain?: 'grassland' | 'forest' | 'dungeon' | 'tavern';
-    features?: Array<'campsites' | 'coastline' | 'path' | 'intersection' | 'buildings' | '3-room' | '5-room'>;
-    buildingsCount?: number;
+    terrain?: 'grassland' | 'forest' | 'dungeon' | 'tavern' | 'cave' | 'urban';
+    features?: Array<'campsites' | 'coastline' | 'path' | 'intersection' | '3-room' | '5-room' | 'stairs'>;
+    structures?: Array<{ type: 'building' | 'ruin'; rooms: number }>;
     /** Long-form AIGM scene context (writes to the encounter's `customContext`). */
     aigmContext?: string;
     /** Player-facing card summary (writes to the encounter's `description`). */

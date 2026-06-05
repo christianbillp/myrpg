@@ -346,8 +346,14 @@ export class EmbeddedMapPreview {
   /** Re-render the current map without touching pan / zoom. Used by the Map
    *  Editor's EDIT tab after each paint click — `setData` would otherwise
    *  reset the viewport on every brush stroke. The caller is responsible for
-   *  having mutated the existing data reference before invoking. */
+   *  having mutated the existing data reference before invoking.
+   *
+   *  Refreshes the tileset routing first: a paint stroke can append a new
+   *  tileset to `data.tilesets` (the first time a tile from an as-yet-unused
+   *  sheet is painted), and without re-routing that GID would fall through to
+   *  the wrong sheet and render blank. */
   repaintInPlace(): void {
+    if (this.data) this.refreshTilesetRouting(this.data);
     this.renderGrid();
   }
 

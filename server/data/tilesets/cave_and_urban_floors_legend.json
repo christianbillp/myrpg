@@ -1,0 +1,563 @@
+{
+  "tileset": "cave_and_urban_floors",
+  "image": "cave_and_urban_floors.png",
+  "tile_size": 128,
+  "grid": {
+    "cols": 10,
+    "rows": 5
+  },
+  "id_formula": "local GID = row*10 + col + 1",
+  "notes": "AI-facing tile legend for the floor-only monochrome tileset. The sheet contains 50 floor tiles arranged as a 10-column × 5-row grid. Tile IDs correspond directly to GIDs assuming firstgid=1. GID = row*10 + col + 1. The sheet contains only ground tiles (no object overlays). Every tile is passable and does not block sight unless explicitly stated otherwise. The art style is hand-drawn black-and-white with true orthographic top-down projection and minimal shading. Maps should consist of a single tile layer using only the IDs listed below.",
+  "tiles": {
+    "1": {
+      "name": "cave_dust",
+      "blocksMovement": false,
+      "blocksSight": false,
+      "layer": "ground",
+      "description": "Flat cave floor with sparse dust speckles.",
+      "tags": [
+        "cave",
+        "floor",
+        "dirt"
+      ]
+    },
+    "2": {
+      "name": "cave_pebbles_sparse",
+      "blocksMovement": false,
+      "blocksSight": false,
+      "layer": "ground",
+      "description": "Light cave floor scattered with small pebbles.",
+      "tags": [
+        "cave",
+        "pebbles"
+      ]
+    },
+    "3": {
+      "name": "cave_rocky",
+      "blocksMovement": false,
+      "blocksSight": false,
+      "layer": "ground",
+      "description": "Uneven rocky cave floor.",
+      "tags": [
+        "cave",
+        "stone"
+      ]
+    },
+    "4": {
+      "name": "cave_gravel",
+      "blocksMovement": false,
+      "blocksSight": false,
+      "layer": "ground",
+      "description": "Coarse gravel floor.",
+      "tags": [
+        "cave",
+        "gravel"
+      ]
+    },
+    "5": {
+      "name": "cave_rippled",
+      "blocksMovement": false,
+      "blocksSight": false,
+      "layer": "ground",
+      "description": "Sediment floor with soft horizontal ridges.",
+      "tags": [
+        "cave",
+        "sand"
+      ]
+    },
+    "6": {
+      "name": "urban_plain",
+      "blocksMovement": false,
+      "blocksSight": false,
+      "layer": "ground",
+      "description": "Simple worn urban paving.",
+      "tags": [
+        "urban",
+        "stone"
+      ]
+    },
+    "7": {
+      "name": "urban_round_courtyard",
+      "blocksMovement": false,
+      "blocksSight": false,
+      "layer": "ground",
+      "description": "Circular plaza pattern.",
+      "tags": [
+        "urban",
+        "courtyard"
+      ]
+    },
+    "8": {
+      "name": "urban_cobbles",
+      "blocksMovement": false,
+      "blocksSight": false,
+      "layer": "ground",
+      "description": "Dense cobblestone paving.",
+      "tags": [
+        "urban",
+        "cobble"
+      ]
+    },
+    "9": {
+      "name": "urban_bricks",
+      "blocksMovement": false,
+      "blocksSight": false,
+      "layer": "ground",
+      "description": "Horizontal brick pavement.",
+      "tags": [
+        "urban",
+        "brick"
+      ]
+    },
+    "10": {
+      "name": "urban_bricks_clean",
+      "blocksMovement": false,
+      "blocksSight": false,
+      "layer": "ground",
+      "description": "Regular brick paving with minimal wear.",
+      "tags": [
+        "urban",
+        "brick",
+        "clean"
+      ]
+    },
+    "11": {
+      "name": "cave_rippled_alt",
+      "blocksMovement": false,
+      "blocksSight": false,
+      "layer": "ground",
+      "description": "Alternative sediment floor texture.",
+      "tags": [
+        "cave",
+        "sand"
+      ]
+    },
+    "12": {
+      "name": "cave_scattered_stones",
+      "blocksMovement": false,
+      "blocksSight": false,
+      "layer": "ground",
+      "description": "Dirt floor with scattered stones.",
+      "tags": [
+        "cave",
+        "rocks"
+      ]
+    },
+    "13": {
+      "name": "cave_pebbles_dense",
+      "blocksMovement": false,
+      "blocksSight": false,
+      "layer": "ground",
+      "description": "Dense pebble covering.",
+      "tags": [
+        "cave",
+        "pebbles"
+      ]
+    },
+    "14": {
+      "name": "cave_gravel_dense",
+      "blocksMovement": false,
+      "blocksSight": false,
+      "layer": "ground",
+      "description": "Heavy gravel texture.",
+      "tags": [
+        "cave",
+        "gravel"
+      ]
+    },
+    "15": {
+      "name": "cave_boulders_small",
+      "blocksMovement": false,
+      "blocksSight": false,
+      "layer": "ground",
+      "description": "Floor with several embedded stones.",
+      "tags": [
+        "cave",
+        "boulders"
+      ]
+    },
+    "16": {
+      "name": "urban_large_slabs",
+      "blocksMovement": false,
+      "blocksSight": false,
+      "layer": "ground",
+      "description": "Large square paving slabs.",
+      "tags": [
+        "urban",
+        "slab"
+      ]
+    },
+    "17": {
+      "name": "urban_corner_slabs",
+      "blocksMovement": false,
+      "blocksSight": false,
+      "layer": "ground",
+      "description": "Decorative slab arrangement.",
+      "tags": [
+        "urban",
+        "decorative"
+      ]
+    },
+    "18": {
+      "name": "urban_tiles_small",
+      "blocksMovement": false,
+      "blocksSight": false,
+      "layer": "ground",
+      "description": "Small tiled pavement.",
+      "tags": [
+        "urban",
+        "tile"
+      ]
+    },
+    "19": {
+      "name": "urban_tiles_grid",
+      "blocksMovement": false,
+      "blocksSight": false,
+      "layer": "ground",
+      "description": "Regular grid paving.",
+      "tags": [
+        "urban",
+        "grid"
+      ]
+    },
+    "20": {
+      "name": "urban_herringbone",
+      "blocksMovement": false,
+      "blocksSight": false,
+      "layer": "ground",
+      "description": "Herringbone brick pattern.",
+      "tags": [
+        "urban",
+        "herringbone"
+      ]
+    },
+    "21": {
+      "name": "cave_cracked",
+      "blocksMovement": false,
+      "blocksSight": false,
+      "layer": "ground",
+      "description": "Dry cracked cave earth.",
+      "tags": [
+        "cave",
+        "cracked"
+      ]
+    },
+    "22": {
+      "name": "cave_stones_few",
+      "blocksMovement": false,
+      "blocksSight": false,
+      "layer": "ground",
+      "description": "Mostly smooth cave floor with a few rocks.",
+      "tags": [
+        "cave"
+      ]
+    },
+    "23": {
+      "name": "cave_single_boulder",
+      "blocksMovement": false,
+      "blocksSight": false,
+      "layer": "ground",
+      "description": "Single embedded boulder.",
+      "tags": [
+        "cave",
+        "boulder"
+      ]
+    },
+    "24": {
+      "name": "cave_smooth",
+      "blocksMovement": false,
+      "blocksSight": false,
+      "layer": "ground",
+      "description": "Smooth worn cave floor.",
+      "tags": [
+        "cave",
+        "plain"
+      ]
+    },
+    "25": {
+      "name": "cave_smooth_pebbled",
+      "blocksMovement": false,
+      "blocksSight": false,
+      "layer": "ground",
+      "description": "Smooth cave floor with tiny inclusions.",
+      "tags": [
+        "cave"
+      ]
+    },
+    "26": {
+      "name": "urban_round_cobbles",
+      "blocksMovement": false,
+      "blocksSight": false,
+      "layer": "ground",
+      "description": "Rounded cobblestone arrangement.",
+      "tags": [
+        "urban",
+        "cobble"
+      ]
+    },
+    "27": {
+      "name": "urban_border_path",
+      "blocksMovement": false,
+      "blocksSight": false,
+      "layer": "ground",
+      "description": "Path with decorative side borders.",
+      "tags": [
+        "urban",
+        "path"
+      ]
+    },
+    "28": {
+      "name": "urban_central_plaza",
+      "blocksMovement": false,
+      "blocksSight": false,
+      "layer": "ground",
+      "description": "Large circular plaza centerpiece.",
+      "tags": [
+        "urban",
+        "plaza"
+      ]
+    },
+    "29": {
+      "name": "urban_irregular_slabs",
+      "blocksMovement": false,
+      "blocksSight": false,
+      "layer": "ground",
+      "description": "Irregular fitted paving stones.",
+      "tags": [
+        "urban",
+        "slab"
+      ]
+    },
+    "30": {
+      "name": "urban_marker_grid",
+      "blocksMovement": false,
+      "blocksSight": false,
+      "layer": "ground",
+      "description": "Square paving with small marker joints.",
+      "tags": [
+        "urban",
+        "grid"
+      ]
+    },
+    "31": {
+      "name": "cave_pool_1",
+      "blocksMovement": true,
+      "blocksSight": false,
+      "layer": "ground",
+      "description": "Small underground water pool.",
+      "tags": [
+        "cave",
+        "water"
+      ]
+    },
+    "32": {
+      "name": "cave_pool_2",
+      "blocksMovement": true,
+      "blocksSight": false,
+      "layer": "ground",
+      "description": "Alternative water pool texture.",
+      "tags": [
+        "cave",
+        "water"
+      ]
+    },
+    "33": {
+      "name": "cave_pool_3",
+      "blocksMovement": true,
+      "blocksSight": false,
+      "layer": "ground",
+      "description": "Rock-bordered underground water.",
+      "tags": [
+        "cave",
+        "water"
+      ]
+    },
+    "34": {
+      "name": "cave_pool_4",
+      "blocksMovement": true,
+      "blocksSight": false,
+      "layer": "ground",
+      "description": "Water pool with uneven border.",
+      "tags": [
+        "cave",
+        "water"
+      ]
+    },
+    "35": {
+      "name": "cave_pool_5",
+      "blocksMovement": true,
+      "blocksSight": false,
+      "layer": "ground",
+      "description": "Large underground pool.",
+      "tags": [
+        "cave",
+        "water"
+      ]
+    },
+    "36": {
+      "name": "urban_mosaic_small",
+      "blocksMovement": false,
+      "blocksSight": false,
+      "layer": "ground",
+      "description": "Fine mosaic paving.",
+      "tags": [
+        "urban",
+        "mosaic"
+      ]
+    },
+    "37": {
+      "name": "urban_square_tiles",
+      "blocksMovement": false,
+      "blocksSight": false,
+      "layer": "ground",
+      "description": "Regular square stone tiles.",
+      "tags": [
+        "urban",
+        "tile"
+      ]
+    },
+    "38": {
+      "name": "urban_large_blocks",
+      "blocksMovement": false,
+      "blocksSight": false,
+      "layer": "ground",
+      "description": "Large block paving.",
+      "tags": [
+        "urban",
+        "stone"
+      ]
+    },
+    "39": {
+      "name": "urban_octagon_pattern",
+      "blocksMovement": false,
+      "blocksSight": false,
+      "layer": "ground",
+      "description": "Octagonal courtyard design.",
+      "tags": [
+        "urban",
+        "courtyard"
+      ]
+    },
+    "40": {
+      "name": "urban_border_frame",
+      "blocksMovement": false,
+      "blocksSight": false,
+      "layer": "ground",
+      "description": "Stone frame border tile.",
+      "tags": [
+        "urban",
+        "frame"
+      ]
+    },
+    "41": {
+      "name": "chasm_small",
+      "blocksMovement": true,
+      "blocksSight": false,
+      "layer": "ground",
+      "description": "Dark bottomless pit.",
+      "tags": [
+        "cave",
+        "pit"
+      ]
+    },
+    "42": {
+      "name": "chasm_medium",
+      "blocksMovement": true,
+      "blocksSight": false,
+      "layer": "ground",
+      "description": "Medium pit opening.",
+      "tags": [
+        "cave",
+        "pit"
+      ]
+    },
+    "43": {
+      "name": "chasm_large",
+      "blocksMovement": true,
+      "blocksSight": false,
+      "layer": "ground",
+      "description": "Large jagged pit.",
+      "tags": [
+        "cave",
+        "pit"
+      ]
+    },
+    "44": {
+      "name": "cave_gravel_alt",
+      "blocksMovement": false,
+      "blocksSight": false,
+      "layer": "ground",
+      "description": "Alternative gravel floor.",
+      "tags": [
+        "cave",
+        "gravel"
+      ]
+    },
+    "45": {
+      "name": "blank",
+      "blocksMovement": false,
+      "blocksSight": false,
+      "layer": "ground",
+      "description": "Featureless filler tile.",
+      "tags": [
+        "blank",
+        "fill"
+      ]
+    },
+    "46": {
+      "name": "urban_herringbone_alt",
+      "blocksMovement": false,
+      "blocksSight": false,
+      "layer": "ground",
+      "description": "Alternative herringbone paving.",
+      "tags": [
+        "urban",
+        "herringbone"
+      ]
+    },
+    "47": {
+      "name": "urban_round_stones",
+      "blocksMovement": false,
+      "blocksSight": false,
+      "layer": "ground",
+      "description": "Circular stone arrangement.",
+      "tags": [
+        "urban",
+        "stone"
+      ]
+    },
+    "48": {
+      "name": "urban_square_grid",
+      "blocksMovement": false,
+      "blocksSight": false,
+      "layer": "ground",
+      "description": "Simple square grid pavement.",
+      "tags": [
+        "urban",
+        "grid"
+      ]
+    },
+    "49": {
+      "name": "urban_plain_alt",
+      "blocksMovement": false,
+      "blocksSight": false,
+      "layer": "ground",
+      "description": "Alternative plain paving.",
+      "tags": [
+        "urban",
+        "plain"
+      ]
+    },
+    "50": {
+      "name": "urban_border_frame_alt",
+      "blocksMovement": false,
+      "blocksSight": false,
+      "layer": "ground",
+      "description": "Alternative framed stone border.",
+      "tags": [
+        "urban",
+        "frame"
+      ]
+    }
+  }
+}

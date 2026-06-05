@@ -39,7 +39,7 @@ export interface ObjectEntry {
   clumpFactor?: number;
 }
 
-export type BiomeId = 'grassland' | 'forest' | 'dungeon';
+export type BiomeId = 'grassland' | 'forest' | 'dungeon' | 'cave' | 'urban';
 
 export interface BiomePalette {
   id: BiomeId;
@@ -56,6 +56,16 @@ const STONE_FLOOR_CRACKED = 71;
 
 const FLOWERS_TRANSPARENT = 96;
 const TREE_TRANSPARENT = 110;
+
+// Cave + urban floors live in the cave_and_urban_floors tileset (firstgid 300).
+// These are GLOBAL gids (firstgid already applied); the canvas derives the
+// tileset from the gids used, so a cave/urban fill auto-declares that tileset.
+const CAVE_DUST = 300;
+const CAVE_ROCKY = 302;
+const CAVE_GRAVEL = 303;
+const URBAN_COBBLES = 307;
+const URBAN_BRICKS = 308;
+const URBAN_SLABS = 315;
 
 export const BIOME_PALETTES: Record<BiomeId, BiomePalette> = {
   grassland: {
@@ -94,6 +104,30 @@ export const BIOME_PALETTES: Record<BiomeId, BiomePalette> = {
     // Decoration objects are placed by feature placers (campfires, furniture,
     // etc.) — not by the per-cell decoration pass, which would clutter
     // corridors.
+    objectPool: [],
+  },
+  cave: {
+    id: 'cave',
+    // Varied cavern floor — mostly dust with gravel + rocky patches so a
+    // hand-carved cave reads as natural rock rather than a flat fill.
+    groundPool: [
+      { gid: CAVE_DUST,   weight: 60 },
+      { gid: CAVE_GRAVEL, weight: 25 },
+      { gid: CAVE_ROCKY,  weight: 15 },
+    ],
+    // Cave decoration (pools, chasms) is placed deliberately as hazards, not
+    // scattered per-cell.
+    objectPool: [],
+  },
+  urban: {
+    id: 'urban',
+    // Varied paving — cobbles dominant with brick + slab patches for streets,
+    // courtyards, and plazas.
+    groundPool: [
+      { gid: URBAN_COBBLES, weight: 55 },
+      { gid: URBAN_BRICKS,  weight: 25 },
+      { gid: URBAN_SLABS,   weight: 20 },
+    ],
     objectPool: [],
   },
 };
