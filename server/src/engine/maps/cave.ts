@@ -26,16 +26,18 @@ export function composeCave(opts: ComposeCaveOpts): ComposedMap {
     return { x, y, w, h, cx: x + (w >> 1), cy: y + (h >> 1) };
   };
 
-  // Large central chamber, roughly centred and filling ~45% of each axis.
-  const cw = Math.max(6, Math.min(opts.width - 8, Math.floor(opts.width * (0.42 + c.rng() * 0.1))));
-  const ch = Math.max(5, Math.min(opts.height - 6, Math.floor(opts.height * (0.42 + c.rng() * 0.1))));
+  // Large central chamber, roughly centred and filling ~40% of each axis —
+  // sized to leave a generous border ring for the side chambers.
+  const cw = Math.max(6, Math.min(opts.width - 10, Math.floor(opts.width * (0.38 + c.rng() * 0.08))));
+  const ch = Math.max(5, Math.min(opts.height - 8, Math.floor(opts.height * (0.38 + c.rng() * 0.08))));
   const central = carveRoom(Math.floor((opts.width - cw) / 2), Math.floor((opts.height - ch) / 2), cw, ch);
   const rooms: CaveRoom[] = [central];
 
   // Small side chambers in the border ring, each tunnelled back to the centre.
-  const sideWant = opts.large ? 7 : 5;
+  // 3-room cave → 2 side chambers; 5-room → 4 (so the total reads as 3 / 5).
+  const sideWant = opts.large ? 4 : 2;
   let attempts = 0;
-  while (rooms.length < sideWant + 1 && attempts < 250) {
+  while (rooms.length < sideWant + 1 && attempts < 500) {
     attempts++;
     const w = 3 + Math.floor(c.rng() * 3);   // 3..5
     const h = 3 + Math.floor(c.rng() * 3);

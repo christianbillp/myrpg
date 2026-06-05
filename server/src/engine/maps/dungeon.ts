@@ -45,7 +45,7 @@ export function composeDungeon(opts: ComposeDungeonOpts): ComposedMap {
   const roomCount = features.includes('5-room') ? 5 : 3;
 
   const rooms: Array<{ x: number; y: number; w: number; h: number; cx: number; cy: number }> = [];
-  const maxAttempts = 80;
+  const maxAttempts = 250;
   while (rooms.length < roomCount) {
     let placed = false;
     for (let attempt = 0; attempt < maxAttempts && !placed; attempt++) {
@@ -67,13 +67,16 @@ export function composeDungeon(opts: ComposeDungeonOpts): ComposedMap {
     for (let dy = 0; dy < r.h; dy++) for (let dx = 0; dx < r.w; dx++) floor[r.y + dy][r.x + dx] = true;
   }
 
-  rooms.sort((a, b) => (a.cy + a.cx) - (b.cy + b.cx));
+  // Serial chain, south → north: the southernmost room is the entrance and the
+  // chain links consecutive rooms only, so there is a single path to the last
+  // (deepest) room — the "final room".
+  rooms.sort((a, b) => (b.cy - a.cy) || (a.cx - b.cx));
   for (let i = 1; i < rooms.length; i++) {
     carveCorridor(floor, rooms[i - 1].cx, rooms[i - 1].cy, rooms[i].cx, rooms[i].cy);
   }
 
-  let entryRoom = rooms[0];
-  for (const r of rooms) if (r.y + r.h > entryRoom.y + entryRoom.h) entryRoom = r;
+  const entryRoom = rooms[0];
+  const finalRoom = rooms.length > 1 ? rooms[rooms.length - 1] : undefined;
   if (entryRoom && !useStairs) {
     const entryX = entryRoom.x + Math.floor(entryRoom.w / 2);
     for (let r = entryRoom.y + entryRoom.h; r < H; r++) floor[r][entryX] = true;
@@ -119,28 +122,19 @@ export function composeDungeon(opts: ComposeDungeonOpts): ComposedMap {
 
   const anchors: MapAnchors = { rooms };
   const zones: MapZone[] = [];
-  // Identify the entrance + vault rooms so their zones can be named distinctly.
-  let vaultRoom = entryRoom;
-  if (entryRoom) {
-    anchors.entrance = { x: entryRoom.cx, y: entryRoom.cy };
-    let bestDist = -1;
-    for (const r of rooms) {
-      const d = Math.abs(r.cx - anchors.entrance.x) + Math.abs(r.cy - anchors.entrance.y);
-      if (d > bestDist) { bestDist = d; vaultRoom = r; }
-    }
-    if (vaultRoom !== entryRoom) anchors.vault = { x: vaultRoom.cx, y: vaultRoom.cy };
-  }
+  if (entryRoom) anchors.entrance = { x: entryRoom.cx, y: entryRoom.cy };
+  if (finalRoom) anchors.vault = { x: finalRoom.cx, y: finalRoom.cy };
 
-  // One author-time zone per room: the entrance and vault named distinctly, the
-  // rest "room <n>".
+  // One author-time zone per room along the chain: the first is the entrance,
+  // the last is the "final room", the rest are "room <n>".
   let roomN = 0;
   for (const r of rooms) {
     const cells: string[] = [];
     for (let yy = r.y; yy < r.y + r.h; yy++) for (let xx = r.x; xx < r.x + r.w; xx++) cells.push(`${xx},${yy}`);
     const isEntrance = r === entryRoom;
-    const isVault = r === vaultRoom && vaultRoom !== entryRoom;
-    const name = isEntrance ? 'entrance' : isVault ? 'vault' : `room ${++roomN}`;
-    const color = isEntrance ? '#88cc88' : isVault ? '#cc8866' : '#6688aa';
+    const isFinal = r === finalRoom;
+    const name = isEntrance ? 'entrance' : isFinal ? 'final room' : `room ${++roomN}`;
+    const color = isEntrance ? '#88cc88' : isFinal ? '#cc8866' : '#6688aa';
     zones.push({ id: allocZoneId(name.replace(' ', '_')), name, color, cells: cells.sort() });
   }
 
@@ -194,5 +188,5 @@ function dungeonDescription(roomCount: number, stairs: boolean): string {
   const entry = stairs
     ? 'A flight of stairs in the entry chamber descends from above.'
     : 'The entrance opens onto the southern edge of the map.';
-  return `A stone dungeon of ${roomCount} room${roomCount === 1 ? '' : 's'} linked by short corridors. ${entry}`;
+  return `A stone dungeon of ${roomCount} room${roomCount === 1 ? '' : 's'} strung along a single line of corridors, ending at the final room. ${entry}`;
 }

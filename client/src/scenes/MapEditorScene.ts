@@ -722,10 +722,12 @@ export class MapEditorScene extends Phaser.Scene {
       label: FEATURE_LABEL[f], variant: "secondary", fontSize: 10,
       onClick: () => {
         if (!this.featureChipEnabled(f)) return;
-        if (featureColumn(f) === "inside") {
-          const wasOn = this.selectedFeatures.has(f);
-          this.selectedFeatures.clear();
-          if (!wasOn) this.selectedFeatures.add(f);
+        if (f === "3-room" || f === "5-room") {
+          // Room count is a radio pair: selecting one clears the other (you can
+          // pick 3 OR 5 rooms, never both). STAIRS stays an independent toggle.
+          this.selectedFeatures.delete(f === "3-room" ? "5-room" : "3-room");
+          if (this.selectedFeatures.has(f)) this.selectedFeatures.delete(f);
+          else this.selectedFeatures.add(f);
         } else {
           if (this.selectedFeatures.has(f)) this.selectedFeatures.delete(f);
           else this.selectedFeatures.add(f);
