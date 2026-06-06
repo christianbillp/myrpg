@@ -7,6 +7,7 @@ import { MapEditorScene } from "./scenes/MapEditorScene";
 import { EncounterCreatorScene } from "./scenes/EncounterCreatorScene";
 import { AdventureCreatorScene } from "./scenes/AdventureCreatorScene";
 import { NpcCreatorScene } from "./scenes/NpcCreatorScene";
+import { CharacterCreatorScene } from "./scenes/CharacterCreatorScene";
 import { TokenCreatorScene } from "./scenes/TokenCreatorScene";
 import { TileCreatorScene } from "./scenes/TileCreatorScene";
 import { ConfigurationScene } from "./scenes/ConfigurationScene";
@@ -34,7 +35,7 @@ function startPhaser(): void {
       mode: Phaser.Scale.FIT,
       autoCenter: Phaser.Scale.CENTER_BOTH,
     },
-    scene: [BootScene, MainMenuScene, EncounterSetupScene, AdventureSetupScene, MapEditorScene, EncounterCreatorScene, AdventureCreatorScene, NpcCreatorScene, TokenCreatorScene, TileCreatorScene, ConfigurationScene, GameScene],
+    scene: [BootScene, MainMenuScene, EncounterSetupScene, AdventureSetupScene, MapEditorScene, EncounterCreatorScene, AdventureCreatorScene, NpcCreatorScene, CharacterCreatorScene, TokenCreatorScene, TileCreatorScene, ConfigurationScene, GameScene],
   };
   new Phaser.Game(config);
 }

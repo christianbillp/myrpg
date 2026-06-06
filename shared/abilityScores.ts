@@ -12,6 +12,7 @@
  * agree. The random roll itself lives server-side (it needs a dice source).
  */
 import type { AbilityKey } from "./types/classes.js";
+export type { AbilityKey };
 
 export const ABILITY_KEYS: readonly AbilityKey[] = ['str', 'dex', 'con', 'int', 'wis', 'cha'];
 

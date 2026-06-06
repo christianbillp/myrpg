@@ -1,0 +1,529 @@
+/**
+ * CharacterCreatorScene (US-122) — a multi-step character-creation flow.
+ *
+ * Steps: Concept (AI assist) → Origin (species/background/class) → Abilities
+ * (Standard Array / Point Buy / Roll) → Skills → Spells (casters) → Review.
+ * The AI-assist step calls `POST /generate/character`, which honours the active
+ * setting's lore, and pre-fills the form; the player can edit anything. CREATE
+ * posts the choices to `POST /characters`; on success the new character joins
+ * the roster and we return to the setup scene.
+ *
+ * Built as a single full-screen DOM panel (consistent with the overlay style)
+ * rather than the absolute-positioned creator-scene helpers — the content area
+ * re-renders per step. Defs are read from the Phaser registry (loaded at boot).
+ */
+import Phaser from "phaser";
+import { gameClient } from "../net/GameClient";
+import {
+  STANDARD_ARRAY, POINT_BUY_BUDGET, POINT_BUY_MIN, POINT_BUY_MAX,
+  pointBuyCost, pointBuyTotalCost, abilityModifier, ABILITY_KEYS,
+  type AbilityScores, type AbilityScoreMethod, type AbilityKey,
+} from "../../../shared/abilityScores";
+import type { ClassDef, SpeciesDef, BackgroundDef, SpellDef } from "../../../shared/types";
+
+const ACCENT = "#e2b96f";
+const ABILITY_LABEL: Record<AbilityKey, string> = {
+  str: "STR", dex: "DEX", con: "CON", int: "INT", wis: "WIS", cha: "CHA",
+};
+
+interface CreatorState {
+  step: number;
+  prompt: string;
+  rationale: string;
+  name: string;
+  shortDescription: string;
+  description: string;
+  speciesId: string;
+  backgroundId: string;
+  classId: string;
+  method: AbilityScoreMethod;
+  scores: AbilityScores;
+  /** Source values to assign (Standard Array / rolled set). */
+  pool: number[];
+  skillPicks: Set<string>;
+  cantripPicks: Set<string>;
+  spellPicks: Set<string>;
+  equipmentChoice: string;
+}
+
+const STEPS = ["Concept", "Origin", "Abilities", "Skills", "Spells", "Review"] as const;
+
+export class CharacterCreatorScene extends Phaser.Scene {
+  private root: HTMLDivElement | null = null;
+  private content: HTMLDivElement | null = null;
+  private statusEl: HTMLDivElement | null = null;
+  private classes: ClassDef[] = [];
+  private species: SpeciesDef[] = [];
+  private backgrounds: BackgroundDef[] = [];
+  private spells: SpellDef[] = [];
+  private busy = false;
+
+  private state: CreatorState = {
+    step: 0, prompt: "", rationale: "", name: "", shortDescription: "", description: "",
+    speciesId: "", backgroundId: "", classId: "",
+    method: "standard-array",
+    scores: { str: 10, dex: 10, con: 10, int: 10, wis: 10, cha: 10 },
+    pool: [...STANDARD_ARRAY],
+    skillPicks: new Set(), cantripPicks: new Set(), spellPicks: new Set(),
+    equipmentChoice: "A",
+  };
+
+  constructor() { super("CharacterCreatorScene"); }
+
+  create(): void {
+    this.input.keyboard?.disableGlobalCapture();
+    this.input.keyboard?.clearCaptures();
+    this.classes = (this.registry.get("classes") as ClassDef[]) ?? [];
+    this.species = (this.registry.get("species") as SpeciesDef[]) ?? [];
+    this.backgrounds = (this.registry.get("backgrounds") as BackgroundDef[]) ?? [];
+    this.spells = (this.registry.get("spells") as SpellDef[]) ?? [];
+    // Sensible defaults so a player can click straight through manually.
+    this.state.speciesId ||= this.species[0]?.id ?? "";
+    this.state.backgroundId ||= this.backgrounds[0]?.id ?? "";
+    this.state.classId ||= this.classes[0]?.id ?? "";
+
+    this.buildShell();
+    this.renderStep();
+
+    this.events.once("shutdown", () => this.teardown());
+    this.events.once("destroy", () => this.teardown());
+  }
+
+  private teardown(): void {
+    this.root?.remove();
+    this.root = null;
+  }
+
+  // ── Shell ───────────────────────────────────────────────────────────────
+  private buildShell(): void {
+    const root = document.createElement("div");
+    root.style.cssText = `
+      position:fixed; inset:0; z-index:50; background:#0d0d1e; color:#c8dae8;
+      font-family:monospace; display:flex; flex-direction:column; padding:24px 32px; box-sizing:border-box; overflow:auto;`;
+    root.innerHTML = `
+      <div style="font-size:22px;color:${ACCENT};letter-spacing:1px;text-align:center;">CREATE A CHARACTER</div>
+      <div style="height:1px;background:#334455;margin:12px 0;"></div>
+      <div data-rail style="display:flex;gap:8px;justify-content:center;font-size:11px;margin-bottom:14px;"></div>
+      <div data-content style="flex:1;max-width:900px;width:100%;margin:0 auto;"></div>
+      <div data-status style="font-size:11px;color:#aa8855;text-align:center;min-height:16px;margin:8px 0;"></div>
+      <div data-bar style="display:flex;gap:10px;justify-content:center;padding-top:8px;"></div>`;
+    document.body.appendChild(root);
+    this.root = root;
+    this.content = root.querySelector("[data-content]");
+    this.statusEl = root.querySelector("[data-status]");
+  }
+
+  private isCaster(): boolean {
+    return !!this.classOf(this.state.classId)?.spellcasting;
+  }
+  private visibleSteps(): number[] {
+    // Hide the Spells step for non-casters.
+    return STEPS.map((_, i) => i).filter((i) => i !== 4 || this.isCaster());
+  }
+  private classOf(id: string) { return this.classes.find((c) => c.id === id); }
+
+  private setStatus(msg: string, error = false): void {
+    if (this.statusEl) { this.statusEl.textContent = msg; this.statusEl.style.color = error ? "#e89090" : "#aa8855"; }
+  }
+
+  private renderStep(): void {
+    if (!this.content || !this.root) return;
+    // Step rail.
+    const rail = this.root.querySelector("[data-rail]") as HTMLDivElement;
+    rail.innerHTML = "";
+    for (const i of this.visibleSteps()) {
+      const chip = document.createElement("span");
+      chip.textContent = STEPS[i];
+      const active = i === this.state.step;
+      chip.style.cssText = `padding:3px 8px;border:1px solid ${active ? ACCENT : "#334455"};color:${active ? ACCENT : "#667788"};`;
+      rail.appendChild(chip);
+    }
+    this.content.innerHTML = "";
+    switch (this.state.step) {
+      case 0: this.renderConcept(); break;
+      case 1: this.renderOrigin(); break;
+      case 2: this.renderAbilities(); break;
+      case 3: this.renderSkills(); break;
+      case 4: this.renderSpells(); break;
+      case 5: this.renderReview(); break;
+    }
+    this.renderBar();
+  }
+
+  // ── Step 0 — Concept / AI assist ─────────────────────────────────────────
+  private renderConcept(): void {
+    const c = this.content!;
+    const help = document.createElement("div");
+    help.style.cssText = "font-size:12px;color:#88aacc;line-height:1.6;margin-bottom:10px;";
+    help.textContent = "Describe the character you have in mind. The GM's AI will suggest a setting-consistent species, background, class, name, and backstory — which you can then edit. Or skip this and build manually.";
+    c.appendChild(help);
+
+    const ta = document.createElement("textarea");
+    ta.value = this.state.prompt;
+    ta.placeholder = "e.g. A disgraced temple guard seeking redemption on the frontier…";
+    ta.style.cssText = "width:100%;height:90px;background:#11111e;border:1px solid #334455;color:#c8dae8;font-family:monospace;font-size:12px;padding:8px;box-sizing:border-box;";
+    ta.addEventListener("input", () => { this.state.prompt = ta.value; });
+    c.appendChild(ta);
+
+    const genBtn = this.button("✦ ASK THE AI", "#2a3a5a", async () => {
+      if (this.state.prompt.trim().length < 4) { this.setStatus("Write a short concept first.", true); return; }
+      await this.runAiAssist();
+    });
+    genBtn.style.marginTop = "10px";
+    c.appendChild(genBtn);
+
+    if (this.state.rationale) {
+      const r = document.createElement("div");
+      r.style.cssText = "margin-top:12px;padding:10px;border:1px solid #3a4a3a;background:#14201a;font-size:11px;color:#a8ccb0;line-height:1.5;";
+      r.textContent = `AI: ${this.state.rationale}`;
+      c.appendChild(r);
+    }
+  }
+
+  private async runAiAssist(): Promise<void> {
+    this.busy = true; this.setStatus("Consulting the GM…");
+    try {
+      const s = await gameClient.suggestCharacter({ prompt: this.state.prompt });
+      this.state.name = s.name;
+      this.state.shortDescription = s.shortDescription;
+      this.state.description = s.description;
+      if (this.classes.some((x) => x.id === s.classId)) this.state.classId = s.classId;
+      if (this.species.some((x) => x.id === s.speciesId)) this.state.speciesId = s.speciesId;
+      if (this.backgrounds.some((x) => x.id === s.backgroundId)) this.state.backgroundId = s.backgroundId;
+      this.state.rationale = s.rationale;
+      // Auto-assign the Standard Array along the AI's ability priority.
+      this.state.method = "standard-array";
+      this.state.pool = [...STANDARD_ARRAY];
+      const priority = (s.abilityPriority as AbilityKey[]).filter((k) => ABILITY_KEYS.includes(k));
+      const next: AbilityScores = { str: 8, dex: 8, con: 8, int: 8, wis: 8, cha: 8 };
+      priority.forEach((k, i) => { next[k] = STANDARD_ARRAY[i] ?? 8; });
+      this.state.scores = next;
+      this.setStatus("Suggestion applied — review the steps and adjust as you like.");
+      this.renderStep();
+    } catch (e) {
+      this.setStatus(e instanceof Error ? e.message : "AI assist failed.", true);
+    } finally {
+      this.busy = false;
+    }
+  }
+
+  // ── Step 1 — Origin ──────────────────────────────────────────────────────
+  private renderOrigin(): void {
+    const c = this.content!;
+    c.appendChild(this.selectRow("Species", this.species.map((s) => ({ value: s.id, label: s.name })), this.state.speciesId, (v) => { this.state.speciesId = v; }));
+    c.appendChild(this.selectRow("Background", this.backgrounds.map((b) => ({ value: b.id, label: b.name })), this.state.backgroundId, (v) => { this.state.backgroundId = v; }));
+    c.appendChild(this.selectRow("Class", this.classes.map((cl) => ({ value: cl.id, label: cl.name })), this.state.classId, (v) => {
+      this.state.classId = v;
+      this.state.skillPicks = new Set();
+      this.state.cantripPicks = new Set();
+      this.state.spellPicks = new Set();
+      this.renderStep();  // class change alters later steps
+    }));
+    const bg = this.backgrounds.find((b) => b.id === this.state.backgroundId);
+    if (bg) {
+      const note = document.createElement("div");
+      note.style.cssText = "font-size:11px;color:#88aacc;margin-top:10px;line-height:1.5;";
+      note.textContent = `${bg.name} grants skills: ${bg.skillProficiencies.join(", ")} · ability bonus among ${bg.abilityScores.map((a) => a.toUpperCase()).join("/")} (applied as +2/+1).`;
+      c.appendChild(note);
+    }
+  }
+
+  // ── Step 2 — Abilities ───────────────────────────────────────────────────
+  private renderAbilities(): void {
+    const c = this.content!;
+    const methods: AbilityScoreMethod[] = ["standard-array", "point-buy", "roll"];
+    const toggle = document.createElement("div");
+    toggle.style.cssText = "display:flex;gap:8px;margin-bottom:12px;";
+    for (const m of methods) {
+      toggle.appendChild(this.button(m.replace("-", " ").toUpperCase(), this.state.method === m ? "#3a2a1a" : "#1a1a2a", () => {
+        this.state.method = m;
+        if (m === "standard-array") this.state.pool = [...STANDARD_ARRAY];
+        if (m === "roll") this.state.pool = rollSet();
+        if (m === "point-buy") this.state.scores = { str: 8, dex: 8, con: 8, int: 8, wis: 8, cha: 8 };
+        this.renderStep();
+      }));
+    }
+    c.appendChild(toggle);
+
+    if (this.state.method === "point-buy") {
+      const total = pointBuyTotalCost(this.state.scores);
+      const remaining = POINT_BUY_BUDGET - total;
+      const budget = document.createElement("div");
+      budget.style.cssText = `font-size:12px;margin-bottom:8px;color:${remaining < 0 ? "#e89090" : ACCENT};`;
+      budget.textContent = `Points remaining: ${remaining} / ${POINT_BUY_BUDGET}`;
+      c.appendChild(budget);
+      for (const k of ABILITY_KEYS) c.appendChild(this.pointBuyRow(k));
+    } else {
+      // Assignment of the pool values via per-ability dropdowns.
+      const poolNote = document.createElement("div");
+      poolNote.style.cssText = "font-size:11px;color:#88aacc;margin-bottom:8px;";
+      poolNote.textContent = `Assign these values: ${[...this.state.pool].sort((a, b) => b - a).join(", ")}`;
+      c.appendChild(poolNote);
+      if (this.state.method === "roll") {
+        c.appendChild(this.button("⟳ REROLL", "#1a1a2a", () => { this.state.pool = rollSet(); this.renderStep(); }));
+      }
+      for (const k of ABILITY_KEYS) c.appendChild(this.assignRow(k));
+    }
+  }
+
+  private pointBuyRow(k: AbilityKey): HTMLElement {
+    const row = document.createElement("div");
+    row.style.cssText = "display:flex;align-items:center;gap:10px;margin:4px 0;font-size:12px;";
+    const score = this.state.scores[k];
+    row.innerHTML = `<span style="width:40px;color:${ACCENT};">${ABILITY_LABEL[k]}</span>`;
+    const dec = this.miniBtn("−", () => { if (score > POINT_BUY_MIN) { this.state.scores[k]--; this.renderStep(); } });
+    const val = document.createElement("span");
+    val.textContent = String(score);
+    val.style.cssText = "width:24px;text-align:center;";
+    const inc = this.miniBtn("+", () => {
+      if (score < POINT_BUY_MAX && pointBuyTotalCost({ ...this.state.scores, [k]: score + 1 }) <= POINT_BUY_BUDGET) {
+        this.state.scores[k]++; this.renderStep();
+      }
+    });
+    const mod = document.createElement("span");
+    mod.style.cssText = "color:#88aacc;margin-left:8px;";
+    mod.textContent = `(cost ${pointBuyCost(score)}) → ${fmtMod(abilityModifier(score))}`;
+    row.appendChild(dec); row.appendChild(val); row.appendChild(inc); row.appendChild(mod);
+    return row;
+  }
+
+  private assignRow(k: AbilityKey): HTMLElement {
+    const row = document.createElement("div");
+    row.style.cssText = "display:flex;align-items:center;gap:10px;margin:4px 0;font-size:12px;";
+    row.innerHTML = `<span style="width:40px;color:${ACCENT};">${ABILITY_LABEL[k]}</span>`;
+    const sel = document.createElement("select");
+    sel.style.cssText = "background:#11111e;border:1px solid #334455;color:#c8dae8;font-family:monospace;padding:3px;";
+    const uniqueVals = Array.from(new Set(this.state.pool)).sort((a, b) => b - a);
+    for (const v of uniqueVals) {
+      const opt = document.createElement("option");
+      opt.value = String(v); opt.textContent = String(v);
+      if (this.state.scores[k] === v) opt.selected = true;
+      sel.appendChild(opt);
+    }
+    sel.addEventListener("change", () => { this.state.scores[k] = Number(sel.value); this.renderStep(); });
+    const mod = document.createElement("span");
+    mod.style.cssText = "color:#88aacc;";
+    mod.textContent = fmtMod(abilityModifier(this.state.scores[k]));
+    row.appendChild(sel); row.appendChild(mod);
+    return row;
+  }
+
+  // ── Step 3 — Skills ──────────────────────────────────────────────────────
+  private renderSkills(): void {
+    const c = this.content!;
+    const cls = this.classOf(this.state.classId);
+    if (!cls) return;
+    const count = cls.skillChoices.count;
+    const head = document.createElement("div");
+    head.style.cssText = "font-size:12px;color:#88aacc;margin-bottom:8px;";
+    head.textContent = `Choose ${count} ${cls.name} skill proficiencies (${this.state.skillPicks.size}/${count}):`;
+    c.appendChild(head);
+    for (const sk of cls.skillChoices.options) {
+      c.appendChild(this.checkRow(sk, this.state.skillPicks.has(sk), (on) => {
+        if (on) {
+          if (this.state.skillPicks.size >= count) return false;
+          this.state.skillPicks.add(sk);
+        } else this.state.skillPicks.delete(sk);
+        head.textContent = `Choose ${count} ${cls.name} skill proficiencies (${this.state.skillPicks.size}/${count}):`;
+        return true;
+      }));
+    }
+  }
+
+  // ── Step 4 — Spells (casters) ────────────────────────────────────────────
+  private renderSpells(): void {
+    const c = this.content!;
+    const cls = this.classOf(this.state.classId);
+    const sc = cls?.spellcasting;
+    if (!cls || !sc) { c.textContent = "This class has no spells to prepare."; return; }
+    const cantripCount = sc.cantripsKnownByLevel?.[0] ?? 0;
+    const prepCount = sc.preparedSpellsByLevel?.[0] ?? 0;
+    const classCantrips = this.spells.filter((s) => s.level === 0 && s.classes.includes(cls.id));
+    const classL1 = this.spells.filter((s) => s.level === 1 && s.classes.includes(cls.id));
+
+    const ch = document.createElement("div");
+    ch.style.cssText = "font-size:12px;color:" + ACCENT + ";margin:6px 0;";
+    ch.textContent = `Cantrips (${this.state.cantripPicks.size}/${cantripCount}):`;
+    c.appendChild(ch);
+    for (const sp of classCantrips) {
+      c.appendChild(this.checkRow(sp.name, this.state.cantripPicks.has(sp.id), (on) => {
+        if (on) { if (this.state.cantripPicks.size >= cantripCount) return false; this.state.cantripPicks.add(sp.id); }
+        else this.state.cantripPicks.delete(sp.id);
+        ch.textContent = `Cantrips (${this.state.cantripPicks.size}/${cantripCount}):`;
+        return true;
+      }));
+    }
+    const ph = document.createElement("div");
+    ph.style.cssText = "font-size:12px;color:" + ACCENT + ";margin:10px 0 6px;";
+    ph.textContent = `Level-1 spells (${this.state.spellPicks.size}/${prepCount}):`;
+    c.appendChild(ph);
+    for (const sp of classL1) {
+      c.appendChild(this.checkRow(sp.name, this.state.spellPicks.has(sp.id), (on) => {
+        if (on) { if (this.state.spellPicks.size >= prepCount) return false; this.state.spellPicks.add(sp.id); }
+        else this.state.spellPicks.delete(sp.id);
+        ph.textContent = `Level-1 spells (${this.state.spellPicks.size}/${prepCount}):`;
+        return true;
+      }));
+    }
+  }
+
+  // ── Step 5 — Review + Create ─────────────────────────────────────────────
+  private renderReview(): void {
+    const c = this.content!;
+    c.appendChild(this.inputRow("Name", this.state.name, (v) => { this.state.name = v; }));
+    c.appendChild(this.inputRow("Tagline", this.state.shortDescription, (v) => { this.state.shortDescription = v; }));
+    const descLabel = document.createElement("div");
+    descLabel.style.cssText = "font-size:11px;color:#88aacc;margin:8px 0 2px;";
+    descLabel.textContent = "Backstory";
+    c.appendChild(descLabel);
+    const ta = document.createElement("textarea");
+    ta.value = this.state.description;
+    ta.style.cssText = "width:100%;height:70px;background:#11111e;border:1px solid #334455;color:#c8dae8;font-family:monospace;font-size:11px;padding:6px;box-sizing:border-box;";
+    ta.addEventListener("input", () => { this.state.description = ta.value; });
+    c.appendChild(ta);
+
+    const bg = this.backgrounds.find((b) => b.id === this.state.backgroundId);
+    if (bg && bg.equipmentOptions.length > 1) {
+      const eqRow = document.createElement("div");
+      eqRow.style.cssText = "display:flex;gap:8px;margin-top:10px;align-items:center;font-size:12px;";
+      eqRow.innerHTML = `<span style="color:#88aacc;">Starting gear:</span>`;
+      for (const opt of bg.equipmentOptions) {
+        eqRow.appendChild(this.button(`${opt.label} (${opt.gold} gp)`, this.state.equipmentChoice === opt.label ? "#3a2a1a" : "#1a1a2a", () => {
+          this.state.equipmentChoice = opt.label; this.renderStep();
+        }));
+      }
+      c.appendChild(eqRow);
+    }
+
+    const summary = document.createElement("div");
+    summary.style.cssText = "margin-top:14px;font-size:11px;color:#a8b8c8;line-height:1.7;border-top:1px solid #334455;padding-top:10px;";
+    const cls = this.classOf(this.state.classId);
+    summary.innerHTML =
+      `<b style="color:${ACCENT};">${this.species.find((s) => s.id === this.state.speciesId)?.name ?? "?"} ${cls?.name ?? "?"}</b> · ${bg?.name ?? "?"}<br/>` +
+      ABILITY_KEYS.map((k) => `${ABILITY_LABEL[k]} ${this.state.scores[k]} (${fmtMod(abilityModifier(this.state.scores[k]))})`).join(" · ");
+    c.appendChild(summary);
+  }
+
+  private async submit(): Promise<void> {
+    this.busy = true; this.setStatus("Creating…");
+    try {
+      const cls = this.classOf(this.state.classId);
+      const bg = this.backgrounds.find((b) => b.id === this.state.backgroundId);
+      // SRD background ability increase: +2 to the first of its abilities the
+      // player rated highest, +1 to the next — we infer it from the assigned
+      // scores so the increase reinforces their intent. (The UI applies the
+      // bump server-side; here we send the +2/+1 picks.)
+      const ordered = [...(bg?.abilityScores ?? [])].sort((a, b) => this.state.scores[b as AbilityKey] - this.state.scores[a as AbilityKey]) as AbilityKey[];
+      const backgroundAbility = ordered.length >= 2
+        ? { kind: "two-one" as const, plusTwo: ordered[0], plusOne: ordered[1] }
+        : { kind: "one-one-one" as const };
+
+      const choices = {
+        name: this.state.name,
+        speciesId: this.state.speciesId,
+        backgroundId: this.state.backgroundId,
+        classId: this.state.classId,
+        abilityMethod: this.state.method,
+        baseAbilityScores: this.state.scores,
+        backgroundAbility,
+        skillProficiencies: [...this.state.skillPicks],
+        equipmentChoice: this.state.equipmentChoice,
+        cantripIds: cls?.spellcasting ? [...this.state.cantripPicks] : undefined,
+        preparedSpellIds: cls?.spellcasting ? [...this.state.spellPicks] : undefined,
+        shortDescription: this.state.shortDescription,
+        description: this.state.description,
+      };
+      await gameClient.createCharacter(choices);
+      // Refresh the roster so the new character appears in the carousel.
+      const chars = await gameClient.fetchCharacters();
+      this.registry.set("characters", chars);
+      this.scene.start("EncounterSetupScene");
+    } catch (e) {
+      this.setStatus(e instanceof Error ? e.message : "Create failed.", true);
+      this.busy = false;
+    }
+  }
+
+  // ── Bottom bar ───────────────────────────────────────────────────────────
+  private renderBar(): void {
+    const bar = this.root!.querySelector("[data-bar]") as HTMLDivElement;
+    bar.innerHTML = "";
+    bar.appendChild(this.button("CANCEL", "#2a1a1a", () => this.scene.start("EncounterSetupScene")));
+    const steps = this.visibleSteps();
+    const pos = steps.indexOf(this.state.step);
+    if (pos > 0) bar.appendChild(this.button("‹ BACK", "#1a1a2a", () => { this.state.step = steps[pos - 1]; this.renderStep(); }));
+    if (pos < steps.length - 1) {
+      bar.appendChild(this.button("NEXT ›", "#1a3a2a", () => { this.state.step = steps[pos + 1]; this.renderStep(); }));
+    } else {
+      bar.appendChild(this.button("✓ CREATE", "#1a4a2a", () => { if (!this.busy) void this.submit(); }));
+    }
+  }
+
+  // ── DOM helpers ──────────────────────────────────────────────────────────
+  private button(label: string, bg: string, onClick: () => void): HTMLButtonElement {
+    const b = document.createElement("button");
+    b.textContent = label;
+    b.style.cssText = `background:${bg};border:1px solid #445566;color:#c8dae8;font-family:monospace;font-size:12px;padding:8px 14px;cursor:pointer;`;
+    b.addEventListener("click", onClick);
+    return b;
+  }
+  private miniBtn(label: string, onClick: () => void): HTMLButtonElement {
+    const b = this.button(label, "#1a1a2a", onClick);
+    b.style.padding = "2px 8px";
+    return b;
+  }
+  private selectRow(label: string, opts: Array<{ value: string; label: string }>, value: string, onChange: (v: string) => void): HTMLElement {
+    const row = document.createElement("div");
+    row.style.cssText = "display:flex;align-items:center;gap:10px;margin:6px 0;font-size:12px;";
+    row.innerHTML = `<span style="width:100px;color:${ACCENT};">${label}</span>`;
+    const sel = document.createElement("select");
+    sel.style.cssText = "flex:1;background:#11111e;border:1px solid #334455;color:#c8dae8;font-family:monospace;padding:5px;";
+    for (const o of opts) {
+      const opt = document.createElement("option");
+      opt.value = o.value; opt.textContent = o.label;
+      if (o.value === value) opt.selected = true;
+      sel.appendChild(opt);
+    }
+    sel.addEventListener("change", () => onChange(sel.value));
+    row.appendChild(sel);
+    return row;
+  }
+  private inputRow(label: string, value: string, onInput: (v: string) => void): HTMLElement {
+    const row = document.createElement("div");
+    row.style.cssText = "display:flex;align-items:center;gap:10px;margin:6px 0;font-size:12px;";
+    row.innerHTML = `<span style="width:100px;color:${ACCENT};">${label}</span>`;
+    const inp = document.createElement("input");
+    inp.value = value;
+    inp.style.cssText = "flex:1;background:#11111e;border:1px solid #334455;color:#c8dae8;font-family:monospace;padding:5px;";
+    inp.addEventListener("input", () => onInput(inp.value));
+    row.appendChild(inp);
+    return row;
+  }
+  private checkRow(label: string, checked: boolean, onToggle: (on: boolean) => boolean | void): HTMLElement {
+    const row = document.createElement("label");
+    row.style.cssText = "display:flex;align-items:center;gap:8px;margin:3px 0;font-size:12px;cursor:pointer;";
+    const box = document.createElement("input");
+    box.type = "checkbox"; box.checked = checked;
+    box.addEventListener("change", () => {
+      const res = onToggle(box.checked);
+      if (res === false) box.checked = false;  // pick rejected (limit reached)
+    });
+    const span = document.createElement("span");
+    span.textContent = label;
+    row.appendChild(box); row.appendChild(span);
+    return row;
+  }
+}
+
+function fmtMod(m: number): string { return m >= 0 ? `+${m}` : String(m); }
+
+/** Client-side 4d6-drop-lowest set (the 'roll' method isn't strictly validated
+ *  server-side, which accepts any 3..18 assignment). */
+function rollSet(): number[] {
+  const one = () => {
+    const r = [d6(), d6(), d6(), d6()].sort((a, b) => a - b);
+    return r[1] + r[2] + r[3];
+  };
+  return Array.from({ length: 6 }, one);
+}
+function d6(): number { return 1 + Math.floor(Math.random() * 6); }

@@ -327,6 +327,49 @@ export class GameClient {
     }
   }
 
+  /** Character creation (US-122): build + persist a new character from choices.
+   *  Returns the created PlayerDef, or throws with the server's error message. */
+  async createCharacter(choices: unknown): Promise<PlayerDef> {
+    const res = await fetch(`${API_URL}/characters`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(choices),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({})) as { error?: string };
+      throw new Error(err.error ?? `Failed to create character: ${res.status}`);
+    }
+    const { playerDef } = await res.json() as { playerDef: PlayerDef };
+    return playerDef;
+  }
+
+  /** AI character-concept assist (US-122): suggest a setting-consistent
+   *  character from a free-text concept + any locked species/background/class. */
+  async suggestCharacter(req: { prompt: string; classId?: string; speciesId?: string; backgroundId?: string }): Promise<{
+    name: string; shortDescription: string; description: string;
+    speciesId: string; backgroundId: string; classId: string;
+    abilityPriority: string[]; rationale: string;
+  }> {
+    const res = await fetch(`${API_URL}/generate/character`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(req),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({})) as { error?: string };
+      throw new Error(err.error ?? `AI assist failed: ${res.status}`);
+    }
+    return await res.json();
+  }
+
+  /** Re-fetch the character roster (after creating one) so the setup scene can
+   *  refresh its carousel. */
+  async fetchCharacters(): Promise<PlayerDef[]> {
+    const res = await fetch(`${API_URL}/characters`);
+    if (!res.ok) throw new Error(`Failed to fetch characters: ${res.status}`);
+    return await res.json() as PlayerDef[];
+  }
+
   async createSession(req: CreateSessionRequest): Promise<{ state: GameState; playerDef: PlayerDef }> {
     // Auto-attach the current Dev Mode toggles so every session-create call
     // site picks them up without having to thread DevMode through manually.

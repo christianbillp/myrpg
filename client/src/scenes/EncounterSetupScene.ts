@@ -260,6 +260,18 @@ export class EncounterSetupScene extends Phaser.Scene {
       onChange: (def) => this.selectChar(def),
     });
 
+    // Character creation (US-122) — launch the multi-step creator. On return,
+    // the creator re-fetches the roster into the registry and restarts this
+    // scene, so a freshly-created character shows up in the carousel.
+    this.htmlButtons.push(createHtmlButton({
+      scene: this, sceneWidth: W,
+      x: CHAR_COL_X + CHAR_COL_W / 2 - 90, y: CAROUSEL_Y + CAROUSEL_H + 12, w: 180, h: 30,
+      label: "+ CREATE CHARACTER",
+      variant: "primary",
+      fontSize: 12,
+      onClick: () => this.scene.start("CharacterCreatorScene"),
+    }));
+
     // Encounters are grouped into sections — GENERATED first, then one per
     // adventure, then OTHER (authored encounters in no adventure). Within each
     // section the cards fill a 2-column grid; surplus content scrolls into view
