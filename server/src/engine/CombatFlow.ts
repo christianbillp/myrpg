@@ -6,6 +6,7 @@ import { isIncapacitated, hasSpeedZero, proneStandCost, speedAfterExhaustion, TU
 import { Logger } from '../Logger.js';
 import { applyEquipment } from './EquipmentSystem.js';
 import { playerArmorSpeedPenaltyFt } from './ActionGuards.js';
+import { applyStormsThunder } from './GiantGifts.js';
 import { runFlamingSphereEndOfTurnSaves } from './SummonSystem.js';
 import { runPerceptionSweep } from './Vision.js';
 import { mod, d20 as d20Local } from './Dice.js';
@@ -539,6 +540,9 @@ export function applyEnemyHitToPlayer(
     }
     // Apply on-hit effects (attach, etc.) authored on the attack.
     applyMonsterAttachToPlayer(ctx, npc, result.attackOnHit);
+    // SRD Goliath Storm's Thunder: a Reaction retaliating against the attacker
+    // (within 60 ft) for thunder damage when the player takes the hit.
+    applyStormsThunder(ctx, npc);
   }
 }
 

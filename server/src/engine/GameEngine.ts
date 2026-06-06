@@ -12,6 +12,7 @@ import {
 } from './CombatSystem.js';
 import { applyEquipment, computeEquippedSlotLabels } from './EquipmentSystem.js';
 import { hasRelentlessEndurance, RELENTLESS_ENDURANCE_ID } from './SpeciesAbilities.js';
+import { applyStoneEndurance } from './GiantGifts.js';
 import { chebyshev } from './EnemyAI.js';
 import { buildAIGMTools } from './AIGMTools.js';
 import { setRelation, getRelation, isHostileTo } from './FactionRelations.js';
@@ -1048,6 +1049,9 @@ export class GameEngine {
     // SRD: resistance/vulnerability/immunity adjusts the typed damage first,
     // before Temporary HP absorbs and before the CON save sees it.
     let effective = damageType ? this.playerResistMod(damage, damageType) : damage;
+    // SRD Goliath Stone's Endurance: a Reaction that reduces the damage taken
+    // by 1d12 + CON before Temporary HP / real HP see it.
+    effective = applyStoneEndurance(this.ctx, effective);
     // SRD: Temporary HP absorbs damage next; the pool drains before the
     // real HP takes any hit. The CON save (and the unconscious check) only
     // see the *leftover* damage that actually reached real HP.

@@ -18,8 +18,10 @@
  * per-Long-Rest pool is the real constraint); the caller publishes the NPC
  * damage delta after this returns.
  */
-import { d } from './Dice.js';
+import { d, mod } from './Dice.js';
 import { sizeRank, parseCreatureSize } from '../../../shared/types.js';
+import { chebyshev } from './EnemyAI.js';
+import { publishNpcDamage } from './ThresholdPublisher.js';
 import type { GameContext } from './GameContext.js';
 import type { NpcState, MonsterDef, PlayerDef, SpeciesDef } from './types.js';
 
@@ -104,4 +106,60 @@ export function applyGiantGiftOnHit(ctx: GameContext, target: NpcState, targetDe
     if (!target.conditions.includes(effect.conditionOnHit.condition)) target.conditions.push(effect.conditionOnHit.condition);
     ctx.addLog({ left: `Giant's gift — ${target.name} is ${effect.conditionOnHit.condition}`, style: 'status' });
   }
+}
+
+/** Roll a "1d12+con"-style spec: dice plus an optional ability modifier. */
+function rollReductionSpec(spec: string, ctx: GameContext): { total: number; label: string } {
+  const [dicePart, abilityPart] = spec.split('+');
+  const { total: diceTot, label } = rollDiceString(dicePart);
+  const abilityMod = abilityPart === 'con' ? mod(ctx.playerDef.con) : 0;
+  return { total: diceTot + abilityMod, label: abilityPart ? `${label}+${abilityMod}` : label };
+}
+
+/**
+ * Stone's Endurance (Stone Giant). A Reaction when the player takes damage:
+ * reduce that damage by 1d12 + CON. Spends one use from the shared pool and the
+ * player's Reaction (so it can't stack with Shield in the same round, and only
+ * the first damage instance of a multi-part hit is reduced). Auto-fires while a
+ * use and the Reaction remain. Returns the (possibly reduced) damage.
+ */
+export function applyStoneEndurance(ctx: GameContext, effective: number): number {
+  if (effective <= 0 || ctx.state.player.reactionUsed) return effective;
+  if ((ctx.state.player.resources[GIANT_GIFT_ID] ?? 0) <= 0) return effective;
+  const dr = chosenGiftEffect(ctx.playerDef, ctx.defs.species)?.damageReduction;
+  if (!dr) return effective;
+  const { total: reduction, label } = rollReductionSpec(dr.roll, ctx);
+  const reduced = Math.max(0, effective - reduction);
+  ctx.state.player.resources[GIANT_GIFT_ID] -= 1;
+  ctx.state.player.reactionUsed = true;
+  ctx.addLog({ left: `Stone's Endurance — damage reduced by ${reduction} (${effective} → ${reduced})`, right: label, style: 'status' });
+  return reduced;
+}
+
+/**
+ * Storm's Thunder (Storm Giant). A Reaction when the player takes damage from a
+ * creature within 60 ft: deal `dice` thunder damage back to it. Spends one use
+ * and the Reaction. Fires from the melee monster-attack path (the common
+ * trigger) where the attacker is known.
+ */
+export function applyStormsThunder(ctx: GameContext, attacker: NpcState): void {
+  const s = ctx.state;
+  if (s.player.hp <= 0 || s.player.reactionUsed) return;
+  if ((s.player.resources[GIANT_GIFT_ID] ?? 0) <= 0) return;
+  if (attacker.hp <= 0) return;
+  const rt = chosenGiftEffect(ctx.playerDef, ctx.defs.species)?.retaliationDamage;
+  if (!rt) return;
+  if (chebyshev(s.player.tileX, s.player.tileY, attacker.tileX, attacker.tileY) * 5 > 60) return;
+  const attackerDef = ctx.resolveMonsterDef(attacker.defId);
+  if (!attackerDef) return;
+  const { total, label } = rollDiceString(rt.dice);
+  const { finalDamage, log } = ctx.resistMod(total, rt.damageType, attackerDef, attacker.name);
+  const before = attacker.hp;
+  attacker.hp = Math.max(0, attacker.hp - finalDamage);
+  s.player.resources[GIANT_GIFT_ID] -= 1;
+  s.player.reactionUsed = true;
+  ctx.addLog({ left: `Storm's Thunder — ${finalDamage} thunder lashes back at ${attacker.name}`, right: label, style: 'hit' });
+  if (log) ctx.addLog(log);
+  publishNpcDamage(ctx, attacker, before, attacker.hp);
+  if (attacker.hp <= 0 && before > 0) ctx.killWithReward(attacker, attackerDef, `☠ ${attacker.name} is felled by Storm's Thunder!`);
 }
