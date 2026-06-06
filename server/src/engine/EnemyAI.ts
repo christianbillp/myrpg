@@ -69,6 +69,9 @@ export interface EnemyTurnResult {
    *  caller is responsible for applying each (along with per-type
    *  resistance) AFTER the primary damage lands. */
   bonusComponents: RolledBonusDamage[];
+  /** Damage type of the primary attack (US-108) — threaded to the player damage
+   *  path so species resistances apply. Undefined when no attack was made. */
+  damageType?: string;
   /** On-hit effects authored on the attack (attach, etc.). The caller applies
    *  these only when the attack actually lands. */
   attackOnHit?: AttackOnHitEffect[];
@@ -195,7 +198,7 @@ export function runEnemyTurn(
 
   return {
     damage, isHit, isCrit, attackTotal, attacked: true,
-    attackedTargetId: target.id,
+    attackedTargetId: target.id, damageType: meleeAttack.damageType,
     logs, events, finalTileX: tileX, finalTileY: tileY, hidden: enemyHidden, bonusComponents,
     attackOnHit: meleeAttack.onHit,
   };

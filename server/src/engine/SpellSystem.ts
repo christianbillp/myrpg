@@ -13,16 +13,17 @@
 
 import type { GameContext } from './GameContext.js';
 import type { GameEvent, NpcState, SpellDef, LogEntry, MonsterDef } from './types.js';
-import { d, d20, mod } from './Dice.js';
+import { d, d20, mod, rollAdvantage } from './Dice.js';
 import { chebyshev } from './EnemyAI.js';
 import { canCastSpell } from './ActionGuards.js';
 import { startConcentration, endConcentration } from './ConcentrationSystem.js';
 import { publishNpcDamage } from './ThresholdPublisher.js';
+import { applyDamageWithTempHp } from './CombatSystem.js';
 import { combatantDisplayName } from './CombatFlow.js';
 import { emitNoise, NOISE_SPELL_VERBAL } from './Sound.js';
 import { Logger } from '../Logger.js';
 import { canSee as visCanSee } from './Vision.js';
-import { hasModifierFlag } from './Modifiers.js';
+import { hasModifierFlag, hasAdvantageOn } from './Modifiers.js';
 import { applySelfBuff, applyBuffTo } from './Buffs.js';
 import { SPEED_ZERO_CONDITIONS } from './ConditionSystem.js';
 import {
@@ -101,7 +102,7 @@ function applyDamageToNpc(
   const { finalDamage, log: resistLog } = ctx.resistMod(amount, damageType, def, target.name);
   if (resistLog) ctx.addLog(resistLog);
   const hpBefore = target.hp;
-  target.hp = Math.max(0, target.hp - finalDamage);
+  applyDamageWithTempHp(target, finalDamage);
   Logger.log('combat.damage_dealt', {
     target: target.id,
     defId: target.defId,
@@ -523,16 +524,22 @@ function rollPlayerSaveAndDamage(
     ? ctx.playerDef.proficiencyBonus
     : 0;
   const saveBonus = abMod + profBonus;
-  const roll = d20();
+  // US-108: species traits can grant Advantage on this save (e.g. Gnomish
+  // Cunning on INT saves). Condition-keyed advantages (Dwarf vs Poisoned) are
+  // collected too but only apply where a save is keyed by that condition.
+  const adv = hasAdvantageOn(ctx.playerDef, 'save', save.ability);
+  const rolled = adv ? rollAdvantage() : null;
+  const roll = rolled ? rolled.result : d20();
+  const rollLabel = rolled ? `${rolled.rolls[0]},${rolled.rolls[1]}→${roll} [ADV]` : `${roll}`;
   const total = roll + saveBonus;
   const success = total >= dc;
   const dmg = damageAfterSave(ctx, spell, success, save.halfOnSuccess, rawDamage);
   ctx.addLog({
     left: `${ctx.playerDef.name} ${success ? 'saves' : 'fails'} — ${dmg} ${damageMeta.type}`,
-    right: `${save.ability.toUpperCase()} d20(${roll})+${saveBonus}=${total} vs DC ${dc}`,
+    right: `${save.ability.toUpperCase()} d20(${rollLabel})+${saveBonus}=${total} vs DC ${dc}`,
     style: success ? 'normal' : 'hit',
   });
-  if (dmg > 0) ctx.applyDamageToPlayer(dmg, events);
+  if (dmg > 0) ctx.applyDamageToPlayer(dmg, events, damageMeta.type);
   void spell;
   return dmg > 0;
 }

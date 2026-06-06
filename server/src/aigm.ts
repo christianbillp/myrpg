@@ -4,7 +4,7 @@ import { GameEvent } from './engine/types.js';
 import { applyAIGMTool, resetTurnGuards, AIGMToolContext } from './engine/AIGMTools.js';
 import { isHostileTo, isFriendlyTo } from './engine/FactionRelations.js';
 import { isDead } from './engine/ConditionSystem.js';
-import { PLAYER_FACTION_ID } from '../../shared/types.js';
+import { PLAYER_FACTION_ID, isBloodied } from '../../shared/types.js';
 import type { NpcState } from '../../shared/types.js';
 import type { AigmMessage } from './sessions.js';
 import { getActiveSetting, settingPromptBlock } from './settings.js';
@@ -257,6 +257,7 @@ function buildStateMessage(engine: GameEngine): string {
           n.combatPassive ? 'PASSIVE (skips combat turn)' : '',
           n.conditions.includes('vexed') ? 'VEXED' : '',
           n.conditions.includes('hidden') ? 'HIDDEN' : '',
+          isBloodied(n.hp, n.maxHp) ? 'BLOODIED' : '',
           // Reactions refresh at the start of each creature's own turn. USED
           // means this creature has spent its Reaction (e.g. an Opportunity
           // Attack against the player or another NPC) and cannot take another
@@ -360,7 +361,7 @@ function buildStateMessage(engine: GameEngine): string {
   return `SETTING: ${s.mapName} | PHASE: ${s.phase}
 CONTEXT: ${s.encounterContext}${adventureBlock}${scriptedEvents}${factionsBlock}${rumorsBlock}${worldClockBlock}${alertnessBlock}
 
-PLAYER: tile (${p.tileX},${p.tileY}) · HP ${p.hp} · ${formatCoins(p.balanceCp)} · ${flags || 'no flags'}
+PLAYER: tile (${p.tileX},${p.tileY}) · HP ${p.hp}/${playerDef.maxHp}${isBloodied(p.hp, playerDef.maxHp) ? ' (BLOODIED)' : ''} · ${formatCoins(p.balanceCp)} · ${flags || 'no flags'}
   ${classLine}
   ${pactLine}
   ${arcanumLine}

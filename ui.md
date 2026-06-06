@@ -400,6 +400,20 @@ Defined in `client/src/ui/ReactionPromptOverlay.ts`. Modal overlay surfaced when
 
 ---
 
+### Reroll Prompt Overlay
+
+Defined in `client/src/ui/RerollPromptOverlay.ts`. Modal overlay surfaced when the server pauses to offer a **Heroic Inspiration** reroll (US-109a) — currently after a player attack roll while the player holds Heroic Inspiration. Opened and closed by `OverlayManager.syncRerollPrompt(state)`, which mirrors `state.pendingReroll`. While open, the attack's consequences are deferred on the server — the next player action must be a `resolveReroll`.
+
+| Component | Description |
+| --------- | ----------- |
+| **Title** | `HEROIC INSPIRATION`. |
+| **Body**  | The roll label (e.g. "Attack vs Bandit (A)"), the natural d20 rolled, and an outcome preview (`HIT — 7 slashing` / `MISS (14 vs AC 15)`) so the player can decide whether the reroll is worth it. |
+| **REROLL** button | Accept. Server spends the Heroic Inspiration, re-resolves the attack with a fresh d20 (honouring the same Advantage/Disadvantage state), and applies the new outcome. |
+| **KEEP ROLL** button | Decline. Server applies the outcome the player already saw; the Heroic Inspiration is **not** spent. |
+| **Close (×) / Backdrop click** | Treated as "Keep roll" — never spends the player's Heroic Inspiration. |
+
+---
+
 ### Wrap Up Loose Ends Overlay
 
 Defined in `client/src/ui/ChapterCompleteOverlay.ts`. Opens once when `GameState.chapterComplete` flips true inside an adventure (combat-ended with no enemies remaining, or the chapter's `completionFlag` is set). The chapter is **resolved at this point** — the player can stay on the map indefinitely to search corpses, talk to NPCs through the GM tab, equip recovered gear, and so on. The modal carries the **encounter's title** (e.g. "Bridge Toll", "Dungeon Delve") so the player immediately recognises which chapter they're wrapping up.

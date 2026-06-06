@@ -256,7 +256,7 @@ export class GameEngine {
       aggroFaction: (npc) => this.aggroFaction(npc),
       autoEndCombatIfNoEnemies: () => this.autoEndCombatIfNoEnemies(),
       resistMod: (d, t, def, n) => this.resistMod(d, t, def, n),
-      applyDamageToPlayer: (d, ev) => this.applyDamageToPlayer(d, ev),
+      applyDamageToPlayer: (d, ev, dt) => this.applyDamageToPlayer(d, ev, dt),
       killNpc: (id) => this.killNpc(id),
       killWithReward: (npc, def, msg, t) => this.killWithReward(npc, def, msg, t),
       applyMasteryConditions: (tgt, v, s) => this.applyMasteryConditions(tgt, v, s),
@@ -1005,12 +1005,37 @@ export class GameEngine {
     return { finalDamage: damage, log: null };
   }
 
-  private applyDamageToPlayer(damage: number, _events: GameEvent[]): void {
+  /** Player-side resistance/vulnerability/immunity (US-108), mirroring the
+   *  monster `resistMod`. Immunity > vulnerability > resistance. Returns the
+   *  damage unchanged when the player has no entry for `damageType`. */
+  private playerResistMod(damage: number, damageType: string): number {
+    const def = this.playerDef;
+    const name = def.name;
+    if (def.immunities?.includes(damageType)) {
+      this.addLog({ left: `${name} is immune to ${damageType} — ${damage}→0`, right: '×0', style: 'status' });
+      return 0;
+    }
+    if (def.resistances?.includes(damageType)) {
+      const fd = Math.floor(damage / 2);
+      this.addLog({ left: `${name} resists ${damageType} — ${damage}→${fd}`, right: '×½', style: 'status' });
+      return fd;
+    }
+    if (def.vulnerabilities?.includes(damageType)) {
+      const fd = damage * 2;
+      this.addLog({ left: `${name} is vulnerable to ${damageType}! ${damage}→${fd}`, right: '×2', style: 'crit' });
+      return fd;
+    }
+    return damage;
+  }
+
+  private applyDamageToPlayer(damage: number, _events: GameEvent[], damageType?: string): void {
     const s = this.state;
-    // SRD: Temporary HP absorbs damage first; the pool drains before the
+    // SRD: resistance/vulnerability/immunity adjusts the typed damage first,
+    // before Temporary HP absorbs and before the CON save sees it.
+    let effective = damageType ? this.playerResistMod(damage, damageType) : damage;
+    // SRD: Temporary HP absorbs damage next; the pool drains before the
     // real HP takes any hit. The CON save (and the unconscious check) only
     // see the *leftover* damage that actually reached real HP.
-    let effective = damage;
     const tempHpBefore = s.player.tempHp;
     if (effective > 0 && s.player.tempHp > 0) {
       const absorbed = Math.min(s.player.tempHp, effective);

@@ -1,6 +1,6 @@
 import {
   NpcState, MonsterDef, NPCDef, ItemDef, MapItemState, SecretState, SecretDef, GameMap,
-  StartingZonesLayer,
+  StartingZonesLayer, CreatureSize,
 } from './types.js';
 import { totalSpawnCount, spawnOrdinalForSlot } from '../../../shared/spawnInstanceIds.js';
 import { shuffle } from './MapUtils.js';
@@ -125,6 +125,8 @@ export function spawnNpc(
   const npcDef = npcDefs.find((n) => n.id === defId);
   let name: string;
   let maxHp: number;
+  // US-107: inherit SRD size from the resolved MonsterDef (parsed at load).
+  let size: CreatureSize | undefined;
   // Faction resolution:
   //   • Named NPCs carry the worldbuilding — NPCDef.factionId is the source
   //     of truth (e.g. "bridge_bandit" → "bandits").
@@ -140,6 +142,7 @@ export function spawnNpc(
     name = npcDef.name;
     const monsterDef = monsters.find((m) => m.id === npcDef.monsterClass);
     maxHp = monsterDef?.maxHp ?? 8;
+    size = monsterDef?.size;
     // NPC's factionId wins; if absent, fall back to the def id as a
     // faction-of-one. (MonsterDef no longer carries factionId — monsters
     // are pure stat blocks; faction membership lives on the NPC wrapper.)
@@ -149,6 +152,7 @@ export function spawnNpc(
     if (!monsterDef) return;
     name = monsterDef.name;
     maxHp = monsterDef.maxHp;
+    size = monsterDef.size;
     factionId = defId;
   }
 
@@ -187,6 +191,7 @@ export function spawnNpc(
         factionId,
         combatLabel,
         hp: maxHp, maxHp,
+        ...(size ? { size } : {}),
         isActive: false,
         reactionUsed: false, conditions: [], inventoryIds: [], ongoingEffects: [],
         ...(npcDef?.routine && npcDef.routine.length > 0 ? { routine: npcDef.routine } : {}),
@@ -236,6 +241,7 @@ export function spawnNpc(
     factionId,
     combatLabel,
     hp: maxHp, maxHp,
+    ...(size ? { size } : {}),
     isActive: false,
     reactionUsed: false, conditions: [], inventoryIds: [], ongoingEffects: [],
     ...(npcDef?.routine && npcDef.routine.length > 0 ? { routine: npcDef.routine } : {}),

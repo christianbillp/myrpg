@@ -26,6 +26,7 @@ import { PLAYER_FACTION_ID } from '../../../shared/types.js';
 import { isIncapacitated, isVisible, TURN_CONDITIONS } from './ConditionSystem.js';
 import { doNpcOpportunityAttack } from './CombatActions.js';
 import { applyNpcAttackHit } from './NpcDamage.js';
+import { applyDamageWithTempHp } from './CombatSystem.js';
 import { publishNpcDamage } from './ThresholdPublisher.js';
 import { chooseNpcBehavior, fleeFromThreat, isMapEdge } from './NpcBrain.js';
 import { Logger } from '../Logger.js';
@@ -102,7 +103,7 @@ function applyTrapZoneDamageToNpc(ctx: GameContext, npc: NpcState, amount: numbe
   const { finalDamage, log } = ctx.resistMod(amount, damageType, def, npc.name);
   if (log) ctx.addLog(log);
   const hpBefore = npc.hp;
-  npc.hp = Math.max(0, npc.hp - finalDamage);
+  applyDamageWithTempHp(npc, finalDamage);
   publishNpcDamage(ctx, npc, hpBefore, npc.hp);
   if (npc.hp <= 0) ctx.killWithReward(npc, def, `☠ ${combatantDisplayName(npc, ctx.state.npcs)} is slain!`);
 }
@@ -433,6 +434,7 @@ export function runSingleEnemyTurn(ctx: GameContext, npc: NpcState, events: Game
       attackerId: npc.id,
       attackerName: combatantDisplayName(npc, s.npcs),
       incomingDamage: result.damage,
+      incomingDamageType: result.damageType,
       incomingBonusComponents: result.bonusComponents,
       attackTotal: result.attackTotal,
       shieldedAc: ctx.state.player.ac + 5,

@@ -20,7 +20,10 @@ export interface GameContext {
 
   autoEndCombatIfNoEnemies(): void;
   resistMod(damage: number, damageType: string, def: MonsterDef, displayName: string): { finalDamage: number; log: LogEntry | null };
-  applyDamageToPlayer(damage: number, events: GameEvent[]): void;
+  /** Apply damage to the player. When `damageType` is supplied, the player's
+   *  species-granted resistances / vulnerabilities / immunities (US-108) are
+   *  applied first; omit it for untyped/abstract damage (no resistance). */
+  applyDamageToPlayer(damage: number, events: GameEvent[], damageType?: string): void;
   killNpc(id: string): void;
   killWithReward(npc: NpcState, def: MonsterDef, killMessage: string, includeTotal?: boolean): void;
   applyMasteryConditions(target: NpcState, vexApplied: boolean, slowApplied: boolean): void;

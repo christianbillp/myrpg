@@ -11,12 +11,12 @@ import type { LogEntry } from "./combatLog.js";
 import type { ActiveConversation } from "./conversation.js";
 import type { EncounterDef, EncounterEnvironment, EncounterTileProperty, MapTilesetInfo, SecretDef } from "./encounter.js";
 import type { WorldFlagValue } from "./engineEvents.js";
-import type { Attitude, NPCDef, OngoingEffect } from "./entities.js";
+import type { Attitude, CreatureSize, NPCDef, OngoingEffect } from "./entities.js";
 import type { ActiveBuff } from "./gameState.js";
 import type { PLAYER_FACTION_ID, Rumor } from "./factions.js";
 import type { AvailableActions, CombatMode, Disposition, PlayerState } from "./gameState.js";
 import type { PlayerAction } from "./playerActions.js";
-import type { PendingReaction } from "./reaction.js";
+import type { PendingReaction, PendingReroll } from "./reaction.js";
 import type { CreateSessionRequest } from "./session.js";
 import type { EncounterTrigger } from "./triggers.js";
 
@@ -95,6 +95,16 @@ export interface NpcState {
   summonOwnerId?: string;
   hp: number;
   maxHp: number;
+  /** Temporary HP pool (US-109) — a buffer that absorbs damage before real HP.
+   *  Absent/0 means none. Lost at the end of a Long Rest. Mirrors
+   *  `PlayerState.tempHp`; nothing grants it to NPCs yet, but the damage path
+   *  honours it so future temp-HP sources (e.g. False Life on a companion)
+   *  work without further wiring. */
+  tempHp?: number;
+  /** SRD creature size (US-107), seeded at spawn from the resolved `MonsterDef`.
+   *  Read by size-gated rules (Grapple/Shove eligibility, Squeezing). Optional
+   *  so saves written before US-107 load without migration (default `'medium'`). */
+  size?: CreatureSize;
   isActive: boolean;
   reactionUsed: boolean;
   conditions: string[];
@@ -460,6 +470,10 @@ export interface GameState {
   availableActions: AvailableActions;
   /** Set when the engine has paused on a reaction-eligible trigger. The next player action must be `resolveReaction`. Cleared on resolution. */
   pendingReaction: PendingReaction | null;
+  /** Set when the engine has paused to offer a Heroic Inspiration reroll
+   *  (US-109a). The next player action must be `resolveReroll`. Cleared on
+   *  resolution. */
+  pendingReroll: PendingReroll | null;
   /** Active conversation when one is open — `null` otherwise. The client
    *  renders the ConversationOverlay whenever this transitions non-null.
    *  Pauses world tick (`isWorldTickEligible` skips when set). */

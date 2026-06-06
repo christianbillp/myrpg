@@ -15,6 +15,7 @@
 import type { GameContext } from './GameContext.js';
 import type { NpcState, MonsterDef } from './types.js';
 import type { RolledBonusDamage } from './CombatSystem.js';
+import { applyDamageWithTempHp } from './CombatSystem.js';
 import { publishNpcDamage } from './ThresholdPublisher.js';
 
 export interface NpcAttackHit {
@@ -67,7 +68,7 @@ export function applyNpcAttackHit(opts: ApplyNpcAttackHitOpts): void {
   const { finalDamage, log: resistLog } = ctx.resistMod(result.damage, damageType, targetDef, target.name);
   if (resistLog) ctx.addLog(resistLog);
   const hpBefore = target.hp;
-  target.hp = Math.max(0, target.hp - finalDamage);
+  applyDamageWithTempHp(target, finalDamage);
 
   // Secondary damage riders (cultist necrotic, etc.) — each rolls through
   // resistance on its own type so a fire-resistant target halves the fire
@@ -76,7 +77,7 @@ export function applyNpcAttackHit(opts: ApplyNpcAttackHitOpts): void {
     const { finalDamage: bdFinal, log: bdResistLog } = ctx.resistMod(bd.damage, bd.damageType, targetDef, target.name);
     ctx.addLog({ left: `+ ${bdFinal} ${bd.damageType}`, right: bd.rollStr, style: 'hit' });
     if (bdResistLog) ctx.addLog(bdResistLog);
-    target.hp = Math.max(0, target.hp - bdFinal);
+    applyDamageWithTempHp(target, bdFinal);
   }
 
   publishNpcDamage(ctx, target, hpBefore, target.hp);

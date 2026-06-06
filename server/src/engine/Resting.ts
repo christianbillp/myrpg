@@ -152,6 +152,8 @@ export function applyLongRest(
 
   player.hp = playerDef.maxHp;
   player.hitDiceUsed = 0;
+  // SRD: Temporary HP is lost at the end of a Long Rest (US-109).
+  player.tempHp = 0;
 
   const maxSlots = playerDef.defaultSpellSlots ?? [];
   player.spellSlots = maxSlots.map((m) => m);
@@ -183,6 +185,7 @@ export function applyLongRest(
   // Companions share the Long Rest: HP to full, rest-clearable conditions gone.
   for (const npc of restingCompanions(inputs.npcs)) {
     npc.hp = npc.maxHp;
+    npc.tempHp = 0;
     npc.conditions = npc.conditions.filter((c) => !REST_CLEARABLE_CONDITIONS.has(c));
   }
 

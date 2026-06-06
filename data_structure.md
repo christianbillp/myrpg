@@ -68,6 +68,9 @@ One file per playable character. Defines identity, ability scores, class feature
 | Field | Computed by | How |
 |---|---|---|
 | `speed` | `applySpecies` | Species base speed + lineage speed bonus (e.g. Wood Elf +5) |
+| `size` | `applySpecies` | SRD `CreatureSize` from the species (`'medium'` default; choice species pick the larger). Gates size-dependent rules (US-107). |
+| `resistances` `vulnerabilities` `immunities` | `applySpecies` | *(US-108)* Damage types the character resists / is vulnerable / immune to, seeded from species `damageResistance` traits (the `"ancestry"` placeholder is skipped). Read by `GameEngine.applyDamageToPlayer` via `playerResistMod`, mirroring monster resistance. |
+| `originModifiers` | `applySpecies` | *(US-108)* Typed `Modifier`s from species/background traits (e.g. Advantage on saves vs Poisoned, Advantage on INT saves). Concatenated into `modifiers` by `collectModifiers` so `hasAdvantageOn` queries them like feat/feature modifiers. HP bonus + innate spells are deferred to the creation flow (US-122) to avoid double-counting baked `maxHp`/`skills`. |
 | `modifiers` | `applyModifiers` | Flat list of typed `Modifier`s aggregated from this character's feats + class features (`crit-range`, `flag`, `advantage`). Queried by resolvers via `Modifiers.ts` helpers. |
 | `savageAttacker` | `applyModifiers` | Legacy projection: `true` if `modifiers` contains a `flag: "savage-attacker"` (Savage Attacker feat) |
 | `fightingStyleDefense` | `applyModifiers` | Legacy projection: `true` if `modifiers` contains a `flag: "fighting-style-defense"` (Defense feat) |
@@ -115,7 +118,7 @@ SRD stat blocks for all creatures — both random enemies and the underlying sta
 |---|---|---|
 | `id` | string | Unique key. Referenced by `NPCDef.monsterClass`. |
 | `name` | string | Display name. |
-| `type` | string | SRD creature type string, e.g. `"Medium Undead, Lawful Evil"`. |
+| `type` | string | SRD creature type string, e.g. `"Medium Undead, Lawful Evil"`. The leading size token is parsed at load into a derived `size: CreatureSize` (US-107) — `"Medium or Small …"` picks the larger; the free-text `type` is retained for display. `size` flows to each spawned `NpcState`. |
 | `maxHp` | number | Maximum hit points. |
 | `hpFormula` | string | SRD dice formula for reference, e.g. `"2d8+2"`. Not used in combat — `maxHp` is authoritative. |
 | `ac` | number | Armour Class. |
@@ -155,6 +158,17 @@ Each entry in `attacks` describes one attack option. The AI selects the most app
 | `damageType` | string | e.g. `"slashing"`, `"piercing"`, `"bludgeoning"`. |
 | `rangeNormal` | number | *(ranged only)* Normal range in feet. Attacks beyond this have Disadvantage. |
 | `rangeLong` | number | *(ranged only)* Maximum range in feet. |
+
+---
+
+## Creature size, Temporary HP, Bloodied & the reroll prompt (US-107/108/109)
+
+Runtime additions shared across creatures, on top of the data-file fields above.
+
+- **Creature size** — `CreatureSize = 'tiny' | 'small' | 'medium' | 'large' | 'huge' | 'gargantuan'` (`shared/types/entities.ts`) with `SIZE_ORDER`, `sizeRank()`, and `parseCreatureSize()`. Lives as an optional `size` on `PlayerDef` (seeded from species), `MonsterDef` (parsed from `type` at load), and `NpcState` (inherited at spawn). Optional only to tolerate old saves/fixtures — always populated by the load/seed path.
+- **Temporary HP** — `NpcState.tempHp?: number` mirrors `PlayerState.tempHp`: a buffer drained before real HP. The shared `applyDamageWithTempHp(target, amount)` (`CombatSystem.ts`) is used by every NPC damage chokepoint (`NpcDamage`, the player-spell-vs-NPC path in `SpellSystem`, trap/zone damage in `NpcTurnRunners`). Player + companion temp HP is zeroed at the end of a Long Rest (`Resting.applyLongRest`). Nothing grants NPC temp HP yet — the path is honoured for future sources.
+- **Bloodied** — `isBloodied(hp, maxHp)` (`shared/types/entities.ts`) is `hp > 0 && hp <= maxHp / 2` (a creature at 0 HP is not Bloodied). Derived on demand (never stored, so it can't drift); surfaced to the GM `CURRENT STATE` snapshot for the player and every NPC.
+- **Heroic Inspiration reroll** — `GameState.pendingReroll: PendingReroll | null` (`shared/types/reaction.ts`) is set when an eligible player d20 (currently the attack roll) is rolled while the player holds Heroic Inspiration. The engine computes the outcome but pauses **before** any consequence, stashing the rolled `ResolvedAttackSnapshot` + `RerollAttackParams` + a human `outcomePreview`. The next action must be `resolveReroll { accept }`: decline applies the seen outcome (inspiration kept), accept spends the inspiration and re-resolves (`CombatActions.doResolveReroll` → `applyAttackOutcome`). Rides the world save like `pendingReaction`. Client surface: `RerollPromptOverlay` via `OverlayManager.syncRerollPrompt`.
 
 ---
 

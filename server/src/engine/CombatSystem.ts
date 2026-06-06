@@ -1,9 +1,31 @@
 import { d, d20, mod, rollAdvantage, rollDisadvantage } from './Dice.js';
-import { PlayerDef, PlayerAttack, MonsterDef, MonsterAttack, ConsumableDef, LogEntry, BonusDamage, RolledBonusDamage } from './types.js';
+import { PlayerDef, PlayerAttack, MonsterDef, MonsterAttack, ConsumableDef, LogEntry, BonusDamage, RolledBonusDamage, ResolvedAttackSnapshot } from './types.js';
 import { Logger } from '../Logger.js';
 import { critFloor } from './Modifiers.js';
 
 export type { RolledBonusDamage };
+
+/** The full outcome of one resolved player attack roll (roll + rolled damage,
+ *  pre-consequence). Captured in `pendingReroll` so a declined Heroic
+ *  Inspiration reroll (US-109a) applies the exact roll the player saw. Aliases
+ *  the shared `ResolvedAttackSnapshot` so it can ride in `GameState`. */
+export type ResolvedPlayerAttack = ResolvedAttackSnapshot;
+
+/**
+ * Apply post-resistance `amount` damage to any creature carrying a Temporary HP
+ * pool (US-109): the pool absorbs first, the remainder reduces real HP. Shared
+ * by every NPC damage path so a future temp-HP source on an NPC is honoured
+ * without touching each call site. Mutates `target.hp` / `target.tempHp`.
+ */
+export function applyDamageWithTempHp(target: { hp: number; tempHp?: number }, amount: number): void {
+  if (amount <= 0) return;
+  if (target.tempHp && target.tempHp > 0) {
+    const absorbed = Math.min(target.tempHp, amount);
+    target.tempHp -= absorbed;
+    amount -= absorbed;
+  }
+  target.hp = Math.max(0, target.hp - amount);
+}
 
 function rollDice(count: number, sides: number): { total: number; rolls: number[] } {
   const rolls: number[] = [];
@@ -81,7 +103,7 @@ function resolvePlayerAttack(
    *  adjacent alternative, and the "no Disadvantage" rider. When `false`,
    *  Sneak dice are NOT added even if the attack has Advantage. */
   sneakAttackAllowed = false,
-): { damage: number; isHit: boolean; isCrit: boolean; attackTotal: number; naturalRoll: number; logs: LogEntry[]; vexApplied: boolean; slowApplied: boolean; bonusComponents: RolledBonusDamage[]; sneakAttackFired: boolean } {
+): ResolvedPlayerAttack {
   const statMod = attack.statKey === 'str' ? mod(player.str) : mod(player.dex);
   // SRD Magic Weapon spell — flat bonus to attack rolls (consumed below
   // when damage is rolled).
@@ -217,7 +239,7 @@ export function playerMeleeAttack(
   playerHidden = false,
   coverAcBonus = 0,
   sneakAttackAllowed = false,
-): { damage: number; isHit: boolean; isCrit: boolean; attackTotal: number; naturalRoll: number; logs: LogEntry[]; vexApplied: boolean; slowApplied: boolean; bonusComponents: RolledBonusDamage[]; sneakAttackFired: boolean } {
+): ResolvedPlayerAttack {
   return resolvePlayerAttack(player, player.mainAttack, enemy, withAdvantage, withDisadvantage, player.proficiencyBonus, autoCrit, playerHidden, coverAcBonus, sneakAttackAllowed);
 }
 
@@ -232,7 +254,7 @@ export function playerThrowAttack(
   playerHidden = false,
   coverAcBonus = 0,
   sneakAttackAllowed = false,
-): { damage: number; isHit: boolean; isCrit: boolean; attackTotal: number; naturalRoll: number; logs: LogEntry[]; vexApplied: boolean; slowApplied: boolean; bonusComponents: RolledBonusDamage[]; sneakAttackFired: boolean } {
+): ResolvedPlayerAttack {
   return resolvePlayerAttack(player, attack, enemy, withAdvantage, withDisadvantage, profBonus ?? player.proficiencyBonus, autoCrit, playerHidden, coverAcBonus, sneakAttackAllowed);
 }
 

@@ -3,10 +3,11 @@ import { ItemDef, EquipmentDef } from "../../../shared/types";
 import { CharacterSheetOverlay, CharacterSheetInputs } from "../ui/CharacterSheetOverlay";
 import { IntroductionOverlay } from "../ui/IntroductionOverlay";
 import { ReactionPromptOverlay } from "../ui/ReactionPromptOverlay";
+import { RerollPromptOverlay } from "../ui/RerollPromptOverlay";
 import { EncounterCompleteOverlay } from "../ui/EncounterCompleteOverlay";
 import { NextChapterButton } from "../ui/NextChapterButton";
 import { ConversationOverlay } from "../ui/ConversationOverlay";
-import type { GameState, SpellDef, PendingReaction, ConversationDef, FeatureDef, ClassDef, SubclassDef } from "../../../shared/types";
+import type { GameState, SpellDef, PendingReaction, PendingReroll, ConversationDef, FeatureDef, ClassDef, SubclassDef } from "../../../shared/types";
 import { UIScale } from "../ui/UIScale";
 import { WorldPause } from "../net/WorldPause";
 import { DevMode } from "../devMode";
@@ -23,6 +24,10 @@ export interface OverlayCallbacks {
   onAcceptReaction: () => void;
   /** Player declined / dismissed the reaction prompt — server should skip the deferred effect. */
   onDeclineReaction: () => void;
+  /** Player accepted the Heroic Inspiration reroll prompt (US-109a) — server rerolls. */
+  onAcceptReroll: () => void;
+  /** Player declined / dismissed the reroll prompt — server applies the original roll. */
+  onDeclineReroll: () => void;
   /** Player pressed NEXT CHAPTER on the chapter-complete overlay. */
   onAdvanceChapter: () => void;
   /** Player pressed RETURN TO MENU on the single-encounter completion
@@ -64,6 +69,7 @@ export class OverlayManager {
   private introOverlay: IntroductionOverlay | null = null;
   private characterSheet: CharacterSheetOverlay | null = null;
   private reactionPrompt: ReactionPromptOverlay | null = null;
+  private rerollPrompt: RerollPromptOverlay | null = null;
   private encounterCompleteOverlay: EncounterCompleteOverlay | null = null;
   private conversation: ConversationOverlay | null = null;
   /** Tracks which conversation id the open overlay is for so a state change
@@ -73,6 +79,8 @@ export class OverlayManager {
   private nextChapterButton: NextChapterButton | null = null;
   /** Tracks which pending-reaction the open prompt is for, so we don't rebuild on every state update. */
   private reactionShownFor: PendingReaction | null = null;
+  /** Tracks which pending-reroll the open prompt is for, so we don't rebuild on every state update. */
+  private rerollShownFor: PendingReroll | null = null;
   /** Tracks which dedup key the encounter-complete overlay was shown for,
    *  so reopening on every tick is suppressed. */
   private encounterCompleteShownFor: string | null = null;
@@ -85,7 +93,7 @@ export class OverlayManager {
   }
 
   get isAnyOpen(): boolean {
-    return !!(this.introOverlay || this.characterSheet || this.reactionPrompt || this.encounterCompleteOverlay || this.conversation);
+    return !!(this.introOverlay || this.characterSheet || this.reactionPrompt || this.rerollPrompt || this.encounterCompleteOverlay || this.conversation);
   }
 
   reset(): void {
@@ -93,6 +101,8 @@ export class OverlayManager {
     this.characterSheet = null;
     this.reactionPrompt = null;
     this.reactionShownFor = null;
+    this.rerollPrompt = null;
+    this.rerollShownFor = null;
     if (this.encounterCompleteOverlay) { this.encounterCompleteOverlay.destroy(); this.encounterCompleteOverlay = null; }
     if (this.nextChapterButton) { this.nextChapterButton.destroy(); this.nextChapterButton = null; }
     if (this.conversation) { this.conversation.destroy(); this.conversation = null; }
@@ -198,6 +208,32 @@ export class OverlayManager {
     this.reactionPrompt.destroy();
     this.reactionPrompt = null;
     this.reactionShownFor = null;
+  }
+
+  /**
+   * Mirror `state.pendingReroll` into an open RerollPromptOverlay (US-109a).
+   * Opens when a new reroll offer appears, leaves it open while the same offer
+   * is pending, and closes once the server clears the field.
+   */
+  syncRerollPrompt(state: GameState): void {
+    const pending = state.pendingReroll;
+    if (pending && this.rerollShownFor !== pending) {
+      this.closeRerollPrompt();
+      this.rerollShownFor = pending;
+      this.rerollPrompt = new RerollPromptOverlay(this.scale, pending, {
+        onAccept:  () => { this.callbacks.onAcceptReroll();  this.rerollPrompt = null; this.rerollShownFor = null; },
+        onDecline: () => { this.callbacks.onDeclineReroll(); this.rerollPrompt = null; this.rerollShownFor = null; },
+      });
+    } else if (!pending && this.rerollPrompt) {
+      this.closeRerollPrompt();
+    }
+  }
+
+  private closeRerollPrompt(): void {
+    if (!this.rerollPrompt) return;
+    this.rerollPrompt.destroy();
+    this.rerollPrompt = null;
+    this.rerollShownFor = null;
   }
 
   /**

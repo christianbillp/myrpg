@@ -45,7 +45,7 @@ import { GameEngine } from "./engine/GameEngine.js";
 import { GameDefs } from "./engine/types.js";
 import { isHostileTo } from "./engine/FactionRelations.js";
 import { Logger } from "./Logger.js";
-import { PLAYER_FACTION_ID } from "../../shared/types.js";
+import { PLAYER_FACTION_ID, parseCreatureSize } from "../../shared/types.js";
 import {
   applyEquipment,
   applySpecies,
@@ -219,6 +219,10 @@ async function loadDefs(): Promise<void> {
   ];
   defs.playerDefs = playerDefs;
   defs.monsters = monsters;
+  // US-107: parse each monster's SRD size from the leading token of its
+  // free-text `type` string ("Medium or Small Humanoid" → 'medium'), keeping
+  // `type` for display. Done once at load so spawned NpcStates can inherit it.
+  for (const m of defs.monsters) m.size = parseCreatureSize(m.type);
   defs.npcs = npcs;
   defs.equipment = equipment;
   defs.feats = feats;
@@ -1718,6 +1722,7 @@ async function loadWorldState(): Promise<{
     ...worldSave,
     player: fullPlayer,
     pendingReaction: worldSave.pendingReaction ?? null,
+    pendingReroll: worldSave.pendingReroll ?? null,
     triggers: worldSave.triggers ?? [],
     firedTriggerIds: worldSave.firedTriggerIds ?? [],
     pendingAigmEvents: worldSave.pendingAigmEvents ?? [],

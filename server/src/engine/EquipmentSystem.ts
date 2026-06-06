@@ -1,5 +1,5 @@
 import { mod } from './Dice.js';
-import { PlayerDef, PlayerAttack, EquipmentSlots, ItemDef, ArmorDef, ShieldDef, WeaponDef, SpeciesDef } from './types.js';
+import { PlayerDef, PlayerAttack, EquipmentSlots, ItemDef, ArmorDef, ShieldDef, WeaponDef, SpeciesDef, parseCreatureSize, sizeRank, CreatureSize, Modifier } from './types.js';
 
 export function computeAC(
   playerDef: PlayerDef,
@@ -105,6 +105,19 @@ export function applySpecies(playerDef: PlayerDef, allSpecies: SpeciesDef[]): vo
   }
   playerDef.speed = speed;
 
+  // US-107: seed SRD creature size from the species. A fixed size is a plain
+  // string ("Medium"); a choice species (e.g. Human/Tiefling "Small or Medium")
+  // is `{ choices }` and has no per-character pick until the creation flow
+  // (US-122) — default to the first/larger valid token for now.
+  if (typeof species.size === 'string') {
+    playerDef.size = parseCreatureSize(species.size);
+  } else {
+    // Pick the larger option deterministically (independent of authored order).
+    playerDef.size = species.size.choices
+      .map(parseCreatureSize)
+      .reduce((a, b) => (sizeRank(b) > sizeRank(a) ? b : a), 'tiny' as CreatureSize);
+  }
+
   // Seed SRD special senses from species traits — Dwarf/Elf darkvision,
   // future blindsight/tremorsense from feats/items, etc. `Vision.canSee`
   // reads `playerDef.senses` for the sight-mode resolution.
@@ -118,6 +131,33 @@ export function applySpecies(playerDef: PlayerDef, allSpecies: SpeciesDef[]): vo
     // the static `playerDef.senses` block for now.
   }
   if (Object.keys(senses).length > 0) playerDef.senses = senses;
+
+  // US-108: activate the rich-but-previously-inert species origin effects.
+  // Purely additive — we only set fields that don't already exist on the
+  // player (resistances + origin modifiers), and deliberately do NOT touch
+  // the baked `maxHp` / `skills` of pre-built characters (HP bonus is applied
+  // at character creation — US-122 — where HP is assembled from scratch, so
+  // it can't double-count here).
+  const resistances: string[] = [];
+  const originModifiers: Modifier[] = [];
+  for (const trait of species.traits) {
+    const e = trait.effects;
+    // Damage resistances (Dwarf poison, Tiefling/Dragonborn legacy fire, …).
+    // Skip the `"ancestry"` placeholder — it needs a Draconic-Ancestry choice
+    // that only the creation flow (US-122) resolves.
+    for (const dt of e.damageResistance ?? []) {
+      if (dt !== 'ancestry' && !resistances.includes(dt)) resistances.push(dt);
+    }
+    // Save advantages → typed Modifiers queried via `hasAdvantageOn`. An entry
+    // keyed by `ability` ("int") advantages that ability's saves; one keyed by
+    // `condition` ("poisoned") advantages saves to avoid/end that condition.
+    for (const adv of e.savingThrowAdvantage ?? []) {
+      const key = adv.ability ?? adv.condition;
+      originModifiers.push(key ? { type: 'advantage', on: 'save', key } : { type: 'advantage', on: 'save' });
+    }
+  }
+  if (resistances.length > 0) playerDef.resistances = resistances;
+  if (originModifiers.length > 0) playerDef.originModifiers = originModifiers;
 }
 
 export function applyEquipment(

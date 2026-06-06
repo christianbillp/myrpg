@@ -1,5 +1,5 @@
 import { GameEvent, NpcState, PlayerAttack, ItemDef, WeaponDef, MonsterDef, LogEntry } from './types.js';
-import type { RolledBonusDamage } from './CombatSystem.js';
+import type { RolledBonusDamage, ResolvedPlayerAttack } from './CombatSystem.js';
 import type { GameContext } from './GameContext.js';
 import {
   playerMeleeAttack, playerThrowAttack, playerHide, playerSecondWind, enemyAttack,
@@ -247,9 +247,54 @@ export function doAttack(ctx: GameContext, targetId: string | undefined, events:
     return;
   }
   const sneakAttackAllowed = sneakAttackEligible(ctx, atk, target, withAdvantage, withDisadvantage);
+  const params = { withAdvantage, withDisadvantage, autoCrit, playerHidden, coverBonus, sneakAttackAllowed };
   const resolved = playerThrowAttack(
     ctx.playerDef, atk, targetDef, withAdvantage, withDisadvantage, ctx.playerDef.proficiencyBonus, autoCrit, playerHidden, coverBonus, sneakAttackAllowed,
   );
+
+  // US-109a — Heroic Inspiration: pause BEFORE any consequence and offer the
+  // reroll. The roll is computed but nothing has been applied yet (no damage,
+  // no hide clear, no action spend), so `doResolveReroll` can cleanly apply
+  // this exact outcome (decline) or re-resolve a fresh roll (accept).
+  if (s.player.heroicInspiration) {
+    const outcomePreview = resolved.isHit
+      ? `HIT — ${resolved.damage} ${atk.damageType}`
+      : `MISS (${resolved.attackTotal} vs AC ${targetDef.ac})`;
+    s.pendingReroll = {
+      kind: 'attack',
+      label: `Attack vs ${combatantDisplayName(target, s.npcs)}`,
+      rolledNatural: resolved.naturalRoll,
+      outcomePreview,
+      targetId: target.id,
+      params,
+      resolved,
+    };
+    return;
+  }
+
+  applyAttackOutcome(ctx, target, targetDef, atk, resolved, events);
+}
+
+/**
+ * Apply the consequences of a resolved player attack — defensive parry, damage
+ * (with resistance), masteries, ammunition recovery, kill, action spend, and
+ * Invisibility break. Extracted from `doAttack` so the Heroic Inspiration
+ * reroll pause (US-109a) can defer it: `doAttack` runs the irreversible
+ * pre-roll setup (ammo spend, advantage flags) and the roll, then either
+ * applies this outcome immediately or stashes it on `pendingReroll` for
+ * `doResolveReroll` to apply with the original or rerolled result.
+ */
+function applyAttackOutcome(
+  ctx: GameContext,
+  target: NpcState,
+  targetDef: MonsterDef,
+  atk: PlayerAttack,
+  resolved: ResolvedPlayerAttack,
+  events: GameEvent[],
+): void {
+  const s = ctx.state;
+  const isRangedWeapon = !!atk.rangeNormal && atk.rangeNormal > 0;
+  const dist = chebyshev(s.player.tileX, s.player.tileY, target.tileX, target.tileY);
   clearHide(s.player);
 
   // Defensive reactions (e.g. Noble's Parry): trigger when the NPC was hit by
@@ -311,6 +356,36 @@ export function doAttack(ctx: GameContext, targetId: string | undefined, events:
   if (s.player.concentratingOn === 'invisibility' && s.player.invisibilityTargetId === 'player') {
     endConcentration(ctx, `${ctx.playerDef.name} broke Invisibility by attacking`);
   }
+  void events;
+}
+
+/**
+ * Resolve a pending Heroic Inspiration reroll (US-109a). Decline applies the
+ * exact outcome the player saw; accept spends the inspiration, re-resolves the
+ * attack fresh (a new d20, honouring the same Advantage/Disadvantage state),
+ * and applies that. The deferred attack consequences are applied here.
+ */
+export function doResolveReroll(ctx: GameContext, accept: boolean, events: GameEvent[]): void {
+  const s = ctx.state;
+  const p = s.pendingReroll;
+  if (!p) return;
+  s.pendingReroll = null;
+  const target = s.npcs.find((n) => n.id === p.targetId);
+  const targetDef = target ? ctx.resolveMonsterDef(target.defId) : null;
+  if (!target || !targetDef) return;  // target gone — nothing to apply.
+  const atk = ctx.playerDef.mainAttack;
+
+  let resolved: ResolvedPlayerAttack = p.resolved;
+  if (accept && s.player.heroicInspiration) {
+    s.player.heroicInspiration = false;
+    resolved = playerThrowAttack(
+      ctx.playerDef, atk, targetDef,
+      p.params.withAdvantage, p.params.withDisadvantage, ctx.playerDef.proficiencyBonus,
+      p.params.autoCrit, p.params.playerHidden, p.params.coverBonus, p.params.sneakAttackAllowed,
+    );
+    ctx.addLog({ left: `${ctx.playerDef.name} expends Heroic Inspiration to reroll`, right: `d20 ${p.rolledNatural} → ${resolved.naturalRoll}`, style: 'header' });
+  }
+  applyAttackOutcome(ctx, target, targetDef, atk, resolved, events);
 }
 
 export function throwItem(ctx: GameContext, itemId: string, targetId?: string): GameEvent[] {

@@ -464,7 +464,7 @@ export function shieldAvailable(ctx: GameContext): boolean {
 export function applyEnemyHitToPlayer(
   ctx: GameContext,
   npc: NpcState,
-  result: { damage: number; isCrit: boolean; finalTileX: number; finalTileY: number; bonusComponents: RolledBonusDamage[]; attackOnHit?: import('./types.js').AttackOnHitEffect[] },
+  result: { damage: number; isCrit: boolean; finalTileX: number; finalTileY: number; bonusComponents: RolledBonusDamage[]; damageType?: string; attackOnHit?: import('./types.js').AttackOnHitEffect[] },
   events: GameEvent[],
 ): void {
   const s = ctx.state;
@@ -519,14 +519,14 @@ export function applyEnemyHitToPlayer(
       s.phase = 'death_saves';
     }
   } else {
-    ctx.applyDamageToPlayer(result.damage, events);
+    ctx.applyDamageToPlayer(result.damage, events, result.damageType);
     // Secondary damage riders from the attack (e.g. cultist's necrotic add-on).
-    // The player has no per-type resistance lookup today, so each component
-    // applies in full — but it's logged separately so the player sees exactly
-    // what hit them, and the engine path is ready for future player resistances.
+    // Each component carries its own damage type, so species resistances
+    // (US-108) apply per-component; logged separately so the player sees
+    // exactly what hit them.
     for (const bd of result.bonusComponents) {
       ctx.addLog({ left: `+ ${bd.damage} ${bd.damageType}`, right: bd.rollStr, style: 'hit' });
-      ctx.applyDamageToPlayer(bd.damage, events);
+      ctx.applyDamageToPlayer(bd.damage, events, bd.damageType);
     }
     // Apply on-hit effects (attach, etc.) authored on the attack.
     applyMonsterAttachToPlayer(ctx, npc, result.attackOnHit);
@@ -723,6 +723,7 @@ export function doResolveReaction(ctx: GameContext, accept: boolean, events: Gam
           finalTileX: attacker.tileX,
           finalTileY: attacker.tileY,
           bonusComponents: pending.incomingBonusComponents,
+          damageType: pending.incomingDamageType,
         };
         applyEnemyHitToPlayer(ctx, attacker, synthResult, events);
       } else if (pending.attackTotal < pending.shieldedAc) {
@@ -739,6 +740,7 @@ export function doResolveReaction(ctx: GameContext, accept: boolean, events: Gam
           finalTileX: attacker.tileX,
           finalTileY: attacker.tileY,
           bonusComponents: pending.incomingBonusComponents,
+          damageType: pending.incomingDamageType,
         };
         applyEnemyHitToPlayer(ctx, attacker, synthResult, events);
       }
@@ -750,6 +752,7 @@ export function doResolveReaction(ctx: GameContext, accept: boolean, events: Gam
         finalTileX: attacker.tileX,
         finalTileY: attacker.tileY,
         bonusComponents: pending.incomingBonusComponents,
+        damageType: pending.incomingDamageType,
       };
       applyEnemyHitToPlayer(ctx, attacker, synthResult, events);
     }

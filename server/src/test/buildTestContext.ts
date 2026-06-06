@@ -198,6 +198,7 @@ export function buildTestContext(overrides: TestContextOverrides = {}): TestCont
     encounterComplete: false,
     selectedTargetId: null,
     pendingReaction: null,
+    pendingReroll: null,
   } as unknown as GameState;
 
   const playerDef = makePlayerDef(overrides.playerDef);

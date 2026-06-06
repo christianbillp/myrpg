@@ -14,6 +14,50 @@ import type { NpcSave } from "./npcSave.js";
 import type { SpellcastingAbility } from "./spells.js";
 
 /**
+ * SRD creature sizes (`Monsters_Header.md`, `Species_All.md`), ordered smallest
+ * to largest. Size gates Grapple/Shove eligibility ("no more than one size
+ * larger"), Squeezing, breath weapons, and mounts. Players derive it from their
+ * species; monsters parse it from the leading token of their free-text `type`
+ * string at load time. Always populated by the load/seed path — typed optional
+ * only to tolerate old saves and partial fixtures (mirrors `senses`).
+ */
+export type CreatureSize = 'tiny' | 'small' | 'medium' | 'large' | 'huge' | 'gargantuan';
+
+export const SIZE_ORDER: readonly CreatureSize[] = [
+  'tiny', 'small', 'medium', 'large', 'huge', 'gargantuan',
+];
+
+/** Index of a size in `SIZE_ORDER`; the difference between two ranks is the
+ *  "how many sizes apart" used by the Grapple/Shove one-size-larger gate. */
+export function sizeRank(size: CreatureSize): number {
+  return SIZE_ORDER.indexOf(size);
+}
+
+/**
+ * Parse a `CreatureSize` from a monster stat-block `type` string such as
+ * `"Medium or Small Humanoid, Neutral"` or `"Tiny Construct, Unaligned"` — the
+ * size is the leading word. For a disjunction ("Medium or Small") the first
+ * (larger) listed size wins, deterministically. Falls back to `'medium'` when
+ * no size token is recognised.
+ */
+export function parseCreatureSize(raw: string | null | undefined): CreatureSize {
+  const token = (raw ?? '').trim().toLowerCase().split(/[^a-z]+/)[0];
+  return (SIZE_ORDER as readonly string[]).includes(token)
+    ? (token as CreatureSize)
+    : 'medium';
+}
+
+/**
+ * SRD "Bloodied" (US-109, `Bloodied.md`): a creature is Bloodied while it has
+ * **half its Hit Points or fewer remaining**. A creature at 0 HP (dead /
+ * dying) is not considered Bloodied. Derived on demand from current HP rather
+ * than stored, so it can never drift out of sync.
+ */
+export function isBloodied(hp: number, maxHp: number): boolean {
+  return hp > 0 && hp <= maxHp / 2;
+}
+
+/**
  * A secondary damage component riding along with an attack. Used for SRD
  * attacks like the Cultist's *Ritual Sickle* (1d4+1 slashing **+ 1 necrotic**)
  * or Cockatrice's beak (piercing + petrification). Each component rolls its
@@ -108,6 +152,25 @@ export interface PlayerDef {
    *  Seeded from species traits when the character is built. Absent means
    *  "normal sight only". Read by `Vision.canSee` and the Hide gate. */
   senses?: Senses;
+  /** SRD creature size, seeded from species at session build (US-107).
+   *  Defaults to `'medium'` when the species declares none. */
+  size?: CreatureSize;
+  /** Damage types this character resists / is vulnerable to / is immune to
+   *  (US-108). Seeded from species traits (`damageResistance`) at session build
+   *  and read by the player damage path (`GameEngine.applyDamageToPlayer`),
+   *  mirroring the monster resistance lookup. Immunity > vulnerability >
+   *  resistance. Lowercase damage-type strings ("poison", "fire", …). */
+  resistances?: string[];
+  vulnerabilities?: string[];
+  immunities?: string[];
+  /** Typed modifiers derived from species/background origin traits (US-108) —
+   *  e.g. Advantage on saves vs Poisoned (Dwarf), Advantage on INT saves
+   *  (Gnome). Concatenated into the aggregated `modifiers` list by
+   *  `collectModifiers`, so resolvers query them via `hasAdvantageOn` exactly
+   *  like feat/feature modifiers. Kept separate from `modifiers` so the species
+   *  pass and the feat/feature pass (`applyModifiers`) don't clobber each other
+   *  regardless of call order. */
+  originModifiers?: Modifier[];
   color: number;
   xp: number;
   /** Typed modifiers aggregated from this character's feats + class features at
@@ -267,6 +330,10 @@ export interface MonsterDef {
   /** Special senses (SRD): darkvision / blindsight / tremorsense / truesight.
    *  Absent means "normal sight only". Read by `Vision.canSee`. */
   senses?: Senses;
+  /** SRD creature size, parsed from the leading token of `type` at load time
+   *  (US-107) via `parseCreatureSize`. The free-text `type` is kept for
+   *  display/flavour. */
+  size?: CreatureSize;
   speed: number;
   attacks: MonsterAttack[];
   xp: number;

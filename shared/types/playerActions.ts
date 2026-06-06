@@ -27,6 +27,7 @@ export type PlayerAction =
    *  range / lifecycle conditions are violated. Consumes the player's Action. */
   | { type: 'commandSummon'; summonNpcId: string; tile: { x: number; y: number } }
   | { type: 'resolveReaction'; accept: boolean }
+  | { type: 'resolveReroll'; accept: boolean }
   | { type: 'dash' }
   | { type: 'dodge' }
   | { type: 'disengage' }

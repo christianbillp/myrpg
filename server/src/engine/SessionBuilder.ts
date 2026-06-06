@@ -424,6 +424,7 @@ export function buildSessionState(
       deployableGearIds: [],
     },
     pendingReaction: null,
+    pendingReroll: null,
     activeConversation: null,
     triggers: req.triggers ?? [],
     firedTriggerIds: [],

@@ -21,6 +21,10 @@ export function collectModifiers(playerDef: PlayerDef, feats: FeatDef[], feature
   const out: Modifier[] = [];
   collectFrom(out, feats, playerDef.featIds);
   collectFrom(out, features, playerDef.defaultFeatureIds);
+  // US-108: species/background origin modifiers (e.g. save advantages) are
+  // seeded onto `originModifiers` by `applySpecies` and merged here so they
+  // sit alongside feat/feature modifiers regardless of pass ordering.
+  if (playerDef.originModifiers) out.push(...playerDef.originModifiers);
   return out;
 }
 
