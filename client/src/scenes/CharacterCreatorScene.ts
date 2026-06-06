@@ -63,6 +63,26 @@ interface CreatorState {
 
 const STEPS = ["Concept", "Origin", "Abilities", "Skills", "Spells", "Review"] as const;
 
+/** One subspecies option — covers lineage (Elf/Gnome), legacy (Tiefling),
+ *  draconic ancestry (Dragonborn), and giant ancestry (Goliath) shapes. */
+interface SubspeciesOption {
+  id?: string;
+  name?: string;
+  dragon?: string;       // draconic ancestry
+  damageType?: string;   // draconic ancestry
+  effect?: Record<string, unknown>;  // giant ancestry
+  level1?: SubspeciesLevelBlock;
+  level3?: SubspeciesLevelBlock;
+  level5?: SubspeciesLevelBlock;
+}
+interface SubspeciesLevelBlock {
+  cantrip?: string;
+  damageResistance?: string[];
+  preparedSpell?: string;
+  darkvisionOverride?: { feet: number };
+  cantripSwapOnLongRest?: { list: string };
+}
+
 /** The 18 SRD skill ids (for the species "any skill" pick). */
 const ALL_SKILLS: readonly string[] = [
   "acrobatics", "animalHandling", "arcana", "athletics", "deception", "history",
@@ -477,22 +497,81 @@ export class CharacterCreatorScene extends Phaser.Scene {
     return !!this.currentSpecies()?.traits.some((t) => t.effects.originFeat);
   }
   private originFeats(): FeatDef[] { return this.feats.filter((f) => f.category === "origin"); }
-  /** Subspecies choice (Elf/Gnome/Goliath lineage, Dragonborn ancestry) for the
-   *  current species, normalised to {label, options}. Null when the species has
-   *  none. */
-  private subspeciesChoice(): { label: string; options: Array<{ value: string; label: string }> } | null {
+  /** The species' subspecies trait, if any — a lineage (Elf/Gnome), ancestry
+   *  (Dragonborn/Goliath), or legacy (Tiefling). Returns the trait + its raw
+   *  option objects. Null when the species has none. */
+  private activeSubspecies(): { trait: SpeciesDef["traits"][number]; options: SubspeciesOption[] } | null {
     const sp = this.currentSpecies();
     if (!sp) return null;
     for (const t of sp.traits) {
-      const e = t.effects as { lineageChoice?: { options: Array<{ id: string; name?: string }> }; ancestryChoice?: { options: Array<{ dragon: string; damageType?: string }> } };
-      if (e.lineageChoice?.options) {
-        return { label: t.name, options: e.lineageChoice.options.map((o) => ({ value: o.id, label: o.name ?? prettify(o.id) })) };
-      }
-      if (e.ancestryChoice?.options) {
-        return { label: t.name, options: e.ancestryChoice.options.map((o) => ({ value: o.dragon, label: `${prettify(o.dragon)}${o.damageType ? ` (${o.damageType})` : ""}` })) };
-      }
+      const e = t.effects as { lineageChoice?: { options: SubspeciesOption[] }; ancestryChoice?: { options: SubspeciesOption[] }; legacyChoice?: { options: SubspeciesOption[] } };
+      const choice = e.lineageChoice ?? e.ancestryChoice ?? e.legacyChoice;
+      if (choice?.options?.length) return { trait: t, options: choice.options };
     }
     return null;
+  }
+
+  /** Stable id for a subspecies option (`id` for lineage/legacy/giant ancestry,
+   *  `dragon` for draconic ancestry). */
+  private subspeciesId(o: SubspeciesOption): string { return o.id ?? o.dragon ?? ""; }
+
+  /** Subspecies dropdown options for the current species, normalised to
+   *  {value,label}. Null when the species has no subspecies. */
+  private subspeciesChoice(): { label: string; options: Array<{ value: string; label: string }> } | null {
+    const sub = this.activeSubspecies();
+    if (!sub) return null;
+    return {
+      label: sub.trait.name,
+      options: sub.options.map((o) => ({
+        value: this.subspeciesId(o),
+        label: o.name ?? `${prettify(o.dragon ?? "")}${o.damageType ? ` (${o.damageType})` : ""}`,
+      })),
+    };
+  }
+
+  /** The currently-selected raw subspecies option, if any. */
+  private selectedSubspecies(): SubspeciesOption | null {
+    const sub = this.activeSubspecies();
+    if (!sub) return null;
+    return sub.options.find((o) => this.subspeciesId(o) === this.state.speciesLineage) ?? null;
+  }
+
+  /** Human-readable lines describing the selected subspecies' features, so the
+   *  species panel can explain what the lineage/ancestry/legacy grants. */
+  private subspeciesFeatureLines(o: SubspeciesOption): string[] {
+    const lines: string[] = [];
+    if (o.damageType) lines.push(`Breath Weapon &amp; Resistance — ${esc(o.damageType)} damage.`);
+    if (o.effect) lines.push(this.describeGiantGift(o.effect));
+    for (const [lvl, label] of [["level1", "Level 1"], ["level3", "Level 3"], ["level5", "Level 5"]] as const) {
+      const b = o[lvl];
+      if (!b) continue;
+      const parts: string[] = [];
+      if (b.cantrip) parts.push(`cantrip <i>${esc(prettify(b.cantrip))}</i>`);
+      if (b.damageResistance?.length) parts.push(`Resistance to ${b.damageResistance.map(esc).join("/")}`);
+      if (b.darkvisionOverride) parts.push(`Darkvision ${b.darkvisionOverride.feet} ft`);
+      if (b.cantripSwapOnLongRest) parts.push(`swap that cantrip on a Long Rest`);
+      if (b.preparedSpell) parts.push(`<i>${esc(prettify(b.preparedSpell))}</i> always prepared`);
+      if (parts.length) lines.push(`${label}: ${parts.join(", ")}.`);
+    }
+    return lines.filter(Boolean);
+  }
+
+  /** Format a Goliath Giant-ancestry effect (uses = PB / Long Rest). */
+  private describeGiantGift(e: Record<string, unknown>): string {
+    const tp = e.teleport as { feet: number; action: string } | undefined;
+    if (tp) return `Teleport ${tp.feet} ft as a ${tp.action.replace(/-/g, " ")}.`;
+    const bd = e.bonusDamageOnHit as { dice: string; damageType: string } | undefined;
+    if (bd) {
+      const sr = e.speedReduction as { feet: number } | undefined;
+      return `Once per turn on a hit: +${bd.dice} ${bd.damageType} damage${sr ? ` and the target's Speed drops ${sr.feet} ft` : ""}.`;
+    }
+    const co = e.conditionOnHit as { condition: string } | undefined;
+    if (co) return `Once per turn on a hit: impose the ${co.condition} condition.`;
+    const dr = e.damageReduction as { roll: string } | undefined;
+    if (dr) return `Reaction when you take damage: reduce it by ${dr.roll}.`;
+    const rt = e.retaliationDamage as { dice: string; damageType: string } | undefined;
+    if (rt) return `Reaction when hurt by a creature within 60 ft: deal ${rt.dice} ${rt.damageType} to it.`;
+    return `A Giant-ancestry benefit (uses = Proficiency Bonus per Long Rest).`;
   }
 
   /** Reset species-granted picks when the species changes (or on load). */
@@ -575,6 +654,26 @@ export class CharacterCreatorScene extends Phaser.Scene {
       row.style.cssText = "font-size:11px;line-height:1.5;margin-top:4px;";
       row.innerHTML = `<b style="color:${ACCENT};">${esc(t.name)}.</b> <span style="color:#aabbcc;">${esc(t.description)}</span>`;
       wrap.appendChild(row);
+    }
+
+    // When a subspecies is selected, explain what THAT choice grants — the
+    // lineage/ancestry/legacy's specific features.
+    const subChoice = this.subspeciesChoice();
+    const selected = this.selectedSubspecies();
+    if (subChoice && selected) {
+      const label = subChoice.options.find((o) => o.value === this.state.speciesLineage)?.label ?? this.state.speciesLineage;
+      const subHead = document.createElement("div");
+      subHead.style.cssText = `font-size:11px;color:#9ac6a0;margin-top:8px;border-top:1px solid #223;padding-top:6px;`;
+      subHead.innerHTML = `<b>${esc(subChoice.label)}: ${esc(label ?? "")}</b>`;
+      wrap.appendChild(subHead);
+      const feats = this.subspeciesFeatureLines(selected);
+      if (feats.length === 0) feats.push("(no additional mechanical features)");
+      for (const line of feats) {
+        const row = document.createElement("div");
+        row.style.cssText = "font-size:11px;line-height:1.5;margin-top:3px;color:#aabbcc;";
+        row.innerHTML = line;
+        wrap.appendChild(row);
+      }
     }
     return wrap;
   }
