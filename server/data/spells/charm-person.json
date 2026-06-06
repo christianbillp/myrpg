@@ -13,7 +13,7 @@
   "concentration": false,
   "ritual": false,
   "save": { "ability": "wis", "halfOnSuccess": false },
-  "effect": { "onFail": "charmed" },
+  "effect": { "onFail": "charmed", "failNote": "is charmed" },
   "description": "You attempt to charm a Humanoid you can see within range. It must succeed on a Wisdom save (with Advantage if you or your companions are fighting it) or be Charmed by you until the spell ends or until you or your allies harm it. The charmed creature regards you as a friendly acquaintance. When the spell ends, the creature knows it was charmed by you.",
   "scaling": "You can target one additional creature for each spell slot level above 1."
 }

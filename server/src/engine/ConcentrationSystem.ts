@@ -92,14 +92,8 @@ export function endConcentration(ctx: GameContext, reason: string): void {
       ctx.removeNpc(sphere.id);
     }
   }
-  // Ray of Enfeeblement (Concentration) — strip `enfeebled` from every NPC.
-  // Multiple casters / sources aren't modelled in single-player, so the
-  // blanket strip is safe.
-  if (spellId === 'ray-of-enfeeblement') {
-    for (const npc of s.npcs) {
-      npc.conditions = npc.conditions.filter((c) => c !== 'enfeebled');
-    }
-  }
+  // (Ray of Enfeeblement's `enfeebled` is stripped by the generic
+  // `effect.onFail` cleanup above — no spell-specific branch needed.)
   s.player.concentratingOn = null;
 }
 

@@ -85,6 +85,9 @@ export interface SpellEffect {
    *  `no-healing`, Shocking Grasp → `no-reactions`). Same shape as `onFail`;
    *  the log flavour comes from `ON_HIT_CONDITION_NOTE` in `SpellSystem`. */
   onHit?: string | string[];
+  /** Iconic narration for a failed save, e.g. Hideous Laughter's "collapses,
+   *  helpless with laughter". Falls back to "is &lt;conditions&gt;" when absent. */
+  failNote?: string;
 }
 
 export interface SpellDef {

@@ -986,9 +986,7 @@ function onHitConditionNote(condition: string): string {
  */
 function conditionLogText(spell: SpellDef, conds: string[]): string {
   if (conds.length === 0) return 'is affected';
-  if (spell.id === 'hideous-laughter') return 'collapses, helpless with laughter';
-  if (spell.id === 'sleep')            return 'falls into a magical slumber';
-  if (spell.id === 'charm-person')     return 'is charmed';
+  if (spell.effect?.failNote) return spell.effect.failNote;
   return 'is ' + conds.join(' and ');
 }
 
