@@ -6,15 +6,21 @@
  * specific feat/feature ids, so a new passive that fits an existing modifier
  * type is pure data — drop `modifiers: [...]` on the feat/feature JSON.
  */
-import type { PlayerDef, FeatDef, FeatureDef, Modifier } from './types.js';
+import type { PlayerDef, FeatDef, FeatureDef, Modifier, ModifierSource } from './types.js';
+
+/** Push the modifiers of every source named by `ids` onto `out`. Feats and
+ *  class features are both `ModifierSource`s, so this is identical for either. */
+function collectFrom(out: Modifier[], sources: ModifierSource[], ids: string[] | undefined): void {
+  if (!ids?.length) return;
+  const byId = new Map(sources.map((s) => [s.id, s]));
+  for (const id of ids) out.push(...(byId.get(id)?.modifiers ?? []));
+}
 
 /** Gather every modifier the character's feats + known class features grant. */
 export function collectModifiers(playerDef: PlayerDef, feats: FeatDef[], features: FeatureDef[]): Modifier[] {
-  const featById = new Map(feats.map((f) => [f.id, f]));
-  const featureById = new Map(features.map((f) => [f.id, f]));
   const out: Modifier[] = [];
-  for (const id of playerDef.featIds ?? []) out.push(...(featById.get(id)?.modifiers ?? []));
-  for (const id of playerDef.defaultFeatureIds ?? []) out.push(...(featureById.get(id)?.modifiers ?? []));
+  collectFrom(out, feats, playerDef.featIds);
+  collectFrom(out, features, playerDef.defaultFeatureIds);
   return out;
 }
 

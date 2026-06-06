@@ -23,3 +23,19 @@ export type Modifier =
   /** Advantage on ability checks of one ability score (Enhance Ability — the
    *  chosen ability). Projected onto `PlayerState.enhancedAbility`. */
   | { type: 'enhanced-ability'; ability: 'str' | 'dex' | 'con' | 'int' | 'wis' | 'cha' };
+
+/**
+ * Shared contract for anything that contributes typed `Modifier`s to a
+ * character — feats (`FeatDef`) and class features (`FeatureDef`). The modifier
+ * aggregator (`collectModifiers`) treats any `ModifierSource` uniformly, so the
+ * data-driven passive layer is identical across both. Each domain extends this
+ * with its own distinct fields (feats: `category` / `prerequisites` / `effects`;
+ * features: `classId` / `cost` / `resource` / `handler`) — they are NOT merged
+ * into one shape, only their common contract is named here.
+ */
+export interface ModifierSource {
+  id: string;
+  name: string;
+  description: string;
+  modifiers?: Modifier[];
+}

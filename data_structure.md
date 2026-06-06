@@ -428,6 +428,8 @@ Catch-all for non-functional inventory items — class artifacts (a wizard's spe
 
 The data-driven layer that replaces scattered `includes(featId)` / `switch(id)` branches for **passive** mechanics. A feat (`feats/`) or class feature (`features/`) declares a `modifiers: Modifier[]` array; at character load `Modifiers.applyModifiers` flattens every active source's modifiers onto `PlayerDef.modifiers`, and resolvers **query** that list instead of branching on ids.
 
+`FeatDef` and `FeatureDef` both extend a shared **`ModifierSource`** base (`shared/types/modifiers.ts` → `{ id, name, description, modifiers? }`) so the aggregator (`collectModifiers`) treats either uniformly via one `collectFrom` helper. The two are **not** merged into a single type — each keeps its domain-specific fields (feat: `category` / `prerequisites` / `effects`; feature: `classId` / `cost` / `resource` / `handler` / `slotRecovery`); only their common modifier-contributing contract is named.
+
 **`Modifier` types** (`shared/types/modifiers.ts`):
 
 | Type | Shape | Meaning |

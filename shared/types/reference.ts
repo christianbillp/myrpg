@@ -5,7 +5,7 @@
  * re-exports every domain module under `shared/types/`).
  */
 
-import type { Modifier } from "./modifiers.js";
+import type { ModifierSource } from "./modifiers.js";
 
 export interface FeatEffects {
   savageAttacker?: boolean;
@@ -33,9 +33,10 @@ export interface FeatEffects {
   [key: string]: unknown;
 }
 
-export interface FeatDef {
-  id: string;
-  name: string;
+/** Character-build choice with prerequisites. `id` / `name` / `description` /
+ *  `modifiers` come from {@link ModifierSource}; the `modifiers` array is the
+ *  data-driven replacement for the ad-hoc `effects` flags. */
+export interface FeatDef extends ModifierSource {
   category: 'origin' | 'general' | 'fighting-style' | 'epic-boon';
   prerequisites: {
     minLevel: number | null;
@@ -44,12 +45,7 @@ export interface FeatDef {
     repeatable: boolean;
     repeatableNote?: string | null;
   };
-  description: string;
   effects: FeatEffects;
-  /** Typed modifiers this feat contributes (crit-range, flags, advantage).
-   *  Aggregated onto `PlayerDef.modifiers` and queried by resolvers — the
-   *  data-driven replacement for the ad-hoc `effects` flags. */
-  modifiers?: Modifier[];
 }
 
 export interface BackgroundDef {

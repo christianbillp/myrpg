@@ -7,7 +7,7 @@
 
 // Cross-domain imports — keep these explicit so the dependency graph is visible.
 import type { LevelUpChoicePrompt } from "./levelUp.js";
-import type { Modifier } from "./modifiers.js";
+import type { ModifierSource } from "./modifiers.js";
 
 //
 // Features are class abilities described as data + handler. Each character
@@ -49,14 +49,16 @@ export interface FeatureUI {
   resourceLabel?: string;
 }
 
-export interface FeatureDef {
-  id: string;
-  name: string;
+/** Class ability described as data + handler. `id` / `name` / `description` /
+ *  `modifiers` come from {@link ModifierSource}; `modifiers` carries the passive
+ *  typed contributions (crit-range, flags, advantage) aggregated onto
+ *  `PlayerDef.modifiers` so a passive that fits an existing modifier type needs
+ *  no engine code, just data. */
+export interface FeatureDef extends ModifierSource {
   /** Class this feature belongs to (e.g. "fighter"). Display-only — no class registry yet. */
   classId: string;
   /** Minimum class level required for the character to know this feature. */
   minLevel: number;
-  description: string;
   cost: FeatureCost;
   resource?: FeatureResource;
   ui?: FeatureUI;
@@ -66,13 +68,6 @@ export interface FeatureDef {
    * character-load (Unarmored Defense, Expertise, etc.).
    */
   handler?: string;
-  /**
-   * Passive typed modifiers this feature contributes (crit-range, flags,
-   * advantage sources). Aggregated onto `PlayerDef.modifiers` and queried by
-   * resolvers — so a passive that fits an existing modifier type needs no
-   * engine code, just this data.
-   */
-  modifiers?: Modifier[];
   /**
    * Short-rest spell-slot recovery (Wizard Arcane Recovery, Druid Natural
    * Recovery). On a Short Rest, once per Long Rest, recover expended slots
