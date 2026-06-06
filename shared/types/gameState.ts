@@ -116,6 +116,10 @@ export interface PlayerState {
    *  the Magic Weapon cast, cleared when the 1-hour duration ends or the
    *  player casts Magic Weapon again. */
   magicWeaponBonus: number;
+  /** SRD Knocking Out a Creature (US-052): when true, a melee hit that would
+   *  drop an enemy to 0 HP instead leaves it Unconscious + Stable (out of the
+   *  fight, not killed). A player-set toggle. */
+  nonLethal?: boolean;
   /** SRD attunement (US-124): ids of magic items the player is currently
    *  attuned to (≤ 3). A `requiresAttunement` item's bonus applies only while
    *  its id is in this list. */

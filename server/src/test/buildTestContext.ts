@@ -244,6 +244,7 @@ export function buildTestContext(overrides: TestContextOverrides = {}): TestCont
     applyDamageToPlayer(damage) { state.player.hp = Math.max(0, state.player.hp - damage); },
     killNpc(id) { const n = state.npcs.find((x) => x.id === id); if (n) n.hp = 0; },
     killWithReward() { /* no-op */ },
+    knockOutNpc(npc) { npc.conditions.push('unconscious', 'stable'); },
     applyMasteryConditions() { /* no-op */ },
     doStartCombat() { /* no-op */ },
     doPlayerOpportunityAttack() { /* no-op */ },

@@ -30,6 +30,8 @@ export interface PlayerPanelActionState {
   bonusActionUsed: boolean;
   movesLeft: number;
   moveMode: boolean;
+  /** SRD Knocking Out (US-052): true while KNOCK OUT (non-lethal melee) mode is on. */
+  nonLethal: boolean;
   throwableItems: Array<{ id: string; name: string }>;
   availableActions: AvailableActions;
   mainAttackName: string;
@@ -85,6 +87,8 @@ export interface PlayerPanelCallbacks {
   /** Grapple (US-110) / Shove (US-050) the selected adjacent enemy. */
   onGrapple: () => void;
   onShove: (effect: 'push' | 'prone') => void;
+  /** Toggle KNOCK OUT (non-lethal melee, US-052). */
+  onToggleNonLethal: (on: boolean) => void;
   /** Attune to a magic item (US-124). */
   onAttune: (itemId: string) => void;
   /** Identify a found magic item (US-124). */
@@ -141,7 +145,7 @@ type ActionGroup = 'action' | 'bonus' | 'move' | 'free' | 'more' | 'companion';
  *  (★ LEVEL UP, ☾ LONG REST) are left alone — see `iconFor`. */
 const ACTION_ICONS: Record<string, string> = {
   ATTACK: '⚔', THROW: '➶', DODGE: '❖', DASH: '»', DISENGAGE: '↩', DETACH: '⤴',
-  GRAPPLE: '✊', SHOVE: '🤚', 'SHOVE PRONE': '⤓', ATTUNE: '✶', IDENTIFY: '🔎',
+  GRAPPLE: '✊', SHOVE: '🤚', 'SHOVE PRONE': '⤓', ATTUNE: '✶', IDENTIFY: '🔎', 'KNOCK OUT': '☄',
   HIDE: '◐', SEARCH: '⚲', MOVE: '⤧', TALK: '❝', CAST: '✦',
   'SHORT REST': '☕', 'ROLL DEATH SAVE': '☠',
 };
@@ -505,6 +509,9 @@ export class PlayerPanel {
         groups.action.push(this.makeBtn('SHOVE', GREEN, () => this.callbacks.onShove('push')));
         groups.action.push(this.makeBtn('SHOVE PRONE', GREEN, () => this.callbacks.onShove('prone')));
       }
+
+      // KNOCK OUT (US-052): toggle non-lethal melee. Highlighted amber when on.
+      groups.more.push(this.makeBtn('KNOCK OUT', state.nonLethal ? '#5a4800' : '#2a2a1a', () => this.callbacks.onToggleNonLethal(!state.nonLethal)));
 
       if (aa.canDetach) groups.action.push(this.makeBtn('DETACH', GREEN, this.callbacks.onDetach));
 

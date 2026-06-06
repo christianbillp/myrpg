@@ -26,6 +26,9 @@ export interface GameContext {
   applyDamageToPlayer(damage: number, events: GameEvent[], damageType?: string): void;
   killNpc(id: string): void;
   killWithReward(npc: NpcState, def: MonsterDef, killMessage: string, includeTotal?: boolean): void;
+  /** SRD Knocking Out (US-052): neutralise the NPC non-lethally — award XP,
+   *  apply Unconscious + Stable, but leave it alive (no loot drop, no kill). */
+  knockOutNpc(npc: NpcState, def: MonsterDef): void;
   applyMasteryConditions(target: NpcState, vexApplied: boolean, slowApplied: boolean): void;
 
   doStartCombat(events: GameEvent[]): void;

@@ -1016,6 +1016,7 @@ export class GameScene extends Phaser.Scene {
       onShove:          (effect) => gameClient.sendAction({ type: "shove", targetId: this.gameState?.selectedTargetId ?? undefined, effect }),
       onAttune:         (itemId) => gameClient.sendAction({ type: "attune", itemId }),
       onIdentify:       (itemId) => gameClient.sendAction({ type: "identify", itemId }),
+      onToggleNonLethal: (on) => gameClient.sendAction({ type: "setNonLethal", on }),
       onDetach:         () => gameClient.sendAction({ type: "detach" }),
       onUseFeature:     (featureId) => gameClient.sendAction({ type: "useFeature", featureId }),
       onHide:           () => gameClient.sendAction({ type: "hide" }),
@@ -1184,6 +1185,7 @@ export class GameScene extends Phaser.Scene {
       bonusActionUsed: state.player.bonusActionUsed,
       movesLeft:       state.player.movesLeft,
       moveMode:        this.moveMode,
+      nonLethal:       !!state.player.nonLethal,
       throwableItems:  state.availableActions.throwableItemIds
         .map(id => allItems.find(i => i.id === id))
         .filter((i): i is ItemDef => i !== undefined)

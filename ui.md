@@ -45,6 +45,7 @@ Defined in `client/src/ui/PlayerPanel.ts`. HTML DOM panel; **open by default** (
 | **☾ LONG REST**    | Above LEVEL UP (just over MOVE) during the `exploring` phase when `availableActions.canLongRest` is true. The flag is set by the encounter (`EncounterDef.allowsLongRest = true`) — taverns / safehouses / camps qualify; wilderness exploration does not. Opens the [Long Rest Overlay](#long-rest-overlay). |
 | **✶ ATTUNE**       | Under "⋯ More" during the `exploring` phase when `availableActions.attunableItemIds` is non-empty (the player holds a magical item that `requiresAttunement`, isn't attuned to it, and has fewer than 3 attunements). Attunes the first eligible item (SRD: bonds over a Short Rest) so its bonus takes effect; the server enforces the ≤3 cap (US-124). |
 | **🔎 IDENTIFY**    | Under "⋯ More" during the `exploring` phase when `availableActions.unidentifiedItemIds` is non-empty (the player holds a `startsUnidentified` item not yet identified). Identifies the first such item (SRD: a Short Rest examining it / the Identify spell), revealing its true name + properties; until then the Equipment tab shows it as "Unidentified <category>" (US-124). |
+| **☄ KNOCK OUT**    | Toggle under "⋯ More" (highlighted amber when on). While on (`PlayerState.nonLethal`), a **melee** blow that would drop an enemy to 0 HP instead leaves it **Unconscious + Stable** — defeated (XP awarded) but alive, not killed (no loot drop). Ranged kills are unaffected (SRD: melee only). US-052. |
 
 ### Action Buttons
 

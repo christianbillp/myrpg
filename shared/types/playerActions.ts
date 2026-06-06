@@ -34,6 +34,7 @@ export type PlayerAction =
   | { type: 'unattune'; itemId: string }
   | { type: 'useScroll'; itemId: string }
   | { type: 'identify'; itemId: string }
+  | { type: 'setNonLethal'; on: boolean }
   | { type: 'dash' }
   | { type: 'dodge' }
   | { type: 'disengage' }

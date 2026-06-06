@@ -365,7 +365,12 @@ function applyAttackOutcome(
     });
   }
 
-  if (target.hp <= 0) ctx.killWithReward(target, targetDef, `☠ ${target.name} is slain!`);
+  if (target.hp <= 0) {
+    // SRD Knocking Out (US-052): a melee blow that drops the target can spare
+    // it — Unconscious + Stable instead of dead — when KNOCK OUT mode is on.
+    if (s.player.nonLethal && !isRangedWeapon) ctx.knockOutNpc(target, targetDef);
+    else ctx.killWithReward(target, targetDef, `☠ ${target.name} is slain!`);
+  }
 
   s.player.actionUsed = true;
 

@@ -94,6 +94,7 @@ export const PLAYER_ACTIONS: Registry = {
   unattune:             (ctx, a)         => ivDoUnattune(ctx, a.itemId),
   useScroll:            (ctx, a, events) => spDoUseScroll(ctx, a.itemId, events),
   identify:             (ctx, a)         => ivDoIdentify(ctx, a.itemId),
+  setNonLethal:         (ctx, a)         => { ctx.state.player.nonLethal = a.on; },
   selectTarget:         (ctx, a)         => { ctx.state.selectedTargetId = a.entityId; },
   scrollLog:            (ctx, a)         => {
     const s = ctx.state;

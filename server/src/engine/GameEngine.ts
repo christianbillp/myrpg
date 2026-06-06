@@ -259,6 +259,7 @@ export class GameEngine {
       applyDamageToPlayer: (d, ev, dt) => this.applyDamageToPlayer(d, ev, dt),
       killNpc: (id) => this.killNpc(id),
       killWithReward: (npc, def, msg, t) => this.killWithReward(npc, def, msg, t),
+      knockOutNpc: (npc, def) => this.knockOutNpc(npc, def),
       applyMasteryConditions: (tgt, v, s) => this.applyMasteryConditions(tgt, v, s),
       doStartCombat: (ev) => cfDoStartCombat(this.ctx, ev),
       doPlayerOpportunityAttack: (npc) => caDoPlayerOA(this.ctx, npc),
@@ -1112,6 +1113,24 @@ export class GameEngine {
     s.player.xp += def.xp;
     this.addLog({ left: `${killMessage} +${def.xp} XP`, style: 'kill' });
     this.killNpc(npc.id);
+  }
+
+  /** SRD Knocking Out a Creature (US-052): the melee blow that would kill
+   *  instead leaves the target Unconscious + Stable — defeated for XP and
+   *  combat purposes, but alive (no loot drop, no `npc_killed`). Reviving it
+   *  (regaining any HP) clears the Unconscious condition. */
+  private knockOutNpc(npc: NpcState, def: MonsterDef): void {
+    const s = this.state;
+    s.player.xp += def.xp;
+    this.addLog({ left: `☄ ${npc.name} is knocked out — +${def.xp} XP`, style: 'kill' });
+    if (!npc.conditions.includes('unconscious')) npc.conditions.push('unconscious');
+    if (!npc.conditions.includes('stable')) npc.conditions.push('stable');
+    npc.isActive = false;
+    clearHide(npc);
+    // A downed creature can't sustain its attach DoTs — drop them, as killNpc does.
+    s.player.ongoingEffects = s.player.ongoingEffects.filter((oe) => oe.kind !== 'attach' || oe.sourceNpcId !== npc.id);
+    for (const n of s.npcs) n.ongoingEffects = n.ongoingEffects.filter((oe) => oe.kind !== 'attach' || oe.sourceNpcId !== npc.id);
+    this.autoEndCombatIfNoEnemies();
   }
 
   private applyMasteryConditions(target: NpcState, vexApplied: boolean, slowApplied: boolean): void {
