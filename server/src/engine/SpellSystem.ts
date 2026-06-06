@@ -1363,6 +1363,40 @@ function resolveSingleTargetSaveSpell(
   }
 }
 
+/**
+ * SRD healing spell (Cure Wounds, Healing Word). Restores HP = roll(dice +
+ * upcast, sides) + the caster's spellcasting ability modifier to the caster or
+ * a chosen ally (a creature at 0 HP can be healed — reviving it clears
+ * Unconscious/Stable). Clamped to the target's max HP. Returns whether any HP
+ * was actually restored (so a full-HP self-cast doesn't claim concentration).
+ */
+function resolveHealSpell(ctx: GameContext, spell: SpellDef, targetIds: string[] | undefined, slotLevel: number): boolean {
+  if (!spell.heal) return false;
+  const s = ctx.state;
+  const upcast = Math.max(0, slotLevel - spell.level);
+  const { total } = rollDamage(spell.heal.dice + upcast, spell.heal.sides);
+  const amount = Math.max(1, total + spellMod(ctx));
+
+  const tid = targetIds?.[0] ?? s.selectedTargetId ?? 'player';
+  const ally = tid !== 'player' ? s.npcs.find((n) => n.id === tid && n.disposition === 'ally') : undefined;
+
+  if (ally) {
+    const before = ally.hp;
+    ally.hp = Math.min(ally.maxHp, ally.hp + amount);
+    if (before <= 0 && ally.hp > 0) {
+      ally.conditions = ally.conditions.filter((c) => c !== 'unconscious' && c !== 'stable');
+    }
+    ctx.addLog({ left: `${ctx.playerDef.name} casts ${spell.name} — ${combatantDisplayName(ally, s.npcs)} regains ${ally.hp - before} HP`, style: 'heal' });
+    return ally.hp > before;
+  }
+
+  // Self (explicit 'player' target, no target, or an invalid/non-ally id).
+  const before = s.player.hp;
+  s.player.hp = Math.min(ctx.playerDef.maxHp, s.player.hp + amount);
+  ctx.addLog({ left: `${ctx.playerDef.name} casts ${spell.name} — regains ${s.player.hp - before} HP`, style: 'heal' });
+  return s.player.hp > before;
+}
+
 function resolveUtilitySpell(ctx: GameContext, spell: SpellDef, slotLevel: number, tile?: { x: number; y: number }, targetIds?: string[], abilityChoice?: 'str' | 'dex' | 'con' | 'int' | 'wis' | 'cha'): void {
   // No roll; just narrate. Specific lasting effects (Mage Armor, Shield as
   // reaction) handled by spell-id switch — kept here, not as separate files,
@@ -1921,6 +1955,8 @@ export function doCastSpell(
     // generic save branch so spells with hpPool aren't forced to also carry
     // a `save` block they wouldn't actually use.
     anyEffect = resolveHpPoolSpell(ctx, spell, tile, slotLevel);
+  } else if (spell.heal) {
+    anyEffect = resolveHealSpell(ctx, spell, targetIds, slotLevel);
   } else if (spell.save) {
     if (preResolvedTarget) {
       anyEffect = resolveSingleTargetSaveSpell(ctx, spell, preResolvedTarget, slotLevel);

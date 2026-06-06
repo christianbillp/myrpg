@@ -138,6 +138,12 @@ export interface SpellDef {
   /** False Life-style temporary HP grant. The roll happens at cast time and
    *  is applied via `awardTempHp` (uses-higher-value semantics). */
   tempHpRoll?: { dice: number; sides: number; bonus?: number };
+  /** SRD healing spell (Cure Wounds, Healing Word). The target — the caster or
+   *  an ally, including a creature at 0 HP — regains HP equal to the roll plus
+   *  the caster's spellcasting ability modifier; upcasting adds `dice` more
+   *  dice per slot level above the spell's base level. Healing never exceeds the
+   *  target's max HP, and reviving a downed ally clears Unconscious/Stable. */
+  heal?: { dice: number; sides: number };
   /** SRD True Strike: the spell makes one attack with the caster's
    *  currently-equipped weapon using their spellcasting ability mod for
    *  both attack and damage rolls. On hit, the damage type defaults to the
