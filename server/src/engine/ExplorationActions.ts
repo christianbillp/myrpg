@@ -11,6 +11,17 @@ import { canShortRest as guardCanShortRest, canSearch as guardCanSearch } from '
 import { tickZoneEnterSaves } from './SpellSystem.js';
 import { checkTrapTriggers, runPassiveTrapDetection, detectAdjacentTraps } from './TrapSystem.js';
 import { formatCoins } from '../../../shared/currency.js';
+import type { GameState } from './types.js';
+
+/** SRD Difficult Terrain movement cost for the player (US-044): 2 movement
+ *  tiles to enter a difficult-terrain tile, else 1. Difficult-terrain zones
+ *  (Web / Grease) are the current source; a static map layer can extend this. */
+function difficultTerrainCostForPlayer(s: GameState, x: number, y: number): number {
+  const inDifficultZone = (s.activeZones ?? []).some(
+    (z) => z.difficultTerrain && z.tiles.some(([zx, zy]) => zx === x && zy === y),
+  );
+  return inDifficultZone ? 2 : 1;
+}
 
 export function doMove(ctx: GameContext, dx: number, dy: number, events: GameEvent[]): void {
   const s = ctx.state;
@@ -68,7 +79,12 @@ export function doMove(ctx: GameContext, dx: number, dy: number, events: GameEve
   if ((s.phase as string) === 'death_saves' || (s.phase as string) === 'defeat') return;
 
   if (s.phase === 'player_turn') {
-    s.player.movesLeft--;
+    // SRD Difficult Terrain (US-044): entering a difficult-terrain tile costs
+    // 2 ft per foot — i.e. 2 movement tiles. Difficult-terrain zones (Web /
+    // Grease) already cost enemies double via `applyZoneStepEffects`; mirror it
+    // for the player. Clamp at 0 so entering with a single tile left is allowed.
+    const cost = difficultTerrainCostForPlayer(s, nx, ny);
+    s.player.movesLeft = Math.max(0, s.player.movesLeft - cost);
     // OA gate (SRD): the reactor must see the moving creature. If the player is
     // hidden or invisible, no enemy can OA them; if the enemy is incapacitated
     // or already burned its reaction this round, it can't react either.
