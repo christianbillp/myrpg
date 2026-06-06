@@ -156,14 +156,16 @@ export class CharacterCreatorScene extends Phaser.Scene {
 
   private renderStep(): void {
     if (!this.content || !this.root) return;
-    // Step rail.
+    // Step rail — clickable tabs; jump to any step freely (changes on every
+    // step take effect immediately, so there's no apply/confirm gate).
     const rail = this.root.querySelector("[data-rail]") as HTMLDivElement;
     rail.innerHTML = "";
     for (const i of this.visibleSteps()) {
-      const chip = document.createElement("span");
+      const chip = document.createElement("button");
       chip.textContent = STEPS[i];
       const active = i === this.state.step;
-      chip.style.cssText = `padding:3px 8px;border:1px solid ${active ? ACCENT : "#334455"};color:${active ? ACCENT : "#667788"};`;
+      chip.style.cssText = `padding:4px 10px;border:1px solid ${active ? ACCENT : "#334455"};background:${active ? "#2a2416" : "#11111e"};color:${active ? ACCENT : "#889aaa"};font-family:monospace;font-size:11px;cursor:pointer;`;
+      chip.addEventListener("click", () => { this.state.step = i; this.renderStep(); });
       rail.appendChild(chip);
     }
     this.content.innerHTML = "";
@@ -859,18 +861,18 @@ export class CharacterCreatorScene extends Phaser.Scene {
   }
 
   // ── Bottom bar ───────────────────────────────────────────────────────────
+  // Tabs (the step rail) handle navigation, so the bar only carries CANCEL +
+  // CREATE — both available from any tab. A previous/next pair stays for
+  // convenience but isn't required to reach any step.
   private renderBar(): void {
     const bar = this.root!.querySelector("[data-bar]") as HTMLDivElement;
     bar.innerHTML = "";
     bar.appendChild(this.button("CANCEL", "#2a1a1a", () => this.scene.start("EncounterSetupScene")));
     const steps = this.visibleSteps();
     const pos = steps.indexOf(this.state.step);
-    if (pos > 0) bar.appendChild(this.button("‹ BACK", "#1a1a2a", () => { this.state.step = steps[pos - 1]; this.renderStep(); }));
-    if (pos < steps.length - 1) {
-      bar.appendChild(this.button("NEXT ›", "#1a3a2a", () => { this.state.step = steps[pos + 1]; this.renderStep(); }));
-    } else {
-      bar.appendChild(this.button("✓ CREATE", "#1a4a2a", () => { if (!this.busy) void this.submit(); }));
-    }
+    if (pos > 0) bar.appendChild(this.button("‹ PREV", "#1a1a2a", () => { this.state.step = steps[pos - 1]; this.renderStep(); }));
+    if (pos < steps.length - 1) bar.appendChild(this.button("NEXT ›", "#1a1a2a", () => { this.state.step = steps[pos + 1]; this.renderStep(); }));
+    bar.appendChild(this.button("✓ CREATE", "#1a4a2a", () => { if (!this.busy) void this.submit(); }));
   }
 
   // ── DOM helpers ──────────────────────────────────────────────────────────
