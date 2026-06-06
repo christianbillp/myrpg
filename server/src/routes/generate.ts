@@ -26,6 +26,7 @@ import { generateMapAgentic } from "../engine/maps/mapAgent.js";
 import { refineEncounter, type EncounterDraftForRefine } from "../encounterRefiner.js";
 import { refineAdventure, type AdventureDraftForRefine, type EncounterPoolEntry } from "../adventureRefiner.js";
 import { refineNpc, type NpcDraftForRefine } from "../npcRefiner.js";
+import { suggestCharacter, type SuggestCharacterRequest } from "../characterSuggester.js";
 import type { GameDefs } from "../engine/types.js";
 import { STARTING_ZONE_PLAYER } from "../../../shared/startingZones.js";
 import { safeId, asString, asArray } from "../util/requestValidation.js";
@@ -915,6 +916,30 @@ export function registerGenerateRoutes(server: FastifyInstance, ctx: GenerateRou
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       Logger.log("anomaly.generate_npc_refine_failed", { error: msg }, "error");
+      return reply.code(400).send({ error: msg });
+    }
+  });
+
+  /**
+   * Character-creation AI assist (US-122). Given a free-text concept (and any
+   * choices the player has locked), Claude proposes a setting-consistent
+   * character — name, backstory, species/background/class from the rosters, and
+   * an ability priority order. The client renders it into the editable creator
+   * form. Honours the active setting's lore.
+   */
+  server.post<{
+    Body: SuggestCharacterRequest;
+  }>("/generate/character", async (req, reply) => {
+    const { prompt } = req.body ?? {};
+    if (typeof prompt !== "string" || prompt.trim().length < 4) {
+      return reply.code(400).send({ error: "prompt must be at least 4 characters" });
+    }
+    try {
+      const result = await suggestCharacter(anthropic, getDefs(), req.body);
+      return reply.send(result);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      Logger.log("anomaly.generate_character_failed", { error: msg }, "error");
       return reply.code(400).send({ error: msg });
     }
   });
