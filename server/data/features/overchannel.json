@@ -1,0 +1,8 @@
+{
+  "id": "overchannel",
+  "name": "Overchannel",
+  "classId": "wizard",
+  "minLevel": 14,
+  "description": "When you cast a damaging Wizard spell with a slot of level 1-5, you can deal maximum damage with it on that turn. The first use before a Long Rest has no cost; each subsequent use deals you 2d12 Necrotic damage per spell level (increasing by 1d12 each additional time), ignoring Resistance and Immunity.",
+  "cost": { "kind": "passive" }
+}

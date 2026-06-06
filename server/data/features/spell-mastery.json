@@ -1,0 +1,8 @@
+{
+  "id": "spell-mastery",
+  "name": "Spell Mastery",
+  "classId": "wizard",
+  "minLevel": 18,
+  "description": "Choose a level 1 and a level 2 spell in your spellbook with a casting time of an action. You always have them prepared and can cast them at their lowest level without expending a spell slot; casting at a higher level requires a slot. You can swap either choice on a Long Rest.",
+  "cost": { "kind": "passive" }
+}

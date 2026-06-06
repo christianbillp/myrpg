@@ -1,0 +1,8 @@
+{
+  "id": "uncanny-dodge",
+  "name": "Uncanny Dodge",
+  "classId": "rogue",
+  "minLevel": 5,
+  "description": "When an attacker that you can see hits you with an attack roll, you can take a Reaction to halve the attack's damage against you (round down).",
+  "cost": { "kind": "reaction", "trigger": "An attacker you can see hits you with an attack roll" }
+}

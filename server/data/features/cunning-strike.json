@@ -1,0 +1,8 @@
+{
+  "id": "cunning-strike",
+  "name": "Cunning Strike",
+  "classId": "rogue",
+  "minLevel": 5,
+  "description": "When you deal Sneak Attack damage, you can add a Cunning Strike effect by forgoing Sneak Attack dice equal to the effect's cost: Poison, Trip, or Withdraw (each Cost: 1d6). Any required save DC equals 8 plus your Dexterity modifier and Proficiency Bonus.",
+  "cost": { "kind": "passive" }
+}

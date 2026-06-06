@@ -1,0 +1,8 @@
+{
+  "id": "evasion",
+  "name": "Evasion",
+  "classId": "rogue",
+  "minLevel": 7,
+  "description": "When you're subjected to an effect that allows a Dexterity saving throw for half damage, you instead take no damage on a success and only half damage on a failure. You can't use this feature while you have the Incapacitated condition.",
+  "cost": { "kind": "passive" }
+}

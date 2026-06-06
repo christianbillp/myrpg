@@ -1,0 +1,8 @@
+{
+  "id": "improved-cunning-strike",
+  "name": "Improved Cunning Strike",
+  "classId": "rogue",
+  "minLevel": 11,
+  "description": "You can use up to two Cunning Strike effects when you deal Sneak Attack damage, paying the die cost for each effect.",
+  "cost": { "kind": "passive" }
+}

@@ -1,0 +1,8 @@
+{
+  "id": "thiefs-reflexes",
+  "name": "Thief's Reflexes",
+  "classId": "rogue",
+  "minLevel": 17,
+  "description": "You can take two turns during the first round of any combat. You take your first turn at your normal Initiative and your second turn at your Initiative minus 10.",
+  "cost": { "kind": "passive" }
+}

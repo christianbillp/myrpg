@@ -1,0 +1,8 @@
+{
+  "id": "indomitable",
+  "name": "Indomitable",
+  "classId": "fighter",
+  "minLevel": 9,
+  "description": "If you fail a saving throw, you can reroll it with a bonus equal to your Fighter level. You must use the new roll, and you can't use this feature again until you finish a Long Rest. You gain a second use at level 13 and a third at level 17.",
+  "cost": { "kind": "reaction", "trigger": "You fail a saving throw" }
+}

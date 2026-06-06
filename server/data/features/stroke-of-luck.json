@@ -1,0 +1,8 @@
+{
+  "id": "stroke-of-luck",
+  "name": "Stroke of Luck",
+  "classId": "rogue",
+  "minLevel": 20,
+  "description": "If you fail a D20 Test, you can turn the roll into a 20. Once you use this feature, you can't use it again until you finish a Short or Long Rest.",
+  "cost": { "kind": "free" }
+}

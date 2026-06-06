@@ -1,0 +1,8 @@
+{
+  "id": "devious-strikes",
+  "name": "Devious Strikes",
+  "classId": "rogue",
+  "minLevel": 14,
+  "description": "You gain new Cunning Strike options: Daze (Cost: 2d6), Obscure (Cost: 3d6), and Knock Out (Cost: 6d6), each forcing a Constitution or Dexterity saving throw as appropriate.",
+  "cost": { "kind": "passive" }
+}

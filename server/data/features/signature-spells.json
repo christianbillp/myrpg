@@ -1,0 +1,8 @@
+{
+  "id": "signature-spells",
+  "name": "Signature Spells",
+  "classId": "wizard",
+  "minLevel": 20,
+  "description": "Choose two level 3 spells in your spellbook as signature spells. You always have them prepared and can cast each once at level 3 without expending a spell slot, regaining that use on a Short or Long Rest. Casting at a higher level requires a slot.",
+  "cost": { "kind": "passive" }
+}

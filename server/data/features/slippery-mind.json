@@ -1,0 +1,8 @@
+{
+  "id": "slippery-mind",
+  "name": "Slippery Mind",
+  "classId": "rogue",
+  "minLevel": 15,
+  "description": "Your cunning mind is exceptionally difficult to control. You gain proficiency in Wisdom and Charisma saving throws.",
+  "cost": { "kind": "passive" }
+}

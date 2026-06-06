@@ -1,0 +1,8 @@
+{
+  "id": "supreme-sneak",
+  "name": "Supreme Sneak",
+  "classId": "rogue",
+  "minLevel": 9,
+  "description": "You gain the Stealth Attack Cunning Strike option (Cost: 1d6): if you have the Hide action's Invisible condition, this attack doesn't end that condition if you end the turn behind Three-Quarters Cover or Total Cover.",
+  "cost": { "kind": "passive" }
+}

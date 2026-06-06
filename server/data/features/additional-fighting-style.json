@@ -1,0 +1,8 @@
+{
+  "id": "additional-fighting-style",
+  "name": "Additional Fighting Style",
+  "classId": "fighter",
+  "minLevel": 7,
+  "description": "You gain another Fighting Style feat of your choice.",
+  "cost": { "kind": "passive" }
+}

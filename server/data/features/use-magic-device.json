@@ -1,0 +1,8 @@
+{
+  "id": "use-magic-device",
+  "name": "Use Magic Device",
+  "classId": "rogue",
+  "minLevel": 13,
+  "description": "Attunement: you can attune to up to four magic items at once. Charges: when you use a magic item property that expends charges, roll 1d6 and on a 6 you don't expend them. Scrolls: you can use any Spell Scroll, casting with Intelligence; cantrip or level 1 spells cast reliably, while higher-level ones require a DC 10 plus the spell's level Intelligence (Arcana) check.",
+  "cost": { "kind": "passive" }
+}

@@ -1,0 +1,8 @@
+{
+  "id": "memorize-spell",
+  "name": "Memorize Spell",
+  "classId": "wizard",
+  "minLevel": 5,
+  "description": "Whenever you finish a Short Rest, you can study your spellbook and replace one of the level 1+ Wizard spells you have prepared with another level 1+ spell from the book.",
+  "cost": { "kind": "passive" }
+}

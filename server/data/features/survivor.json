@@ -1,0 +1,8 @@
+{
+  "id": "survivor",
+  "name": "Survivor",
+  "classId": "fighter",
+  "minLevel": 18,
+  "description": "Defy Death: you have Advantage on Death Saving Throws, and rolling 18-20 on one counts as rolling a 20. Heroic Rally: at the start of each of your turns, you regain Hit Points equal to 5 plus your Constitution modifier if you are Bloodied and have at least 1 Hit Point.",
+  "cost": { "kind": "passive" }
+}
