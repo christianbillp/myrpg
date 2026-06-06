@@ -394,6 +394,7 @@ Weapons, armor, and shields share an optional `MagicItemProps` block:
 | `rarity` | string | `"common"` / `"uncommon"` / `"rare"` / `"very-rare"` / `"legendary"` / `"artifact"`. |
 | `bonus` | number | SRD enhancement bonus (+1/+2/+3). **Weapon:** added to attack & damage via the shared `magicWeaponBonus` path (does NOT stack with the Magic Weapon spell — the higher wins). **Armor / shield:** added to AC in `computeAC`. Per SRD these +N items don't require attunement, so the bonus applies whenever equipped. |
 | `requiresAttunement` | boolean | SRD attunement (US-124 Slice 2). When `true`, the item's `bonus` applies only while its id is in `PlayerState.attunedItemIds` (≤ 3 attuned). `effectiveItemBonus(item, attuned)` gates this for `computeAC` / `applyEquipment`. Attune via the `attune` action (`doAttune`, exploration-phase Short-Rest bond); `unattune` ends it. |
+| `startsUnidentified` | boolean | SRD identify (US-124 Slice 3). When `true`, the item displays as "Unidentified <category>" (name + mechanical label hidden) until its id is in `PlayerState.identifiedItemIds`. `itemDisplayName` / `isItemIdentified` compute the masked name; the `identify` action (`doIdentify`, exploration-phase) reveals it. Identification is informational — the item functions regardless. |
 
 Shipped examples: `longsword_plus_1`, `leather_armor_plus_1`. *(Attunement, identify, scrolls/wands, and potions-beyond-healing are later Phase 9 slices.)*
 

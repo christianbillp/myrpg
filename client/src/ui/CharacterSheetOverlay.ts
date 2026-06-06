@@ -9,7 +9,7 @@
 
 import { BaseOverlay } from "./BaseOverlay";
 import { PlayerDef, PlayerAttack } from "../../../shared/types";
-import { ItemDef, ArmorDef, WeaponDef, ShieldDef, EquipmentDef } from "../../../shared/types";
+import { ItemDef, ArmorDef, WeaponDef, ShieldDef, EquipmentDef, itemDisplayName, isItemIdentified } from "../../../shared/types";
 import { UIScale } from "./UIScale";
 import type { PlayerState, SpellDef, FeatureDef, ClassDef, SubclassDef } from "../../../shared/types";
 import { featuresAt as cpFeaturesAt, subclassFeaturesAt, subclassGrantedSpellsAt, subclassGrantedCantripsAt } from "../../../shared/classProgression";
@@ -536,9 +536,14 @@ export class CharacterSheetOverlay extends BaseOverlay {
     });
 
     const eqRows = eqGroups.map(({ item, count }) => {
+      // US-124: an unidentified item shows a masked name and hides its
+      // mechanical label until identified.
+      const identified = isItemIdentified(item, state.identifiedItemIds);
+      const dispName = itemDisplayName(item, state.identifiedItemIds);
+      const tail = identified ? `  ·  ${escHtml(slotLabel(item, playerDef))}` : `  ·  <span style="color:#7a5aaa;">unidentified</span>`;
       const label = count > 1
-        ? `${escHtml(item.name)} ×${count}  ·  ${escHtml(slotLabel(item, playerDef))}`
-        : `${escHtml(item.name)}  ·  ${escHtml(slotLabel(item, playerDef))}`;
+        ? `${escHtml(dispName)} ×${count}${tail}`
+        : `${escHtml(dispName)}${tail}`;
       const slot: "armor" | "weapon" | "shield" =
         item.type === "armor" ? "armor" : item.type === "weapon" ? "weapon" : "shield";
       return `
@@ -585,7 +590,7 @@ export class CharacterSheetOverlay extends BaseOverlay {
     const scrollRows = scrolls.map((sc) => `
       <div style="display:flex;align-items:center;justify-content:space-between;height:28px;padding:0 2px;">
         <span style="font-size:11px;color:#b59bd8;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;margin-right:8px;">
-          ${escHtml(sc.name)}
+          ${escHtml(itemDisplayName(sc, state.identifiedItemIds))}
         </span>
         <button data-cast-scroll="${escHtml(sc.id)}" class="gui-btn-overlay"
           style="width:72px;height:22px;background:#1a1030;border:1px solid #7a5aaa;color:#c9b3e8;font-size:10px;">

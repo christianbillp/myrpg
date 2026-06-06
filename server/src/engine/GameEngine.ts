@@ -1192,6 +1192,19 @@ export class GameEngine {
       });
     }
 
+    // Identify (US-124): held items flagged startsUnidentified, not yet
+    // identified, while exploring.
+    let unidentifiedItemIds: string[] = [];
+    if (phase === 'exploring') {
+      const identified = p.identifiedItemIds ?? [];
+      const held = new Set<string>([...p.inventoryIds, ...Object.values(p.equippedSlots).filter((x): x is string => !!x)]);
+      unidentifiedItemIds = [...held].filter((id) => {
+        if (identified.includes(id)) return false;
+        const it = this.defs.equipment.find((e) => e.id === id) as { startsUnidentified?: boolean } | undefined;
+        return !!it?.startsUnidentified;
+      });
+    }
+
     s.availableActions = {
       canAttack: Guard.canAttackTarget(this.ctx),
       throwableItemIds,
@@ -1215,6 +1228,7 @@ export class GameEngine {
       grappleableTargetIds,
       shoveableTargetIds,
       attunableItemIds,
+      unidentifiedItemIds,
     };
   }
 

@@ -33,6 +33,7 @@ export type PlayerAction =
   | { type: 'attune'; itemId: string }
   | { type: 'unattune'; itemId: string }
   | { type: 'useScroll'; itemId: string }
+  | { type: 'identify'; itemId: string }
   | { type: 'dash' }
   | { type: 'dodge' }
   | { type: 'disengage' }

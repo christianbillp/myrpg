@@ -188,3 +188,27 @@ export function doUnattune(ctx: GameContext, itemId: string): void {
   const item = ctx.defs.equipment.find((i) => i.id === itemId);
   ctx.addLog({ left: `${ctx.playerDef.name} ends attunement to ${item?.name ?? itemId}.`, style: 'status' });
 }
+
+/**
+ * SRD identify (US-124): learn a found item's true name/properties. Modelled as
+ * an exploration-phase action (a Short Rest examining the item, or the Identify
+ * spell). Identification is informational — the item already functions; this
+ * just reveals what it is.
+ */
+export function doIdentify(ctx: GameContext, itemId: string): void {
+  const s = ctx.state;
+  if (s.phase !== 'exploring') {
+    ctx.addLog({ left: `Identifying an item takes a Short Rest — not possible in combat.`, style: 'status' });
+    return;
+  }
+  if (!playerHasItem(ctx, itemId)) return;
+  const item = ctx.defs.equipment.find((i) => i.id === itemId) as { id: string; name: string; startsUnidentified?: boolean } | undefined;
+  if (!item || !item.startsUnidentified) return;
+  s.player.identifiedItemIds = s.player.identifiedItemIds ?? [];
+  if (s.player.identifiedItemIds.includes(itemId)) return;
+  s.player.identifiedItemIds.push(itemId);
+  // Refresh the equipped-slot labels so a now-identified equipped item shows
+  // its true name.
+  s.player.equippedSlotLabels = computeEquippedSlotLabels(ctx.playerDef, s.player.equippedSlots, ctx.defs.equipment);
+  ctx.addLog({ left: `${ctx.playerDef.name} identifies it as ${item.name}.`, style: 'status' });
+}

@@ -120,6 +120,10 @@ export interface PlayerState {
    *  attuned to (≤ 3). A `requiresAttunement` item's bonus applies only while
    *  its id is in this list. */
   attunedItemIds?: string[];
+  /** SRD identification (US-124): ids of `startsUnidentified` items the player
+   *  has identified this session. Until an item's id is here, it displays as
+   *  "Unidentified <category>". */
+  identifiedItemIds?: string[];
   /** SRD See Invisibility — while true, the player sees creatures with the
    *  Invisible condition as if they were visible. Set by the See Invisibility
    *  cast, cleared after 1 hour (handled as a narrative timer for now —
@@ -208,4 +212,8 @@ export interface AvailableActions {
    *  — magical, `requiresAttunement`, not yet attuned, fewer than 3 attuned,
    *  and exploring (US-124). Drives the ATTUNE button. */
   attunableItemIds: string[];
+  /** Item ids (equipped or carried) the player could identify right now —
+   *  `startsUnidentified`, not yet identified, and exploring (US-124). Drives
+   *  the IDENTIFY button. */
+  unidentifiedItemIds: string[];
 }

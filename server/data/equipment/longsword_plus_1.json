@@ -15,5 +15,6 @@
   "versatile": { "damageDice": 1, "damageSides": 10 },
   "magic": true,
   "rarity": "uncommon",
-  "bonus": 1
+  "bonus": 1,
+  "startsUnidentified": true
 }

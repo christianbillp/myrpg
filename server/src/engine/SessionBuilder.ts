@@ -425,6 +425,7 @@ export function buildSessionState(
       grappleableTargetIds: [],
       shoveableTargetIds: [],
       attunableItemIds: [],
+      unidentifiedItemIds: [],
     },
     pendingReaction: null,
     pendingReroll: null,

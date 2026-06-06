@@ -37,6 +37,11 @@ export interface MagicItemProps {
    *  effects) apply only while the player is attuned to it (≤ 3 attuned items,
    *  bonded over a Short Rest). */
   requiresAttunement?: boolean;
+  /** SRD identification (US-124 Slice 3): when true, the item is found
+   *  unidentified — its name/properties read as "Unidentified <category>" to
+   *  the player until identified (Identify spell or a Short Rest examining it).
+   *  Identification is informational; the item still functions when used/worn. */
+  startsUnidentified?: boolean;
 }
 
 export interface ArmorDef extends MagicItemProps {
@@ -138,3 +143,23 @@ export interface ScrollDef extends MagicItemProps {
 
 export type EquipmentDef = ArmorDef | ShieldDef | WeaponDef;
 export type ItemDef = ConsumableDef | AmmunitionDef | EquipmentDef | GearDef | ScrollDef;
+
+/** Whether `itemId` (a `startsUnidentified` magic item) has been identified by
+ *  the player this session (US-124). Non-unidentified items are always "known". */
+export function isItemIdentified(item: ItemDef, identifiedItemIds: string[] | undefined): boolean {
+  const props = item as MagicItemProps;
+  if (!props.startsUnidentified) return true;
+  return (identifiedItemIds ?? []).includes(item.id);
+}
+
+/** Display name shown to the player: the true name once identified, else a
+ *  masked "Unidentified <category>" (US-124). */
+export function itemDisplayName(item: ItemDef, identifiedItemIds: string[] | undefined): string {
+  if (isItemIdentified(item, identifiedItemIds)) return item.name;
+  const cat = item.type === 'scroll' ? 'Scroll'
+    : item.type === 'armor' ? 'Armor'
+    : item.type === 'shield' ? 'Shield'
+    : item.type === 'weapon' ? 'Weapon'
+    : 'Item';
+  return `Unidentified ${cat}`;
+}

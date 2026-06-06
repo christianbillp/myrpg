@@ -87,6 +87,8 @@ export interface PlayerPanelCallbacks {
   onShove: (effect: 'push' | 'prone') => void;
   /** Attune to a magic item (US-124). */
   onAttune: (itemId: string) => void;
+  /** Identify a found magic item (US-124). */
+  onIdentify: (itemId: string) => void;
   onDetach: () => void;
   onHide: () => void;
   onDeathSave: () => void;
@@ -139,7 +141,7 @@ type ActionGroup = 'action' | 'bonus' | 'move' | 'free' | 'more' | 'companion';
  *  (★ LEVEL UP, ☾ LONG REST) are left alone — see `iconFor`. */
 const ACTION_ICONS: Record<string, string> = {
   ATTACK: '⚔', THROW: '➶', DODGE: '❖', DASH: '»', DISENGAGE: '↩', DETACH: '⤴',
-  GRAPPLE: '✊', SHOVE: '🤚', 'SHOVE PRONE': '⤓', ATTUNE: '✶',
+  GRAPPLE: '✊', SHOVE: '🤚', 'SHOVE PRONE': '⤓', ATTUNE: '✶', IDENTIFY: '🔎',
   HIDE: '◐', SEARCH: '⚲', MOVE: '⤧', TALK: '❝', CAST: '✦',
   'SHORT REST': '☕', 'ROLL DEATH SAVE': '☠',
 };
@@ -452,6 +454,10 @@ export class PlayerPanel {
       // the first eligible item; the server enforces the ≤3 cap.
       if (aa.attunableItemIds.length > 0) {
         groups.more.push(this.makeBtn('ATTUNE', '#2a2a5a', () => this.callbacks.onAttune(aa.attunableItemIds[0])));
+      }
+      // Identify a found magic item (US-124) — examines the first unidentified item.
+      if (aa.unidentifiedItemIds.length > 0) {
+        groups.more.push(this.makeBtn('IDENTIFY', '#2a2a5a', () => this.callbacks.onIdentify(aa.unidentifiedItemIds[0])));
       }
       if (aa.canLevelUp) groups.more.push(this.makeBtn('★ LEVEL UP', '#3a2a5a', this.callbacks.onLevelUp));
       if (aa.canLongRest) groups.more.push(this.makeBtn('☾ LONG REST', '#1a2a4a', this.callbacks.onLongRest));
