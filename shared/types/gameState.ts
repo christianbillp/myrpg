@@ -125,6 +125,11 @@ export interface PlayerState {
    *  readied strike (a `readied_attack` pending reaction). Cleared when the
    *  strike fires or at the start of the player's next turn. */
   readiedAttack?: boolean;
+  /** SRD Extra Attack (US-119): follow-up weapon attacks still available in the
+   *  current Attack action. The first attack of the action commits the Action
+   *  and reserves `attacksPerAction - 1` here; each follow-up draws this down
+   *  without spending another Action. Reset to 0 at the start of the turn. */
+  attacksRemaining?: number;
   /** SRD attunement (US-124): ids of magic items the player is currently
    *  attuned to (≤ 3). A `requiresAttunement` item's bonus applies only while
    *  its id is in this list. */

@@ -277,6 +277,7 @@ export function enterPlayerTurn(ctx: GameContext): void {
   s.player.bonusActionUsed = false;
   s.player.reactionUsed = false;
   s.player.readiedAttack = false;  // SRD: an unused readied action is lost at your next turn (US-057).
+  s.player.attacksRemaining = 0;   // SRD Extra Attack (US-119): the Attack-action reserve resets each turn.
   s.player.freeObjectInteractionUsed = false;
   // Per-turn flags reset at the start of every player turn. `movedThisTurn`
   // gates Rogue Steady Aim; `steadyAim` is the one-shot Advantage flag the

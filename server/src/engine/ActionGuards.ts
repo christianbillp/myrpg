@@ -226,7 +226,9 @@ export function canAttackTarget(ctx: GameContext, targetId?: string): boolean {
   }
 
   if (s.phase === 'exploring') return true;
-  return canSpendAction(ctx);
+  // SRD Extra Attack (US-119): a follow-up attack in an in-progress Attack
+  // action doesn't need a fresh Action — it draws from the reserved pool.
+  return canSpendAction(ctx) || (s.player.attacksRemaining ?? 0) > 0;
 }
 
 // ── Spellcasting guards ─────────────────────────────────────────────────────

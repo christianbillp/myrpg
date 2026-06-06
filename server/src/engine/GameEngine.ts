@@ -310,6 +310,7 @@ export class GameEngine {
     if (flags.unlimitedActions) {
       p.actionUsed = false;
       p.bonusActionUsed = false;
+      p.attacksRemaining = 0;
     }
     if (flags.unlimitedSpellSlots) {
       // Restore each slot to the per-session playerDef's current max. The

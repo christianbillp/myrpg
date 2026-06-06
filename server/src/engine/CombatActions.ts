@@ -209,7 +209,9 @@ export function doAttack(ctx: GameContext, targetId: string | undefined, events:
     ctx.doStartCombat(events);
   }
 
-  if (!canSpendAction(ctx)) return;
+  // SRD Extra Attack (US-119): allow a follow-up attack from the reserved pool
+  // even though the Action is already committed.
+  if (!canSpendAction(ctx) && (s.player.attacksRemaining ?? 0) <= 0) return;
 
   // Pick the target: prefer the explicit targetId; otherwise nearest hostile in reach.
   const inReach = (n: NpcState): boolean =>
@@ -375,7 +377,21 @@ function applyAttackOutcome(
     else ctx.killWithReward(target, targetDef, `☠ ${target.name} is slain!`);
   }
 
-  s.player.actionUsed = true;
+  // SRD Extra Attack (US-119): the first attack of the action commits the
+  // Action and reserves the remaining attacks; each follow-up draws the reserve
+  // down without spending another Action. When the reserve hits 0 the Attack
+  // action is fully spent. Throws (improvised/thrown items) are single attacks
+  // and just spend the Action via the reserve-of-0 path.
+  if ((s.player.attacksRemaining ?? 0) > 0) {
+    s.player.attacksRemaining = (s.player.attacksRemaining ?? 0) - 1;
+  } else {
+    s.player.actionUsed = true;
+    const reserve = Math.max(0, attacksPerAction(ctx.playerDef) - 1);
+    s.player.attacksRemaining = reserve;
+    if (reserve > 0 && s.phase === 'player_turn') {
+      ctx.addLog({ left: `Extra Attack — ${reserve} more attack${reserve > 1 ? 's' : ''} this action`, style: 'status' });
+    }
+  }
 
   // SRD Invisibility — if the caster invisibilised themselves and then made
   // this attack roll, the spell ends. Concentration cleanup strips the
