@@ -80,6 +80,11 @@ export interface SpellEffect {
    *  next attack roll). Same shape as `onFail`. Single-turn expiry uses
    *  the `spell-condition` ongoing-effect ticker. */
   onSuccess?: string | string[];
+  /** Condition(s) applied to the target when an attack-roll spell HITS, with
+   *  no save (the cantrip "riders": Ray of Frost → `slowed`, Chill Touch →
+   *  `no-healing`, Shocking Grasp → `no-reactions`). Same shape as `onFail`;
+   *  the log flavour comes from `ON_HIT_CONDITION_NOTE` in `SpellSystem`. */
+  onHit?: string | string[];
 }
 
 export interface SpellDef {

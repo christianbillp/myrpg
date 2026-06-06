@@ -258,19 +258,14 @@ function resolveAttackRollSpell(
   });
   applyDamageToNpc(ctx, target, dmg, spell.damage.type);
 
-  // Riders — engine-side recognition by spell id, kept short to avoid
-  // sprawling per-spell logic. Suppressed when this resolution is itself a
-  // follow-up (e.g. a chain hop) to avoid stacking the same rider twice.
+  // On-hit condition riders (Ray of Frost → slowed, Chill Touch → no-healing,
+  // Shocking Grasp → no-reactions) — applied from `effect.onHit`, no save.
+  // Suppressed when this resolution is itself a follow-up (e.g. a chain hop)
+  // to avoid stacking the same rider twice.
   if (!options?.suppressRiders) {
-    if (spell.id === 'ray-of-frost') {
-      if (!target.conditions.includes('slowed')) target.conditions.push('slowed');
-      ctx.addLog({ left: `${combatantDisplayName(target, ctx.state.npcs)} is slowed (Speed −10 ft until end of next turn)`, style: 'status' });
-    } else if (spell.id === 'chill-touch') {
-      if (!target.conditions.includes('no-healing')) target.conditions.push('no-healing');
-      ctx.addLog({ left: `${combatantDisplayName(target, ctx.state.npcs)} can't regain HP until the start of your next turn`, style: 'status' });
-    } else if (spell.id === 'shocking-grasp') {
-      if (!target.conditions.includes('no-reactions')) target.conditions.push('no-reactions');
-      ctx.addLog({ left: `${combatantDisplayName(target, ctx.state.npcs)} can't take Reactions until the start of its next turn`, style: 'status' });
+    for (const c of normaliseConditionList(spell.effect?.onHit)) {
+      if (!target.conditions.includes(c)) target.conditions.push(c);
+      ctx.addLog({ left: `${combatantDisplayName(target, ctx.state.npcs)} ${onHitConditionNote(c)}`, style: 'status' });
     }
     // Delayed-self-damage rider (Acid Arrow). Scheduled at the end of the
     // target's NEXT turn — `turnsRemaining = 1` so the first end-of-turn
@@ -972,6 +967,18 @@ function normaliseConditionList(value: string | string[] | undefined): string[] 
   return Array.isArray(value) ? value.slice() : [value];
 }
 
+/** Log-flavour predicate for an on-hit condition rider, e.g. `slowed` →
+ *  "is slowed (Speed −10 ft until end of next turn)". Falls back to "is <c>"
+ *  so a new on-hit condition reads sensibly without a bespoke entry. */
+const ON_HIT_CONDITION_NOTE: Record<string, string> = {
+  slowed: 'is slowed (Speed −10 ft until end of next turn)',
+  'no-healing': "can't regain HP until the start of your next turn",
+  'no-reactions': "can't take Reactions until the start of its next turn",
+};
+function onHitConditionNote(condition: string): string {
+  return ON_HIT_CONDITION_NOTE[condition] ?? `is ${condition}`;
+}
+
 /**
  * Flavour line for a failed save. Recognises a handful of spells with
  * iconic narration; falls back to a generic "is &lt;condition&gt;" / "is affected"
@@ -1151,8 +1158,9 @@ function resolveSaveSpell(
     // terrain — the zone is the point, and creatures who step in later
     // trigger the save during movement. `doCastSpell` auto-registers the
     // zone in its tail block; we just need to return success here so the
-    // slot consumes and concentration starts.
-    const isGroundZone = !!spell.area && (spell.id === 'grease' || spell.id === 'silent-image' || spell.id === 'minor-illusion');
+    // slot consumes and concentration starts. Driven by the spell's
+    // `zone.groundPlaceable` descriptor rather than an id list.
+    const isGroundZone = !!spell.area && spell.zone?.groundPlaceable === true;
     if (isGroundZone) {
       ctx.addLog({ left: `${ctx.playerDef.name} casts ${spell.name}`, style: 'header' });
       return true;
@@ -1207,6 +1215,14 @@ function resolveSaveSpell(
       const conds = !success ? normaliseConditionList(spell.effect.onFail) : [];
       for (const c of conds) {
         if (!target.conditions.includes(c)) target.conditions.push(c);
+      }
+      // On-success rider (same descriptor as the single-target path) — applied
+      // without counting toward `anyAffected`, so a fully-saved AOE still won't
+      // start concentration.
+      if (success) {
+        for (const c of normaliseConditionList(spell.effect.onSuccess)) {
+          if (!target.conditions.includes(c)) target.conditions.push(c);
+        }
       }
       // Bounded-duration condition spells (Color Spray "until end of your
       // next turn") schedule an ongoingEffect so the end-of-player-turn
@@ -1313,13 +1329,14 @@ function resolveSingleTargetSaveSpell(
     for (const c of conds) {
       if (!target.conditions.includes(c)) target.conditions.push(c);
     }
-    // SRD Ray of Enfeeblement: on a successful save, the target still has
-    // Disadvantage on its next attack roll until the start of the caster's
-    // next turn. The engine's existing `vexed` condition covers this exact
-    // semantic (one-shot attack-roll Disadvantage that expires at end of
-    // the affected creature's own turn).
-    if (success && spell.id === 'ray-of-enfeeblement') {
-      if (!target.conditions.includes('vexed')) target.conditions.push('vexed');
+    // SRD on-success rider (Ray of Enfeeblement: even on a save the target has
+    // Disadvantage on its next attack roll — the engine's one-shot `vexed`).
+    // Applied from `effect.onSuccess`; the failure return value is unchanged so
+    // a fully-saved cast still doesn't trip concentration.
+    if (success) {
+      for (const c of normaliseConditionList(spell.effect.onSuccess)) {
+        if (!target.conditions.includes(c)) target.conditions.push(c);
+      }
     }
     ctx.addLog({
       left: `${combatantDisplayName(target, ctx.state.npcs)} ${success ? 'resists' : conditionLogText(spell, conds)}`,
