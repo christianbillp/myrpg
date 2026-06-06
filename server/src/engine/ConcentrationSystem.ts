@@ -84,11 +84,6 @@ export function endConcentration(ctx: GameContext, reason: string): void {
     }
     s.player.invisibilityTargetId = undefined;
   }
-  // Enhance Ability (Concentration) — clear the boosted ability so future
-  // ability checks roll normally.
-  if (spellId === 'enhance-ability') {
-    s.player.enhancedAbility = undefined;
-  }
   // Flaming Sphere (Concentration) — despawn the sphere when the spell
   // ends. The summon NPC carries `summonSpellId === 'flaming-sphere'`,
   // so the filter picks it up no matter how many were placed.

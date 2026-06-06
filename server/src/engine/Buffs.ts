@@ -25,6 +25,8 @@ export function recomputeBuffs(ctx: GameContext): void {
   const mods = (p.activeBuffs ?? []).flatMap((b) => b.modifiers ?? []);
   p.seeInvisible = mods.some((m) => m.type === 'flag' && m.name === 'see-invisible');
   p.expeditiousRetreat = mods.some((m) => m.type === 'flag' && m.name === 'expeditious-retreat');
+  const enhanced = mods.find((m) => m.type === 'enhanced-ability');
+  p.enhancedAbility = enhanced && enhanced.type === 'enhanced-ability' ? enhanced.ability : undefined;
   p.speedBonus = mods.reduce((max, m) => (m.type === 'speed-bonus' ? Math.max(max, m.value) : max), 0);
   p.magicWeaponBonus = mods.reduce((max, m) => (m.type === 'weapon-bonus' ? Math.max(max, m.value) : max), 0);
   // mageArmor + shieldActive are owned outside the buff list (Mage Armor is

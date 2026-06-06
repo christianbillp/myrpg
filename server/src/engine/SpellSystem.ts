@@ -1541,12 +1541,13 @@ function resolveUtilitySpell(ctx: GameContext, spell: SpellDef, slotLevel: numbe
       // Strength / Cat's Grace / Eagle's Splendor / Fox's Cunning /
       // Owl's Wisdom. The chosen creature gains Advantage on ability
       // checks of the corresponding ability score for the duration.
-      // Single-character implementation: self-target only. Engine reads
-      // `s.player.enhancedAbility` when rolling ability checks; cleanup
-      // on concentration-end clears the flag. The ability pick rides on
-      // the cast action's `abilityChoice`; defaults to STR if missing.
+      // Single-character implementation: self-target only. The
+      // `enhanced-ability` modifier is projected onto `s.player.enhancedAbility`
+      // by `recomputeBuffs` (which `rollAbilityCheck` reads), and concentration
+      // end clears it generically via `removeBuffsForSpell`. The ability pick
+      // rides on the cast action's `abilityChoice`; defaults to STR if missing.
       const pick = abilityChoice ?? spell.abilityChoices?.[0] ?? 'str';
-      s.player.enhancedAbility = pick;
+      applySelfBuff(ctx, { spellId: spell.id, modifiers: [{ type: 'enhanced-ability', ability: pick }], concentration: true });
       const variant = ENHANCE_ABILITY_VARIANTS[pick] ?? pick.toUpperCase();
       ctx.addLog({ left: `${ctx.playerDef.name} casts Enhance Ability (${variant}) — Advantage on ${pick.toUpperCase()} ability checks`, style: 'status' });
       break;

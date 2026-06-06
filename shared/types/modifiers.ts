@@ -19,4 +19,7 @@ export type Modifier =
   /** Flat bonus to weapon attack AND damage rolls (Magic Weapon). */
   | { type: 'weapon-bonus'; value: number }
   /** Flat bonus to movement speed in feet (Longstrider). */
-  | { type: 'speed-bonus'; value: number };
+  | { type: 'speed-bonus'; value: number }
+  /** Advantage on ability checks of one ability score (Enhance Ability — the
+   *  chosen ability). Projected onto `PlayerState.enhancedAbility`. */
+  | { type: 'enhanced-ability'; ability: 'str' | 'dex' | 'con' | 'int' | 'wis' | 'cha' };

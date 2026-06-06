@@ -19,6 +19,7 @@ function mkCtx() {
     speedBonus: 0,
     seeInvisible: false,
     expeditiousRetreat: false,
+    enhancedAbility: undefined as undefined | "str" | "dex" | "con" | "int" | "wis" | "cha",
   };
   const playerDef = { dex: 14, str: 10 } as unknown as PlayerDef;
   const ctx = { state: { player }, playerDef, defs: { equipment: [] } } as unknown as GameContext;
@@ -43,6 +44,14 @@ describe("self-buff registry", () => {
     expect(player.expeditiousRetreat).toBe(true);
     removeBuffsForSpell(ctx, "expeditious-retreat");
     expect(player.expeditiousRetreat).toBe(false);
+  });
+
+  it("projects the enhanced-ability modifier onto enhancedAbility and clears it on end", () => {
+    const { ctx, player } = mkCtx();
+    applySelfBuff(ctx, { spellId: "enhance-ability", modifiers: [{ type: "enhanced-ability", ability: "con" }], concentration: true });
+    expect(player.enhancedAbility).toBe("con");
+    removeBuffsForSpell(ctx, "enhance-ability");
+    expect(player.enhancedAbility).toBeUndefined();
   });
 
   it("applies and strips player conditions (Blur)", () => {
