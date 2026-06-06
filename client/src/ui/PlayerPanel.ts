@@ -91,6 +91,8 @@ export interface PlayerPanelCallbacks {
   onToggleNonLethal: (on: boolean) => void;
   /** Help — Assist an Attack (US-057): distract the adjacent enemy. */
   onHelp: () => void;
+  /** Study / Utilize / Influence (US-057): prime the GM chat for adjudication. */
+  onActionPrompt: (kind: 'study' | 'utilize' | 'influence') => void;
   /** Attune to a magic item (US-124). */
   onAttune: (itemId: string) => void;
   /** Identify a found magic item (US-124). */
@@ -147,7 +149,7 @@ type ActionGroup = 'action' | 'bonus' | 'move' | 'free' | 'more' | 'companion';
  *  (★ LEVEL UP, ☾ LONG REST) are left alone — see `iconFor`. */
 const ACTION_ICONS: Record<string, string> = {
   ATTACK: '⚔', THROW: '➶', DODGE: '❖', DASH: '»', DISENGAGE: '↩', DETACH: '⤴',
-  GRAPPLE: '✊', SHOVE: '🤚', 'SHOVE PRONE': '⤓', ATTUNE: '✶', IDENTIFY: '🔎', 'KNOCK OUT': '☄', HELP: '🤝',
+  GRAPPLE: '✊', SHOVE: '🤚', 'SHOVE PRONE': '⤓', ATTUNE: '✶', IDENTIFY: '🔎', 'KNOCK OUT': '☄', HELP: '🤝', STUDY: '📖', UTILIZE: '🛠', INFLUENCE: '💬',
   HIDE: '◐', SEARCH: '⚲', MOVE: '⤧', TALK: '❝', CAST: '✦',
   'SHORT REST': '☕', 'ROLL DEATH SAVE': '☠',
 };
@@ -445,6 +447,12 @@ export class PlayerPanel {
       if (state.throwableItems.length > 0) {
         groups.action.push(this.makeBtn('THROW', GREEN, () => { this.pickerOpen = true; this.refreshActions(state); }));
       }
+
+      // SRD core actions Study / Utilize / Influence (US-057) — prime a GM
+      // chat prompt the player completes; the GM adjudicates the check.
+      groups.more.push(this.makeBtn('STUDY', '#1a2a3a', () => this.callbacks.onActionPrompt('study')));
+      groups.more.push(this.makeBtn('UTILIZE', '#1a2a3a', () => this.callbacks.onActionPrompt('utilize')));
+      groups.more.push(this.makeBtn('INFLUENCE', '#1a2a3a', () => this.callbacks.onActionPrompt('influence')));
 
       // Free utilities during exploration → tucked under More.
       const search = this.makeBtn('SEARCH', GREEN, this.callbacks.onSearch);

@@ -474,6 +474,22 @@ export class HUD {
     // movement work immediately.
   }
 
+  /** SRD core actions Study / Utilize / Influence (US-057). These resolve
+   *  through the GM (Intelligence/Charisma checks, object interaction,
+   *  Willing/Hesitant adjudication — the AIGM already calls `request_ability_check`
+   *  with the attitude modifier for Influence, US-092). The button primes the GM
+   *  chat with a leading template so the player fills in the specifics and
+   *  sends; the GM then adjudicates. */
+  primeActionPrompt(kind: 'study' | 'utilize' | 'influence'): void {
+    this.gmMode = 'gm';
+    const prefix = kind === 'study' ? 'I study '
+      : kind === 'utilize' ? 'I use the '
+      : this.selectedNpcName ? `I try to convince ${this.selectedNpcName} to ` : 'I try to convince ';
+    this.gmInputEl.value = prefix;
+    this.gmInputEl.focus();
+    this.gmInputEl.setSelectionRange(prefix.length, prefix.length);
+  }
+
   /** Public entry point for the Player Panel's TALK button. Forces the
    *  message through the `sayto` branch (wrapped + speech-bubble emitted)
    *  using whichever target is currently selected. No-op when no target is
