@@ -168,17 +168,23 @@ export function applyLevelUp(input: {
   if (preview.proficiencyAfter !== preview.proficiencyBefore) {
     const delta = preview.proficiencyAfter - preview.proficiencyBefore;
     playerDef.proficiencyBonus = preview.proficiencyAfter;
-    // Add the pb delta to every proficient skill / save. Pre-baked totals
-    // (e.g. skills.arcana = ability + pb) are the source of truth; we shift
-    // them in lockstep rather than rebuilding from scratch.
+    // US-119 fix: shift the PB delta onto PROFICIENT skills only — a uniform
+    // shift wrongly credited the new bonus to skills the character has no
+    // proficiency in. Proficiency is inferred from the pre-baked total the same
+    // way Expertise selection does it: `total - abilityMod` is the proficiency
+    // contribution, baked against the OLD bonus, so `>= profBefore` means
+    // proficient and `>= 2×profBefore` means Expertise (doubled PB → doubled
+    // delta). Non-proficient skills (`< profBefore`) stay put.
+    const profBefore = preview.proficiencyBefore;
     for (const key of Object.keys(playerDef.skills)) {
-      // Without per-skill proficiency flags we can't tell which skills are
-      // proficient; the existing PlayerDef shape pre-bakes the bonus on every
-      // skill at character-build time. Shift them uniformly to preserve relative
-      // ordering — proficient skills move by `delta`, others stay the same.
-      // For now we apply the delta uniformly; revisit when adding per-skill
-      // proficiency tracking.
-      playerDef.skills[key] += delta;
+      const ability = SKILL_ABILITY[key];
+      if (!ability) continue;
+      const proficientPart = playerDef.skills[key] - abilityMod(playerDef[ability]);
+      if (proficientPart >= profBefore * 2) {
+        playerDef.skills[key] += delta * 2;
+      } else if (proficientPart >= profBefore) {
+        playerDef.skills[key] += delta;
+      }
     }
     for (const key of Object.keys(playerDef.savingThrows)) {
       if (playerDef.savingThrowProficiencies.includes(key)) {
