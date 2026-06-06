@@ -1,0 +1,17 @@
+{
+  "id": "fly",
+  "name": "Fly",
+  "level": 3,
+  "school": "transmutation",
+  "classes": ["sorcerer", "warlock", "wizard"],
+  "castingTime": "action",
+  "range": "Touch",
+  "rangeFeet": 5,
+  "components": { "verbal": true, "somatic": true, "material": "a feather" },
+  "duration": "Concentration, up to 10 minutes",
+  "durationRounds": 100,
+  "concentration": true,
+  "ritual": false,
+  "description": "You touch a willing creature. For the duration, the target gains a Fly Speed of 60 feet and can hover; it falls when the spell ends if still aloft. Engine: a Fly Speed has no consumer in the grid movement model yet, so this is descriptive.",
+  "scaling": "You can target one additional creature for each spell slot level above 3."
+}

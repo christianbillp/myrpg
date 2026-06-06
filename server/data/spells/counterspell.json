@@ -1,0 +1,17 @@
+{
+  "id": "counterspell",
+  "name": "Counterspell",
+  "level": 3,
+  "school": "abjuration",
+  "classes": ["sorcerer", "warlock", "wizard"],
+  "castingTime": "reaction",
+  "castingTimeTrigger": "when you see a creature within 60 feet casting a spell with Verbal, Somatic, or Material components",
+  "range": "60 feet",
+  "rangeFeet": 60,
+  "components": { "verbal": false, "somatic": true, "material": null },
+  "duration": "Instantaneous",
+  "concentration": false,
+  "ritual": false,
+  "save": { "ability": "con", "halfOnSuccess": false },
+  "description": "You attempt to interrupt a creature casting a spell. It makes a Constitution saving throw; on a failure the spell dissipates with no effect and its action/slot is wasted. Engine: there is no enemy-spellcasting pipeline to interrupt yet (US-117), so this is descriptive — castable for flavour during exploration."
+}

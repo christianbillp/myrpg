@@ -1,0 +1,19 @@
+{
+  "id": "slow",
+  "name": "Slow",
+  "level": 3,
+  "school": "transmutation",
+  "classes": ["bard", "sorcerer", "wizard"],
+  "castingTime": "action",
+  "range": "120 feet",
+  "rangeFeet": 120,
+  "components": { "verbal": true, "somatic": true, "material": "a drop of molasses" },
+  "duration": "Concentration, up to 1 minute",
+  "durationRounds": 10,
+  "concentration": true,
+  "ritual": false,
+  "save": { "ability": "wis", "halfOnSuccess": false },
+  "area": { "shape": "cube", "sizeFeet": 40 },
+  "effect": { "onFail": "slowed" },
+  "description": "You alter time around up to six creatures in a 40-foot Cube within range. Each target must succeed on a Wisdom saving throw or be Slowed for the duration: Speed halved, −2 to AC and Dexterity saves, no Reactions, and only an action or a Bonus Action (not both) on its turn — one attack only if it Attacks, with a 25% chance a Somatic spell fails. Engine: the Slowed condition halves speed; the finer AC/action-economy penalties are descriptive."
+}

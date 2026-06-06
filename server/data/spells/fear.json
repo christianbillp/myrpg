@@ -1,0 +1,20 @@
+{
+  "id": "fear",
+  "name": "Fear",
+  "level": 3,
+  "school": "illusion",
+  "classes": ["bard", "sorcerer", "warlock", "wizard"],
+  "castingTime": "action",
+  "range": "Self (30-foot Cone)",
+  "rangeFeet": 0,
+  "components": { "verbal": true, "somatic": true, "material": "a white feather" },
+  "duration": "Concentration, up to 1 minute",
+  "durationRounds": 10,
+  "concentration": true,
+  "ritual": false,
+  "save": { "ability": "wis", "halfOnSuccess": false },
+  "area": { "shape": "cone", "sizeFeet": 30 },
+  "effect": { "onFail": "frightened" },
+  "repeatSave": { "ability": "wis", "removeOnSuccess": ["frightened"] },
+  "description": "Each creature in a 30-foot Cone must succeed on a Wisdom saving throw or drop what it's holding and have the Frightened condition for the duration. A Frightened creature Dashes away from you by the safest route each turn; if it ends a turn without line of sight to you, it repeats the save, ending the effect on a success."
+}

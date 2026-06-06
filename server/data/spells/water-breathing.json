@@ -1,0 +1,16 @@
+{
+  "id": "water-breathing",
+  "name": "Water Breathing",
+  "level": 3,
+  "school": "transmutation",
+  "classes": ["druid", "ranger", "sorcerer", "wizard"],
+  "castingTime": "action",
+  "range": "30 feet",
+  "rangeFeet": 30,
+  "components": { "verbal": true, "somatic": true, "material": "a short reed" },
+  "duration": "24 hours",
+  "durationRounds": 14400,
+  "concentration": false,
+  "ritual": true,
+  "description": "Up to ten willing creatures of your choice within range gain the ability to breathe underwater until the spell ends, while retaining their normal respiration. Engine: an exploration utility narrated by the AIGM."
+}

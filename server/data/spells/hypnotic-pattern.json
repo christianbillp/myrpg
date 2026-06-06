@@ -1,0 +1,19 @@
+{
+  "id": "hypnotic-pattern",
+  "name": "Hypnotic Pattern",
+  "level": 3,
+  "school": "illusion",
+  "classes": ["bard", "sorcerer", "warlock", "wizard"],
+  "castingTime": "action",
+  "range": "120 feet",
+  "rangeFeet": 120,
+  "components": { "verbal": false, "somatic": true, "material": "a pinch of confetti" },
+  "duration": "Concentration, up to 1 minute",
+  "durationRounds": 10,
+  "concentration": true,
+  "ritual": false,
+  "save": { "ability": "wis", "halfOnSuccess": false },
+  "area": { "shape": "cube", "sizeFeet": 30 },
+  "effect": { "onFail": ["charmed", "incapacitated"] },
+  "description": "You create a twisting pattern of colors in a 30-foot Cube within range. Each creature in the area who can see it must succeed on a Wisdom saving throw or have the Charmed condition for the duration; while Charmed it is Incapacitated and has a Speed of 0. The effect ends for a creature if it takes damage or someone uses an action to shake it out of its stupor."
+}

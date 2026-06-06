@@ -1,0 +1,18 @@
+{
+  "id": "sleet-storm",
+  "name": "Sleet Storm",
+  "level": 3,
+  "school": "conjuration",
+  "classes": ["druid", "sorcerer", "wizard"],
+  "castingTime": "action",
+  "range": "150 feet",
+  "rangeFeet": 150,
+  "components": { "verbal": true, "somatic": true, "material": "a miniature umbrella" },
+  "duration": "Concentration, up to 1 minute",
+  "durationRounds": 10,
+  "concentration": true,
+  "ritual": false,
+  "area": { "shape": "sphere", "sizeFeet": 20 },
+  "zone": { "tintHex": "#9fd6e0", "castCondition": "heavily-obscured", "castLabel": "Heavily Obscured", "difficultTerrain": true, "groundPlaceable": true, "enterSave": { "ability": "dex", "condition": "prone" } },
+  "description": "Sleet falls in a 40-foot-tall, 20-foot-radius Cylinder centered on a point within range. The area is Heavily Obscured, exposed flames are doused, and the ground is Difficult Terrain. A creature entering the area for the first time on a turn or starting its turn there must succeed on a Dexterity saving throw or fall Prone. Concentration spellcasters in the area must also succeed on a Constitution save or lose Concentration. Engine simplification: the DEX save is rolled for creatures in the area at cast time (zone enter-save model)."
+}

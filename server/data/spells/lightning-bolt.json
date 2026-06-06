@@ -1,0 +1,19 @@
+{
+  "id": "lightning-bolt",
+  "name": "Lightning Bolt",
+  "level": 3,
+  "school": "evocation",
+  "classes": ["sorcerer", "wizard"],
+  "castingTime": "action",
+  "range": "Self (100-foot Line)",
+  "rangeFeet": 0,
+  "components": { "verbal": true, "somatic": true, "material": "a bit of fur and a crystal rod" },
+  "duration": "Instantaneous",
+  "concentration": false,
+  "ritual": false,
+  "save": { "ability": "dex", "halfOnSuccess": true },
+  "damage": { "dice": 8, "sides": 6, "type": "lightning" },
+  "area": { "shape": "line", "sizeFeet": 100, "widthFeet": 5 },
+  "description": "A stroke of lightning forming a 100-foot-long, 5-foot-wide Line blasts from you. Each creature in the Line makes a Dexterity saving throw, taking 8d6 Lightning damage on a failed save or half as much on a success.",
+  "scaling": "The damage increases by 1d6 for each spell slot level above 3."
+}

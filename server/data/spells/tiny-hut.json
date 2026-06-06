@@ -1,0 +1,16 @@
+{
+  "id": "tiny-hut",
+  "name": "Tiny Hut",
+  "level": 3,
+  "school": "evocation",
+  "classes": ["bard", "wizard"],
+  "castingTime": "1 minute",
+  "range": "Self",
+  "rangeFeet": 0,
+  "components": { "verbal": true, "somatic": true, "material": "a crystal bead" },
+  "duration": "8 hours",
+  "durationRounds": 4800,
+  "concentration": false,
+  "ritual": true,
+  "description": "A 10-foot Emanation dome springs up around you for the duration (it must fully enclose every creature in its area or the casting fails). Those inside at casting can move through it freely; all others, plus level-3-or-lower spells, are barred from passing through. The atmosphere inside is comfortable and dry regardless of outside weather. Engine: a safe-rest utility narrated by the AIGM."
+}

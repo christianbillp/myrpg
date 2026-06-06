@@ -1,0 +1,16 @@
+{
+  "id": "nondetection",
+  "name": "Nondetection",
+  "level": 3,
+  "school": "abjuration",
+  "classes": ["bard", "ranger", "wizard"],
+  "castingTime": "action",
+  "range": "Touch",
+  "rangeFeet": 5,
+  "components": { "verbal": true, "somatic": true, "material": "a pinch of diamond dust worth 25+ GP, which the spell consumes" },
+  "duration": "8 hours",
+  "durationRounds": 4800,
+  "concentration": false,
+  "ritual": false,
+  "description": "For the duration, you hide a touched target (a willing creature, or a place/object no larger than 10 feet) from Divination spells and magical scrying sensors. Engine: divination-warding utility narrated by the AIGM."
+}

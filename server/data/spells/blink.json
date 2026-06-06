@@ -1,0 +1,16 @@
+{
+  "id": "blink",
+  "name": "Blink",
+  "level": 3,
+  "school": "transmutation",
+  "classes": ["sorcerer", "wizard"],
+  "castingTime": "action",
+  "range": "Self",
+  "rangeFeet": 0,
+  "components": { "verbal": true, "somatic": true, "material": null },
+  "duration": "1 minute",
+  "durationRounds": 10,
+  "concentration": false,
+  "ritual": false,
+  "description": "Roll 1d6 at the end of each of your turns for the duration; on a 4-6 you vanish to the Ethereal Plane (perceiving the plane you left in gray, out to 60 feet) and return at the start of your next turn to a chosen unoccupied space within 10 feet. While ethereal you can be affected only by other ethereal creatures. Engine: the phase-out evasion is descriptive only — no Ethereal Plane modelled."
+}

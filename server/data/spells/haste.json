@@ -1,0 +1,16 @@
+{
+  "id": "haste",
+  "name": "Haste",
+  "level": 3,
+  "school": "transmutation",
+  "classes": ["sorcerer", "wizard"],
+  "castingTime": "action",
+  "range": "30 feet",
+  "rangeFeet": 30,
+  "components": { "verbal": true, "somatic": true, "material": "a shaving of licorice root" },
+  "duration": "Concentration, up to 1 minute",
+  "durationRounds": 10,
+  "concentration": true,
+  "ritual": false,
+  "description": "A willing creature within range has its Speed doubled, gains +2 AC, has Advantage on Dexterity saving throws, and gains one extra action each turn (Attack [one attack], Dash, Disengage, Hide, or Utilize). When the spell ends the target is Incapacitated with Speed 0 until the end of its next turn. Engine: the speed/AC/extra-action buff is descriptive only until an ally-buff resolver lands."
+}

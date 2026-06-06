@@ -1,0 +1,18 @@
+{
+  "id": "stinking-cloud",
+  "name": "Stinking Cloud",
+  "level": 3,
+  "school": "conjuration",
+  "classes": ["bard", "sorcerer", "wizard"],
+  "castingTime": "action",
+  "range": "90 feet",
+  "rangeFeet": 90,
+  "components": { "verbal": true, "somatic": true, "material": "a rotten egg" },
+  "duration": "Concentration, up to 1 minute",
+  "durationRounds": 10,
+  "concentration": true,
+  "ritual": false,
+  "area": { "shape": "sphere", "sizeFeet": 20 },
+  "zone": { "tintHex": "#9aa84e", "castCondition": "heavily-obscured", "castLabel": "Heavily Obscured", "groundPlaceable": true, "enterSave": { "ability": "con", "condition": "poisoned" } },
+  "description": "You create a 20-foot-radius Sphere of nauseating gas centered on a point within range. The cloud is Heavily Obscured and lingers for the duration (a strong wind disperses it). Each creature that starts its turn in the Sphere must succeed on a Constitution saving throw or have the Poisoned condition until the end of that turn, unable to take an action or Bonus Action while so Poisoned. Engine simplification: the CON save is rolled for creatures in the area at cast time (per the zone enter-save model)."
+}

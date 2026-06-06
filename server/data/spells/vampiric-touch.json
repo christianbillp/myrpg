@@ -1,0 +1,19 @@
+{
+  "id": "vampiric-touch",
+  "name": "Vampiric Touch",
+  "level": 3,
+  "school": "necromancy",
+  "classes": ["sorcerer", "warlock", "wizard"],
+  "castingTime": "action",
+  "range": "Self",
+  "rangeFeet": 5,
+  "components": { "verbal": true, "somatic": true, "material": null },
+  "duration": "Concentration, up to 1 minute",
+  "durationRounds": 10,
+  "concentration": true,
+  "ritual": false,
+  "attack": "melee-spell",
+  "damage": { "dice": 3, "sides": 6, "type": "necrotic" },
+  "description": "Make a melee spell attack against one creature within reach. On a hit, it takes 3d6 Necrotic damage and you regain Hit Points equal to half the necrotic damage dealt. Until the spell ends you can repeat the attack as a Magic action on each of your turns. Engine: the attack + damage resolve; the self-heal for half the damage is descriptive only until a leech rider lands.",
+  "scaling": "The damage increases by 1d6 for each spell slot level above 3."
+}

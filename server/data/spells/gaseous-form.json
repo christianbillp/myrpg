@@ -1,0 +1,16 @@
+{
+  "id": "gaseous-form",
+  "name": "Gaseous Form",
+  "level": 3,
+  "school": "transmutation",
+  "classes": ["sorcerer", "warlock", "wizard"],
+  "castingTime": "action",
+  "range": "Touch",
+  "rangeFeet": 5,
+  "components": { "verbal": true, "somatic": true, "material": "a bit of gauze" },
+  "duration": "Concentration, up to 1 hour",
+  "durationRounds": 600,
+  "concentration": true,
+  "ritual": false,
+  "description": "A willing creature you touch (and its gear) becomes a misty cloud with a Fly Speed of 10 feet (can hover), Resistance to Bludgeoning/Piercing/Slashing, Advantage on STR/DEX/CON saves, and immunity to the Prone condition, but can't take actions, speak, or manipulate objects. Ends at 0 HP or as a Magic action. Engine: the gaseous transformation is descriptive only."
+}

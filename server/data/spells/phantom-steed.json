@@ -1,0 +1,16 @@
+{
+  "id": "phantom-steed",
+  "name": "Phantom Steed",
+  "level": 3,
+  "school": "illusion",
+  "classes": ["wizard"],
+  "castingTime": "1 minute",
+  "range": "30 feet",
+  "rangeFeet": 30,
+  "components": { "verbal": true, "somatic": true, "material": null },
+  "duration": "1 hour",
+  "durationRounds": 600,
+  "concentration": false,
+  "ritual": true,
+  "description": "A Large, quasi-real, horselike steed (saddle, bit, and bridle included) appears in an unoccupied space within range. For the duration you or a chosen rider can ride it; it uses the Riding Horse stat block but has a Speed of 100 feet and travels 13 miles per hour. It fades when the spell ends (1 minute to dismount) or if it takes any damage. Engine: overland travel utility narrated by the AIGM."
+}

@@ -1,0 +1,16 @@
+{
+  "id": "major-image",
+  "name": "Major Image",
+  "level": 3,
+  "school": "illusion",
+  "classes": ["bard", "sorcerer", "warlock", "wizard"],
+  "castingTime": "action",
+  "range": "120 feet",
+  "rangeFeet": 120,
+  "components": { "verbal": true, "somatic": true, "material": "a bit of fleece" },
+  "duration": "Concentration, up to 10 minutes",
+  "durationRounds": 100,
+  "concentration": true,
+  "ritual": false,
+  "description": "You create the image of an object, creature, or phenomenon no larger than a 20-foot Cube, including sounds, smells, and temperature, that lasts for the duration. It can't deal damage or cause conditions, but seems real. You can move it and alter its appearance with a Magic action. A creature can discern it as illusory with an Investigation check against your spell save DC. Engine: a sensory illusion narrated by the AIGM."
+}
