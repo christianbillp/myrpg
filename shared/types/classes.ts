@@ -73,6 +73,14 @@ export interface FeatureDef {
    * engine code, just this data.
    */
   modifiers?: Modifier[];
+  /**
+   * Short-rest spell-slot recovery (Wizard Arcane Recovery, Druid Natural
+   * Recovery). On a Short Rest, once per Long Rest, recover expended slots
+   * whose combined level totals at most ⌈characterLevel / budgetDivisor⌉, none
+   * above `maxSlotLevel`, topping up the lowest empty slot first. Driven off
+   * this descriptor so a new recovery feature is data-only.
+   */
+  slotRecovery?: { budgetDivisor: number; maxSlotLevel: number };
 }
 
 // ── Class definitions ────────────────────────────────────────────────────────

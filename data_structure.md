@@ -683,7 +683,7 @@ A handful of features short-circuit on `playerDef.defaultFeatureIds.includes(...
 | `improved-critical` (Champion L3) | `CombatSystem.resolvePlayerAttack` — `critFloor` | Critical hits on natural 19-20 |
 | `superior-critical` (Champion L15) | same | Critical hits on natural 18-20 (additive) |
 | `potent-cantrip` (Evoker L3) | `SpellSystem.resolveAttackRollSpell` miss path + `SpellSystem.damageAfterSave` | Damaging cantrips deal half on a miss / successful save |
-| `arcane-recovery` (Wizard L1) | `ExplorationActions.doShortRest` | Greedy slot recovery up to ⌈level/2⌉ levels, ≤ L5, once per Long Rest |
+| any feature with a `slotRecovery` descriptor (Wizard Arcane Recovery, Druid Natural Recovery) | `ExplorationActions.doShortRest` | Greedy slot recovery up to ⌈level / `budgetDivisor`⌉ levels, ≤ `maxSlotLevel`, once per Long Rest. Gated on owning the feature, not a class name — see `slotRecovery` field below |
 
 ### Routes
 
@@ -711,6 +711,7 @@ The shape mirrors `spells/`: data describes WHAT and WHEN; code describes HOW. N
 | `ui` | object? | UI hints — `{ buttonLabel?, buttonColor?, resourceLabel? }`. `resourceLabel` is a template using `{remaining}` and `{max}` placeholders, e.g. `"Second Wind: {remaining}/{max}"`. Features without a `buttonLabel` aren't rendered as buttons (passive / attack-time features). |
 | `handler` | string? | Key into the server's `FeatureRegistry`. Omit for data-only features (Unarmored Defense applied at character load, Expertise as a skill modifier, etc.). |
 | `modifiers` | Modifier[]? | Passive typed contributions (`crit-range` / `flag` / `advantage`) aggregated onto `PlayerDef.modifiers` — e.g. Improved Critical, Remarkable Athlete, Potent Cantrip. See [Modifier aggregator](#modifier-aggregator). |
+| `slotRecovery` | object? | `{ budgetDivisor: int, maxSlotLevel: int }`. Short-rest spell-slot recovery (Wizard Arcane Recovery = `{ 2, 5 }`). On a Short Rest, once per Long Rest, recover expended slots whose combined level totals at most ⌈characterLevel / `budgetDivisor`⌉, none above `maxSlotLevel`, lowest-first. `doShortRest` reads this off the owned feature — a new recovery feature (Druid Natural Recovery) is data-only. |
 
 ### Example — `features/second-wind.json`
 
