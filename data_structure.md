@@ -593,7 +593,7 @@ All other trait effects are stored for future engine use and have no current mec
 
 ## spells/
 
-One file per SRD spell, served via `GET /spells`. Files use kebab-case ids matching the SRD spell name (e.g. `magic-missile.json`, `ray-of-frost.json`). The full SRD 5.2.1 wizard list ships as JSON (16 cantrips, 30 L1 spells); mechanical coverage varies per spell — see `SpellSystem.ts` for the resolver branches. Non-wizard spells from the SRD ship as required by character JSONs.
+One file per SRD spell, served via `GET /spells`. Files use kebab-case ids matching the SRD spell name (e.g. `magic-missile.json`, `ray-of-frost.json`). The full SRD 5.2.1 **Wizard and Cleric lists for cantrips + levels 1–3** ship as JSON; **mechanical coverage varies per spell** — damage / save-for-half / attack-roll / single- or area-target / healing / conditions / zones / temp-HP / self-teleport resolve data-driven via `SpellSystem.ts`, while buffs needing an unbuilt primitive (Bless/Bane +1d4, Shield of Faith / Haste AC, Aid max-HP), summon-likes (Spiritual Weapon, Animate Dead), and metagame/utility spells (Counterspell, Dispel Magic, divinations) ship as full metadata + description — castable and AIGM-rulable, with an `Engine:` note in the description stating what isn't yet wired. Other classes' spells ship as required by character JSONs.
 
 Each spell carries SRD metadata (level, school, classes, casting time, range, components, duration) plus optional mechanical fields the engine can consume when spellcasting lands (attack roll vs save, damage dice, area shape). Narrative effects live in `description`.
 
