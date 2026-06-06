@@ -11,6 +11,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync, readdirSync } from 'fs';
 import { join } from 'path';
 import { buildPlayerDef, type CharacterBuilderDefs, type CharacterCreationChoices } from './CharacterBuilder.js';
+import { previewForLevel } from './Leveling.js';
 import { abilityModifier, type AbilityScores } from '../../../shared/abilityScores.js';
 
 const DATA_DIR = join(import.meta.dirname, '..', '..', 'data');
@@ -108,6 +109,41 @@ describe('PlayerDef builder (US-122)', () => {
     expect(pd.resistances).toContain('poison');  // Dwarven Resilience (applySpecies)
     // Cleric d8 + CON mod(+2) + Dwarven Toughness (+1 at L1) = 11.
     expect(pd.maxHp).toBe(8 + abilityModifier(15) + 1);
+    expect(pd.hpBonusPerLevel).toBe(1);  // Dwarven Toughness per-level
+  });
+
+  it('adds Dwarven Toughness +1 to each level-up HP gain (vs a non-Dwarf)', () => {
+    const base: Omit<CharacterCreationChoices, 'name' | 'speciesId'> = {
+      backgroundId: 'acolyte', classId: 'cleric', abilityMethod: 'standard-array',
+      baseAbilityScores: arr(13, 10, 14, 8, 15, 12),
+      backgroundAbility: { kind: 'two-one', plusTwo: 'wis', plusOne: 'int' },
+      skillProficiencies: ['medicine', 'persuasion'],
+      equipmentChoice: 'A',
+      cantripIds: ['sacred-flame', 'light', 'mending'],
+      preparedSpellIds: ['cure-wounds', 'guiding-bolt', 'healing-word', 'detect-magic'],
+    };
+    const dwarf = buildPlayerDef({ ...base, name: 'D', speciesId: 'dwarf' }, defs);
+    const human = buildPlayerDef({ ...base, name: 'H', speciesId: 'human', speciesSkills: ['insight'], speciesFeat: 'alert' }, defs);
+    expect(dwarf.ok && human.ok).toBe(true);
+    if (!dwarf.ok || !human.ok) return;
+    const lv = (pd: typeof dwarf.playerDef) => previewForLevel(pd, 2, defs.features, defs.spells, defs.classes, [], defs.feats).hpGain;
+    expect(lv(dwarf.playerDef)).toBe(lv(human.playerDef) + 1);
+  });
+
+  it('grants Gnome lineage cantrips (Rock Gnome → Mending + Prestidigitation)', () => {
+    const choices: CharacterCreationChoices = {
+      name: 'Test Gnome', speciesId: 'gnome', backgroundId: 'soldier', classId: 'fighter',
+      abilityMethod: 'standard-array', baseAbilityScores: arr(15, 13, 14, 10, 12, 8),
+      backgroundAbility: { kind: 'two-one', plusTwo: 'con', plusOne: 'str' },  // soldier = str/dex/con
+      skillProficiencies: ['athletics', 'perception'],
+      speciesLineage: 'rock-gnome',
+      equipmentChoice: 'A',
+    };
+    const r = buildPlayerDef(choices, defs);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.playerDef.defaultCantripIds).toEqual(expect.arrayContaining(['mending', 'prestidigitation']));
+    expect(r.playerDef.spellcastingAbility).toBe('int');  // racial default (int/wis/cha)
   });
 
   it('assigns Common + the two chosen Standard languages', () => {

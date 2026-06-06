@@ -67,4 +67,28 @@ describe('applySpecies — origin effects (US-108)', () => {
     expect(p.resistances).toBeUndefined();
     expect(p.originModifiers).toBeUndefined();
   });
+
+  it('applies the chosen subspecies level-1 damage resistance (Tiefling Infernal → fire)', () => {
+    const p = { speciesId: 'sp', speciesLineage: 'infernal', speed: 30, featIds: [] } as unknown as PlayerDef;
+    applySpecies(p, [species([{
+      name: 'Fiendish Legacy', description: '',
+      effects: { legacyChoice: { options: [{ id: 'infernal', level1: { damageResistance: ['fire'] } }] } } as unknown as SpeciesTrait['effects'],
+    }])]);
+    expect(p.resistances).toEqual(['fire']);
+  });
+
+  it('applies a lineage darkvision override (Elf Drow → 120 ft over the base 60)', () => {
+    const p = { speciesId: 'sp', speciesLineage: 'drow', speed: 30, featIds: [] } as unknown as PlayerDef;
+    applySpecies(p, [species([
+      { name: 'Darkvision', description: '', effects: { darkvision: { feet: 60 } } },
+      { name: 'Elven Lineage', description: '', effects: { lineageChoice: { options: [{ id: 'drow', level1: { darkvisionOverride: { feet: 120 } } }] } } as unknown as SpeciesTrait['effects'] },
+    ])]);
+    expect(p.senses?.darkvision).toBe(120);
+  });
+
+  it('projects the Dwarven Toughness per-level HP bonus onto the player', () => {
+    const p = player();
+    applySpecies(p, [species([{ name: 'Dwarven Toughness', description: '', effects: { hpMaxBonus: { atLevel1: 1, perLevel: 1 } } }])]);
+    expect(p.hpBonusPerLevel).toBe(1);
+  });
 });

@@ -92,7 +92,9 @@ export function previewForLevel(
   const subclassDef = resolveSubclassDef(playerDef, subclasses);
   const conMod = abilityMod(playerDef.con);
   const hpPerLevel = classDef?.fixedHpPerLevel ?? fixedHpForClass(playerDef.className ?? '');
-  const hpGain = Math.max(1, hpPerLevel + conMod);
+  // SRD species per-level HP bonus (Dwarven Toughness → +1) rides on top of the
+  // class HP gain, projected onto `playerDef` by `applySpecies`.
+  const hpGain = Math.max(1, hpPerLevel + conMod) + (playerDef.hpBonusPerLevel ?? 0);
   const profBefore = proficiencyBonusAtLevel(fromLevel);
   const profAfter = proficiencyBonusAtLevel(toLevel);
 

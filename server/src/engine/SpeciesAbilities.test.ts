@@ -185,6 +185,24 @@ describe('Long Rest refills species-ability resources', () => {
     expect(player.resources[RELENTLESS_ENDURANCE_ID]).toBe(1);
   });
 
+  it('grants Human Resourceful Heroic Inspiration on a Long Rest', () => {
+    const playerDef = {
+      name: 'Vala', level: 1, maxHp: 10, speciesId: 'human', className: 'Fighter',
+      defaultSpellSlots: [], defaultFeatureIds: [],
+    } as unknown as PlayerDef;
+    const player = {
+      hp: 4, hitDiceUsed: 0, spellSlots: [], resources: {}, exhaustionLevel: 0, tempHp: 0,
+      heroicInspiration: false, preparedSpellIds: [],
+    } as unknown as PlayerState;
+    const human: SpeciesDef = {
+      id: 'human', name: 'Human', creatureType: 'humanoid', size: 'medium', speed: 30,
+      traits: [{ name: 'Resourceful', description: '', effects: { heroicInspirationOnLongRest: true } as never }],
+    };
+    const inputs: RestingInputs = { playerDef, player, features: [], spells: [], classDef: null, species: [human] };
+    applyLongRest(inputs, {}, buildLongRestPreview(inputs));
+    expect(player.heroicInspiration).toBe(true);
+  });
+
   it('leaves resources untouched for a non-Orc species', () => {
     const playerDef = {
       name: 'Aria', level: 1, maxHp: 8, speciesId: 'elf', className: 'Wizard',

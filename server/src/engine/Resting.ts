@@ -218,6 +218,12 @@ export function applyLongRest(
     player.resources[id] = max;
   }
 
+  // SRD Human Resourceful: gain Heroic Inspiration on finishing a Long Rest.
+  const speciesDef = (inputs.species ?? []).find((s) => s.id === playerDef.speciesId);
+  if (speciesDef?.traits.some((t) => (t.effects as { heroicInspirationOnLongRest?: boolean }).heroicInspirationOnLongRest)) {
+    player.heroicInspiration = true;
+  }
+
   if (preview.exhaustionReduced) {
     player.exhaustionLevel = Math.max(0, (player.exhaustionLevel ?? 0) - 1);
   }

@@ -291,8 +291,15 @@ export function buildPlayerDef(choices: CharacterCreationChoices, defs: Characte
   const subChoice = subTrait ? ((subTrait.effects as Record<string, unknown>).lineageChoice ?? (subTrait.effects as Record<string, unknown>).ancestryChoice ?? (subTrait.effects as Record<string, unknown>).legacyChoice) as SubChoice : undefined;
   const subOption = subChoice?.options?.find((o) => (o.id ?? o.dragon) === choices.speciesLineage);
   const baseCantrips = species.traits.map((t) => (t.effects as { cantrip?: string }).cantrip).filter((c): c is string => typeof c === 'string');
-  const subCantrip = (subOption?.level1 as { cantrip?: string } | undefined)?.cantrip;
-  const racialCantripIds = [...baseCantrips, ...(subCantrip ? [subCantrip] : [])]
+  // Subspecies cantrips come in three authored shapes: nested under `level1`
+  // (Elf lineages, Tiefling legacies) or directly on the option as `cantrip` /
+  // `cantrips` (Gnome Forest = one, Rock = two).
+  const subCantripIds = [
+    (subOption?.level1 as { cantrip?: string } | undefined)?.cantrip,
+    (subOption as { cantrip?: string } | undefined)?.cantrip,
+    ...((subOption as { cantrips?: string[] } | undefined)?.cantrips ?? []),
+  ].filter((c): c is string => typeof c === 'string');
+  const racialCantripIds = [...baseCantrips, ...subCantripIds]
     .filter((id) => defs.spells.some((s) => s.id === id && s.level === 0));
   const racialAbilityChoices = subChoice?.spellcastingAbility?.choices;
   const racialAbility = (choices.racialSpellAbility && racialAbilityChoices?.includes(choices.racialSpellAbility))

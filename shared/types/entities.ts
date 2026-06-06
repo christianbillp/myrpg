@@ -188,6 +188,11 @@ export interface PlayerDef {
    *  species `rerollD20OnesOnTests` trait; read at every player d20 roll site
    *  via `applyHalflingLuck`. */
   halflingLuck?: boolean;
+  /** SRD species HP-maximum bonus per level beyond 1st (Dwarven Toughness → 1).
+   *  Set by `applySpecies` from the `hpMaxBonus.perLevel` trait; added to each
+   *  level-up's HP gain in `previewForLevel`. The level-1 portion
+   *  (`hpMaxBonus.atLevel1`) is folded into `maxHp` at character creation. */
+  hpBonusPerLevel?: number;
   color: number;
   xp: number;
   /** Known languages (US-123). Common + the two Standard languages chosen at

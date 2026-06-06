@@ -132,6 +132,21 @@ export function applySpecies(playerDef: PlayerDef, allSpecies: SpeciesDef[]): vo
   }
   playerDef.speed = speed;
 
+  // The chosen subspecies option (Elf lineage / Tiefling legacy / Dragonborn or
+  // Goliath ancestry), if any. Several level-1 effects ride on it: a darkvision
+  // override (Drow), a damage resistance (Tiefling legacy), etc.
+  const selectedOption: Record<string, unknown> | undefined = (() => {
+    if (!playerDef.speciesLineage) return undefined;
+    for (const trait of species.traits) {
+      const e = trait.effects as Record<string, unknown>;
+      const choice = (e.lineageChoice ?? e.ancestryChoice ?? e.legacyChoice) as { options?: Array<Record<string, unknown>> } | undefined;
+      const opt = choice?.options?.find((o) => (o.id ?? o.dragon) === playerDef.speciesLineage);
+      if (opt) return opt;
+    }
+    return undefined;
+  })();
+  const selectedLevel1 = selectedOption?.level1 as Record<string, unknown> | undefined;
+
   // US-107: seed SRD creature size from the species. A fixed size is a plain
   // string ("Medium"); a choice species (e.g. Human/Tiefling "Small or Medium")
   // is `{ choices }` and has no per-character pick until the creation flow
@@ -157,6 +172,10 @@ export function applySpecies(playerDef: PlayerDef, allSpecies: SpeciesDef[]): vo
     // creature as POTENTIALLY having it. We leave the activated form out of
     // the static `playerDef.senses` block for now.
   }
+  // Lineage darkvision override (Elf Drow → 120 ft), authored on the chosen
+  // option's level-1 block.
+  const dvOverride = (selectedLevel1?.darkvisionOverride as { feet?: number } | undefined)?.feet;
+  if (typeof dvOverride === 'number') senses.darkvision = Math.max(senses.darkvision ?? 0, dvOverride);
   if (Object.keys(senses).length > 0) playerDef.senses = senses;
 
   // US-108: activate the rich-but-previously-inert species origin effects.
@@ -196,12 +215,26 @@ export function applySpecies(playerDef: PlayerDef, allSpecies: SpeciesDef[]): vo
       originModifiers.push(key ? { type: 'advantage', on: 'save', key } : { type: 'advantage', on: 'save' });
     }
   }
+  // Subspecies level-1 damage resistance (Tiefling Fiendish Legacy: Abyssal
+  // poison / Chthonic necrotic / Infernal fire), authored on the chosen option.
+  for (const dt of (selectedLevel1?.damageResistance as string[] | undefined) ?? []) {
+    const resolved = dt === 'ancestry' ? ancestryDamageType : dt;
+    if (resolved && !resistances.includes(resolved)) resistances.push(resolved);
+  }
   if (resistances.length > 0) playerDef.resistances = resistances;
   if (originModifiers.length > 0) playerDef.originModifiers = originModifiers;
 
   // SRD Halfling Luck: project the species trait onto a flag the player d20
   // roll sites read (`applyHalflingLuck`) without re-scanning species traits.
   if (species.traits.some((t) => t.effects.rerollD20OnesOnTests)) playerDef.halflingLuck = true;
+
+  // SRD Dwarven Toughness: project the per-level HP bonus so the level-up
+  // preview can add it without re-scanning species defs. The level-1 portion is
+  // applied to `maxHp` at character creation.
+  for (const trait of species.traits) {
+    const perLevel = trait.effects.hpMaxBonus?.perLevel;
+    if (typeof perLevel === 'number' && perLevel > 0) playerDef.hpBonusPerLevel = perLevel;
+  }
 }
 
 export function applyEquipment(
