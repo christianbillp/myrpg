@@ -19,7 +19,7 @@ import { PLAYER_FACTION_ID, INFLUENCE_SKILLS } from '../../../shared/types.js';
 import { SKILL_ABILITY } from './Leveling.js';
 import { Logger } from '../Logger.js';
 import * as Guard from './ActionGuards.js';
-import { clearHide, isDead } from './ConditionSystem.js';
+import { clearHide, isDead, autoFailsStrDexSave, resistsAllDamage } from './ConditionSystem.js';
 import type { GameContext } from './GameContext.js';
 import {
   endCombat as cfEndCombat, autoEndCombatIfNoEnemies as cfAutoEndCombat,
@@ -887,7 +887,7 @@ export class GameEngine {
 
   rollPlayerSavingThrow(ability: string, dc: number): { roll: number; total: number; success: boolean; autoFail: boolean } {
     const { conditions, exhaustionLevel } = this.state.player;
-    if ((ability === 'str' || ability === 'dex') && (conditions.includes('paralyzed') || conditions.includes('unconscious') || conditions.includes('stunned'))) {
+    if ((ability === 'str' || ability === 'dex') && autoFailsStrDexSave(conditions)) {
       return { roll: 0, total: 0, success: false, autoFail: true };
     }
     const saveMod = (this.playerDef.savingThrows[ability] ?? 0) - exhaustionLevel * 2;
@@ -1014,6 +1014,16 @@ export class GameEngine {
   private playerResistMod(damage: number, damageType: string): number {
     const def = this.playerDef;
     const name = def.name;
+    // SRD Petrified (US-058): Resistance to ALL damage + immunity to poison.
+    if (resistsAllDamage(this.state.player.conditions) && !def.immunities?.includes(damageType)) {
+      if (damageType === 'poison') {
+        this.addLog({ left: `${name} is Petrified — immune to ${damageType} — ${damage}→0`, right: '×0', style: 'status' });
+        return 0;
+      }
+      const fd = Math.floor(damage / 2);
+      this.addLog({ left: `${name} is Petrified — resists all damage — ${damage}→${fd}`, right: '×½', style: 'status' });
+      return fd;
+    }
     if (def.immunities?.includes(damageType)) {
       this.addLog({ left: `${name} is immune to ${damageType} — ${damage}→0`, right: '×0', style: 'status' });
       return 0;

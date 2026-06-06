@@ -6,7 +6,7 @@
 /** Conditions that prevent actions, bonus actions, and reactions. `dead`
  *  is included so any incapacitation gate (turn skipping, AOE saving-throw
  *  exclusion, etc.) treats corpses the same as unconscious creatures. */
-export const INCAPACITATING_CONDITIONS = ['paralyzed', 'stunned', 'unconscious', 'incapacitated', 'dead'];
+export const INCAPACITATING_CONDITIONS = ['paralyzed', 'stunned', 'unconscious', 'incapacitated', 'dead', 'petrified'];
 
 /** True when the creature is a corpse — `hp <= 0` is the canonical signal,
  *  but the `dead` tag is the authored marker (set by `set_npc_dead`) that
@@ -19,7 +19,7 @@ export function isDead<T extends { hp: number; conditions: string[] }>(target: T
 /** Conditions that give attackers Advantage against the creature (prone handled separately).
  *  `helped` is the SRD Help (Assist an Attack) marker (US-057): the next attack
  *  against the distracted creature has Advantage; consumed by that attack. */
-export const ADVANTAGE_AGAINST_CONDITIONS = ['blinded', 'paralyzed', 'restrained', 'stunned', 'unconscious', 'helped'];
+export const ADVANTAGE_AGAINST_CONDITIONS = ['blinded', 'paralyzed', 'restrained', 'stunned', 'unconscious', 'helped', 'petrified'];
 
 /** Conditions that impose Disadvantage on the creature's own attack rolls.
  *  `heavily-obscured` is included because a creature standing in fog can't
@@ -33,7 +33,7 @@ export const ATTACK_DISADVANTAGE_CONDITIONS = ['blinded', 'frightened', 'grapple
 /** Conditions that reduce the creature's speed to 0. `hobbled` is the
  *  caltrops effect — Speed 0 until the start of the creature's next turn
  *  (it is also a TURN_CONDITION so it clears then). */
-export const SPEED_ZERO_CONDITIONS = ['grappled', 'paralyzed', 'restrained', 'unconscious', 'hobbled'];
+export const SPEED_ZERO_CONDITIONS = ['grappled', 'paralyzed', 'restrained', 'unconscious', 'hobbled', 'petrified'];
 
 /** Conditions on a target that give attackers Disadvantage (regardless of range).
  *  SRD 5.2.1: a creature in a Heavily Obscured area is functionally Blinded
@@ -104,6 +104,19 @@ export function hasAttackAdvantage(conditions: string[]): boolean {
 /** True when this creature's speed is forced to 0 by a condition. */
 export function hasSpeedZero(conditions: string[]): boolean {
   return SPEED_ZERO_CONDITIONS.some((c) => conditions.includes(c));
+}
+
+/** SRD Petrified (US-058): the creature has Resistance to ALL damage (not just
+ *  a damage-type list). Resolvers halve damage when this is true. */
+export function resistsAllDamage(conditions: string[]): boolean {
+  return conditions.includes('petrified');
+}
+
+/** SRD: a creature auto-fails Strength and Dexterity saving throws while
+ *  Paralyzed, Unconscious, Stunned, or Petrified (US-058). */
+export function autoFailsStrDexSave(conditions: string[]): boolean {
+  return conditions.includes('paralyzed') || conditions.includes('unconscious')
+    || conditions.includes('stunned') || conditions.includes('petrified');
 }
 
 /**
