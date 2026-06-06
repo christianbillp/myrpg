@@ -674,6 +674,21 @@ export class CharacterSheetOverlay extends BaseOverlay {
     const castableSet = new Set(this.inputs.castableSpellIds);
     const isExploring = this.inputs.isExploring;
 
+    // SRD Somatic/Material component gate (US-116): mirror the server's
+    // free-hand count so the disabled-CAST tooltip can explain a both-hands-
+    // occupied block. A two-handed weapon (or a versatile weapon without a
+    // shield) takes both hands; a one-handed weapon and a shield take one each.
+    const wpn = this.inputs.equippedItems.weapon;
+    const shield = this.inputs.equippedItems.shield;
+    let handsUsed = 0;
+    if (shield) handsUsed += 1;
+    if (wpn && wpn.type === "weapon") {
+      handsUsed += wpn.twoHanded ? 2 : 1;  // Versatile counts as one hand for components.
+    } else if (wpn) {
+      handsUsed += 1;
+    }
+    const freeHands = Math.max(0, 2 - handsUsed);
+
     const renderSpellRow = (id: string, opts: { prepared?: boolean; tag?: string } = {}): string => {
       const sp = byId[id];
       if (!sp) return `<div style="font-size:10px;color:#445566;padding:2px 0;">${escHtml(id)} (unknown)</div>`;
@@ -725,6 +740,7 @@ export class CharacterSheetOverlay extends BaseOverlay {
         const longCast = sp.castingTime !== 'action' && sp.castingTime !== 'bonus-action' && sp.castingTime !== 'reaction';
         if (longCast && !isExploring) return `Casting time exceeds a combat round (${sp.castingTime}). Castable only out of combat.`;
         if (sp.level > 0 && (state.spellSlots[sp.level - 1] ?? 0) <= 0) return `No L${sp.level} slot remaining.`;
+        if ((sp.components?.somatic || !!sp.components?.material) && freeHands < 1) return `No free hand — a Somatic or Material component needs one. Unequip a weapon or shield.`;
         if (sp.castingTime === 'action' && state.actionUsed && !isExploring) return `Action already spent this turn.`;
         if (sp.castingTime === 'bonus-action' && state.bonusActionUsed) return `Bonus Action already spent this turn.`;
         if (sp.castingTime === 'reaction' && !isExploring) return `Reactions auto-fire on their trigger in combat.`;

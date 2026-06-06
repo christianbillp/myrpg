@@ -3,7 +3,7 @@
 // enforcement) call into these — never re-derive the same preconditions.
 
 import type { GameContext } from './GameContext.js';
-import type { ArmorDef } from './types.js';
+import type { ArmorDef, WeaponDef } from './types.js';
 import { isIncapacitated } from './ConditionSystem.js';
 import { armorSpeedPenaltyFt } from './EquipmentSystem.js';
 import { chebyshev } from './EnemyAI.js';
@@ -232,6 +232,28 @@ export function canAttackTarget(ctx: GameContext, targetId?: string): boolean {
 // ── Spellcasting guards ─────────────────────────────────────────────────────
 
 /**
+ * Free hands the player has right now, derived from the equipped weapon/shield.
+ * A two-handed weapon (or a versatile weapon wielded without a shield) occupies
+ * both hands; a one-handed weapon and a shield each occupy one. Used by the SRD
+ * Somatic/Material component gate (US-116).
+ */
+export function freeHandCount(ctx: GameContext): number {
+  const slots = ctx.state.player.equippedSlots;
+  let used = 0;
+  if (slots.shieldId) used += 1;
+  if (slots.weaponId) {
+    const item = ctx.defs.equipment.find((e) => e.id === slots.weaponId);
+    const weapon = item && item.type === 'weapon' ? (item as WeaponDef) : undefined;
+    // Only a strictly two-handed weapon occupies both hands. A Versatile weapon
+    // can be gripped one-handed to free a hand for components, so it counts as
+    // one hand here (even though the damage model favours the two-handed grip
+    // when no shield is equipped).
+    used += weapon?.twoHanded ? 2 : 1;
+  }
+  return Math.max(0, 2 - used);
+}
+
+/**
  * Can the player cast the given spell right now, given the spell's casting
  * time, the player's available actions/reactions, and the slot pool? This is
  * the pure-eligibility check — target/range validation is the resolver's job.
@@ -254,6 +276,15 @@ export function canCastSpell(ctx: GameContext, spellId: string): boolean {
   if (spell.level > 0) {
     const slot = s.player.spellSlots[spell.level - 1] ?? 0;
     if (slot <= 0) return false;
+  }
+
+  // SRD components (US-116): a spell with a Somatic or Material component needs
+  // at least one free hand — Somatic gestures use "at least one of their
+  // hands", and the Material "hand free to access" can be that same hand. A
+  // Verbal-only spell needs no free hand, so it stays castable with both hands
+  // occupied. (Verbal's gagged/silence gate has no consumer yet.)
+  if ((spell.components.somatic || spell.components.material !== null) && freeHandCount(ctx) < 1) {
+    return false;
   }
 
   // Action economy gated by castingTime.

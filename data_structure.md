@@ -446,6 +446,8 @@ Casting from a scroll (`doCastSpell` with `scrollItemId`, driven by the `useScro
 
 **Upcasting (US-116).** A levelled spell may be cast with a slot of its own level or higher; the resolvers scale damage / darts / rays by `slotLevel` (`max(0, slotLevel - spell.level)` extra). `doCastSpell` resolves the effective level before spending anything: cantrips, ritual casts, and scroll casts force `slotLevel = spell.level`; a normal cast clamps the requested level to `[spell.level, 9]` (no downcasting) and **fizzles before consuming any slot or action** if the player holds no slot at that level. `consumeCastingResources` then decrements the slot at the chosen `slotLevel` — **not** the base level (the historical bug). The client's Spells tab opens a slot-level picker when `SpellDef.scaling` is set and a higher slot is owned, threading the choice through the target mode so deferred (target-click / tile / multi-projectile) casts spend the right slot.
 
+**Component free-hand gate (US-116).** Per SRD, a Somatic component needs ≥1 free hand and a Material component needs a free hand to access it (sharable with the Somatic hand) — so `canCastSpell` refuses any spell whose `components.somatic` or `components.material` is set when `freeHandCount(ctx)` is 0. `freeHandCount` derives from `equippedSlots`: a strictly `twoHanded` weapon uses both hands; a one-handed weapon and a shield use one each; a Versatile weapon uses one (the caster grips it one-handed to free the other). Verbal-only spells skip the gate. The client's Spells-tab tooltip mirrors the same count from `equippedItems`.
+
 ---
 
 ### type: `"ammunition"`
