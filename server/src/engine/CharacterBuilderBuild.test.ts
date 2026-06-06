@@ -159,14 +159,35 @@ describe('PlayerDef builder (US-122)', () => {
       backgroundAbility: { kind: 'two-one', plusTwo: 'str', plusOne: 'con' },
       skillProficiencies: ['athletics', 'perception'],
       speciesSkills: ['arcana'],   // Skillful: a free skill
-      speciesFeat: 'skilled',      // Versatile: an Origin feat
+      speciesFeat: 'alert',        // Versatile: an Origin feat (no skill grant)
     };
     const r = buildPlayerDef(choices, defs);
     expect(r.ok).toBe(true);
     if (!r.ok) return;
     expect(r.playerDef.skills.arcana).toBe(abilityModifier(r.playerDef.int) + 2);  // now proficient
-    expect(r.playerDef.featIds).toContain('skilled');
+    expect(r.playerDef.featIds).toContain('alert');
     expect(r.playerDef.featIds.length).toBeGreaterThanOrEqual(2);  // background feat + origin feat
+  });
+
+  it('Skilled feat grants 3 extra skill proficiencies (sourced on the Skills page)', () => {
+    const choices: CharacterCreationChoices = {
+      name: 'Jack of Trades', speciesId: 'human', backgroundId: 'soldier', classId: 'fighter',
+      abilityMethod: 'standard-array', baseAbilityScores: arr(15, 13, 14, 8, 12, 10),
+      backgroundAbility: { kind: 'two-one', plusTwo: 'str', plusOne: 'con' },
+      skillProficiencies: ['athletics', 'perception'],
+      speciesSkills: ['arcana'],          // Human Skillful (1)
+      speciesFeat: 'skilled',             // Versatile → Skilled feat (grants 3)
+      featSkills: ['stealth', 'nature', 'medicine'],
+    };
+    const r = buildPlayerDef(choices, defs);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    for (const sk of ['arcana', 'stealth', 'nature', 'medicine']) {
+      const ability = ({ arcana: 'int', stealth: 'dex', nature: 'int', medicine: 'wis' } as const)[sk as 'arcana'];
+      expect(r.playerDef.skills[sk]).toBe(abilityModifier(r.playerDef[ability]) + 2);
+    }
+    // Wrong feat-skill count is rejected.
+    expect(buildPlayerDef({ ...choices, featSkills: ['stealth'] }, defs).ok).toBe(false);
   });
 
   it('rejects a Human with no Origin feat or a non-Origin feat', () => {

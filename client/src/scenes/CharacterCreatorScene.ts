@@ -49,6 +49,9 @@ interface CreatorState {
   speciesSkillPicks: Set<string>;
   /** Species-granted Origin feat id (Human "Versatile"); "" when none/unset. */
   speciesFeat: string;
+  /** Skills chosen for each feat that grants skill proficiencies (Skilled → 3),
+   *  keyed by feat id. */
+  featSkillPicks: Map<string, Set<string>>;
   languagePicks: Set<string>;
   cantripPicks: Set<string>;
   spellPicks: Set<string>;
@@ -82,7 +85,7 @@ export class CharacterCreatorScene extends Phaser.Scene {
     scores: { str: 10, dex: 10, con: 10, int: 10, wis: 10, cha: 10 },
     backgroundAbility: { kind: "one-one-one" },  // replaced with the bg's first two on load
     pool: [...STANDARD_ARRAY],
-    skillPicks: new Set(), speciesSkillPicks: new Set(), speciesFeat: "",
+    skillPicks: new Set(), speciesSkillPicks: new Set(), speciesFeat: "", featSkillPicks: new Map(),
     languagePicks: new Set(), cantripPicks: new Set(), spellPicks: new Set(),
     equipmentChoice: "A",
   };
@@ -276,6 +279,7 @@ export class CharacterCreatorScene extends Phaser.Scene {
     c.appendChild(this.selectRow("Background", this.backgrounds.map((b) => ({ value: b.id, label: b.name })), this.state.backgroundId, (v) => {
       this.state.backgroundId = v;
       this.state.backgroundAbility = this.defaultBackgroundAbility();  // keep the bonus choice valid for the new bg
+      this.state.featSkillPicks = new Map();  // background feat (a skill source) changed
       this.renderStep();
     }));
     c.appendChild(this.backgroundPanel());
@@ -468,6 +472,39 @@ export class CharacterCreatorScene extends Phaser.Scene {
   private resetSpeciesGrants(): void {
     this.state.speciesSkillPicks = new Set();
     this.state.speciesFeat = this.speciesGrantsOriginFeat() ? (this.originFeats()[0]?.id ?? "") : "";
+    this.state.featSkillPicks = new Map();  // granting feats changed
+  }
+
+  /** The feats the character will have at creation (background feat + species
+   *  Origin feat). */
+  private characterFeats(): FeatDef[] {
+    const ids = new Set<string>();
+    const bgFeat = this.backgrounds.find((b) => b.id === this.state.backgroundId)?.feat?.id;
+    if (bgFeat) ids.add(bgFeat);
+    if (this.state.speciesFeat) ids.add(this.state.speciesFeat);
+    return [...ids].map((id) => this.feats.find((f) => f.id === id)).filter((f): f is FeatDef => !!f);
+  }
+
+  /** Feats that grant a number of free skill proficiencies (e.g. Skilled → 3). */
+  private featsGrantingSkills(): Array<{ feat: FeatDef; count: number }> {
+    return this.characterFeats()
+      .map((feat) => ({ feat, count: (feat.effects as { skillOrToolProficiencies?: { count: number } }).skillOrToolProficiencies?.count ?? 0 }))
+      .filter((x) => x.count > 0);
+  }
+
+  /** Skills already proficient from every source (class picks, background,
+   *  species Skillful, feat picks) — optionally excluding one feat's own picks
+   *  so its picker still shows them checked. Used to stop redundant choices. */
+  private takenSkills(excludeFeatId?: string): Set<string> {
+    const t = new Set<string>([
+      ...this.state.skillPicks,
+      ...(this.backgrounds.find((b) => b.id === this.state.backgroundId)?.skillProficiencies ?? []),
+      ...this.state.speciesSkillPicks,
+    ]);
+    for (const [fid, picks] of this.state.featSkillPicks) {
+      if (fid !== excludeFeatId) for (const s of picks) t.add(s);
+    }
+    return t;
   }
 
   /** Origin-feat picker shown under the Species panel when the species grants
@@ -482,7 +519,7 @@ export class CharacterCreatorScene extends Phaser.Scene {
     head.style.cssText = "font-size:11px;color:#9ac6a0;margin-bottom:6px;";
     head.innerHTML = `Origin feat — <b>${esc(this.currentSpecies()?.name ?? "Species")}</b> grants an Origin feat of your choice:`;
     wrap.appendChild(head);
-    wrap.appendChild(this.miniSelect("Feat", feats.map((f) => ({ value: f.id, label: f.name })), this.state.speciesFeat, (v) => { this.state.speciesFeat = v; this.renderStep(); }));
+    wrap.appendChild(this.miniSelect("Feat", feats.map((f) => ({ value: f.id, label: f.name })), this.state.speciesFeat, (v) => { this.state.speciesFeat = v; this.state.featSkillPicks = new Map(); this.renderStep(); }));
     const sel = feats.find((f) => f.id === this.state.speciesFeat);
     if (sel) {
       const d = document.createElement("div");
@@ -621,22 +658,45 @@ export class CharacterCreatorScene extends Phaser.Scene {
       }));
     }
 
-    // Species skill grant (Human "Skillful") — an extra proficiency in any skill
-    // the character doesn't already get from class/background.
+    // Species skill grant (Human "Skillful") — an extra proficiency, clearly
+    // sourced, in a skill not already granted by another source.
     const speciesCount = this.speciesSkillCount();
     if (speciesCount > 0) {
-      const taken = new Set<string>([...this.state.skillPicks, ...(this.backgrounds.find((b) => b.id === this.state.backgroundId)?.skillProficiencies ?? [])]);
       const sHead = document.createElement("div");
       sHead.style.cssText = "font-size:12px;color:#9ac6a0;margin:14px 0 6px;";
-      const label = () => `${this.currentSpecies()?.name ?? "Species"} skill — choose ${speciesCount} more (${this.state.speciesSkillPicks.size}/${speciesCount}):`;
+      const label = () => `${this.currentSpecies()?.name ?? "Species"} bonus skill (Skillful) — choose ${speciesCount} (${this.state.speciesSkillPicks.size}/${speciesCount}):`;
       sHead.textContent = label();
       c.appendChild(sHead);
+      const taken = this.takenSkills();
       for (const sk of this.speciesSkillChoices()) {
-        if (taken.has(sk)) continue;  // can't pick a skill you already have
+        if (taken.has(sk) && !this.state.speciesSkillPicks.has(sk)) continue;
         c.appendChild(this.checkRow(prettify(sk), this.state.speciesSkillPicks.has(sk), (on) => {
           if (on) { if (this.state.speciesSkillPicks.size >= speciesCount) return false; this.state.speciesSkillPicks.add(sk); }
           else this.state.speciesSkillPicks.delete(sk);
           sHead.textContent = label();
+          return true;
+        }));
+      }
+    }
+
+    // Feat-granted skill proficiencies (e.g. the Skilled feat → 3). One labeled
+    // section per granting feat so the player can see exactly why they have the
+    // extra picks.
+    for (const { feat, count } of this.featsGrantingSkills()) {
+      let picks = this.state.featSkillPicks.get(feat.id);
+      if (!picks) { picks = new Set(); this.state.featSkillPicks.set(feat.id, picks); }
+      const fHead = document.createElement("div");
+      fHead.style.cssText = "font-size:12px;color:#caa6e6;margin:14px 0 6px;";
+      const label = () => `${feat.name} feat — choose ${count} skill ${count === 1 ? "proficiency" : "proficiencies"} (${picks!.size}/${count}):`;
+      fHead.textContent = label();
+      c.appendChild(fHead);
+      const taken = this.takenSkills(feat.id);
+      for (const sk of ALL_SKILLS) {
+        if (taken.has(sk) && !picks.has(sk)) continue;
+        c.appendChild(this.checkRow(prettify(sk), picks.has(sk), (on) => {
+          if (on) { if (picks!.size >= count) return false; picks!.add(sk); }
+          else picks!.delete(sk);
+          fHead.textContent = label();
           return true;
         }));
       }
@@ -752,6 +812,7 @@ export class CharacterCreatorScene extends Phaser.Scene {
         skillProficiencies: [...this.state.skillPicks],
         speciesSkills: [...this.state.speciesSkillPicks],
         speciesFeat: this.state.speciesFeat || undefined,
+        featSkills: [...this.state.featSkillPicks.values()].flatMap((s) => [...s]),
         languages: [...this.state.languagePicks],
         equipmentChoice: this.state.equipmentChoice,
         cantripIds: cls?.spellcasting ? [...this.state.cantripPicks] : undefined,

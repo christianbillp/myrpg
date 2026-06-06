@@ -68,6 +68,8 @@ export interface CharacterCreationChoices {
   speciesSkills?: string[];
   /** Species-granted Origin feat (Human "Versatile"). */
   speciesFeat?: string;
+  /** Skills chosen for feat-granted proficiencies (Skilled feat → 3). */
+  featSkills?: string[];
   /** Background equipment option label (e.g. "A" / "B") — sets starting gold. */
   equipmentChoice?: string;
   /** Caster cantrip picks (count = class cantrips-known at L1). */
@@ -169,6 +171,29 @@ export function buildPlayerDef(choices: CharacterCreationChoices, defs: Characte
     }
   }
 
+  // ── Feats: background feat + species Origin feat (Human "Versatile") ─────────
+  const featIds = defs.feats.some((f) => f.id === bg.feat.id) ? [bg.feat.id] : [];
+  const featGrant = species.traits.map((t) => t.effects.originFeat).find(Boolean);
+  if (featGrant) {
+    const pickedFeat = choices.speciesFeat;
+    if (!pickedFeat) return { ok: false, error: `${species.name} grants an Origin feat — choose one.` };
+    const feat = defs.feats.find((f) => f.id === pickedFeat);
+    if (!feat || feat.category !== 'origin') return { ok: false, error: `"${pickedFeat}" isn't an Origin feat.` };
+    if (!featIds.includes(pickedFeat)) featIds.push(pickedFeat);
+  }
+
+  // Feat-granted skill proficiencies (Skilled feat → 3 skills). Sum the count
+  // across every feat the character has, validate the picks, fold them in.
+  const featSkillCount = featIds.reduce((n, fid) => n + (defs.feats.find((f) => f.id === fid)?.effects.skillOrToolProficiencies?.count ?? 0), 0);
+  const featSkills = choices.featSkills ?? [];
+  if (featSkills.length !== featSkillCount) {
+    return { ok: false, error: `Your feats grant ${featSkillCount} skill proficiencies; got ${featSkills.length}.` };
+  }
+  for (const sk of featSkills) {
+    if (!(sk in SKILL_ABILITY)) return { ok: false, error: `"${sk}" isn't a valid skill.` };
+    proficientSkills.add(sk);
+  }
+
   const PB = 2;  // proficiency bonus at level 1
   const skills: Record<string, number> = {};
   for (const sk of ALL_SKILLS) {
@@ -231,17 +256,6 @@ export function buildPlayerDef(choices: CharacterCreationChoices, defs: Characte
   const defaultEquipment = cls.startingEquipment
     ? { ...cls.startingEquipment }
     : { armorId: null, weaponId: null, shieldId: null };
-
-  // ── Feats: background feat + species Origin feat (Human "Versatile") ─────────
-  const featIds = defs.feats.some((f) => f.id === bg.feat.id) ? [bg.feat.id] : [];
-  const featGrant = species.traits.map((t) => t.effects.originFeat).find(Boolean);
-  if (featGrant) {
-    const pickedFeat = choices.speciesFeat;
-    if (!pickedFeat) return { ok: false, error: `${species.name} grants an Origin feat — choose one.` };
-    const feat = defs.feats.find((f) => f.id === pickedFeat);
-    if (!feat || feat.category !== 'origin') return { ok: false, error: `"${pickedFeat}" isn't an Origin feat.` };
-    if (!featIds.includes(pickedFeat)) featIds.push(pickedFeat);
-  }
 
   const sneakAttackDice = (trackAt(cls, 'sneak-attack-dice', 1) as number | undefined) ?? 0;
 
