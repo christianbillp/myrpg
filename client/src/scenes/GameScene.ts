@@ -192,6 +192,9 @@ export class GameScene extends Phaser.Scene {
         fromTileX: number; fromTileY: number;
       }
     | null = null;
+  /** Active when a tile-targeted feature (Goliath Cloud's Jaunt) is awaiting a
+   *  destination click. `rangeTiles` bounds the valid teleport disc. */
+  private featureTargetMode: { featureId: string; rangeTiles: number } | null = null;
   private pendingGmHistory: ChatMessage[] = [];
   private pendingIsResume = false;
   /** Set by `init()` from scene-restart payload when a chapter-advance fade is
@@ -740,6 +743,7 @@ export class GameScene extends Phaser.Scene {
       this.gridView.pointerMove(p);
       this.drawMovePreview(p);
       this.drawSpellAoePreview(p);
+      this.drawFeatureRangePreview(p);
     });
     this.input.on("pointerup",   (p: Phaser.Input.Pointer) => {
       if (this.gridView.pointerUp(p)) this.handleMapClick(p);
@@ -782,6 +786,22 @@ export class GameScene extends Phaser.Scene {
     const { player: ps, npcs } = this.gameState;
     const nState = npcs.find(n => n.hp > 0 && n.tileX === tileX && n.tileY === tileY)
       ?? npcs.find(n => n.tileX === tileX && n.tileY === tileY);
+
+    // Feature-target mode (Cloud's Jaunt) — the click is the teleport
+    // destination. Dispatch only when it's an in-range, passable, unoccupied
+    // tile (the server re-validates); any click exits the mode.
+    if (this.featureTargetMode) {
+      const ftm = this.featureTargetMode;
+      this.exitFeatureTargetMode();
+      const dist = Math.max(Math.abs(tileX - ps.tileX), Math.abs(tileY - ps.tileY));
+      const passable = !this.gameState.map.blocksMovement[tileY]?.[tileX];
+      const occupied = !!nState && nState.hp > 0;
+      const isSelf = tileX === ps.tileX && tileY === ps.tileY;
+      if (dist >= 1 && dist <= ftm.rangeTiles && passable && !occupied && !isSelf) {
+        gameClient.sendAction({ type: "useFeature", featureId: ftm.featureId, tile: { x: tileX, y: tileY } });
+      }
+      return;
+    }
 
     // Spell-target mode swallows the click. For creature-target spells, a
     // creature click resolves and anything else cancels. For AOE spells, ANY
@@ -972,6 +992,8 @@ export class GameScene extends Phaser.Scene {
       this.exitMoveMode();
     if (this.spellTargetMode && Phaser.Input.Keyboard.JustDown(this.escKey))
       this.exitSpellTargetMode();
+    if (this.featureTargetMode && Phaser.Input.Keyboard.JustDown(this.escKey))
+      this.exitFeatureTargetMode();
     if (this.companionMoveToMode && Phaser.Input.Keyboard.JustDown(this.escKey))
       this.exitCompanionMoveToMode();
 
@@ -1022,7 +1044,7 @@ export class GameScene extends Phaser.Scene {
       onReady:          () => gameClient.sendAction({ type: "ready" }),
       onActionPrompt:   (kind) => this.hud.primeActionPrompt(kind),
       onDetach:         () => gameClient.sendAction({ type: "detach" }),
-      onUseFeature:     (featureId) => gameClient.sendAction({ type: "useFeature", featureId }),
+      onUseFeature:     (featureId) => this.beginUseFeature(featureId),
       onHide:           () => gameClient.sendAction({ type: "hide" }),
       onDeathSave:      () => gameClient.sendAction({ type: "rollDeathSave" }),
       onShortRest:      () => gameClient.sendAction({ type: "shortRest" }),
@@ -1259,6 +1281,7 @@ export class GameScene extends Phaser.Scene {
    * against the player tile.
    */
   private beginSpellCast(spellId: string, asRitual: boolean): void {
+    if (this.featureTargetMode) this.exitFeatureTargetMode();
     const allSpells = this.defs.spells();
     const spell = allSpells.find(sp => sp.id === spellId);
     if (!spell) return;
@@ -1447,6 +1470,50 @@ export class GameScene extends Phaser.Scene {
     this.closeMultiProjectilePanel();
     this.clearMultiProjectileBadges();
     if (this.gameState) this.playerPanel.refreshActions(this.buildActionState(this.gameState));
+  }
+
+  /** Use a feature button. Tile-targeted features (Cloud's Jaunt) enter a
+   *  destination-pick mode; everything else fires immediately. */
+  private beginUseFeature(featureId: string): void {
+    const def = this.defs.features().find((f) => f.id === featureId);
+    if (def?.targetsTile) {
+      if (this.moveMode) this.exitMoveMode();
+      if (this.spellTargetMode) this.exitSpellTargetMode();
+      this.featureTargetMode = { featureId, rangeTiles: 6 };  // 30 ft
+      if (this.gameState) this.playerPanel.refreshActions(this.buildActionState(this.gameState));
+      return;
+    }
+    gameClient.sendAction({ type: "useFeature", featureId });
+  }
+
+  private exitFeatureTargetMode(): void {
+    if (!this.featureTargetMode) return;
+    this.featureTargetMode = null;
+    this.spellAoeLayer.clear();
+    if (this.gameState) this.playerPanel.refreshActions(this.buildActionState(this.gameState));
+  }
+
+  /** Tint the in-range teleport disc for an active feature-target mode and
+   *  highlight the hovered destination. Shares `spellAoeLayer`, which the spell
+   *  AOE preview clears first when no spell mode is active. */
+  private drawFeatureRangePreview(pointer: Phaser.Input.Pointer): void {
+    if (!this.featureTargetMode || !this.gameState) return;
+    const { rangeTiles } = this.featureTargetMode;
+    const ps = this.gameState.player;
+    const { cols, rows, blocksMovement } = this.gameState.map;
+    this.spellAoeLayer.fillStyle(0x55aaff, 0.14);
+    for (let y = Math.max(0, ps.tileY - rangeTiles); y <= Math.min(rows - 1, ps.tileY + rangeTiles); y++) {
+      for (let x = Math.max(0, ps.tileX - rangeTiles); x <= Math.min(cols - 1, ps.tileX + rangeTiles); x++) {
+        if ((x === ps.tileX && y === ps.tileY) || blocksMovement[y]?.[x]) continue;
+        this.spellAoeLayer.fillRect(x * TILE_SIZE + 1, y * TILE_SIZE + 1, TILE_SIZE - 2, TILE_SIZE - 2);
+      }
+    }
+    const { tileX, tileY } = this.gridView.toTile(pointer);
+    const dist = Math.max(Math.abs(tileX - ps.tileX), Math.abs(tileY - ps.tileY));
+    if (dist >= 1 && dist <= rangeTiles && tileX >= 0 && tileX < cols && tileY >= 0 && tileY < rows && !blocksMovement[tileY]?.[tileX]) {
+      this.spellAoeLayer.fillStyle(0x88ccff, 0.35);
+      this.spellAoeLayer.fillRect(tileX * TILE_SIZE + 1, tileY * TILE_SIZE + 1, TILE_SIZE - 2, TILE_SIZE - 2);
+    }
   }
 
   /** Enter companion-move-to mode. Cancels the other targeting modes
@@ -2624,6 +2691,7 @@ export class GameScene extends Phaser.Scene {
 
   private enterMoveMode(): void {
     this.moveMode = true;
+    if (this.featureTargetMode) this.exitFeatureTargetMode();
     if (this.gameState) {
       this.drawHighlights(this.gameState);
       this.playerPanel.refreshActions(this.buildActionState(this.gameState));

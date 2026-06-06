@@ -63,6 +63,11 @@ export interface FeatureDef extends ModifierSource {
   cost: FeatureCost;
   resource?: FeatureResource;
   ui?: FeatureUI;
+  /** When true, using this feature requires picking a destination/target tile
+   *  (Goliath Cloud's Jaunt teleport). The client enters a tile-target mode on
+   *  the button press and sends the chosen `tile` with the `useFeature` action;
+   *  the handler validates it. */
+  targetsTile?: boolean;
   /** Languages this feature grants (US-123) — e.g. Rogue Thieves' Cant grants
    *  `["Thieves' Cant"]`, Druid Druidic grants `["Druidic"]`. The character
    *  builder folds these into `PlayerDef.languages`. */

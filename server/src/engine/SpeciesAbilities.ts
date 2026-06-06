@@ -1,5 +1,5 @@
 import { PlayerDef, SpeciesDef } from './types.js';
-import { GIANT_GIFT_ID, giantGiftPoolMax } from './GiantGifts.js';
+import { GIANT_GIFT_ID, giantGiftPoolMax, chosenGiftEffect } from './GiantGifts.js';
 
 /** Resource-pool key for the Orc "Relentless Endurance" trait. Active species
  *  abilities with limited uses share the same `player.resources` pool as
@@ -55,5 +55,8 @@ export function speciesFeatureIds(playerDef: PlayerDef, allSpecies: SpeciesDef[]
       if (trait.effects[map.effect] && (playerDef.level ?? 1) >= map.minLevel) ids.push(map.featureId);
     }
   }
+  // Cloud's Jaunt is the one *activated* Giant-Ancestry gift — surface its
+  // button when the chosen gift is a teleport (the others fire automatically).
+  if (chosenGiftEffect(playerDef, allSpecies)?.teleport) ids.push('clouds-jaunt');
   return ids;
 }

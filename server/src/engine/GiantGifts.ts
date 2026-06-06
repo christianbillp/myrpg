@@ -108,6 +108,41 @@ export function applyGiantGiftOnHit(ctx: GameContext, target: NpcState, targetDe
   }
 }
 
+/**
+ * Cloud's Jaunt (Cloud Giant). A Bonus Action teleport up to the gift's range
+ * (30 ft) to an unoccupied, passable tile. Validates range / passability /
+ * occupancy (mirroring Misty Step); spends one use + the Bonus Action only on a
+ * successful jump. Returns whether the teleport happened.
+ */
+export function applyCloudsJaunt(ctx: GameContext, tile: { x: number; y: number } | undefined): boolean {
+  const s = ctx.state;
+  if ((s.player.resources[GIANT_GIFT_ID] ?? 0) <= 0) return false;
+  const teleport = chosenGiftEffect(ctx.playerDef, ctx.defs.species)?.teleport;
+  if (!teleport) return false;
+  if (!tile) { ctx.addLog({ left: `Cloud's Jaunt — no destination tile`, style: 'miss' }); return false; }
+  const rangeTiles = Math.max(1, Math.ceil(teleport.feet / 5));
+  if (Math.max(Math.abs(tile.x - s.player.tileX), Math.abs(tile.y - s.player.tileY)) > rangeTiles) {
+    ctx.addLog({ left: `Cloud's Jaunt — destination is out of range (${teleport.feet} ft)`, style: 'miss' });
+    return false;
+  }
+  const { cols, rows, blocksMovement } = s.map;
+  if (tile.x < 0 || tile.x >= cols || tile.y < 0 || tile.y >= rows || blocksMovement[tile.y][tile.x]) {
+    ctx.addLog({ left: `Cloud's Jaunt — destination is impassable`, style: 'miss' });
+    return false;
+  }
+  if (s.npcs.some((n) => n.hp > 0 && n.tileX === tile.x && n.tileY === tile.y)) {
+    ctx.addLog({ left: `Cloud's Jaunt — destination is occupied`, style: 'miss' });
+    return false;
+  }
+  const fromX = s.player.tileX, fromY = s.player.tileY;
+  s.player.tileX = tile.x;
+  s.player.tileY = tile.y;
+  s.player.resources[GIANT_GIFT_ID] -= 1;
+  s.player.bonusActionUsed = true;
+  ctx.addLog({ left: `${ctx.playerDef.name} steps through the clouds — (${fromX},${fromY}) → (${tile.x},${tile.y})`, style: 'status' });
+  return true;
+}
+
 /** Roll a "1d12+con"-style spec: dice plus an optional ability modifier. */
 function rollReductionSpec(spec: string, ctx: GameContext): { total: number; label: string } {
   const [dicePart, abilityPart] = spec.split('+');

@@ -1,0 +1,14 @@
+{
+  "id": "clouds-jaunt",
+  "name": "Cloud's Jaunt",
+  "classId": "goliath",
+  "minLevel": 1,
+  "description": "Bonus Action: magically teleport up to 30 feet to an unoccupied space you can see. Draws on your shared Giant Ancestry uses (Proficiency Bonus per Long Rest).",
+  "cost": { "kind": "bonus-action" },
+  "targetsTile": true,
+  "ui": {
+    "buttonLabel": "CLOUD'S JAUNT",
+    "buttonColor": "#37506a"
+  },
+  "handler": "clouds-jaunt"
+}

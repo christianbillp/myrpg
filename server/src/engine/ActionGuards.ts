@@ -113,6 +113,11 @@ export function canUseFeature(ctx: GameContext, featureId: string): boolean {
   if (featureId === 'turn-undead' || featureId === 'divine-spark' || featureId === 'preserve-life') {
     if ((s.player.resources['channel-divinity'] ?? 0) <= 0) return false;
   }
+  // Cloud's Jaunt draws on the shared Goliath Giant-Ancestry pool rather than
+  // an own resource (US-122).
+  if (featureId === 'clouds-jaunt') {
+    if ((s.player.resources['giant-gift'] ?? 0) <= 0) return false;
+  }
   if (featureId === 'steady-aim') {
     // SRD: only on the rogue's own combat turn, and only if they haven't
     // moved this turn (tracked via `movedThisTurn`, reset at

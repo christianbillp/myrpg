@@ -4,7 +4,8 @@
  * (`resources['giant-gift']`). These tests drive `applyGiantGiftOnHit` directly.
  */
 import { describe, it, expect } from 'vitest';
-import { applyGiantGiftOnHit, applyStoneEndurance, applyStormsThunder, giantGiftPoolMax, GIANT_GIFT_ID } from './GiantGifts.js';
+import { applyGiantGiftOnHit, applyStoneEndurance, applyStormsThunder, applyCloudsJaunt, giantGiftPoolMax, GIANT_GIFT_ID } from './GiantGifts.js';
+import { speciesFeatureIds } from './SpeciesAbilities.js';
 import { buildTestContext, makeNpc } from '../test/buildTestContext.js';
 import type { MonsterDef, PlayerDef, SpeciesDef } from './types.js';
 
@@ -22,6 +23,7 @@ function goliath(): SpeciesDef {
             { id: 'hills-tumble', effect: { conditionOnHit: { condition: 'prone', targetSizeMax: 'large' } } },
             { id: 'stones-endurance', effect: { damageReduction: { trigger: 'take-damage', action: 'reaction', roll: '1d12+con' } } },
             { id: 'storms-thunder', effect: { retaliationDamage: { trigger: 'take-damage-from-creature-within-60ft', action: 'reaction', dice: '1d8', damageType: 'thunder' } } },
+            { id: 'clouds-jaunt', effect: { teleport: { feet: 30, action: 'bonus-action' } } },
           ],
         },
       },
@@ -126,5 +128,39 @@ describe("Storm's Thunder (reaction)", () => {
     applyStormsThunder(c, target);
     expect(target.hp).toBe(30);
     expect(c.state.player.resources[GIANT_GIFT_ID]).toBe(2);
+  });
+});
+
+describe("Cloud's Jaunt (teleport)", () => {
+  it('teleports to an in-range, unoccupied tile and spends a use + bonus action', () => {
+    const { ctx: c } = ctx('clouds-jaunt');
+    c.state.player.tileX = 5; c.state.player.tileY = 5;
+    const ok = applyCloudsJaunt(c, { x: 9, y: 5 });   // 20 ft — within 30
+    expect(ok).toBe(true);
+    expect([c.state.player.tileX, c.state.player.tileY]).toEqual([9, 5]);
+    expect(c.state.player.resources[GIANT_GIFT_ID]).toBe(1);
+    expect(c.state.player.bonusActionUsed).toBe(true);
+  });
+
+  it('refuses an out-of-range destination without spending a use', () => {
+    const { ctx: c } = ctx('clouds-jaunt');
+    c.state.player.tileX = 5; c.state.player.tileY = 5;
+    const ok = applyCloudsJaunt(c, { x: 14, y: 5 });  // 45 ft — beyond 30
+    expect(ok).toBe(false);
+    expect([c.state.player.tileX, c.state.player.tileY]).toEqual([5, 5]);
+    expect(c.state.player.resources[GIANT_GIFT_ID]).toBe(2);
+  });
+
+  it('refuses an occupied destination', () => {
+    const { ctx: c, target } = ctx('clouds-jaunt');
+    c.state.player.tileX = 5; c.state.player.tileY = 5;
+    target.tileX = 7; target.tileY = 5; target.hp = 30;
+    expect(applyCloudsJaunt(c, { x: 7, y: 5 })).toBe(false);
+    expect(c.state.player.resources[GIANT_GIFT_ID]).toBe(2);
+  });
+
+  it('surfaces the clouds-jaunt feature button only for the teleport gift', () => {
+    expect(speciesFeatureIds({ speciesId: 'goliath', speciesLineage: 'clouds-jaunt', level: 1, proficiencyBonus: 2 } as never, [goliath()])).toContain('clouds-jaunt');
+    expect(speciesFeatureIds({ speciesId: 'goliath', speciesLineage: 'fires-burn', level: 1, proficiencyBonus: 2 } as never, [goliath()])).not.toContain('clouds-jaunt');
   });
 });

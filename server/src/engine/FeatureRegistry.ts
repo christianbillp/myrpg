@@ -19,6 +19,7 @@ import type { GameEvent } from './types.js';
 import { canUseFeature, playerArmorSpeedPenaltyFt } from './ActionGuards.js';
 import { speedAfterExhaustion } from './ConditionSystem.js';
 import { applySelfBuff } from './Buffs.js';
+import { applyCloudsJaunt } from './GiantGifts.js';
 import { playerSecondWind } from './CombatSystem.js';
 import { spellSaveDC, spellMod, npcSaveMod } from './SpellSystem.js';
 import { combatantDisplayName } from './CombatFlow.js';
@@ -172,6 +173,15 @@ registerFeatureHandler('large-form', (ctx, featureId) => {
     left: `${ctx.playerDef.name} swells to Large — +10 ft Speed and the reach to grapple bigger foes`,
     style: 'status',
   });
+});
+
+/**
+ * Cloud's Jaunt (Goliath Giant Ancestry, US-122). A Bonus Action teleport up to
+ * 30 ft to a chosen tile. The client sends the destination as `action.tile`;
+ * the gift validates range / passability / occupancy and spends a shared use.
+ */
+registerFeatureHandler('clouds-jaunt', (ctx, _featureId, action) => {
+  applyCloudsJaunt(ctx, action.tile);
 });
 
 // ── Cleric Channel Divinity (US-120) ─────────────────────────────────────────
