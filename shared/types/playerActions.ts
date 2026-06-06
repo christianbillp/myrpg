@@ -36,6 +36,7 @@ export type PlayerAction =
   | { type: 'identify'; itemId: string }
   | { type: 'setNonLethal'; on: boolean }
   | { type: 'help'; targetId?: string }
+  | { type: 'ready' }
   | { type: 'dash' }
   | { type: 'dodge' }
   | { type: 'disengage' }

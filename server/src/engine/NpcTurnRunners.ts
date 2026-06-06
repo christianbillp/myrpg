@@ -428,7 +428,8 @@ export function runSingleEnemyTurn(ctx: GameContext, npc: NpcState, events: Game
   // to spend the reaction for the +5 / no-Magic-Missile buff that lasts
   // until the start of their next turn, so the prompt fires on crits too.
   const targetedPlayer = result.attackedTargetId === 'player';
-  if (targetedPlayer && result.attacked && result.isHit && shieldAvailable(ctx)) {
+  // A readied attack reserves the player's Reaction, so Shield isn't offered.
+  if (targetedPlayer && result.attacked && result.isHit && !s.player.readiedAttack && shieldAvailable(ctx)) {
     s.pendingReaction = {
       kind: 'shield',
       attackerId: npc.id,
@@ -463,6 +464,15 @@ export function runSingleEnemyTurn(ctx: GameContext, npc: NpcState, events: Game
   // apply the remaining attacks inline against the same target.
   if (result.attacked && result.attackedTargetId && result.extraAttacks?.length) {
     applyExtraAttacks(ctx, npc, result.attackedTargetId, result.extraAttacks, events);
+  }
+  // SRD Ready (US-057): an enemy that moved INTO the player's reach this turn
+  // triggers the player's readied melee attack. Pause for the prompt; the
+  // resume (`doResolveReaction`) makes the strike and finalizes this NPC's turn.
+  if (!startedAdjacentToPlayer && endedAdjacentToPlayer && s.player.readiedAttack
+      && playerCanReact(ctx) && isVisible(npc.conditions) && npc.hp > 0) {
+    s.pendingReaction = { kind: 'readied_attack', npcId: npc.id, npcName: combatantDisplayName(npc, s.npcs) };
+    ctx.addLog({ left: `⚡ Readied Attack: ${combatantDisplayName(npc, s.npcs)} closes into reach`, style: 'header' });
+    return;
   }
   finalizeNpcTurn(ctx, npc, events);
   ctx.publish({ type: 'turn_ended', combatantId: npc.id });

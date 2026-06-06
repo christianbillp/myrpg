@@ -87,6 +87,13 @@ function describe(reaction: PendingReaction): { title: string; body: string; acc
       acceptLabel: "ATTACK",
     };
   }
+  if (reaction.kind === "readied_attack") {
+    return {
+      title: "READIED ATTACK",
+      body: `<strong style="color:#e8e8f8;">${escHtml(reaction.npcName)}</strong> closes into your reach.<br/><br/>Loose your readied attack?`,
+      acceptLabel: "ATTACK",
+    };
+  }
   // SRD Shield: crits bypass AC, and a non-crit attack that beats AC + 5
   // still lands even with the buff up — in both cases the +5 AC bonus
   // still protects against subsequent attacks until the start of the

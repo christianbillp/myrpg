@@ -1210,10 +1210,14 @@ export class GameEngine {
 
     // Help / Assist an Attack (US-057): an adjacent enemy + a living ally to benefit.
     let canHelp = false;
+    // Ready (US-057): Action + Reaction free, not already readied, a living enemy.
+    let canReady = false;
     if (Guard.canSpendAction(this.ctx)) {
       const adjEnemy = s.npcs.some((n) => n.disposition === 'enemy' && n.hp > 0 && chebyshev(p.tileX, p.tileY, n.tileX, n.tileY) <= 1);
       const livingAlly = s.npcs.some((n) => n.disposition === 'ally' && n.hp > 0);
       canHelp = adjEnemy && livingAlly;
+      canReady = phase === 'player_turn' && !p.reactionUsed && !p.readiedAttack
+        && s.npcs.some((n) => n.disposition === 'enemy' && n.hp > 0);
     }
 
     // Attunement (US-124): magic + requiresAttunement items the player holds,
@@ -1267,6 +1271,7 @@ export class GameEngine {
       attunableItemIds,
       unidentifiedItemIds,
       canHelp,
+      canReady,
     };
   }
 

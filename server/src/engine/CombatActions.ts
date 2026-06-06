@@ -713,6 +713,22 @@ export function doHelp(ctx: GameContext, targetId: string | undefined): void {
   s.player.actionUsed = true;
 }
 
+/**
+ * SRD Ready (US-057): reserve your Reaction for a melee attack against the
+ * first enemy that moves into your reach this round. Spends the Action now; the
+ * strike fires through the reaction prompt when an enemy enters reach (see
+ * `runSingleEnemyTurn`). The reservation is cleared when it fires or at the
+ * start of your next turn.
+ */
+export function doReady(ctx: GameContext): void {
+  const s = ctx.state;
+  if (s.phase !== 'player_turn' || !canSpendAction(ctx)) return;
+  if (s.player.reactionUsed) { ctx.addLog({ left: `No Reaction available to ready an attack.`, style: 'miss' }); return; }
+  s.player.readiedAttack = true;
+  s.player.actionUsed = true;
+  ctx.addLog({ left: `${ctx.playerDef.name} readies an attack — will strike the next enemy that closes in.`, style: 'status' });
+}
+
 export function doDash(ctx: GameContext): void {
   const s = ctx.state;
   if (!guardCanDash(ctx)) return;

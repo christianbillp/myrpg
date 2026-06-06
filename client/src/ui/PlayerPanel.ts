@@ -91,6 +91,8 @@ export interface PlayerPanelCallbacks {
   onToggleNonLethal: (on: boolean) => void;
   /** Help — Assist an Attack (US-057): distract the adjacent enemy. */
   onHelp: () => void;
+  /** Ready an attack (US-057): strike an enemy that closes into reach. */
+  onReady: () => void;
   /** Study / Utilize / Influence (US-057): prime the GM chat for adjudication. */
   onActionPrompt: (kind: 'study' | 'utilize' | 'influence') => void;
   /** Attune to a magic item (US-124). */
@@ -149,7 +151,7 @@ type ActionGroup = 'action' | 'bonus' | 'move' | 'free' | 'more' | 'companion';
  *  (★ LEVEL UP, ☾ LONG REST) are left alone — see `iconFor`. */
 const ACTION_ICONS: Record<string, string> = {
   ATTACK: '⚔', THROW: '➶', DODGE: '❖', DASH: '»', DISENGAGE: '↩', DETACH: '⤴',
-  GRAPPLE: '✊', SHOVE: '🤚', 'SHOVE PRONE': '⤓', ATTUNE: '✶', IDENTIFY: '🔎', 'KNOCK OUT': '☄', HELP: '🤝', STUDY: '📖', UTILIZE: '🛠', INFLUENCE: '💬',
+  GRAPPLE: '✊', SHOVE: '🤚', 'SHOVE PRONE': '⤓', ATTUNE: '✶', IDENTIFY: '🔎', 'KNOCK OUT': '☄', HELP: '🤝', READY: '⏳', STUDY: '📖', UTILIZE: '🛠', INFLUENCE: '💬',
   HIDE: '◐', SEARCH: '⚲', MOVE: '⤧', TALK: '❝', CAST: '✦',
   'SHORT REST': '☕', 'ROLL DEATH SAVE': '☠',
 };
@@ -520,6 +522,7 @@ export class PlayerPanel {
         groups.action.push(this.makeBtn('SHOVE PRONE', GREEN, () => this.callbacks.onShove('prone')));
       }
       if (aa.canHelp) groups.action.push(this.makeBtn('HELP', GREEN, this.callbacks.onHelp));
+      if (aa.canReady) groups.action.push(this.makeBtn('READY', GREEN, this.callbacks.onReady));
 
       // KNOCK OUT (US-052): toggle non-lethal melee. Highlighted amber when on.
       groups.more.push(this.makeBtn('KNOCK OUT', state.nonLethal ? '#5a4800' : '#2a2a1a', () => this.callbacks.onToggleNonLethal(!state.nonLethal)));

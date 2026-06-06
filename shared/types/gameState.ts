@@ -120,6 +120,11 @@ export interface PlayerState {
    *  drop an enemy to 0 HP instead leaves it Unconscious + Stable (out of the
    *  fight, not killed). A player-set toggle. */
   nonLethal?: boolean;
+  /** SRD Ready action (US-057): the player has readied a melee attack, reserving
+   *  their Reaction. When an enemy moves into reach the engine offers the
+   *  readied strike (a `readied_attack` pending reaction). Cleared when the
+   *  strike fires or at the start of the player's next turn. */
+  readiedAttack?: boolean;
   /** SRD attunement (US-124): ids of magic items the player is currently
    *  attuned to (≤ 3). A `requiresAttunement` item's bonus applies only while
    *  its id is in this list. */
@@ -224,4 +229,8 @@ export interface AvailableActions {
    *  an Action is free, an enemy is adjacent, and a living ally can benefit
    *  (US-057). Drives the HELP button. */
   canHelp: boolean;
+  /** True when the player can Ready an attack now — in combat, an Action and
+   *  the Reaction are free, not already readied, and a living enemy exists
+   *  (US-057). Drives the READY button. */
+  canReady: boolean;
 }

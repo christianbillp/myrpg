@@ -23,7 +23,7 @@ import type { PlayerAction } from '../../../../shared/types.js';
 
 // Delegated imports — same set the old switch used.
 import { doMove as exDoMove, doMoveTo as exDoMoveTo, doSearch as exDoSearch, doShortRest as exDoShortRest, doUsePotion as exDoUsePotion } from '../ExplorationActions.js';
-import { doAttack as caDoAttack, doDash as caDoDash, doDodge as caDoDodge, doDisengage as caDoDisengage, doDetach as caDoDetach, doHide as caDoHide, throwItem as caThrowItem, doResolveReroll as caDoResolveReroll, doGrapple as caDoGrapple, doShove as caDoShove, doHelp as caDoHelp } from '../CombatActions.js';
+import { doAttack as caDoAttack, doDash as caDoDash, doDodge as caDoDodge, doDisengage as caDoDisengage, doDetach as caDoDetach, doHide as caDoHide, throwItem as caThrowItem, doResolveReroll as caDoResolveReroll, doGrapple as caDoGrapple, doShove as caDoShove, doHelp as caDoHelp, doReady as caDoReady } from '../CombatActions.js';
 import { doCastSpell as spDoCastSpell, doUseScroll as spDoUseScroll } from '../SpellSystem.js';
 import { doEquip as ivDoEquip, doUnequip as ivDoUnequip, doAttune as ivDoAttune, doUnattune as ivDoUnattune, doIdentify as ivDoIdentify } from '../InventoryActions.js';
 import { doCommandSummon, checkSummonTether } from '../SummonSystem.js';
@@ -71,6 +71,7 @@ export const PLAYER_ACTIONS: Registry = {
   grapple:              (ctx, a)         => caDoGrapple(ctx, a.targetId),
   shove:                (ctx, a)         => caDoShove(ctx, a.targetId, a.effect ?? 'push'),
   help:                 (ctx, a)         => caDoHelp(ctx, a.targetId),
+  ready:                (ctx)            => caDoReady(ctx),
   dash:                 (ctx)            => caDoDash(ctx),
   dodge:                (ctx)            => caDoDodge(ctx),
   disengage:            (ctx)            => caDoDisengage(ctx),

@@ -1018,6 +1018,7 @@ export class GameScene extends Phaser.Scene {
       onIdentify:       (itemId) => gameClient.sendAction({ type: "identify", itemId }),
       onToggleNonLethal: (on) => gameClient.sendAction({ type: "setNonLethal", on }),
       onHelp:           () => gameClient.sendAction({ type: "help", targetId: this.gameState?.selectedTargetId ?? undefined }),
+      onReady:          () => gameClient.sendAction({ type: "ready" }),
       onActionPrompt:   (kind) => this.hud.primeActionPrompt(kind),
       onDetach:         () => gameClient.sendAction({ type: "detach" }),
       onUseFeature:     (featureId) => gameClient.sendAction({ type: "useFeature", featureId }),

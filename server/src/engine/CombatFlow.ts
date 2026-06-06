@@ -276,6 +276,7 @@ export function enterPlayerTurn(ctx: GameContext): void {
   s.player.actionUsed = false;
   s.player.bonusActionUsed = false;
   s.player.reactionUsed = false;
+  s.player.readiedAttack = false;  // SRD: an unused readied action is lost at your next turn (US-057).
   s.player.freeObjectInteractionUsed = false;
   // Per-turn flags reset at the start of every player turn. `movedThisTurn`
   // gates Rogue Steady Aim; `steadyAim` is the one-shot Advantage flag the
@@ -703,6 +704,21 @@ export function doResolveReaction(ctx: GameContext, accept: boolean, events: Gam
         ctx.doPlayerOpportunityAttack(npc, events);
       } else {
         ctx.addLog({ left: `${ctx.playerDef.name} holds — no Opportunity Attack`, style: 'status' });
+      }
+      finalizeNpcTurn(ctx, npc, events);
+    }
+  } else if (pending.kind === 'readied_attack') {
+    // SRD Ready (US-057): accept → make the readied melee strike (consumes the
+    // Reaction, clears the reservation). Decline → keep the readied attack so it
+    // can still trigger on a later enemy this round. Either way, finish the
+    // triggering NPC's turn.
+    const npc = s.npcs.find((n) => n.id === pending.npcId);
+    if (npc) {
+      if (accept) {
+        ctx.doPlayerOpportunityAttack(npc, events);
+        s.player.readiedAttack = false;
+      } else {
+        ctx.addLog({ left: `${ctx.playerDef.name} holds the readied attack`, style: 'status' });
       }
       finalizeNpcTurn(ctx, npc, events);
     }

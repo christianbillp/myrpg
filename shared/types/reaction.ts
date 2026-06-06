@@ -53,7 +53,16 @@ export interface PendingReactionShield {
   isCrit?: boolean;
 }
 
-export type PendingReaction = PendingReactionOA | PendingReactionShield;
+export interface PendingReactionReadiedAttack {
+  kind: 'readied_attack';
+  /** Id of the NPC that moved into the player's reach, triggering the readied
+   *  strike (US-057 Ready). */
+  npcId: string;
+  /** Display name of that NPC (already disambiguated). */
+  npcName: string;
+}
+
+export type PendingReaction = PendingReactionOA | PendingReactionShield | PendingReactionReadiedAttack;
 
 //
 // Heroic Inspiration reroll prompt (US-109a). SRD: a player may expend Heroic

@@ -427,6 +427,7 @@ export function buildSessionState(
       attunableItemIds: [],
       unidentifiedItemIds: [],
       canHelp: false,
+      canReady: false,
     },
     pendingReaction: null,
     pendingReroll: null,
