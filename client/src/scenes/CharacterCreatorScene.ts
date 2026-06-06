@@ -81,6 +81,7 @@ interface SubspeciesLevelBlock {
   preparedSpell?: string;
   darkvisionOverride?: { feet: number };
   cantripSwapOnLongRest?: { list: string };
+  speedBonus?: number;
 }
 
 /** The 18 SRD skill ids (for the species "any skill" pick). */
@@ -536,6 +537,19 @@ export class CharacterCreatorScene extends Phaser.Scene {
     return sub.options.find((o) => this.subspeciesId(o) === this.state.speciesLineage) ?? null;
   }
 
+  /** Walking speed including the selected subspecies' speed bonus (e.g. Wood
+   *  Elf +5 → 35). Mirrors what `applySpecies` bakes onto the built character. */
+  private effectiveSpeed(): number {
+    const sp = this.currentSpecies();
+    if (!sp) return 0;
+    let speed = sp.speed;
+    const sel = this.selectedSubspecies();
+    if (sel) for (const lvl of ["level1", "level3", "level5"] as const) {
+      if (sel[lvl]?.speedBonus) speed += sel[lvl]!.speedBonus!;
+    }
+    return speed;
+  }
+
   /** Human-readable lines describing the selected subspecies' features, so the
    *  species panel can explain what the lineage/ancestry/legacy grants. */
   private subspeciesFeatureLines(o: SubspeciesOption): string[] {
@@ -547,6 +561,7 @@ export class CharacterCreatorScene extends Phaser.Scene {
       if (!b) continue;
       const parts: string[] = [];
       if (b.cantrip) parts.push(`cantrip <i>${esc(prettify(b.cantrip))}</i>`);
+      if (b.speedBonus) parts.push(`+${b.speedBonus} ft Speed`);
       if (b.damageResistance?.length) parts.push(`Resistance to ${b.damageResistance.map(esc).join("/")}`);
       if (b.darkvisionOverride) parts.push(`Darkvision ${b.darkvisionOverride.feet} ft`);
       if (b.cantripSwapOnLongRest) parts.push(`swap that cantrip on a Long Rest`);
@@ -647,7 +662,7 @@ export class CharacterCreatorScene extends Phaser.Scene {
     const size = typeof sp.size === "string" ? sp.size : "Small or Medium";
     const head = document.createElement("div");
     head.style.cssText = "font-size:11px;color:#88aacc;margin-bottom:4px;";
-    head.textContent = `${sp.name} — ${size}, Speed ${sp.speed} ft`;
+    head.textContent = `${sp.name} — ${size}, Speed ${this.effectiveSpeed()} ft`;
     wrap.appendChild(head);
     for (const t of sp.traits) {
       const row = document.createElement("div");
