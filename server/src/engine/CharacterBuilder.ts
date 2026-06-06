@@ -70,6 +70,9 @@ export interface CharacterCreationChoices {
   speciesFeat?: string;
   /** Skills chosen for feat-granted proficiencies (Skilled feat → 3). */
   featSkills?: string[];
+  /** Spellcasting ability for species-granted cantrips, when the species/lineage
+   *  offers a choice (Elf/Tiefling: int/wis/cha). Used only for non-casters. */
+  racialSpellAbility?: string;
   /** Background equipment option label (e.g. "A" / "B") — sets starting gold. */
   equipmentChoice?: string;
   /** Caster cantrip picks (count = class cantrips-known at L1). */
@@ -277,6 +280,28 @@ export function buildPlayerDef(choices: CharacterCreationChoices, defs: Characte
     .flatMap((fid) => defs.features.find((f) => f.id === fid)?.grantsLanguages ?? []);
   const languages = mergeLanguages(chosenLangs, grantedLangs);
 
+  // ── Species / subspecies cantrips (US-108 innate spells, L1) ─────────────────
+  // The species base cantrip (Tiefling Otherworldly Presence → Thaumaturgy) plus
+  // the selected lineage/legacy's Level-1 cantrip (Wood Elf Druidcraft, Drow
+  // Dancing Lights, …). Added to the known cantrips even for non-casters; for a
+  // non-caster the racial spellcasting ability makes them castable.
+  type SubChoice = { spellcastingAbility?: { choices: string[] }; options?: Array<Record<string, unknown>> };
+  const subTrait = species.traits.find((t) => (t.effects as Record<string, unknown>).lineageChoice || (t.effects as Record<string, unknown>).ancestryChoice || (t.effects as Record<string, unknown>).legacyChoice);
+  const subChoice = subTrait ? ((subTrait.effects as Record<string, unknown>).lineageChoice ?? (subTrait.effects as Record<string, unknown>).ancestryChoice ?? (subTrait.effects as Record<string, unknown>).legacyChoice) as SubChoice : undefined;
+  const subOption = subChoice?.options?.find((o) => (o.id ?? o.dragon) === choices.speciesLineage);
+  const baseCantrips = species.traits.map((t) => (t.effects as { cantrip?: string }).cantrip).filter((c): c is string => typeof c === 'string');
+  const subCantrip = (subOption?.level1 as { cantrip?: string } | undefined)?.cantrip;
+  const racialCantripIds = [...baseCantrips, ...(subCantrip ? [subCantrip] : [])]
+    .filter((id) => defs.spells.some((s) => s.id === id && s.level === 0));
+  const racialAbilityChoices = subChoice?.spellcastingAbility?.choices;
+  const racialAbility = (choices.racialSpellAbility && racialAbilityChoices?.includes(choices.racialSpellAbility))
+    ? choices.racialSpellAbility
+    : (racialAbilityChoices?.[0] ?? 'cha');
+
+  const allCantrips = [...new Set([...(casterFields.defaultCantripIds ?? []), ...racialCantripIds])];
+  const spellcastingAbility = (casterFields.spellcastingAbility
+    ?? (racialCantripIds.length ? racialAbility as PlayerDef['spellcastingAbility'] : undefined));
+
   const playerDef: PlayerDef = {
     id: slugify(choices.name),
     name: choices.name.trim(),
@@ -312,6 +337,10 @@ export function buildPlayerDef(choices: CharacterCreationChoices, defs: Characte
     shortDescription: choices.shortDescription,
     description: choices.description,
     ...casterFields,
+    // Merge racial cantrips into the known list + ensure a spellcasting ability
+    // exists for a non-caster who gained one (override the casterFields spread).
+    ...(allCantrips.length ? { defaultCantripIds: allCantrips } : {}),
+    ...(spellcastingAbility ? { spellcastingAbility } : {}),
   };
 
   // Run the same derivation passes the load path uses so the returned PlayerDef

@@ -1,0 +1,15 @@
+{
+  "id": "druidcraft",
+  "name": "Druidcraft",
+  "level": 0,
+  "school": "transmutation",
+  "classes": ["druid"],
+  "castingTime": "action",
+  "range": "30 feet",
+  "rangeFeet": 30,
+  "components": { "verbal": true, "somatic": true, "material": null },
+  "duration": "Instantaneous",
+  "concentration": false,
+  "ritual": false,
+  "description": "Whispering to the spirits of nature, you create one of the following effects within range. Weather: instantly forecast the next 24 hours of local weather. Bloom: make a flower blossom, a seed pod open, or a leaf bud bloom. Sensory Effect: create a harmless sensory effect that predicts seasonal weather (falling leaves, a light breeze, …). Fire Snuff: instantly light or snuff out a candle, torch, or small campfire."
+}

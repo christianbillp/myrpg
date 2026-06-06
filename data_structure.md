@@ -69,7 +69,7 @@ One file per playable character. Defines identity, ability scores, class feature
 |---|---|---|
 | `speed` | `applySpecies` | Species base speed + lineage speed bonus (e.g. Wood Elf +5) |
 | `size` | `applySpecies` | SRD `CreatureSize` from the species (`'medium'` default; choice species pick the larger). Gates size-dependent rules (US-107). |
-| `resistances` `vulnerabilities` `immunities` | `applySpecies` | *(US-108)* Damage types the character resists / is vulnerable / immune to, seeded from species `damageResistance` traits (the `"ancestry"` placeholder is skipped). Read by `GameEngine.applyDamageToPlayer` via `playerResistMod`, mirroring monster resistance. |
+| `resistances` `vulnerabilities` `immunities` | `applySpecies` | *(US-108)* Damage types the character resists / is vulnerable / immune to, seeded from species `damageResistance` traits (the `"ancestry"` placeholder resolves to the chosen Draconic Ancestry's damage type). Read by `GameEngine.applyDamageToPlayer` via `playerResistMod`, mirroring monster resistance. |
 | `originModifiers` | `applySpecies` | *(US-108)* Typed `Modifier`s from species/background traits (e.g. Advantage on saves vs Poisoned, Advantage on INT saves). Concatenated into `modifiers` by `collectModifiers` so `hasAdvantageOn` queries them like feat/feature modifiers. HP bonus + innate spells are deferred to the creation flow (US-122) to avoid double-counting baked `maxHp`/`skills`. |
 | `modifiers` | `applyModifiers` | Flat list of typed `Modifier`s aggregated from this character's feats + class features (`crit-range`, `flag`, `advantage`). Queried by resolvers via `Modifiers.ts` helpers. |
 | `savageAttacker` | `applyModifiers` | Legacy projection: `true` if `modifiers` contains a `flag: "savage-attacker"` (Savage Attacker feat) |
@@ -553,7 +553,7 @@ One file per SRD background. Backgrounds are loaded at startup, served via `GET 
 
 ## species/
 
-One file per SRD species. Species are loaded at startup, served via `GET /species`, and cached in the client registry. `applySpecies` reads a character's `speciesId` and `speciesLineage` and writes `speed` onto `PlayerDef`.
+One file per SRD species. Species are loaded at startup, served via `GET /species`, and cached in the client registry. `applySpecies` reads a character's `speciesId` and `speciesLineage` and writes `speed`, `size`, `senses`, `resistances`, and `originModifiers` onto `PlayerDef` (the `"ancestry"` damage-resistance placeholder resolves to the chosen Draconic Ancestry's damage type).
 
 ### Fields
 
@@ -571,6 +571,10 @@ One file per SRD species. Species are loaded at startup, served via `GET /specie
 | Key | Engine effect |
 |---|---|
 | `lineageChoice.options[].level1.speedBonus` | Added to base `speed` by `applySpecies` when the character's `speciesLineage` matches the option id. |
+| `cantrip` | A level-0 spell id granted by the species at L1 (e.g. Tiefling Thaumaturgy). `CharacterBuilder` folds it into `defaultCantripIds`; for a non-caster species-only caster it also seeds `spellcastingAbility` from `racialSpellAbility` (the SRD ability the species ties the spell to). |
+| `level1.cantrip` (on a subspecies option) | Same as `cantrip`, but granted by the *selected* lineage/ancestry/legacy option (e.g. High Elf Wizard's Cantrip). Folded into `defaultCantripIds` only when that option is the character's `speciesLineage`. |
+| `damageResistance[]` | Damage types resisted, seeded onto `PlayerDef.resistances` by `applySpecies`. The literal `"ancestry"` resolves to the chosen Draconic Ancestry's `damageType` (Dragonborn) via the matching `ancestryChoice.options[]` entry; it is skipped if no ancestry is chosen. |
+| `savingThrowAdvantage[]` | Each `{ ability }` / `{ condition }` becomes an advantage Modifier on `originModifiers`, queried by `hasAdvantageOn`. |
 
 All other trait effects are stored for future engine use and have no current mechanical impact.
 

@@ -202,6 +202,50 @@ describe('PlayerDef builder (US-122)', () => {
     expect(buildPlayerDef({ ...base, speciesFeat: 'alert' }, defs).ok).toBe(true);  // valid Origin feat
   });
 
+  it('grants species/subspecies cantrips (Tiefling Thaumaturgy + Infernal Fire Bolt) to a non-caster', () => {
+    const choices: CharacterCreationChoices = {
+      name: 'Hellkin', speciesId: 'tiefling', speciesLineage: 'infernal', backgroundId: 'soldier', classId: 'fighter',
+      abilityMethod: 'standard-array', baseAbilityScores: arr(15, 13, 14, 8, 10, 12),
+      backgroundAbility: { kind: 'two-one', plusTwo: 'str', plusOne: 'con' },
+      skillProficiencies: ['athletics', 'perception'],
+    };
+    const r = buildPlayerDef(choices, defs);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.playerDef.defaultCantripIds).toContain('thaumaturgy');  // Otherworldly Presence
+    expect(r.playerDef.defaultCantripIds).toContain('fire-bolt');    // Infernal legacy
+    expect(r.playerDef.spellcastingAbility).toBeDefined();           // racial casting ability set for the non-caster
+  });
+
+  it('merges a Wood Elf racial cantrip into a wizard’s known cantrips and applies +5 speed', () => {
+    const choices: CharacterCreationChoices = {
+      name: 'Glade', speciesId: 'elf', speciesLineage: 'wood-elf', backgroundId: 'sage', classId: 'wizard',
+      abilityMethod: 'standard-array', baseAbilityScores: arr(8, 14, 13, 15, 12, 10),
+      backgroundAbility: { kind: 'two-one', plusTwo: 'int', plusOne: 'con' },
+      skillProficiencies: ['arcana', 'investigation'], speciesSkills: ['perception'],
+      cantripIds: ['fire-bolt', 'light', 'ray-of-frost'],
+      preparedSpellIds: ['magic-missile', 'shield', 'mage-armor', 'detect-magic'],
+    };
+    const r = buildPlayerDef(choices, defs);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.playerDef.defaultCantripIds).toEqual(expect.arrayContaining(['fire-bolt', 'light', 'ray-of-frost', 'druidcraft']));
+    expect(r.playerDef.speed).toBe(35);  // Elf 30 + Wood Elf +5
+  });
+
+  it('resolves Dragonborn ancestry damage resistance (red → fire)', () => {
+    const choices: CharacterCreationChoices = {
+      name: 'Scaleborn', speciesId: 'dragonborn', speciesLineage: 'red', backgroundId: 'soldier', classId: 'fighter',
+      abilityMethod: 'standard-array', baseAbilityScores: arr(15, 12, 14, 8, 10, 13),
+      backgroundAbility: { kind: 'two-one', plusTwo: 'str', plusOne: 'con' },
+      skillProficiencies: ['athletics', 'perception'],
+    };
+    const r = buildPlayerDef(choices, defs);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.playerDef.resistances).toContain('fire');
+  });
+
   it('rejects an over-budget point-buy and a bad skill pick', () => {
     const base: CharacterCreationChoices = {
       name: 'X', speciesId: 'human', backgroundId: 'soldier', classId: 'fighter',

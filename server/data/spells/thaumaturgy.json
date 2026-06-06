@@ -1,0 +1,16 @@
+{
+  "id": "thaumaturgy",
+  "name": "Thaumaturgy",
+  "level": 0,
+  "school": "transmutation",
+  "classes": ["cleric"],
+  "castingTime": "action",
+  "range": "30 feet",
+  "rangeFeet": 30,
+  "components": { "verbal": true, "somatic": false, "material": null },
+  "duration": "up to 1 minute",
+  "durationRounds": 10,
+  "concentration": false,
+  "ritual": false,
+  "description": "You manifest a minor wonder within range. Choose one of the following: your voice booms up to three times as loud for 1 minute; you cause flames to flicker, brighten, dim, or change colour for 1 minute; you cause harmless tremors in the ground for 1 minute; you create an instantaneous sound (thunder, a crow's caw, …); you instantaneously cause an unlocked door or window to fly open or slam shut; or you alter the appearance of your eyes for 1 minute. You can have up to three of its 1-minute effects active at once."
+}

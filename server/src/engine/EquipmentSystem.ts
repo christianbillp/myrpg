@@ -167,13 +167,26 @@ export function applySpecies(playerDef: PlayerDef, allSpecies: SpeciesDef[]): vo
   // it can't double-count here).
   const resistances: string[] = [];
   const originModifiers: Modifier[] = [];
+  // SRD Dragonborn: Damage Resistance follows the chosen Draconic Ancestry. The
+  // `"ancestry"` placeholder resolves to the chosen ancestry's damage type
+  // (US-108/US-122). Look up the ancestry option whose `dragon` matches the
+  // character's `speciesLineage`.
+  const ancestryDamageType = (() => {
+    if (!playerDef.speciesLineage) return undefined;
+    for (const trait of species.traits) {
+      const ac = (trait.effects as { ancestryChoice?: { options?: Array<{ dragon?: string; damageType?: string }> } }).ancestryChoice;
+      const opt = ac?.options?.find((o) => o.dragon === playerDef.speciesLineage);
+      if (opt?.damageType) return opt.damageType;
+    }
+    return undefined;
+  })();
   for (const trait of species.traits) {
     const e = trait.effects;
-    // Damage resistances (Dwarf poison, Tiefling/Dragonborn legacy fire, …).
-    // Skip the `"ancestry"` placeholder — it needs a Draconic-Ancestry choice
-    // that only the creation flow (US-122) resolves.
+    // Damage resistances (Dwarf poison, Tiefling legacy, Dragonborn ancestry).
+    // `"ancestry"` resolves to the chosen Draconic Ancestry's damage type.
     for (const dt of e.damageResistance ?? []) {
-      if (dt !== 'ancestry' && !resistances.includes(dt)) resistances.push(dt);
+      const resolved = dt === 'ancestry' ? ancestryDamageType : dt;
+      if (resolved && !resistances.includes(resolved)) resistances.push(resolved);
     }
     // Save advantages → typed Modifiers queried via `hasAdvantageOn`. An entry
     // keyed by `ability` ("int") advantages that ability's saves; one keyed by
