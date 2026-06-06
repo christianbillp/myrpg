@@ -1,0 +1,16 @@
+{
+  "id": "silence",
+  "name": "Silence",
+  "level": 2,
+  "school": "illusion",
+  "classes": ["bard", "cleric", "ranger"],
+  "castingTime": "action",
+  "range": "120 feet",
+  "rangeFeet": 120,
+  "components": { "verbal": true, "somatic": true, "material": null },
+  "duration": "Concentration, up to 10 minutes",
+  "durationRounds": 100,
+  "concentration": true,
+  "ritual": true,
+  "description": "For the duration, no sound can be created within or pass through a 20-foot-radius Sphere centered on a point within range. Anything entirely inside has Immunity to Thunder damage; creatures inside have the Deafened condition; casting a Verbal-component spell there is impossible. Engine: the zone's anti-Verbal / deafen effect is descriptive only until the Verbal-component gate has a consumer."
+}

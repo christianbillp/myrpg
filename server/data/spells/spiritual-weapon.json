@@ -1,0 +1,17 @@
+{
+  "id": "spiritual-weapon",
+  "name": "Spiritual Weapon",
+  "level": 2,
+  "school": "evocation",
+  "classes": ["cleric"],
+  "castingTime": "bonus-action",
+  "range": "60 feet",
+  "rangeFeet": 60,
+  "components": { "verbal": true, "somatic": true, "material": null },
+  "duration": "Concentration, up to 1 minute",
+  "durationRounds": 10,
+  "concentration": true,
+  "ritual": false,
+  "description": "You create a floating, spectral weapon within range and immediately make one melee spell attack against a creature within 5 feet of it; on a hit the target takes 1d8 + your spellcasting modifier Force damage. As a Bonus Action on later turns you can move the weapon up to 20 feet and repeat the attack. Engine: the persistent bonus-action weapon is descriptive only until a directable-attacker summon (cf. Flaming Sphere) is authored for it.",
+  "scaling": "The damage increases by 1d8 for every slot level above 2."
+}

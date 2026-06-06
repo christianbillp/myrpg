@@ -1,0 +1,18 @@
+{
+  "id": "calm-emotions",
+  "name": "Calm Emotions",
+  "level": 2,
+  "school": "enchantment",
+  "classes": ["bard", "cleric"],
+  "castingTime": "action",
+  "range": "60 feet",
+  "rangeFeet": 60,
+  "components": { "verbal": true, "somatic": true, "material": null },
+  "duration": "Concentration, up to 1 minute",
+  "durationRounds": 10,
+  "concentration": true,
+  "ritual": false,
+  "save": { "ability": "cha", "halfOnSuccess": false },
+  "area": { "shape": "sphere", "sizeFeet": 20 },
+  "description": "Each Humanoid in a 20-foot-radius Sphere makes a Charisma saving throw or is affected by one of: Immunity to (and suppression of) the Charmed and Frightened conditions; or becoming Indifferent toward chosen creatures it's Hostile to. Engine: the CHA save is rolled per target; the emotion-suppression/indifference outcome is descriptive only."
+}

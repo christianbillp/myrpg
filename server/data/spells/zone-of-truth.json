@@ -1,0 +1,16 @@
+{
+  "id": "zone-of-truth",
+  "name": "Zone of Truth",
+  "level": 2,
+  "school": "enchantment",
+  "classes": ["bard", "cleric", "paladin"],
+  "castingTime": "action",
+  "range": "60 feet",
+  "rangeFeet": 60,
+  "components": { "verbal": true, "somatic": true, "material": null },
+  "duration": "10 minutes",
+  "durationRounds": 100,
+  "concentration": false,
+  "ritual": false,
+  "description": "You create a 15-foot-radius Sphere within range. A creature that enters the area for the first time on a turn or starts its turn there makes a Charisma saving throw; on a failure it can't speak a deliberate lie while in the radius (it can stay silent or be evasive). You know whether each creature succeeds. Engine: a social-utility zone narrated by the AIGM."
+}

@@ -1,0 +1,15 @@
+{
+  "id": "find-traps",
+  "name": "Find Traps",
+  "level": 2,
+  "school": "divination",
+  "classes": ["cleric", "druid", "ranger"],
+  "castingTime": "action",
+  "range": "120 feet",
+  "rangeFeet": 120,
+  "components": { "verbal": true, "somatic": true, "material": null },
+  "duration": "Instantaneous",
+  "concentration": false,
+  "ritual": false,
+  "description": "You sense any trap within range that is within line of sight (an object or mechanism created to cause damage or danger). The spell reveals that a trap is present and its general nature, but not its location. Engine: a detection utility narrated by the AIGM."
+}
