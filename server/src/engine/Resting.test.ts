@@ -46,14 +46,14 @@ function mkInputs(level: number, classDef: ClassDef | null, prepared: string[] =
 describe('Long Rest prepared-spell cap', () => {
   it('exposes the spellbook prep picker for spellbook casters', () => {
     const p = buildLongRestPreview(mkInputs(5, wizardClass()));
-    expect(p.wizardSpellPrep).toBeDefined();
-    expect(p.wizardSpellPrep!.maxPrepared).toBe(WIZARD_PREPARED[4]); // L5 → 9
-    expect(p.wizardSpellPrep!.spellbookSpells.map((s) => s.id)).toEqual(['fire-bolt', 'magic-missile', 'shield']);
+    expect(p.spellPrep).toBeDefined();
+    expect(p.spellPrep!.maxPrepared).toBe(WIZARD_PREPARED[4]); // L5 → 9
+    expect(p.spellPrep!.spellbookSpells.map((s) => s.id)).toEqual(['fire-bolt', 'magic-missile', 'shield']);
   });
 
   it('uses the class table at high levels (fixes the stale hardcoded plateau)', () => {
-    expect(buildLongRestPreview(mkInputs(16, wizardClass())).wizardSpellPrep!.maxPrepared).toBe(21);
-    expect(buildLongRestPreview(mkInputs(20, wizardClass())).wizardSpellPrep!.maxPrepared).toBe(25);
+    expect(buildLongRestPreview(mkInputs(16, wizardClass())).spellPrep!.maxPrepared).toBe(21);
+    expect(buildLongRestPreview(mkInputs(20, wizardClass())).spellPrep!.maxPrepared).toBe(25);
   });
 
   it('never strips feat-granted extras below the current prepared count', () => {
@@ -61,12 +61,37 @@ describe('Long Rest prepared-spell cap', () => {
     // L1 table value is 4, current is 2 → cap stays 4. Bump current past the
     // table to confirm the max() floor.
     const big = buildLongRestPreview(mkInputs(1, wizardClass(), ['a', 'b', 'c', 'd', 'magic-missile']));
-    expect(p.wizardSpellPrep!.maxPrepared).toBe(4);
-    expect(big.wizardSpellPrep!.maxPrepared).toBeGreaterThanOrEqual(4);
+    expect(p.spellPrep!.maxPrepared).toBe(4);
+    expect(big.spellPrep!.maxPrepared).toBeGreaterThanOrEqual(4);
   });
 
   it('omits the picker for non-spellbook casters and unknown classes', () => {
-    expect(buildLongRestPreview(mkInputs(5, sorcererClass())).wizardSpellPrep).toBeUndefined();
-    expect(buildLongRestPreview(mkInputs(5, null)).wizardSpellPrep).toBeUndefined();
+    expect(buildLongRestPreview(mkInputs(5, sorcererClass())).spellPrep).toBeUndefined();
+    expect(buildLongRestPreview(mkInputs(5, null)).spellPrep).toBeUndefined();
+  });
+
+  it('exposes a class-list prep picker for from-class-list casters (Cleric)', () => {
+    const clericClass = {
+      id: 'cleric', name: 'Cleric',
+      spellcasting: {
+        learnModel: 'from-class-list',
+        preparedSpellsByLevel: [4, 5, 6, 7, 9, 10, 11, 12, 14, 15, 16, 16, 17, 17, 18, 18, 19, 20, 21, 22],
+        // L1 caster: only level-1 slots, so the pool excludes higher-level spells.
+        spellSlotsByLevel: [[2, 0, 0, 0, 0, 0, 0, 0, 0]],
+      },
+    } as unknown as ClassDef;
+    const inputs = mkInputs(1, clericClass);
+    // Override the spell pool with cleric-tagged + non-cleric spells.
+    (inputs as { spells: unknown }).spells = [
+      { id: 'cure-wounds', name: 'Cure Wounds', level: 1, school: 'abjuration', classes: ['cleric'] },
+      { id: 'magic-missile', name: 'Magic Missile', level: 1, school: 'evocation', classes: ['wizard'] },
+      { id: 'spirit-guardians', name: 'Spirit Guardians', level: 3, school: 'conjuration', classes: ['cleric'] },
+    ];
+    const p = buildLongRestPreview(inputs);
+    expect(p.spellPrep).toBeDefined();
+    expect(p.spellPrep!.source).toBe('class-list');
+    // Only the level-1 cleric spell qualifies: wizard spell excluded by class,
+    // the L3 cleric spell excluded by castable level (L1 caster).
+    expect(p.spellPrep!.spellbookSpells.map((s) => s.id)).toEqual(['cure-wounds']);
   });
 });

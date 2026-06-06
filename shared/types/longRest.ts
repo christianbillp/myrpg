@@ -45,19 +45,26 @@ export interface LongRestPreview {
    *  to gain — surfaced on the Long Rest screen so the player sees the party
    *  rest, not just themselves. */
   companionsRestored?: Array<{ id: string; name: string; hpRestored: number; conditionsCleared: string[] }>;
-  /** Wizard-only: prepared-spell picker state. Omitted for non-Wizard classes. */
-  wizardSpellPrep?: {
+  /** Prepared-spell picker state for prepare-casters (Wizard rebuilds from the
+   *  spellbook; Cleric and other `from-class-list` casters rebuild from the
+   *  whole class list of castable level). Omitted for non-preparing classes. */
+  spellPrep?: {
+    /** The pool the player may prepare from — the spellbook (Wizard) or the
+     *  full class list of castable level (Cleric). Field name kept for the
+     *  client's renderer; not literally a spellbook for `from-class-list`. */
     spellbookSpells: Array<{ id: string; name: string; level: number; school: string }>;
     /** Currently prepared ids. The client seeds the picker with these. */
     currentlyPrepared: string[];
-    /** Maximum allowed prepared spells (SRD Wizard Features table, or higher when feats grant extras). */
+    /** Maximum allowed prepared spells (SRD class Features table, or higher when feats grant extras). */
     maxPrepared: number;
+    /** Where the pool comes from, so the client can word the help text. */
+    source: 'spellbook' | 'class-list';
   };
 }
 
-/** Player-supplied answers to the long-rest preview. Wizards must pass their chosen prepared-spell list. */
+/** Player-supplied answers to the long-rest preview. Prepare-casters pass their chosen prepared-spell list. */
 export interface LongRestChoices {
-  wizardPreparedSpellIds?: string[];
+  preparedSpellPicks?: string[];
 }
 
 // Unified NPC state — covers neutral social NPCs, allied combatants, and enemies.

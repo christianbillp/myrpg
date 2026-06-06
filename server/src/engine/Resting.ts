@@ -61,6 +61,51 @@ function preparedCap(classDef: ClassDef | null, level: number, currentlyPrepared
   return Math.max(tableValue, currentlyPreparedCount);
 }
 
+/** Highest spell level the caster can currently cast, read off the class slot
+ *  table at the character's level. Bounds the `from-class-list` prep pool. */
+function highestCastableLevel(table: number[][] | undefined, level: number): number {
+  const row = table?.[Math.max(1, Math.min(20, level)) - 1];
+  if (!row) return 0;
+  for (let i = row.length - 1; i >= 0; i--) if (row[i] > 0) return i + 1;
+  return 0;
+}
+
+/** The pool a prepare-caster may rebuild its prepared list from on a Long Rest:
+ *  the spellbook (Wizard) or the whole class list of castable level
+ *  (`from-class-list` — Cleric). Null for non-preparing learn models, so the
+ *  rest just keeps the existing prepared list. */
+function prepPool(inputs: RestingInputs): { source: 'spellbook' | 'class-list'; spells: SpellDef[] } | null {
+  const sc = inputs.classDef?.spellcasting;
+  if (!sc) return null;
+  if (sc.learnModel === 'spellbook') {
+    const known = new Set(inputs.playerDef.defaultSpellbookIds ?? []);
+    return { source: 'spellbook', spells: inputs.spells.filter((s) => known.has(s.id)) };
+  }
+  if (sc.learnModel === 'from-class-list') {
+    const classId = inputs.classDef!.id;
+    const maxLevel = highestCastableLevel(sc.spellSlotsByLevel, inputs.playerDef.level);
+    return {
+      source: 'class-list',
+      spells: inputs.spells.filter((s) => s.level >= 1 && s.level <= maxLevel && (s.classes ?? []).includes(classId)),
+    };
+  }
+  return null;
+}
+
+/** Build the prepared-spell picker payload from the resolved prep pool. */
+function buildPrepPicker(inputs: RestingInputs): LongRestPreview['spellPrep'] {
+  const pool = prepPool(inputs);
+  if (!pool) return undefined;
+  const ids = new Set(pool.spells.map((s) => s.id));
+  const currentlyPrepared = inputs.player.preparedSpellIds.filter((id) => ids.has(id));
+  return {
+    spellbookSpells: pool.spells.map((s) => ({ id: s.id, name: s.name, level: s.level, school: s.school })),
+    currentlyPrepared,
+    maxPrepared: preparedCap(inputs.classDef, inputs.playerDef.level, currentlyPrepared.length),
+    source: pool.source,
+  };
+}
+
 /**
  * Build the Long Rest preview the client renders. Pure read-only — caller
  * (engine) decides when to call `applyLongRest` to commit.
@@ -103,25 +148,11 @@ export function buildLongRestPreview(inputs: RestingInputs): LongRestPreview {
     }
   }
 
-  // Spellbook prep picker — only for spellbook-learn-model casters (Wizard).
-  // The picker shows every spell in the spellbook; the player ticks up to
-  // `maxPrepared`. Driven by the class definition's learn model rather than a
-  // class-name check, so a new spellbook class needs no engine change.
-  let wizardSpellPrep: LongRestPreview['wizardSpellPrep'] | undefined;
-  const isSpellbookCaster = inputs.classDef?.spellcasting?.learnModel === 'spellbook';
-  if (isSpellbookCaster) {
-    const book = playerDef.defaultSpellbookIds ?? [];
-    const known = new Set(book);
-    const spellbookSpells = spells
-      .filter((s) => known.has(s.id))
-      .map((s) => ({ id: s.id, name: s.name, level: s.level, school: s.school }));
-    const currentlyPrepared = player.preparedSpellIds.filter((id) => known.has(id));
-    wizardSpellPrep = {
-      spellbookSpells,
-      currentlyPrepared,
-      maxPrepared: preparedCap(inputs.classDef, playerDef.level, currentlyPrepared.length),
-    };
-  }
+  // Prepared-spell picker — for prepare-casters that rebuild their list on a
+  // Long Rest. Driven by the class definition's learn model, not a class-name
+  // check: `spellbook` (Wizard) prepares from the spellbook; `from-class-list`
+  // (Cleric, …) prepares from the whole class spell list of castable level.
+  const spellPrep = buildPrepPicker(inputs);
 
   return {
     hpRestored,
@@ -130,7 +161,7 @@ export function buildLongRestPreview(inputs: RestingInputs): LongRestPreview {
     featuresRestored,
     exhaustionReduced,
     companionsRestored,
-    wizardSpellPrep,
+    spellPrep,
   };
 }
 
@@ -189,18 +220,19 @@ export function applyLongRest(
     npc.conditions = npc.conditions.filter((c) => !REST_CLEARABLE_CONDITIONS.has(c));
   }
 
-  // Spellbook prepared-spell rebuild (Wizard learn model).
-  const isSpellbookCaster = inputs.classDef?.spellcasting?.learnModel === 'spellbook';
-  if (isSpellbookCaster && preview.wizardSpellPrep) {
-    const picks = choices.wizardPreparedSpellIds ?? [];
-    const book = new Set(playerDef.defaultSpellbookIds ?? []);
+  // Prepared-spell rebuild for prepare-casters (Wizard spellbook / Cleric
+  // from-class-list). Validate every pick against the same pool the preview
+  // offered, then replace the prepared list (deduped, order preserved).
+  const pool = prepPool(inputs);
+  if (pool && preview.spellPrep) {
+    const valid = new Set(pool.spells.map((s) => s.id));
+    const picks = choices.preparedSpellPicks ?? [];
     for (const id of picks) {
-      if (!book.has(id)) throw new Error(`Wizard prep includes ${id}, which isn't in the spellbook.`);
+      if (!valid.has(id)) throw new Error(`Prepared spell ${id} isn't available to prepare.`);
     }
-    if (picks.length > preview.wizardSpellPrep.maxPrepared) {
-      throw new Error(`Wizard prep limit exceeded: picked ${picks.length}, max ${preview.wizardSpellPrep.maxPrepared}.`);
+    if (picks.length > preview.spellPrep.maxPrepared) {
+      throw new Error(`Prepared-spell limit exceeded: picked ${picks.length}, max ${preview.spellPrep.maxPrepared}.`);
     }
-    // Dedupe + preserve order.
     const seen = new Set<string>();
     const deduped: string[] = [];
     for (const id of picks) {

@@ -39,7 +39,7 @@ export class LongRestOverlay extends BaseOverlay {
     private readonly callbacks: LongRestOverlayCallbacks,
   ) {
     super(scale, PANEL_W, PANEL_H, ACCENT, () => callbacks.onCancel());
-    this.preparedPicks = new Set(preview.wizardSpellPrep?.currentlyPrepared ?? []);
+    this.preparedPicks = new Set(preview.spellPrep?.currentlyPrepared ?? []);
     this.buildBody();
     this.refreshConfirmState();
   }
@@ -118,18 +118,19 @@ export class LongRestOverlay extends BaseOverlay {
       body.appendChild(compList);
     }
 
-    // ── Wizard spell preparation (only Wizards) ─────────────────────────
-    if (p.wizardSpellPrep) {
+    // ── Prepared-spell rebuild (Wizard spellbook / Cleric class list) ───
+    if (p.spellPrep) {
       body.appendChild(this.sectionLabel("Prepare Spells"));
       const help = document.createElement("div");
-      help.textContent = `Choose up to ${p.wizardSpellPrep.maxPrepared} spells from your spellbook to have prepared. Cantrips are always available and do not count toward this limit.`;
+      const fromWhere = p.spellPrep.source === 'spellbook' ? 'your spellbook' : 'the class spell list';
+      help.textContent = `Choose up to ${p.spellPrep.maxPrepared} spells from ${fromWhere} to have prepared. Cantrips are always available and do not count toward this limit.`;
       help.style.cssText = "font-size: 11px; color: #778899; line-height: 1.55;";
       body.appendChild(help);
 
       const counter = document.createElement("div");
       counter.style.cssText = "font-size: 11px; color: #88aacc; margin-top: 4px;";
       const updateCounter = () => {
-        counter.textContent = `${this.preparedPicks.size} / ${p.wizardSpellPrep!.maxPrepared} prepared`;
+        counter.textContent = `${this.preparedPicks.size} / ${p.spellPrep!.maxPrepared} prepared`;
       };
       updateCounter();
       body.appendChild(counter);
@@ -137,7 +138,7 @@ export class LongRestOverlay extends BaseOverlay {
       const list = document.createElement("div");
       list.style.cssText = "display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px;";
       // Sort: by level, then name.
-      const sorted = [...p.wizardSpellPrep.spellbookSpells]
+      const sorted = [...p.spellPrep.spellbookSpells]
         .sort((a, b) => a.level - b.level || a.name.localeCompare(b.name));
       for (const opt of sorted) {
         const chip = document.createElement("button");
@@ -145,7 +146,7 @@ export class LongRestOverlay extends BaseOverlay {
         chip.style.cssText = this.chipCss(this.preparedPicks.has(opt.id));
         chip.dataset.spellId = opt.id;
         chip.addEventListener("click", () => {
-          const max = p.wizardSpellPrep!.maxPrepared;
+          const max = p.spellPrep!.maxPrepared;
           if (this.preparedPicks.has(opt.id)) {
             this.preparedPicks.delete(opt.id);
           } else if (this.preparedPicks.size < max) {
@@ -250,8 +251,8 @@ export class LongRestOverlay extends BaseOverlay {
     this.busy = true;
     this.refreshConfirmState();
     this.statusEl.textContent = "Resting…";
-    const choices: LongRestChoices = this.preview.wizardSpellPrep
-      ? { wizardPreparedSpellIds: Array.from(this.preparedPicks) }
+    const choices: LongRestChoices = this.preview.spellPrep
+      ? { preparedSpellPicks: Array.from(this.preparedPicks) }
       : {};
     try {
       await this.callbacks.onConfirm(choices);
