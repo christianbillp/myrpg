@@ -220,4 +220,8 @@ export interface AvailableActions {
    *  `startsUnidentified`, not yet identified, and exploring (US-124). Drives
    *  the IDENTIFY button. */
   unidentifiedItemIds: string[];
+  /** True when the player can take the Help (Assist an Attack) action now —
+   *  an Action is free, an enemy is adjacent, and a living ally can benefit
+   *  (US-057). Drives the HELP button. */
+  canHelp: boolean;
 }

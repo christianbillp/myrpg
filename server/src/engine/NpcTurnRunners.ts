@@ -606,7 +606,7 @@ export function runSingleAllyTurn(ctx: GameContext, ally: NpcState, events: Game
     : s.npcs.filter((n) => n !== ally && n.hp > 0 && isHostileTo(s, allyView, { factionId: n.factionId, disposition: n.disposition })))
     .map((n) => {
       const ndef = ctx.resolveMonsterDef(n.defId);
-      return { id: n.id, tileX: n.tileX, tileY: n.tileY, ac: ndef?.ac ?? 10 };
+      return { id: n.id, tileX: n.tileX, tileY: n.tileY, ac: ndef?.ac ?? 10, conditions: n.conditions };
     });
 
   const occupied: [number, number][] = [
@@ -669,6 +669,12 @@ export function runSingleAllyTurn(ctx: GameContext, ally: NpcState, events: Game
         });
       }
     }
+  }
+  // SRD Help (US-057): the `helped` Advantage is single-use — consume it on the
+  // attacked target whether the strike hit or missed.
+  if (result.attacked && result.attackedTargetId) {
+    const t = s.npcs.find((n) => n.id === result.attackedTargetId);
+    if (t) t.conditions = t.conditions.filter((c) => c !== 'helped');
   }
   ctx.publish({ type: 'turn_ended', combatantId: ally.id });
 }

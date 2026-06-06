@@ -16,8 +16,10 @@ export function isDead<T extends { hp: number; conditions: string[] }>(target: T
   return target.hp <= 0 || target.conditions.includes('dead');
 }
 
-/** Conditions that give attackers Advantage against the creature (prone handled separately). */
-export const ADVANTAGE_AGAINST_CONDITIONS = ['blinded', 'paralyzed', 'restrained', 'stunned', 'unconscious'];
+/** Conditions that give attackers Advantage against the creature (prone handled separately).
+ *  `helped` is the SRD Help (Assist an Attack) marker (US-057): the next attack
+ *  against the distracted creature has Advantage; consumed by that attack. */
+export const ADVANTAGE_AGAINST_CONDITIONS = ['blinded', 'paralyzed', 'restrained', 'stunned', 'unconscious', 'helped'];
 
 /** Conditions that impose Disadvantage on the creature's own attack rolls.
  *  `heavily-obscured` is included because a creature standing in fog can't

@@ -1,6 +1,6 @@
 import { NpcState, MonsterDef, GameEvent, LogEntry, AttackOnHitEffect, ExtraAttack } from './types.js';
 import { tryNimbleEscape, enemyAttack, type RolledBonusDamage } from './CombatSystem.js';
-import { isIncapacitated, hasAttackDisadvantage, hasAttackAdvantage, hasSpeedZero, proneStandCost, grantsDisadvantageAgainst } from './ConditionSystem.js';
+import { isIncapacitated, hasAttackDisadvantage, hasAttackAdvantage, hasSpeedZero, proneStandCost, grantsDisadvantageAgainst, grantsAdvantageAgainst } from './ConditionSystem.js';
 
 /**
  * Snapshot of the creature an enemy NPC is about to engage. Generic over
@@ -85,7 +85,7 @@ export interface EnemyTurnResult {
 export interface AllyTurnConfig {
   /** Pre-disambiguated display name; same convention as EnemyTurnConfig. */
   displayName: string;
-  enemyTargets: Array<{ id: string; tileX: number; tileY: number; ac: number }>;
+  enemyTargets: Array<{ id: string; tileX: number; tileY: number; ac: number; conditions?: string[] }>;
   blocksMovement: boolean[][];
   mapCols: number;
   mapRows: number;
@@ -271,7 +271,14 @@ export function runAllyTurn(
     return { attackedTargetId: null, damage: 0, isHit: false, isCrit: false, attacked: false, logs, events, finalTileX: tileX, finalTileY: tileY, bonusComponents: [] };
   }
 
-  const { damage, isHit, isCrit, logs: attackLogs, bonusComponents } = enemyAttack(meleeAttack, nearest.ac, false, false);
+  // Advantage from the target's condition (prone within reach, Blinded, and the
+  // SRD Help `helped` marker — US-057). Previously allies never benefited from
+  // target conditions; this also fixes the prone/blinded gap. (The `helped`
+  // single-use marker is consumed by the caller after the attack.)
+  const nearestConditions = nearest.conditions ?? [];
+  const allyAdvantage = grantsAdvantageAgainst(nearestConditions, dist);
+  const allyDisadvantage = grantsDisadvantageAgainst(nearestConditions, dist);
+  const { damage, isHit, isCrit, logs: attackLogs, bonusComponents } = enemyAttack(meleeAttack, nearest.ac, allyAdvantage, allyDisadvantage);
   logs.push(...attackLogs);
 
   return { attackedTargetId: nearest.id, damage, isHit, isCrit, attacked: true, logs, events, finalTileX: tileX, finalTileY: tileY, bonusComponents };

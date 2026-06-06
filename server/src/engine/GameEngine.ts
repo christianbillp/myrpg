@@ -1198,6 +1198,14 @@ export class GameEngine {
       grappleableTargetIds = adj.filter((n) => !n.conditions.includes('grappled')).map((n) => n.id);
     }
 
+    // Help / Assist an Attack (US-057): an adjacent enemy + a living ally to benefit.
+    let canHelp = false;
+    if (Guard.canSpendAction(this.ctx)) {
+      const adjEnemy = s.npcs.some((n) => n.disposition === 'enemy' && n.hp > 0 && chebyshev(p.tileX, p.tileY, n.tileX, n.tileY) <= 1);
+      const livingAlly = s.npcs.some((n) => n.disposition === 'ally' && n.hp > 0);
+      canHelp = adjEnemy && livingAlly;
+    }
+
     // Attunement (US-124): magic + requiresAttunement items the player holds,
     // not yet attuned, while exploring with fewer than 3 attuned.
     let attunableItemIds: string[] = [];
@@ -1248,6 +1256,7 @@ export class GameEngine {
       shoveableTargetIds,
       attunableItemIds,
       unidentifiedItemIds,
+      canHelp,
     };
   }
 

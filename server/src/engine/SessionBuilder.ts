@@ -426,6 +426,7 @@ export function buildSessionState(
       shoveableTargetIds: [],
       attunableItemIds: [],
       unidentifiedItemIds: [],
+      canHelp: false,
     },
     pendingReaction: null,
     pendingReroll: null,

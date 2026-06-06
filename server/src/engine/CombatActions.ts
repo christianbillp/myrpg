@@ -314,6 +314,9 @@ function applyAttackOutcome(
   const s = ctx.state;
   const isRangedWeapon = !!atk.rangeNormal && atk.rangeNormal > 0;
   const dist = chebyshev(s.player.tileX, s.player.tileY, target.tileX, target.tileY);
+  // SRD Help (US-057): the `helped` Advantage is single-use — consume it once
+  // this attack against the target resolves.
+  if (target.conditions.includes('helped')) target.conditions = target.conditions.filter((c) => c !== 'helped');
   clearHide(s.player);
 
   // Defensive reactions (e.g. Noble's Parry): trigger when the NPC was hit by
@@ -683,6 +686,30 @@ export function doGrapple(ctx: GameContext, targetId: string | undefined): void 
     target.conditions.push('grappled');  // Speed 0 via ConditionSystem.
     ctx.addLog({ left: `${ctx.playerDef.name} grapples ${label} — Speed 0`, right, style: 'status' });
   }
+  s.player.actionUsed = true;
+}
+
+/**
+ * SRD Help — Assist an Attack (US-057): spend the Action to distract an enemy
+ * within 5 ft; the next attack against it (by the player or an ally) has
+ * Advantage. Modelled as the `helped` marker (consumed by the benefiting
+ * attack). Requires a living ally to benefit. Other Help modes (assist an
+ * ability check / stabilize a dying creature) are separate follow-ups.
+ */
+export function doHelp(ctx: GameContext, targetId: string | undefined): void {
+  const s = ctx.state;
+  if (!canSpendAction(ctx)) return;
+  const adj = (n: NpcState) => n.disposition === 'enemy' && n.hp > 0
+    && chebyshev(s.player.tileX, s.player.tileY, n.tileX, n.tileY) <= 1;
+  const target = (targetId ? s.npcs.find((n) => n.id === targetId && adj(n)) : null) ?? s.npcs.find(adj) ?? null;
+  if (!target) return;
+  const hasAlly = s.npcs.some((n) => n.disposition === 'ally' && n.hp > 0 && !isIncapacitated(n.conditions));
+  if (!hasAlly) {
+    ctx.addLog({ left: `${ctx.playerDef.name} has no ally to assist.`, style: 'miss' });
+    return;
+  }
+  if (!target.conditions.includes('helped')) target.conditions.push('helped');
+  ctx.addLog({ left: `${ctx.playerDef.name} distracts ${combatantDisplayName(target, s.npcs)} — an ally's next attack has Advantage`, style: 'status' });
   s.player.actionUsed = true;
 }
 

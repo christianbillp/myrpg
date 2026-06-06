@@ -35,6 +35,7 @@ export type PlayerAction =
   | { type: 'useScroll'; itemId: string }
   | { type: 'identify'; itemId: string }
   | { type: 'setNonLethal'; on: boolean }
+  | { type: 'help'; targetId?: string }
   | { type: 'dash' }
   | { type: 'dodge' }
   | { type: 'disengage' }
