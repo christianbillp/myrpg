@@ -1417,10 +1417,11 @@ function resolveUtilitySpell(ctx: GameContext, spell: SpellDef, slotLevel: numbe
     }
     case 'expeditious-retreat': {
       // SRD: cast as bonus action; you Dash this turn and may Dash as a bonus
-      // action on each subsequent turn. We grant the upfront Dash immediately
-      // (adds `speed/5` extra tiles to `movesLeft`) and flag the runtime so
-      // CombatFlow can grant the bonus-action Dash each turn while active.
-      s.player.expeditiousRetreat = true;
+      // action on each subsequent turn. The `expeditious-retreat` flag (which
+      // CombatFlow reads to grant the per-turn Dash) is derived from the active
+      // buff by `recomputeBuffs`, so concentration-end cleanup is generic. We
+      // still grant the upfront Dash immediately (adds `speed/5` extra tiles).
+      applySelfBuff(ctx, { spellId: spell.id, modifiers: [{ type: 'flag', name: 'expeditious-retreat' }], concentration: true });
       if (s.phase === 'player_turn') {
         s.player.movesLeft += Math.floor((ctx.playerDef.speed + s.player.speedBonus) / 5);
       }

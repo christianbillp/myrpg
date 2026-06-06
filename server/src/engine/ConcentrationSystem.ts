@@ -45,10 +45,6 @@ export function endConcentration(ctx: GameContext, reason: string): void {
       }
     }
   }
-  // Self-buff concentration spells set per-spell runtime flags that the
-  // generic effect-cleanup above can't reach. Reset them here so the buff
-  // doesn't linger past the spell's lifetime.
-  if (spellId === 'expeditious-retreat') s.player.expeditiousRetreat = false;
   // Active zones tied to this spell — SRD ruling: a concentration spell's
   // area ends when concentration ends. Strip the zone's `condition` from
   // every creature it tagged (tracked via `affectedNpcIds` so a creature

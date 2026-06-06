@@ -10,8 +10,8 @@
  * buff (e.g. on concentration end), strips its conditions, and recomputes.
  *
  * Buffs that are parameterised or stateful (Enhance Ability's chosen ability,
- * Mirror Image's counter, Expeditious Retreat's per-turn Dash) and Mage Armor
- * (persisted across resume) stay on their existing paths for now.
+ * Mirror Image's counter) and Mage Armor (persisted across resume) stay on
+ * their existing paths for now.
  */
 import type { GameContext } from './GameContext.js';
 import type { ActiveBuff } from './types.js';
@@ -24,6 +24,7 @@ export function recomputeBuffs(ctx: GameContext): void {
   const p = ctx.state.player;
   const mods = (p.activeBuffs ?? []).flatMap((b) => b.modifiers ?? []);
   p.seeInvisible = mods.some((m) => m.type === 'flag' && m.name === 'see-invisible');
+  p.expeditiousRetreat = mods.some((m) => m.type === 'flag' && m.name === 'expeditious-retreat');
   p.speedBonus = mods.reduce((max, m) => (m.type === 'speed-bonus' ? Math.max(max, m.value) : max), 0);
   p.magicWeaponBonus = mods.reduce((max, m) => (m.type === 'weapon-bonus' ? Math.max(max, m.value) : max), 0);
   // mageArmor + shieldActive are owned outside the buff list (Mage Armor is

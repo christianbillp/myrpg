@@ -18,6 +18,7 @@ function mkCtx() {
     magicWeaponBonus: 0,
     speedBonus: 0,
     seeInvisible: false,
+    expeditiousRetreat: false,
   };
   const playerDef = { dex: 14, str: 10 } as unknown as PlayerDef;
   const ctx = { state: { player }, playerDef, defs: { equipment: [] } } as unknown as GameContext;
@@ -34,6 +35,14 @@ describe("self-buff registry", () => {
     expect(player.speedBonus).toBe(10);
     expect(player.magicWeaponBonus).toBe(2);
     expect(playerDef.mainAttack?.magicWeaponBonus).toBe(2); // rebuilt onto the attack
+  });
+
+  it("derives the expeditious-retreat flag and clears it on concentration end", () => {
+    const { ctx, player } = mkCtx();
+    applySelfBuff(ctx, { spellId: "expeditious-retreat", modifiers: [{ type: "flag", name: "expeditious-retreat" }], concentration: true });
+    expect(player.expeditiousRetreat).toBe(true);
+    removeBuffsForSpell(ctx, "expeditious-retreat");
+    expect(player.expeditiousRetreat).toBe(false);
   });
 
   it("applies and strips player conditions (Blur)", () => {
