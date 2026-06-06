@@ -67,6 +67,10 @@ export interface SpeciesTraitEffects {
   damageResistance?: string[];
   savingThrowAdvantage?: Array<{ condition?: string; ability?: string }>;
   hpMaxBonus?: { atLevel1: number; perLevel: number };
+  /** SRD Orc "Relentless Endurance" — when reduced to 0 HP but not killed
+   *  outright, drop to 1 HP instead. `usesPerLongRest` feeds the player resource
+   *  pool, refilled on a Long Rest like a class-feature resource. (US-122) */
+  relentlessEndurance?: { usesPerLongRest: number };
   /** SRD species skill grant (Human "Skillful") — choose `count` skills. `choices`
    *  is `["any"]` for a free pick, or an explicit skill-id list. (US-122) */
   skillProficiency?: { choices: string[]; count: number };

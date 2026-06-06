@@ -20,10 +20,11 @@
  * at L1-2 (the scope our level-up system currently supports).
  */
 import type {
-  PlayerDef, FeatureDef, SpellDef, PlayerState, NpcState, ClassDef,
+  PlayerDef, FeatureDef, SpellDef, PlayerState, NpcState, ClassDef, SpeciesDef,
   LongRestPreview, LongRestChoices,
 } from '../../../shared/types.js';
 import { preparedSpellsAt } from '../../../shared/classProgression.js';
+import { speciesAbilityResources } from './SpeciesAbilities.js';
 
 export interface RestingInputs {
   playerDef: PlayerDef;
@@ -34,6 +35,9 @@ export interface RestingInputs {
    *  prepared-spell cap and the spellbook learn model. Null for an
    *  unrecognised class (no rest-time prep picker). */
   classDef: ClassDef | null;
+  /** Species roster — used to refill active species-ability resources (e.g. Orc
+   *  Relentless Endurance) on a Long Rest. */
+  species?: SpeciesDef[];
   /** Live NPCs — companions among them share the rest's benefits. */
   npcs?: NpcState[];
 }
@@ -207,6 +211,11 @@ export function applyLongRest(
     const def = features.find((f) => f.id === fid);
     if (!def?.resource || def.resource.kind === 'unlimited') continue;
     player.resources[fid] = def.resource.max;
+  }
+
+  // Active species abilities (Orc Relentless Endurance) refill on a Long Rest.
+  for (const [id, max] of Object.entries(speciesAbilityResources(playerDef, inputs.species ?? []))) {
+    player.resources[id] = max;
   }
 
   if (preview.exhaustionReduced) {

@@ -575,8 +575,9 @@ One file per SRD species. Species are loaded at startup, served via `GET /specie
 | `level1.cantrip` (on a subspecies option) | Same as `cantrip`, but granted by the *selected* lineage/ancestry/legacy option (e.g. High Elf Wizard's Cantrip). Folded into `defaultCantripIds` only when that option is the character's `speciesLineage`. |
 | `damageResistance[]` | Damage types resisted, seeded onto `PlayerDef.resistances` by `applySpecies`. The literal `"ancestry"` resolves to the chosen Draconic Ancestry's `damageType` (Dragonborn) via the matching `ancestryChoice.options[]` entry; it is skipped if no ancestry is chosen. |
 | `savingThrowAdvantage[]` | Each `{ ability }` / `{ condition }` becomes an advantage Modifier on `originModifiers`, queried by `hasAdvantageOn`. |
+| `relentlessEndurance.usesPerLongRest` | SRD Orc trait. `SpeciesAbilities.speciesAbilityResources` seeds a `relentless-endurance` pool into `player.resources` at session build (refilled on Long Rest by `applyLongRest`); when player damage would drop the character to 0 HP but not kill them outright, `GameEngine.applyDamageToPlayer` consumes one use and holds them at 1 HP instead. |
 
-All other trait effects are stored for future engine use and have no current mechanical impact.
+All other trait effects are stored for future engine use and have no current mechanical impact. **Active species abilities** with limited uses live in `server/src/engine/SpeciesAbilities.ts`, which derives their `player.resources` pools (seeded by `SessionBuilder`, refilled by `applyLongRest`) — the same resource model used by class features.
 
 ---
 

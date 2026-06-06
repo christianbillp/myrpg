@@ -11,6 +11,7 @@ import {
   ZoneMap, parseStartingZones, findPlayerSpawn, populateNpcs,
 } from './SpawnHelpers.js';
 import { buildFactionRelations, projectFactionStandings } from './FactionRelations.js';
+import { speciesAbilityResources } from './SpeciesAbilities.js';
 import { stripTileFlipBits } from '../../../shared/tileGid.js';
 
 /** The shape stored in `defs.maps[i]` — pure geometry, no semantics.
@@ -234,12 +235,15 @@ export function buildSessionState(
     // Initialise per-feature resource pools: resume value wins; otherwise
     // each known feature with a non-unlimited resource starts at `max` (Long
     // Rest equivalent, since a new encounter == new day in our model).
-    resources: req.resumeResources ?? Object.fromEntries(
-      (playerDef.defaultFeatureIds ?? [])
-        .map((fid) => defs.features.find((f) => f.id === fid))
-        .filter((f): f is NonNullable<typeof f> => !!f && !!f.resource && f.resource.kind !== 'unlimited')
-        .map((f) => [f.id, f.resource!.max] as const),
-    ),
+    resources: req.resumeResources ?? {
+      ...Object.fromEntries(
+        (playerDef.defaultFeatureIds ?? [])
+          .map((fid) => defs.features.find((f) => f.id === fid))
+          .filter((f): f is NonNullable<typeof f> => !!f && !!f.resource && f.resource.kind !== 'unlimited')
+          .map((f) => [f.id, f.resource!.max] as const),
+      ),
+      ...speciesAbilityResources(playerDef, defs.species),
+    },
     actionUsed: false,
     bonusActionUsed: false,
     reactionUsed: false,

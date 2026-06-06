@@ -11,6 +11,7 @@ import {
   rollPlayerAttackVsAc, rollNpcAttackVsAc,
 } from './CombatSystem.js';
 import { applyEquipment, computeEquippedSlotLabels } from './EquipmentSystem.js';
+import { hasRelentlessEndurance, RELENTLESS_ENDURANCE_ID } from './SpeciesAbilities.js';
 import { chebyshev } from './EnemyAI.js';
 import { buildAIGMTools } from './AIGMTools.js';
 import { setRelation, getRelation, isHostileTo } from './FactionRelations.js';
@@ -1076,19 +1077,38 @@ export class GameEngine {
     // SRD: the save is based on damage *taken*, not damage *dealt*.
     if (s.player.concentratingOn && effective > 0) maybeBreakConcentration(this.ctx, effective);
     if (s.player.hp > 0) return;
+    const leftover = effective - hpBefore;
+    const killedOutright = leftover >= this.playerDef.maxHp;
+    // SRD Orc Relentless Endurance: when reduced to 0 HP but not killed
+    // outright, drop to 1 HP instead. Once per Long Rest. The character stays
+    // conscious, so concentration (already CON-saved above) is not dropped.
+    if (!killedOutright && this.tryRelentlessEndurance()) {
+      s.player.hp = 1;
+      this.addLog({ left: `${this.playerDef.name} refuses to fall — Relentless Endurance holds them at 1 HP!`, style: 'status' });
+      return;
+    }
     clearHide(s.player);
     // SRD: Concentration ends if you have the Incapacitated condition or
     // you die. Falling to 0 HP triggers Unconscious (which is Incapacitated),
     // so drop any concentration the player was holding before the phase flip.
     if (s.player.concentratingOn) endConcentration(this.ctx, 'caster fell unconscious');
-    const leftover = effective - hpBefore;
-    if (leftover >= this.playerDef.maxHp) {
+    if (killedOutright) {
       this.addLog({ left: `Massive damage — ${this.playerDef.name} dies instantly`, style: 'kill' });
       s.phase = 'defeat';
     } else {
       this.addLog({ left: `${this.playerDef.name} falls unconscious!`, style: 'status' });
       s.phase = 'death_saves';
     }
+  }
+
+  /** SRD Orc Relentless Endurance: consume one use (1/Long Rest) if the species
+   *  grants it and a use remains. Returns whether the drop-to-1 rescue fires. */
+  private tryRelentlessEndurance(): boolean {
+    if (!hasRelentlessEndurance(this.playerDef, this.defs.species)) return false;
+    const remaining = this.state.player.resources[RELENTLESS_ENDURANCE_ID] ?? 0;
+    if (remaining <= 0) return false;
+    this.state.player.resources[RELENTLESS_ENDURANCE_ID] = remaining - 1;
+    return true;
   }
 
   private killNpc(id: string): void {
@@ -1443,7 +1463,7 @@ export class GameEngine {
     if (!preview) throw new Error('Long Rest is not available here.');
 
     applyLongRest(
-      { playerDef: this.playerDef, player: this.state.player, features: this.defs.features, spells: this.defs.spells, classDef: this.resolvePlayerClassDef(), npcs: this.state.npcs },
+      { playerDef: this.playerDef, player: this.state.player, features: this.defs.features, spells: this.defs.spells, classDef: this.resolvePlayerClassDef(), species: this.defs.species, npcs: this.state.npcs },
       choices,
       preview,
     );
