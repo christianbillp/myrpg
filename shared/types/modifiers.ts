@@ -15,4 +15,8 @@ export type Modifier =
   | { type: 'flag'; name: string }
   /** Advantage on a category of d20 test. `key` narrows checks/saves to a
    *  specific ability/skill when present (e.g. on:'check', key:'athletics'). */
-  | { type: 'advantage'; on: 'attack' | 'save' | 'check' | 'initiative'; key?: string };
+  | { type: 'advantage'; on: 'attack' | 'save' | 'check' | 'initiative'; key?: string }
+  /** Flat bonus to weapon attack AND damage rolls (Magic Weapon). */
+  | { type: 'weapon-bonus'; value: number }
+  /** Flat bonus to movement speed in feet (Longstrider). */
+  | { type: 'speed-bonus'; value: number };

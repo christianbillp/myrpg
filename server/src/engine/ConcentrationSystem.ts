@@ -7,6 +7,7 @@
 import type { GameContext } from './GameContext.js';
 import { d20, mod } from './Dice.js';
 import { Logger } from '../Logger.js';
+import { removeBuffsForSpell } from './Buffs.js';
 
 /** Begin concentrating on `spellId` — drops any previous concentration first. */
 export function startConcentration(ctx: GameContext, spellId: string): void {
@@ -69,10 +70,10 @@ export function endConcentration(ctx: GameContext, reason: string): void {
       }
     }
   }
-  // Blur (Concentration) — strip the `blurred` condition from the caster.
-  if (spellId === 'blur') {
-    s.player.conditions = s.player.conditions.filter((c) => c !== 'blurred');
-  }
+  // Self-buffs recorded on `activeBuffs` (Blur's `blurred` condition, Magic
+  // Weapon's bonus, …) — strip their conditions, drop the buff, and recompute
+  // the derived fields generically. Replaces the per-spell branches.
+  removeBuffsForSpell(ctx, spellId);
   // Invisibility (Concentration) — strip the `invisible` condition from
   // whichever creature was the Invisibility target. `invisibilityTargetId`
   // points at the recipient ('player' for self-cast, or an NPC id). Clear

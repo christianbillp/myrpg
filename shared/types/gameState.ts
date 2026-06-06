@@ -9,6 +9,18 @@
 import type { FeatureDef } from "./classes.js";
 import type { EquipmentSlots, OngoingEffect } from "./entities.js";
 import type { GameState } from "./longRest.js";
+import type { Modifier } from "./modifiers.js";
+
+/** One active self-buff spell on the player. Its `modifiers` are derived into
+ *  the legacy buff fields by `Buffs.recomputeBuffs`; `playerConditions` are the
+ *  conditions it applied (stripped when the buff ends). `concentration` buffs
+ *  are removed by `endConcentration`. */
+export interface ActiveBuff {
+  spellId: string;
+  modifiers?: Modifier[];
+  playerConditions?: string[];
+  concentration?: boolean;
+}
 
 export type CombatMode = 'exploring' | 'player_turn' | 'enemy_turn' | 'death_saves' | 'defeat';
 
@@ -71,6 +83,13 @@ export interface PlayerState {
   preparedSpellIds: string[];
   /** Spell currently concentrated on, or null. Cleared by damage CON save, casting another concentration spell, or incapacitation. */
   concentratingOn: string | null;
+  /** Active self-buff spells, each recording the typed modifiers it contributes
+   *  and any conditions it applied. The engine DERIVES the legacy buff fields
+   *  below (`magicWeaponBonus`, `speedBonus`, `seeInvisible`) from this list via
+   *  `Buffs.recomputeBuffs`, and `endConcentration` strips a buff's conditions +
+   *  removes it generically — replacing the old per-spell `switch(spell.id)`
+   *  applications and cleanup branches. */
+  activeBuffs?: ActiveBuff[];
   /** Flag set by Mage Armor — `applyEquipment`-equivalent uses base AC 13 + DEX while no armor is worn. */
   mageArmor: boolean;
   /** True while the Shield reaction's +5 AC bonus is active — set when the

@@ -24,6 +24,7 @@ import { emitNoise, NOISE_SPELL_VERBAL } from './Sound.js';
 import { Logger } from '../Logger.js';
 import { canSee as visCanSee } from './Vision.js';
 import { hasModifierFlag } from './Modifiers.js';
+import { applySelfBuff } from './Buffs.js';
 import { SPEED_ZERO_CONDITIONS } from './ConditionSystem.js';
 import {
   tilesInArea, playerInArea, creaturesInArea,
@@ -1383,14 +1384,12 @@ function resolveUtilitySpell(ctx: GameContext, spell: SpellDef, slotLevel: numbe
       break;
     }
     case 'longstrider': {
-      // SRD: +10 ft speed for the duration. The bonus lives on PlayerState
-      // so tile-speed calculations at turn start can read it without
-      // mutating the immutable PlayerDef. When cast mid-turn, also bump
-      // `movesLeft` by the new ft difference so the player can spend the
-      // extra tiles this turn — `enterPlayerTurn` already seeded
-      // `movesLeft` from the base speed before the buff existed.
+      // SRD: +10 ft speed for the duration. Recorded as a self-buff
+      // (`speed-bonus` modifier) → `recomputeBuffs` derives `speedBonus`. When
+      // cast mid-turn, also bump `movesLeft` by the new ft difference so the
+      // player can spend the extra tiles this turn.
       const prevBonus = s.player.speedBonus;
-      s.player.speedBonus = Math.max(s.player.speedBonus, 10);
+      applySelfBuff(ctx, { spellId: 'longstrider', modifiers: [{ type: 'speed-bonus', value: 10 }] });
       if (s.phase === 'player_turn') {
         const deltaTiles = Math.floor((s.player.speedBonus - prevBonus) / 5);
         if (deltaTiles > 0) s.player.movesLeft += deltaTiles;
@@ -1422,14 +1421,16 @@ function resolveUtilitySpell(ctx: GameContext, spell: SpellDef, slotLevel: numbe
       // 1 hour. Higher-level upcasts grant +2 (L3-5) or +3 (L6+). The
       // bonus rides on PlayerAttack via applyEquipment.
       const bonus = slotLevel >= 6 ? 3 : slotLevel >= 3 ? 2 : 1;
-      s.player.magicWeaponBonus = bonus;
-      applyEquipment(ctx.playerDef, s.player.equippedSlots, ctx.defs.equipment, s.player.mageArmor, s.player.shieldActive, bonus);
+      // Self-buff (`weapon-bonus` modifier) → `recomputeBuffs` derives
+      // `magicWeaponBonus` and rebuilds the attack; concentration end removes it.
+      applySelfBuff(ctx, { spellId: 'magic-weapon', modifiers: [{ type: 'weapon-bonus', value: bonus }], concentration: true });
       ctx.addLog({ left: `${ctx.playerDef.name} casts Magic Weapon — +${bonus} to attack and damage for 1 hour`, style: 'status' });
       break;
     }
     case 'see-invisibility':
       // SRD: see invisible creatures and the Ethereal Plane for 1 hour.
-      s.player.seeInvisible = true;
+      // Self-buff `flag` → `recomputeBuffs` derives `seeInvisible`.
+      applySelfBuff(ctx, { spellId: 'see-invisibility', modifiers: [{ type: 'flag', name: 'see-invisible' }] });
       ctx.addLog({ left: `${ctx.playerDef.name} casts See Invisibility — sees Invisible creatures for 1 hour`, style: 'status' });
       break;
     case 'darkvision':
@@ -1442,9 +1443,9 @@ function resolveUtilitySpell(ctx: GameContext, spell: SpellDef, slotLevel: numbe
       break;
     case 'blur':
       // SRD: attackers have Disadvantage on attack rolls against you
-      // (Concentration). Apply the `blurred` condition to the caster;
-      // endConcentration strips it when the spell ends.
-      if (!s.player.conditions.includes('blurred')) s.player.conditions.push('blurred');
+      // (Concentration). Self-buff records the `blurred` condition; the generic
+      // `removeBuffsForSpell` in endConcentration strips it when the spell ends.
+      applySelfBuff(ctx, { spellId: 'blur', playerConditions: ['blurred'], concentration: true });
       ctx.addLog({ left: `${ctx.playerDef.name} casts Blur — attackers have Disadvantage`, style: 'status' });
       break;
     case 'mirror-image': {

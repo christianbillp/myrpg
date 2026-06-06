@@ -280,6 +280,7 @@ export function buildSessionState(
         )).map((sp) => sp.id)
       : (req.resumePreparedSpellIds ?? [...(playerDef.defaultPreparedSpellIds ?? [])]),
     concentratingOn: req.resumeConcentratingOn ?? null,
+    activeBuffs: [],
     mageArmor: req.resumeMageArmor ?? false,
     shieldActive: false,
     speedBonus: 0,
