@@ -14,6 +14,8 @@
   "weaponProficiencies": ["simple", "martial"],
   "armorTraining": ["light", "medium", "heavy", "shields"],
   "toolProficiencies": [],
+  "startingEquipment": { "armorId": "chain_mail", "weaponId": "longsword", "shieldId": "shield" },
+  "startingInventoryIds": ["javelin", "javelin"],
   "subclassLevels": [3, 7, 10, 15, 18],
 
   "tracksByLevel": {

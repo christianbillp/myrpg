@@ -8,6 +8,7 @@
 // Cross-domain imports — keep these explicit so the dependency graph is visible.
 import type { LevelUpChoicePrompt } from "./levelUp.js";
 import type { ModifierSource } from "./modifiers.js";
+import type { EquipmentSlots } from "./entities.js";
 
 //
 // Features are class abilities described as data + handler. Each character
@@ -209,6 +210,14 @@ export interface ClassDef {
   weaponProficiencies: string[];
   armorTraining: string[];
   toolProficiencies: string[];
+  /** Default starting loadout for a freshly-created character of this class
+   *  (US-122). The SRD's A/B equipment packages aren't modelled per item;
+   *  this is the engine's sensible class default (e.g. Fighter → chain mail +
+   *  a martial weapon) so a created character spawns combat-ready. Equipment
+   *  ids must exist in the equipment registry. Omitted → empty slots. */
+  startingEquipment?: EquipmentSlots;
+  /** Item ids placed in a created character's starting inventory (US-122). */
+  startingInventoryIds?: string[];
   /** Class levels at which the chosen subclass grants a feature. Mirrors
    *  the subclass's `progression[].level` values so the level-up resolver
    *  knows when to look up subclass content. */

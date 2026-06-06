@@ -14,6 +14,8 @@
   "weaponProficiencies": ["simple"],
   "armorTraining": ["light", "medium", "shields"],
   "toolProficiencies": [],
+  "startingEquipment": { "armorId": "scale_mail", "weaponId": "quarterstaff", "shieldId": null },
+  "startingInventoryIds": [],
   "subclassLevels": [3, 6, 17],
 
   "spellcasting": {

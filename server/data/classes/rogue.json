@@ -14,6 +14,8 @@
   "weaponProficiencies": ["simple", "martial-finesse-or-light"],
   "armorTraining": ["light"],
   "toolProficiencies": ["thieves-tools"],
+  "startingEquipment": { "armorId": "leather_armor", "weaponId": "shortsword", "shieldId": null },
+  "startingInventoryIds": ["dagger", "dagger", "shortbow", "arrow", "thieves_tools"],
   "subclassLevels": [3, 9, 13, 17],
 
   "tracksByLevel": {

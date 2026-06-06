@@ -14,6 +14,8 @@
   "weaponProficiencies": ["simple"],
   "armorTraining": [],
   "toolProficiencies": [],
+  "startingEquipment": { "armorId": null, "weaponId": "quarterstaff", "shieldId": null },
+  "startingInventoryIds": ["dagger", "spellbook"],
   "subclassLevels": [3, 6, 10, 14],
 
   "spellcasting": {
