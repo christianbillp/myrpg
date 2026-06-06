@@ -1,0 +1,15 @@
+{
+  "id": "dispel-magic",
+  "name": "Dispel Magic",
+  "level": 3,
+  "school": "abjuration",
+  "classes": ["bard", "cleric", "druid", "paladin", "ranger", "sorcerer", "warlock", "wizard"],
+  "castingTime": "action",
+  "range": "120 feet",
+  "rangeFeet": 120,
+  "components": { "verbal": true, "somatic": true, "material": null },
+  "duration": "Instantaneous",
+  "concentration": false,
+  "ritual": false,
+  "description": "Choose a creature, object, or magical effect within range. Any spell of level 3 or lower on the target ends; for a higher-level spell, make an ability check with your spellcasting ability (DC 10 + that spell's level) to end it. Engine: there is no dispellable on-board magic (enemy buffs/effects) yet (US-117), so this is descriptive."
+}

@@ -1,0 +1,16 @@
+{
+  "id": "magic-circle",
+  "name": "Magic Circle",
+  "level": 3,
+  "school": "abjuration",
+  "classes": ["cleric", "paladin", "warlock", "wizard"],
+  "castingTime": "1 minute",
+  "range": "10 feet",
+  "rangeFeet": 10,
+  "components": { "verbal": true, "somatic": true, "material": "salt and powdered silver worth 100+ GP, which the spell consumes" },
+  "duration": "1 hour",
+  "durationRounds": 600,
+  "concentration": false,
+  "ritual": false,
+  "description": "A 10-foot-radius, 20-foot-tall Cylinder of magical energy wards against a chosen creature type (Aberration, Celestial, Elemental, Fey, Fiend, or Undead): such creatures can't willingly enter by nonmagical means, have Disadvantage on attacks against those inside, and can't charm/frighten/possess them — or you can invert it to trap a creature inside. Engine: a creature-type ward is descriptive only until creature-type tagging + this consumer land."
+}

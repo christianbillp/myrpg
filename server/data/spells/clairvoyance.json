@@ -1,0 +1,16 @@
+{
+  "id": "clairvoyance",
+  "name": "Clairvoyance",
+  "level": 3,
+  "school": "divination",
+  "classes": ["bard", "cleric", "sorcerer", "wizard"],
+  "castingTime": "10 minutes",
+  "range": "1 mile",
+  "rangeFeet": 5280,
+  "components": { "verbal": true, "somatic": true, "material": "a focus worth 100+ GP (a jeweled horn for hearing or a glass eye for seeing)" },
+  "duration": "Concentration, up to 10 minutes",
+  "durationRounds": 100,
+  "concentration": true,
+  "ritual": false,
+  "description": "You create an invisible sensor within range in a location familiar to you or an obvious one, choosing to see or hear through it for the duration (you can switch as a Magic action). Engine: a remote-scrying utility narrated by the AIGM."
+}

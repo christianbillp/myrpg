@@ -1,0 +1,16 @@
+{
+  "id": "protection-from-energy",
+  "name": "Protection from Energy",
+  "level": 3,
+  "school": "abjuration",
+  "classes": ["cleric", "druid", "ranger", "sorcerer", "wizard"],
+  "castingTime": "action",
+  "range": "Touch",
+  "rangeFeet": 5,
+  "components": { "verbal": true, "somatic": true, "material": null },
+  "duration": "Concentration, up to 1 hour",
+  "durationRounds": 600,
+  "concentration": true,
+  "ritual": false,
+  "description": "For the duration, the willing creature you touch has Resistance to one damage type of your choice: Acid, Cold, Fire, Lightning, or Thunder. Engine: the ally damage-resistance buff is descriptive only until an ally-buff resolver lands (the player damage path already supports resistances)."
+}

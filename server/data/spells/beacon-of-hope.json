@@ -1,0 +1,16 @@
+{
+  "id": "beacon-of-hope",
+  "name": "Beacon of Hope",
+  "level": 3,
+  "school": "abjuration",
+  "classes": ["cleric"],
+  "castingTime": "action",
+  "range": "30 feet",
+  "rangeFeet": 30,
+  "components": { "verbal": true, "somatic": true, "material": null },
+  "duration": "Concentration, up to 1 minute",
+  "durationRounds": 10,
+  "concentration": true,
+  "ritual": false,
+  "description": "Choose any number of creatures within range. For the duration, each target has Advantage on Wisdom saving throws and Death Saving Throws, and regains the maximum number of Hit Points possible from any healing. Engine: the advantage/max-healing buff is descriptive only until an ally-buff resolver lands."
+}

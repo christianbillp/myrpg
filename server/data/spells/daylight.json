@@ -1,0 +1,16 @@
+{
+  "id": "daylight",
+  "name": "Daylight",
+  "level": 3,
+  "school": "evocation",
+  "classes": ["cleric", "druid", "paladin", "ranger", "sorcerer"],
+  "castingTime": "action",
+  "range": "60 feet",
+  "rangeFeet": 60,
+  "components": { "verbal": true, "somatic": true, "material": null },
+  "duration": "1 hour",
+  "durationRounds": 600,
+  "concentration": false,
+  "ritual": false,
+  "description": "A 60-foot-radius Sphere of Bright Light spreads from a point or object within range, with Dim Light for an additional 60 feet, for the duration. Sunlight-sensitive creatures are affected; Darkness created by a level 3 or lower spell is dispelled where the two areas overlap. Engine: a light utility narrated by the AIGM (lighting overlay not modelled for player spells yet)."
+}

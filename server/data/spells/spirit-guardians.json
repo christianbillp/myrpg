@@ -1,0 +1,20 @@
+{
+  "id": "spirit-guardians",
+  "name": "Spirit Guardians",
+  "level": 3,
+  "school": "conjuration",
+  "classes": ["cleric"],
+  "castingTime": "action",
+  "range": "Self (15-foot Emanation)",
+  "rangeFeet": 0,
+  "components": { "verbal": true, "somatic": true, "material": "a prayer scroll" },
+  "duration": "Concentration, up to 10 minutes",
+  "durationRounds": 100,
+  "concentration": true,
+  "ritual": false,
+  "save": { "ability": "wis", "halfOnSuccess": true },
+  "damage": { "dice": 3, "sides": 8, "type": "radiant" },
+  "area": { "shape": "sphere", "sizeFeet": 15 },
+  "description": "Protective spirits flit around you in a 15-foot Emanation for the duration. A creature you didn't designate has its Speed halved in the area and, the first time each turn it is in the area, makes a Wisdom saving throw, taking 3d8 Radiant (good/neutral) or Necrotic (evil) damage on a fail or half on a success. Engine simplification: the save + damage resolve once for creatures in the area at cast time; the persistent aura + Speed-halving are descriptive.",
+  "scaling": "The damage increases by 1d8 for each spell slot level above 3."
+}

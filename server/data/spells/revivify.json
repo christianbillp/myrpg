@@ -1,0 +1,15 @@
+{
+  "id": "revivify",
+  "name": "Revivify",
+  "level": 3,
+  "school": "necromancy",
+  "classes": ["cleric", "druid", "paladin", "ranger"],
+  "castingTime": "action",
+  "range": "Touch",
+  "rangeFeet": 5,
+  "components": { "verbal": true, "somatic": true, "material": "a diamond worth 300+ GP, which the spell consumes" },
+  "duration": "Instantaneous",
+  "concentration": false,
+  "ritual": false,
+  "description": "You touch a creature that has died within the last minute; it revives with 1 Hit Point. The spell can't revive a creature that died of old age or restore missing body parts. Engine: there is no dead-ally revival flow yet, so this is descriptive — the existing heal resolver already revives a downed (0 HP) ally."
+}

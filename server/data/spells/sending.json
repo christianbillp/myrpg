@@ -1,0 +1,15 @@
+{
+  "id": "sending",
+  "name": "Sending",
+  "level": 3,
+  "school": "divination",
+  "classes": ["bard", "cleric", "wizard"],
+  "castingTime": "action",
+  "range": "Unlimited",
+  "rangeFeet": 0,
+  "components": { "verbal": true, "somatic": true, "material": "a copper wire" },
+  "duration": "Instantaneous",
+  "concentration": false,
+  "ritual": false,
+  "description": "You send a short message of 25 words or fewer to a creature you are familiar with, anywhere on the same plane; it hears the message in its mind, recognizes you, and can reply in kind. Engine: a long-range communication utility narrated by the AIGM."
+}

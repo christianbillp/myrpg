@@ -1,0 +1,16 @@
+{
+  "id": "tongues",
+  "name": "Tongues",
+  "level": 3,
+  "school": "divination",
+  "classes": ["bard", "cleric", "sorcerer", "warlock", "wizard"],
+  "castingTime": "action",
+  "range": "Touch",
+  "rangeFeet": 5,
+  "components": { "verbal": true, "somatic": false, "material": "a miniature ziggurat" },
+  "duration": "1 hour",
+  "durationRounds": 600,
+  "concentration": false,
+  "ritual": false,
+  "description": "For the duration, the creature you touch understands any spoken language it hears, and any creature that knows a language and can hear it understands what it says. Engine: a communication utility narrated by the AIGM (overlaps the Comprehend Languages coverage)."
+}

@@ -1,0 +1,16 @@
+{
+  "id": "meld-into-stone",
+  "name": "Meld into Stone",
+  "level": 3,
+  "school": "transmutation",
+  "classes": ["cleric", "druid", "ranger"],
+  "castingTime": "action",
+  "range": "Touch",
+  "rangeFeet": 5,
+  "components": { "verbal": true, "somatic": true, "material": null },
+  "duration": "8 hours",
+  "durationRounds": 4800,
+  "concentration": false,
+  "ritual": true,
+  "description": "You step into a stone object or surface large enough to fully contain your body, melding yourself and your gear with the stone for the duration. You can sense around you and step out as a Bonus Action. Engine: a concealment utility narrated by the AIGM."
+}

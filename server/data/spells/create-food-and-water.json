@@ -1,0 +1,15 @@
+{
+  "id": "create-food-and-water",
+  "name": "Create Food and Water",
+  "level": 3,
+  "school": "conjuration",
+  "classes": ["cleric", "paladin"],
+  "castingTime": "action",
+  "range": "30 feet",
+  "rangeFeet": 30,
+  "components": { "verbal": true, "somatic": true, "material": null },
+  "duration": "Instantaneous",
+  "concentration": false,
+  "ritual": false,
+  "description": "You create 40 pounds of food and 30 gallons of water on the ground or in containers within range, enough to sustain up to fifteen Humanoids or five horse-sized creatures for 24 hours. The food spoils after 24 hours. Engine: a provisioning utility narrated by the AIGM."
+}

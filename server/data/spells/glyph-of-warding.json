@@ -1,0 +1,15 @@
+{
+  "id": "glyph-of-warding",
+  "name": "Glyph of Warding",
+  "level": 3,
+  "school": "abjuration",
+  "classes": ["bard", "cleric", "wizard"],
+  "castingTime": "1 hour",
+  "range": "Touch",
+  "rangeFeet": 5,
+  "components": { "verbal": true, "somatic": true, "material": "powdered diamond worth 200+ GP, which the spell consumes" },
+  "duration": "Until dispelled or triggered",
+  "concentration": false,
+  "ritual": false,
+  "description": "You inscribe a glyph on a surface or object that triggers on a condition you set, unleashing either a stored spell (level 3 or lower) or an Explosive Runes burst (5d8 of a chosen energy type, DEX save for half in a 20-foot Sphere). Engine: a placed ward / trap is descriptive only until the player-authored trap pipeline lands."
+}

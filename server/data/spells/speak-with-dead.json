@@ -1,0 +1,16 @@
+{
+  "id": "speak-with-dead",
+  "name": "Speak with Dead",
+  "level": 3,
+  "school": "necromancy",
+  "classes": ["bard", "cleric", "wizard"],
+  "castingTime": "action",
+  "range": "10 feet",
+  "rangeFeet": 10,
+  "components": { "verbal": true, "somatic": true, "material": "burning incense" },
+  "duration": "10 minutes",
+  "durationRounds": 100,
+  "concentration": false,
+  "ritual": false,
+  "description": "You grant a degree of life and intellect to a corpse within range that still has a mouth and isn't Undead, letting you ask it up to five questions over the duration. It knows only what it knew in life, answers cryptically, and a given corpse can be questioned only once every 10 days. Engine: an interrogation utility narrated by the AIGM."
+}

@@ -1,0 +1,18 @@
+{
+  "id": "bestow-curse",
+  "name": "Bestow Curse",
+  "level": 3,
+  "school": "necromancy",
+  "classes": ["bard", "cleric", "wizard"],
+  "castingTime": "action",
+  "range": "Touch",
+  "rangeFeet": 5,
+  "components": { "verbal": true, "somatic": true, "material": null },
+  "duration": "Concentration, up to 1 minute",
+  "durationRounds": 10,
+  "concentration": true,
+  "ritual": false,
+  "save": { "ability": "wis", "halfOnSuccess": false },
+  "description": "You touch a creature, which must succeed on a Wisdom saving throw or be cursed for the duration with one chosen effect: Disadvantage on checks/saves with one ability; Disadvantage on attack rolls against you; a start-of-turn Wisdom save or be forced to Dodge; or +1d8 Necrotic when you damage it. Engine: the WIS save is rolled; the specific curse rider is descriptive only.",
+  "scaling": "Higher-level slots extend the duration and may drop the Concentration requirement (level 4 → 10 minutes; 5-6 → 8 hours, no Concentration; 7-8 → 24 hours; 9 → until dispelled)."
+}

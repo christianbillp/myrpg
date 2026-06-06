@@ -1,0 +1,16 @@
+{
+  "id": "water-walk",
+  "name": "Water Walk",
+  "level": 3,
+  "school": "transmutation",
+  "classes": ["cleric", "druid", "ranger", "sorcerer"],
+  "castingTime": "action",
+  "range": "30 feet",
+  "rangeFeet": 30,
+  "components": { "verbal": true, "somatic": true, "material": "a piece of cork" },
+  "duration": "1 hour",
+  "durationRounds": 600,
+  "concentration": false,
+  "ritual": true,
+  "description": "Up to ten willing creatures of your choice within range can move across any liquid surface — water, acid, mud, snow, quicksand, or lava — as if it were harmless solid ground, for the duration. Engine: an exploration utility narrated by the AIGM."
+}

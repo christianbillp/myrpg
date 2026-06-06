@@ -1,0 +1,17 @@
+{
+  "id": "mass-healing-word",
+  "name": "Mass Healing Word",
+  "level": 3,
+  "school": "abjuration",
+  "classes": ["bard", "cleric"],
+  "castingTime": "bonus-action",
+  "range": "60 feet",
+  "rangeFeet": 60,
+  "components": { "verbal": true, "somatic": false, "material": null },
+  "duration": "Instantaneous",
+  "concentration": false,
+  "ritual": false,
+  "heal": { "dice": 2, "sides": 4 },
+  "description": "Up to six creatures of your choice within range regain Hit Points equal to 2d4 plus your spellcasting ability modifier. Engine: the single-target heal resolver restores the chosen ally; the additional targets are descriptive until a multi-target heal lands.",
+  "scaling": "The healing increases by 1d4 for each spell slot level above 3."
+}
