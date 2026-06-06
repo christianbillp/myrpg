@@ -1,0 +1,15 @@
+{
+  "id": "adrenaline-rush",
+  "name": "Adrenaline Rush",
+  "classId": "orc",
+  "minLevel": 1,
+  "description": "Bonus Action: take the Dash action and gain Temporary Hit Points equal to your Proficiency Bonus. You regain all expended uses when you finish a Short or Long Rest.",
+  "cost": { "kind": "bonus-action" },
+  "resource": { "kind": "uses-per-short-rest", "max": 2 },
+  "ui": {
+    "buttonLabel": "ADRENALINE RUSH",
+    "buttonColor": "#5a2a2a",
+    "resourceLabel": "Adrenaline Rush: {remaining}/{max}"
+  },
+  "handler": "adrenaline-rush"
+}

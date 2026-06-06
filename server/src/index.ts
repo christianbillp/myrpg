@@ -51,6 +51,7 @@ import {
   applySpecies,
 } from "./engine/EquipmentSystem.js";
 import { applyModifiers } from "./engine/Modifiers.js";
+import { speciesFeatureIds } from "./engine/SpeciesAbilities.js";
 import { CreateSessionRequest } from "./engine/types.js";
 import type { MapTilesetInfo, TokenSpec } from "../../shared/types.js";
 import {
@@ -237,6 +238,11 @@ async function loadDefs(): Promise<void> {
   defs.subclasses = subclasses;
   for (const p of defs.playerDefs) {
     applySpecies(p, defs.species);
+    // Surface activated species abilities (Orc Adrenaline Rush, …) as known
+    // features so the existing button / guard / dispatch pipeline drives them.
+    for (const fid of speciesFeatureIds(p, defs.species)) {
+      (p.defaultFeatureIds ??= []).push(fid);
+    }
     applyModifiers(p, defs.feats, defs.features);
     applyEquipment(p, p.defaultEquipment, defs.equipment);
   }

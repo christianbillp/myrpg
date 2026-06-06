@@ -29,3 +29,26 @@ export function speciesAbilityResources(playerDef: PlayerDef, allSpecies: Specie
   }
   return out;
 }
+
+/** Maps an activated species trait to the FeatureDef id that surfaces it as a
+ *  player action button. Keyed by the trait's signature effect so the data file
+ *  stays the single source of truth for the ability's cost / resource / UI. */
+const TRAIT_FEATURE: ReadonlyArray<{ effect: string; featureId: string; minLevel: number }> = [
+  { effect: 'dashAsBonusAction', featureId: 'adrenaline-rush', minLevel: 1 },
+];
+
+/** Activated-ability FeatureDef ids the character's species grants at its
+ *  current level — appended to `defaultFeatureIds` at load (and by the character
+ *  builder) so the existing feature button / guard / dispatch pipeline drives
+ *  them with no class-feature special-casing. */
+export function speciesFeatureIds(playerDef: PlayerDef, allSpecies: SpeciesDef[]): string[] {
+  const species = speciesFor(playerDef, allSpecies);
+  if (!species) return [];
+  const ids: string[] = [];
+  for (const trait of species.traits) {
+    for (const map of TRAIT_FEATURE) {
+      if (trait.effects[map.effect] && (playerDef.level ?? 1) >= map.minLevel) ids.push(map.featureId);
+    }
+  }
+  return ids;
+}

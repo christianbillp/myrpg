@@ -13,6 +13,7 @@
  */
 import { d } from './Dice.js';
 import { applySpecies, applyEquipment } from './EquipmentSystem.js';
+import { speciesFeatureIds } from './SpeciesAbilities.js';
 import { applyModifiers } from './Modifiers.js';
 import { SKILL_ABILITY } from './Leveling.js';
 import {
@@ -347,6 +348,11 @@ export function buildPlayerDef(choices: CharacterCreationChoices, defs: Characte
   // is fully resolved (speed / size / senses / resistances / origin modifiers,
   // aggregated modifiers, AC + mainAttack from the equipped loadout).
   applySpecies(playerDef, defs.species);
+  // Surface activated species abilities (Orc Adrenaline Rush, …) as known
+  // features so they get a player action button like class features.
+  for (const fid of speciesFeatureIds(playerDef, defs.species)) {
+    if (!playerDef.defaultFeatureIds?.includes(fid)) (playerDef.defaultFeatureIds ??= []).push(fid);
+  }
   applyModifiers(playerDef, defs.feats, defs.features);
   applyEquipment(playerDef, playerDef.defaultEquipment, defs.equipment);
 

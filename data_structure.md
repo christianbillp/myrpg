@@ -578,7 +578,9 @@ One file per SRD species. Species are loaded at startup, served via `GET /specie
 | `relentlessEndurance.usesPerLongRest` | SRD Orc trait. `SpeciesAbilities.speciesAbilityResources` seeds a `relentless-endurance` pool into `player.resources` at session build (refilled on Long Rest by `applyLongRest`); when player damage would drop the character to 0 HP but not kill them outright, `GameEngine.applyDamageToPlayer` consumes one use and holds them at 1 HP instead. |
 | `rerollD20OnesOnTests` | SRD Halfling "Luck". `applySpecies` projects it onto `PlayerDef.halflingLuck`; every player d20 roll site routes its natural die through `Dice.applyHalflingLuck`, which rerolls a natural 1 once (attack rolls, spell attacks, ability checks, saving throws, initiative, death saves, hide, trap save/disarm). |
 
-All other trait effects are stored for future engine use and have no current mechanical impact. **Active species abilities** with limited uses live in `server/src/engine/SpeciesAbilities.ts`, which derives their `player.resources` pools (seeded by `SessionBuilder`, refilled by `applyLongRest`) — the same resource model used by class features.
+| `dashAsBonusAction` | SRD Orc "Adrenaline Rush". `SpeciesAbilities.speciesFeatureIds` maps this trait to the `adrenaline-rush` FeatureDef id and appends it to `defaultFeatureIds` (at load + in the character builder), so the activated ability surfaces as a player action button through the normal feature pipeline. The handler takes the Dash action and grants Temp HP equal to the Proficiency Bonus. |
+
+All other trait effects are stored for future engine use and have no current mechanical impact. **Active species abilities** live in `server/src/engine/SpeciesAbilities.ts`: limited-use *passive* abilities (Relentless Endurance) derive their `player.resources` pools (seeded by `SessionBuilder`, refilled by `applyLongRest`); *activated* abilities are surfaced as feature buttons via `speciesFeatureIds` + an authored `features/*.json` def (`classId` set to the granting species), reusing the class-feature resource / guard / dispatch / client-button pipeline unchanged.
 
 ---
 

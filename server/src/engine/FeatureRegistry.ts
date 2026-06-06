@@ -16,7 +16,8 @@
 
 import type { GameContext } from './GameContext.js';
 import type { GameEvent } from './types.js';
-import { canUseFeature } from './ActionGuards.js';
+import { canUseFeature, playerArmorSpeedPenaltyFt } from './ActionGuards.js';
+import { speedAfterExhaustion } from './ConditionSystem.js';
 import { playerSecondWind } from './CombatSystem.js';
 import { spellSaveDC, spellMod, npcSaveMod } from './SpellSystem.js';
 import { combatantDisplayName } from './CombatFlow.js';
@@ -108,6 +109,29 @@ registerFeatureHandler('steady-aim', (ctx) => {
   s.player.movesLeft = 0;
   ctx.addLog({
     left: `${ctx.playerDef.name} steadies their aim — Advantage on the next attack this turn`,
+    style: 'status',
+  });
+});
+
+/**
+ * Adrenaline Rush (Orc species, US-122). A Bonus Action that takes the Dash
+ * action (extra movement equal to Speed, after exhaustion + armor reductions —
+ * mirroring `doDash`) and grants Temporary Hit Points equal to the Proficiency
+ * Bonus. Temp HP does not stack — keep the higher pool. Uses = PB, refilled on
+ * a Short or Long Rest (the static `resource.max` of 2 matches PB at the level
+ * band, same precedent as Channel Divinity).
+ */
+registerFeatureHandler('adrenaline-rush', (ctx, featureId) => {
+  const s = ctx.state;
+  const dashFt = Math.max(0, speedAfterExhaustion(ctx.playerDef.speed + (s.player.speedBonus ?? 0), s.player.exhaustionLevel ?? 0) - playerArmorSpeedPenaltyFt(ctx));
+  s.player.movesLeft += dashFt / 5;
+  if (!s.player.conditions.includes('dashing')) s.player.conditions.push('dashing');
+  const pb = ctx.playerDef.proficiencyBonus;
+  s.player.tempHp = Math.max(s.player.tempHp, pb);
+  s.player.resources[featureId] = Math.max(0, (s.player.resources[featureId] ?? 0) - 1);
+  s.player.bonusActionUsed = true;
+  ctx.addLog({
+    left: `${ctx.playerDef.name} surges with adrenaline — Dash (+${dashFt / 5} tiles) and ${pb} Temp HP (${s.player.resources[featureId]} uses left)`,
     style: 'status',
   });
 });

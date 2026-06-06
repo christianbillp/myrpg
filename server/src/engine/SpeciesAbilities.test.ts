@@ -9,20 +9,28 @@
  */
 import { describe, it, expect } from 'vitest';
 import {
-  hasRelentlessEndurance, speciesAbilityResources, RELENTLESS_ENDURANCE_ID,
+  hasRelentlessEndurance, speciesAbilityResources, speciesFeatureIds, RELENTLESS_ENDURANCE_ID,
 } from './SpeciesAbilities.js';
+import { doUseFeature } from './FeatureRegistry.js';
 import { applyLongRest, buildLongRestPreview, type RestingInputs } from './Resting.js';
-import type { PlayerDef, PlayerState, SpeciesDef } from './types.js';
+import { buildTestContext } from '../test/buildTestContext.js';
+import type { PlayerDef, PlayerState, SpeciesDef, FeatureDef } from './types.js';
 
 function orc(): SpeciesDef {
   return {
     id: 'orc', name: 'Orc', creatureType: 'humanoid', size: 'medium', speed: 30,
     traits: [
       { name: 'Relentless Endurance', description: '', effects: { relentlessEndurance: { usesPerLongRest: 1 } } },
+      { name: 'Adrenaline Rush', description: '', effects: { dashAsBonusAction: true, tempHpOnDash: 'proficiencyBonus' } },
       { name: 'Darkvision', description: '', effects: { darkvision: { feet: 120 } } },
     ],
   };
 }
+
+const ADRENALINE_RUSH: FeatureDef = {
+  id: 'adrenaline-rush', name: 'Adrenaline Rush', classId: 'orc', minLevel: 1, description: '',
+  cost: { kind: 'bonus-action' }, resource: { kind: 'uses-per-short-rest', max: 2 }, handler: 'adrenaline-rush',
+} as FeatureDef;
 
 function elf(): SpeciesDef {
   return {
@@ -47,6 +55,41 @@ describe('speciesAbilityResources', () => {
   it('returns nothing when the species id is unknown', () => {
     const p = { speciesId: 'gnome' } as unknown as PlayerDef;
     expect(speciesAbilityResources(p, [orc(), elf()])).toEqual({});
+  });
+});
+
+describe('speciesFeatureIds', () => {
+  it('grants Adrenaline Rush to an Orc and nothing to an Elf', () => {
+    expect(speciesFeatureIds({ speciesId: 'orc', level: 1 } as unknown as PlayerDef, [orc(), elf()])).toEqual(['adrenaline-rush']);
+    expect(speciesFeatureIds({ speciesId: 'elf', level: 1 } as unknown as PlayerDef, [orc(), elf()])).toEqual([]);
+  });
+});
+
+describe('Adrenaline Rush handler', () => {
+  it('Dashes (+speed movement) and grants Temp HP equal to proficiency bonus, spending a bonus action and a use', () => {
+    const { ctx, state } = buildTestContext({
+      phase: 'player_turn',
+      player: { movesLeft: 6, tempHp: 0, resources: { 'adrenaline-rush': 2 } },
+      playerDef: { speciesId: 'orc', speed: 30, proficiencyBonus: 2, defaultFeatureIds: ['adrenaline-rush'] },
+    });
+    ctx.defs.features.push(ADRENALINE_RUSH);
+    doUseFeature(ctx, 'adrenaline-rush', {}, []);
+    expect(state.player.movesLeft).toBe(12);        // 6 + 30ft/5
+    expect(state.player.tempHp).toBe(2);            // = PB
+    expect(state.player.conditions).toContain('dashing');
+    expect(state.player.bonusActionUsed).toBe(true);
+    expect(state.player.resources['adrenaline-rush']).toBe(1);
+  });
+
+  it('does not stack Temp HP — keeps the higher pool', () => {
+    const { ctx, state } = buildTestContext({
+      phase: 'player_turn',
+      player: { movesLeft: 6, tempHp: 5, resources: { 'adrenaline-rush': 2 } },
+      playerDef: { speciesId: 'orc', speed: 30, proficiencyBonus: 2, defaultFeatureIds: ['adrenaline-rush'] },
+    });
+    ctx.defs.features.push(ADRENALINE_RUSH);
+    doUseFeature(ctx, 'adrenaline-rush', {}, []);
+    expect(state.player.tempHp).toBe(5);            // existing 5 > PB 2
   });
 });
 
