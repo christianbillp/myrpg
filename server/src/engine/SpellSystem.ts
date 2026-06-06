@@ -131,14 +131,15 @@ function consumeCastingResources(ctx: GameContext, spell: SpellDef, slotLevel: n
   if (asRitual) return;
   // Scroll casts (US-124): expend no spell slot — the scroll itself is the
   // resource (consumed by the caller) — but still cost the spell's action.
+  // US-116: spend the slot at the chosen upcast level, NOT the spell's base
+  // level. `doCastSpell` has already clamped slotLevel to [spell.level, 9] and
+  // verified a free slot at that level, so this consumption is always valid.
   if (spell.level > 0 && !fromScroll) {
-    const slotIdx = spell.level - 1;
+    const slotIdx = slotLevel - 1;
     const before = s.player.spellSlots[slotIdx] ?? 0;
     s.player.spellSlots[slotIdx] = Math.max(0, before - 1);
-    Logger.log('spell.slot_consumed', { spellId: spell.id, level: spell.level, before, after: s.player.spellSlots[slotIdx] });
+    Logger.log('spell.slot_consumed', { spellId: spell.id, level: spell.level, slotLevel, before, after: s.player.spellSlots[slotIdx] });
   }
-  // We don't gate by slotLevel here — the picker passes spell.level by default;
-  // upcast support is wired in but not yet exposed by the UI.
   if (s.phase === 'player_turn') {
     switch (spell.castingTime) {
       case 'action':       s.player.actionUsed = true; break;
@@ -146,7 +147,6 @@ function consumeCastingResources(ctx: GameContext, spell: SpellDef, slotLevel: n
       case 'reaction':     s.player.reactionUsed = true; break;
     }
   }
-  void slotLevel;
 }
 
 // ── Resolution branches ─────────────────────────────────────────────────────
@@ -1798,6 +1798,22 @@ export function doCastSpell(
       return;
     }
     preResolvedTarget = target;
+  }
+
+  // ── US-116 upcasting: resolve the effective slot level ────────────────────
+  // Cantrips, ritual casts, and scroll casts always resolve at the spell's
+  // base level (cantrips spend no slot; rituals spend no slot; a scroll stores
+  // a fixed-level spell). A normal levelled cast may upcast: clamp the request
+  // to [spell.level, 9] — no downcasting — and require a free slot at that
+  // level, bailing before any resource is spent if none is available.
+  if (spell.level === 0 || asRitual || scrollItemId !== undefined) {
+    slotLevel = spell.level;
+  } else {
+    slotLevel = Math.max(spell.level, Math.min(9, slotLevel || spell.level));
+    if ((ctx.state.player.spellSlots[slotLevel - 1] ?? 0) <= 0) {
+      ctx.addLog({ left: `${spell.name}: no level-${slotLevel} slot available`, style: 'miss' });
+      return;
+    }
   }
 
   // Aggressive casts in exploring phase trigger combat first — same as the

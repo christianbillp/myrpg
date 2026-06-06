@@ -442,7 +442,9 @@ Single-use spell scroll (US-124). When read, it casts `spellId` and is consumed.
 | `spellId` | string | Id of the `SpellDef` cast on use. |
 | `magic` / `rarity` | — | Optional `MagicItemProps`. |
 
-Casting from a scroll (`doCastSpell` with `scrollItemId`, driven by the `useScroll` action) **bypasses the prepared/known + slot gate**, spends **no spell slot** (the scroll is the resource, consumed on cast), but still costs the spell's action. Targeting reuses the normal resolver (selected-target fallback for attack/auto-hit spells); the Equipment tab renders a **CAST** button per scroll. Shipped: `scroll_of_magic_missile`.
+Casting from a scroll (`doCastSpell` with `scrollItemId`, driven by the `useScroll` action) **bypasses the prepared/known + slot gate**, spends **no spell slot** (the scroll is the resource, consumed on cast), but still costs the spell's action. Targeting reuses the normal resolver (selected-target fallback for attack/auto-hit spells); the Equipment tab renders a **CAST** button per scroll. Shipped: `scroll_of_magic_missile`. Scroll casts always resolve at the spell's **base level** (no upcasting — see below).
+
+**Upcasting (US-116).** A levelled spell may be cast with a slot of its own level or higher; the resolvers scale damage / darts / rays by `slotLevel` (`max(0, slotLevel - spell.level)` extra). `doCastSpell` resolves the effective level before spending anything: cantrips, ritual casts, and scroll casts force `slotLevel = spell.level`; a normal cast clamps the requested level to `[spell.level, 9]` (no downcasting) and **fizzles before consuming any slot or action** if the player holds no slot at that level. `consumeCastingResources` then decrements the slot at the chosen `slotLevel` — **not** the base level (the historical bug). The client's Spells tab opens a slot-level picker when `SpellDef.scaling` is set and a higher slot is owned, threading the choice through the target mode so deferred (target-click / tile / multi-projectile) casts spend the right slot.
 
 ---
 

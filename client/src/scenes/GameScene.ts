@@ -153,7 +153,7 @@ export class GameScene extends Phaser.Scene {
    *                         shape "sphere"/"cube" + selfAnchored — disc on player tile.
    *                         shape "sphere"/"cube" otherwise        — disc on cursor tile. */
   private spellTargetMode:
-    | { kind: "creature"; spellId: string; spellName: string; asRitual: boolean; damageTypeChoice?: string; abilityChoice?: 'str' | 'dex' | 'con' | 'int' | 'wis' | 'cha' }
+    | { kind: "creature"; spellId: string; spellName: string; asRitual: boolean; slotLevel?: number; damageTypeChoice?: string; abilityChoice?: 'str' | 'dex' | 'con' | 'int' | 'wis' | 'cha' }
     | {
         kind: "multi-projectile"; spellId: string; spellName: string; asRitual: boolean;
         slotLevel: number;
@@ -167,6 +167,7 @@ export class GameScene extends Phaser.Scene {
       }
     | {
         kind: "aoe"; spellId: string; spellName: string; asRitual: boolean;
+        slotLevel?: number;
         /** For cone: the cone's max reach in tiles. For sphere/cube/line: the long-axis length of the area in tiles. */
         sideTiles: number;
         /** Width of the area perpendicular to the axis (Gust of Wind: 2 tiles for a 10-ft-wide line). Only consulted for `shape: 'line'`. */
@@ -1262,6 +1263,44 @@ export class GameScene extends Phaser.Scene {
     const spell = allSpells.find(sp => sp.id === spellId);
     if (!spell) return;
 
+    // US-116 upcasting: if the spell scales with slot level and the player owns
+    // a slot above its base level, offer the casting-level choice FIRST. Ritual
+    // casts and cantrips never upcast (no slot is spent). CANCEL aborts.
+    const upcastLevels = this.upcastableSlotLevels(spell, asRitual);
+    if (upcastLevels.length > 1) {
+      const labels = upcastLevels.map((lvl) => `Level ${lvl}${lvl === spell.level ? ' (base)' : ''}`);
+      new SpellOptionPicker(
+        this.uiScale,
+        `${spell.name} — slot level`,
+        "Cast at a higher level to amplify the spell.",
+        labels,
+        (label) => this.beginSpellCastAtLevel(spell, asRitual, upcastLevels[labels.indexOf(label)] ?? spell.level),
+        () => { /* cancelled — no resource consumed */ },
+      );
+      return;
+    }
+
+    this.beginSpellCastAtLevel(spell, asRitual, spell.level === 0 ? 0 : spell.level);
+  }
+
+  /**
+   * Levels the player may cast `spell` at right now: its base level plus any
+   * higher level they hold an unspent slot for. Returns `[]` (no upcast choice)
+   * for cantrips, ritual casts, and spells without an "At Higher Levels" entry.
+   */
+  private upcastableSlotLevels(spell: SpellDef, asRitual: boolean): number[] {
+    if (asRitual || spell.level === 0 || !spell.scaling) return [];
+    const slots = this.gameState?.player.spellSlots ?? [];
+    const levels: number[] = [];
+    for (let lvl = spell.level; lvl <= 9; lvl++) {
+      if ((slots[lvl - 1] ?? 0) > 0) levels.push(lvl);
+    }
+    return levels;
+  }
+
+  /** Resume a cast at a resolved slot level — runs the cast-time choice pickers
+   *  (damage type, ability) before entering target mode. */
+  private beginSpellCastAtLevel(spell: SpellDef, asRitual: boolean, slotLevel: number): void {
     // Spells that ask the caster to choose at cast time (Chromatic Orb's
     // damage type, future Dragon's Breath types, …) get a small picker
     // BEFORE we enter target mode. CANCEL aborts the cast — no resource
@@ -1272,7 +1311,7 @@ export class GameScene extends Phaser.Scene {
         `${spell.name} — damage type`,
         "Choose the damage type for this cast.",
         spell.damageTypeChoices,
-        (chosen) => this.continueSpellCast(spell, asRitual, chosen),
+        (chosen) => this.continueSpellCast(spell, asRitual, chosen, undefined, slotLevel),
         () => { /* cancelled — no further action */ },
       );
       return;
@@ -1300,21 +1339,22 @@ export class GameScene extends Phaser.Scene {
         (label) => {
           const idx = options.indexOf(label);
           const ability = (spell.abilityChoices?.[idx] ?? spell.abilityChoices?.[0]) as 'str' | 'dex' | 'con' | 'int' | 'wis' | 'cha';
-          this.continueSpellCast(spell, asRitual, undefined, ability);
+          this.continueSpellCast(spell, asRitual, undefined, ability, slotLevel);
         },
         () => { /* cancelled — no further action */ },
       );
       return;
     }
 
-    this.continueSpellCast(spell, asRitual, undefined);
+    this.continueSpellCast(spell, asRitual, undefined, undefined, slotLevel);
   }
 
   /** Pulled out of `beginSpellCast` so the damage-type picker can resume the
-   *  cast with the player's choice. */
-  private continueSpellCast(spell: SpellDef, asRitual: boolean, damageTypeChoice: string | undefined, abilityChoice?: 'str' | 'dex' | 'con' | 'int' | 'wis' | 'cha'): void {
+   *  cast with the player's choice. `slotLevelOverride` carries the upcast
+   *  level chosen in `beginSpellCast` (US-116); defaults to the spell's base. */
+  private continueSpellCast(spell: SpellDef, asRitual: boolean, damageTypeChoice: string | undefined, abilityChoice?: 'str' | 'dex' | 'con' | 'int' | 'wis' | 'cha', slotLevelOverride?: number): void {
     const spellId = spell.id;
-    const slotLevel = spell.level === 0 ? 0 : spell.level;
+    const slotLevel = spell.level === 0 ? 0 : (slotLevelOverride ?? spell.level);
 
     // SRD Magic Missile (3 darts at L1, +1 per upcast) and Scorching Ray
     // (3 rays at L2, +1 per upcast) let the caster distribute projectiles
@@ -1362,7 +1402,7 @@ export class GameScene extends Phaser.Scene {
     const isSelfTeleport = !!spell.selfTeleport;
 
     if (needsCreatureTarget || isTouchBuff) {
-      this.spellTargetMode = { kind: "creature", spellId, spellName: spell.name, asRitual, damageTypeChoice, abilityChoice };
+      this.spellTargetMode = { kind: "creature", spellId, spellName: spell.name, asRitual, slotLevel, damageTypeChoice, abilityChoice };
     } else if (isSelfTeleport) {
       // Misty Step — caster picks a destination tile within `selfTeleport.rangeFeet`.
       // Reuse the AOE targeting machinery with a synthetic 1-tile sphere so the
@@ -1370,7 +1410,7 @@ export class GameScene extends Phaser.Scene {
       // the actual range; this preview is just a visual cue. The spell-resolver
       // case routes the click tile into `s.player.tileX/tileY`.
       this.spellTargetMode = {
-        kind: "aoe", spellId, spellName: spell.name, asRitual,
+        kind: "aoe", spellId, spellName: spell.name, asRitual, slotLevel,
         sideTiles: 1, selfAnchored: false, shape: "sphere", damageTypeChoice, abilityChoice,
       };
     } else if (isAoe) {
@@ -1389,7 +1429,7 @@ export class GameScene extends Phaser.Scene {
         : Math.max(1, Math.ceil(sizeFeet / 5));
       const widthTiles = Math.max(1, Math.ceil((spell.area?.widthFeet ?? 5) / 5));
       const selfAnchored = spell.range === 'self' || spell.rangeFeet === 0;
-      this.spellTargetMode = { kind: "aoe", spellId, spellName: spell.name, asRitual, sideTiles, widthTiles, selfAnchored, shape, damageTypeChoice, abilityChoice };
+      this.spellTargetMode = { kind: "aoe", spellId, spellName: spell.name, asRitual, slotLevel, sideTiles, widthTiles, selfAnchored, shape, damageTypeChoice, abilityChoice };
     } else {
       // Self / utility: fire immediately. `abilityChoice` rides along when
       // the spell offered an Enhance-Ability-style picker.
@@ -1659,7 +1699,9 @@ export class GameScene extends Phaser.Scene {
     const allSpells = this.defs.spells();
     const spell = allSpells.find(sp => sp.id === stm.spellId);
     if (!spell) { this.exitSpellTargetMode(); return; }
-    const slotLevel = spell.level === 0 ? 0 : spell.level;
+    // US-116: honour the upcast level chosen in beginSpellCast (stored on the
+    // target mode); fall back to the spell's base level.
+    const slotLevel = spell.level === 0 ? 0 : (stm.slotLevel ?? spell.level);
 
     if (stm.kind === "creature") {
       if (!targetNpcId) { this.exitSpellTargetMode(); return; }
