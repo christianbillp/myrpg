@@ -35,6 +35,9 @@ interface CreatorState {
   shortDescription: string;
   description: string;
   speciesId: string;
+  /** Chosen subspecies — lineage (Elf/Gnome/Goliath) or ancestry (Dragonborn).
+   *  Stored on `PlayerDef.speciesLineage`. Null when the species has none. */
+  speciesLineage: string | null;
   backgroundId: string;
   classId: string;
   method: AbilityScoreMethod;
@@ -80,7 +83,7 @@ export class CharacterCreatorScene extends Phaser.Scene {
 
   private state: CreatorState = {
     step: 0, prompt: "", rationale: "", name: "", shortDescription: "", description: "",
-    speciesId: "", backgroundId: "", classId: "",
+    speciesId: "", speciesLineage: null, backgroundId: "", classId: "",
     method: "standard-array",
     scores: { str: 10, dex: 10, con: 10, int: 10, wis: 10, cha: 10 },
     backgroundAbility: { kind: "one-one-one" },  // replaced with the bg's first two on load
@@ -271,9 +274,13 @@ export class CharacterCreatorScene extends Phaser.Scene {
     const c = this.content!;
     c.appendChild(this.selectRow("Species", this.species.map((s) => ({ value: s.id, label: s.name })), this.state.speciesId, (v) => {
       this.state.speciesId = v;
-      this.resetSpeciesGrants();  // species grants (Skillful skill, Versatile feat) reset with the species
+      this.resetSpeciesGrants();  // species grants (Skillful skill, Versatile feat, lineage) reset with the species
       this.renderStep();
     }));
+    const sub = this.subspeciesChoice();
+    if (sub) {
+      c.appendChild(this.selectRow(sub.label, sub.options, this.state.speciesLineage ?? sub.options[0]?.value ?? "", (v) => { this.state.speciesLineage = v; this.renderStep(); }));
+    }
     c.appendChild(this.speciesPanel());
     c.appendChild(this.originFeatPicker());
     c.appendChild(this.selectRow("Background", this.backgrounds.map((b) => ({ value: b.id, label: b.name })), this.state.backgroundId, (v) => {
@@ -468,11 +475,30 @@ export class CharacterCreatorScene extends Phaser.Scene {
     return !!this.currentSpecies()?.traits.some((t) => t.effects.originFeat);
   }
   private originFeats(): FeatDef[] { return this.feats.filter((f) => f.category === "origin"); }
+  /** Subspecies choice (Elf/Gnome/Goliath lineage, Dragonborn ancestry) for the
+   *  current species, normalised to {label, options}. Null when the species has
+   *  none. */
+  private subspeciesChoice(): { label: string; options: Array<{ value: string; label: string }> } | null {
+    const sp = this.currentSpecies();
+    if (!sp) return null;
+    for (const t of sp.traits) {
+      const e = t.effects as { lineageChoice?: { options: Array<{ id: string; name?: string }> }; ancestryChoice?: { options: Array<{ dragon: string; damageType?: string }> } };
+      if (e.lineageChoice?.options) {
+        return { label: t.name, options: e.lineageChoice.options.map((o) => ({ value: o.id, label: o.name ?? prettify(o.id) })) };
+      }
+      if (e.ancestryChoice?.options) {
+        return { label: t.name, options: e.ancestryChoice.options.map((o) => ({ value: o.dragon, label: `${prettify(o.dragon)}${o.damageType ? ` (${o.damageType})` : ""}` })) };
+      }
+    }
+    return null;
+  }
+
   /** Reset species-granted picks when the species changes (or on load). */
   private resetSpeciesGrants(): void {
     this.state.speciesSkillPicks = new Set();
     this.state.speciesFeat = this.speciesGrantsOriginFeat() ? (this.originFeats()[0]?.id ?? "") : "";
     this.state.featSkillPicks = new Map();  // granting feats changed
+    this.state.speciesLineage = this.subspeciesChoice()?.options[0]?.value ?? null;
   }
 
   /** The feats the character will have at creation (background feat + species
@@ -804,6 +830,7 @@ export class CharacterCreatorScene extends Phaser.Scene {
       const choices = {
         name: this.state.name,
         speciesId: this.state.speciesId,
+        speciesLineage: this.state.speciesLineage,
         backgroundId: this.state.backgroundId,
         classId: this.state.classId,
         abilityMethod: this.state.method,
