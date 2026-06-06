@@ -11,5 +11,6 @@
   "description": "You gain a +2 bonus to attack rolls you make with ranged weapons.",
   "effects": {
     "rangedAttackBonus": 2
-  }
+  },
+  "modifiers": [{ "type": "flag", "name": "fighting-style-archery" }]
 }

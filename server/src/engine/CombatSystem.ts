@@ -1,7 +1,7 @@
 import { d, d20, mod, rollAdvantage, rollDisadvantage } from './Dice.js';
 import { PlayerDef, PlayerAttack, MonsterDef, MonsterAttack, ConsumableDef, LogEntry, BonusDamage, RolledBonusDamage, ResolvedAttackSnapshot } from './types.js';
 import { Logger } from '../Logger.js';
-import { critFloor } from './Modifiers.js';
+import { critFloor, hasModifierFlag } from './Modifiers.js';
 
 export type { RolledBonusDamage };
 
@@ -112,7 +112,10 @@ function resolvePlayerAttack(
   // SRD Magic Weapon spell — flat bonus to attack rolls (consumed below
   // when damage is rolled).
   const magicWeaponBonus = attack.magicWeaponBonus ?? 0;
-  const attackBonus = statMod + profBonus + magicWeaponBonus + extraAttackMod;
+  // SRD Archery Fighting Style — +2 to attack rolls with ranged weapons.
+  const isRangedWeapon = !!attack.rangeNormal && attack.rangeNormal > 0;
+  const archeryBonus = isRangedWeapon && hasModifierFlag(player, 'fighting-style-archery') ? 2 : 0;
+  const attackBonus = statMod + profBonus + magicWeaponBonus + extraAttackMod + archeryBonus;
   const logs: LogEntry[] = [];
 
   const effAdv = withAdvantage && !withDisadvantage;
