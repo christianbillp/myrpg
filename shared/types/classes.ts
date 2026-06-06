@@ -63,6 +63,10 @@ export interface FeatureDef extends ModifierSource {
   cost: FeatureCost;
   resource?: FeatureResource;
   ui?: FeatureUI;
+  /** Languages this feature grants (US-123) — e.g. Rogue Thieves' Cant grants
+   *  `["Thieves' Cant"]`, Druid Druidic grants `["Druidic"]`. The character
+   *  builder folds these into `PlayerDef.languages`. */
+  grantsLanguages?: string[];
   /**
    * Mechanic-handler key, looked up in the server-side FeatureRegistry. When
    * omitted, the feature is "data-only" — passive, ambient, or applied at

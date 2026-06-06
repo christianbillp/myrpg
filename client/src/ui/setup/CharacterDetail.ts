@@ -362,7 +362,10 @@ export class CharacterDetail {
       <div style="font-size:11px;color:#c8d8e8;margin-bottom:10px;line-height:1.5;">${escHtml(def.speciesName)}${escHtml(lineage)}</div>
 
       <div style="font-size:10px;color:#556677;letter-spacing:1px;margin-bottom:6px;">BACKGROUND</div>
-      <div style="font-size:11px;color:#aabbcc;line-height:1.6;white-space:pre-wrap;">${escHtml(description)}</div>
+      <div style="font-size:11px;color:#aabbcc;line-height:1.6;white-space:pre-wrap;margin-bottom:10px;">${escHtml(description)}</div>
+
+      <div style="font-size:10px;color:#556677;letter-spacing:1px;margin-bottom:6px;">LANGUAGES</div>
+      <div style="font-size:11px;color:#c8d8e8;line-height:1.5;">${escHtml((def.languages && def.languages.length ? def.languages : ["Common"]).join(", "))}</div>
     `);
   }
 

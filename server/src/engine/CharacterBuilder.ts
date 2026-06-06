@@ -23,6 +23,7 @@ import {
   isValidBackgroundAbilityChoice, isValidPointBuy, isStandardArrayAssignment,
   type AbilityScores, type AbilityScoreMethod, type BackgroundAbilityChoice,
 } from '../../../shared/abilityScores.js';
+import { mergeLanguages, isStandardLanguage, STANDARD_LANGUAGE_CHOICES } from '../../../shared/languages.js';
 import type {
   PlayerDef, ClassDef, BackgroundDef, SpeciesDef, FeatDef, FeatureDef, SpellDef,
   ItemDef, PlayerAttack,
@@ -73,6 +74,8 @@ export interface CharacterCreationChoices {
   color?: number;
   shortDescription?: string;
   description?: string;
+  /** The Standard languages chosen at creation (SRD: two beyond Common). */
+  languages?: string[];
 }
 
 export type BuildResult =
@@ -214,6 +217,24 @@ export function buildPlayerDef(choices: CharacterCreationChoices, defs: Characte
 
   const sneakAttackDice = (trackAt(cls, 'sneak-attack-dice', 1) as number | undefined) ?? 0;
 
+  // ── Languages (US-123) ──────────────────────────────────────────────────────
+  // SRD: Common + two chosen Standard languages, plus any feature grants
+  // (Rogue Thieves' Cant, Druid Druidic, …). Validate the chosen picks.
+  const chosenLangs = choices.languages ?? [];
+  const distinctLangs = new Set(chosenLangs);
+  if (distinctLangs.size !== chosenLangs.length) return { ok: false, error: `Duplicate language selected.` };
+  if (chosenLangs.length > 0 && chosenLangs.length !== STANDARD_LANGUAGE_CHOICES) {
+    return { ok: false, error: `Choose exactly ${STANDARD_LANGUAGE_CHOICES} languages; got ${chosenLangs.length}.` };
+  }
+  for (const lang of chosenLangs) {
+    if (lang === 'Common' || !isStandardLanguage(lang)) {
+      return { ok: false, error: `"${lang}" isn't a choosable Standard language.` };
+    }
+  }
+  const grantedLangs = featuresAt(cls, 1)
+    .flatMap((fid) => defs.features.find((f) => f.id === fid)?.grantsLanguages ?? []);
+  const languages = mergeLanguages(chosenLangs, grantedLangs);
+
   const playerDef: PlayerDef = {
     id: slugify(choices.name),
     name: choices.name.trim(),
@@ -238,6 +259,7 @@ export function buildPlayerDef(choices: CharacterCreationChoices, defs: Characte
     speed: species.speed,  // recomputed by applySpecies below
     color: choices.color ?? 0x88aacc,
     xp: 0,
+    languages,
     savageAttacker: false,
     fightingStyleDefense: false,
     defaultEquipment,

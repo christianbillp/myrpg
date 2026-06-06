@@ -185,6 +185,10 @@ export interface PlayerDef {
   originModifiers?: Modifier[];
   color: number;
   xp: number;
+  /** Known languages (US-123). Common + the two Standard languages chosen at
+   *  creation + any feature grants (Thieves' Cant, Druidic, …). Optional so
+   *  characters authored before US-123 load without migration. */
+  languages?: string[];
   /** Typed modifiers aggregated from this character's feats + class features at
    *  load (`Modifiers.applyModifiers`). Resolvers query this (crit floor,
    *  passive flags, advantage sources) instead of branching on feat/feature

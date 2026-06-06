@@ -209,6 +209,7 @@ function buildStateMessage(engine: GameEngine): string {
     `Class: ${playerDef.className} L${playerDef.level}`,
     playerDef.subclassId ? `Subclass: ${playerDef.subclassId}` : '',
     trackEntries.length > 0 ? `Tracks: ${trackEntries.map(([k, v]) => `${k}=${v}`).join(', ')}` : '',
+    playerDef.languages && playerDef.languages.length > 0 ? `Languages: ${playerDef.languages.join(', ')}` : '',
   ].filter(Boolean).join(' · ');
 
   // Warlock Pact Magic + Mystic Arcanum (absent for non-Warlocks).

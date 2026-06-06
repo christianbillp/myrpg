@@ -19,6 +19,7 @@ import {
   pointBuyCost, pointBuyTotalCost, abilityModifier, ABILITY_KEYS,
   type AbilityScores, type AbilityScoreMethod, type AbilityKey,
 } from "../../../shared/abilityScores";
+import { STANDARD_LANGUAGES, STANDARD_LANGUAGE_CHOICES, COMMON } from "../../../shared/languages";
 import type { ClassDef, SpeciesDef, BackgroundDef, SpellDef } from "../../../shared/types";
 
 const ACCENT = "#e2b96f";
@@ -41,6 +42,7 @@ interface CreatorState {
   /** Source values to assign (Standard Array / rolled set). */
   pool: number[];
   skillPicks: Set<string>;
+  languagePicks: Set<string>;
   cantripPicks: Set<string>;
   spellPicks: Set<string>;
   equipmentChoice: string;
@@ -64,7 +66,7 @@ export class CharacterCreatorScene extends Phaser.Scene {
     method: "standard-array",
     scores: { str: 10, dex: 10, con: 10, int: 10, wis: 10, cha: 10 },
     pool: [...STANDARD_ARRAY],
-    skillPicks: new Set(), cantripPicks: new Set(), spellPicks: new Set(),
+    skillPicks: new Set(), languagePicks: new Set(), cantripPicks: new Set(), spellPicks: new Set(),
     equipmentChoice: "A",
   };
 
@@ -225,6 +227,22 @@ export class CharacterCreatorScene extends Phaser.Scene {
       note.style.cssText = "font-size:11px;color:#88aacc;margin-top:10px;line-height:1.5;";
       note.textContent = `${bg.name} grants skills: ${bg.skillProficiencies.join(", ")} · ability bonus among ${bg.abilityScores.map((a) => a.toUpperCase()).join("/")} (applied as +2/+1).`;
       c.appendChild(note);
+    }
+
+    // Languages (US-123): every character knows Common; choose two more.
+    const langHead = document.createElement("div");
+    langHead.style.cssText = "font-size:12px;color:" + ACCENT + ";margin:14px 0 6px;";
+    const langCount = () => `Languages — you know ${COMMON}; choose ${STANDARD_LANGUAGE_CHOICES} more (${this.state.languagePicks.size}/${STANDARD_LANGUAGE_CHOICES}):`;
+    langHead.textContent = langCount();
+    c.appendChild(langHead);
+    for (const lang of STANDARD_LANGUAGES) {
+      if (lang === COMMON) continue;
+      c.appendChild(this.checkRow(lang, this.state.languagePicks.has(lang), (on) => {
+        if (on) { if (this.state.languagePicks.size >= STANDARD_LANGUAGE_CHOICES) return false; this.state.languagePicks.add(lang); }
+        else this.state.languagePicks.delete(lang);
+        langHead.textContent = langCount();
+        return true;
+      }));
     }
   }
 
@@ -427,6 +445,7 @@ export class CharacterCreatorScene extends Phaser.Scene {
         baseAbilityScores: this.state.scores,
         backgroundAbility,
         skillProficiencies: [...this.state.skillPicks],
+        languages: [...this.state.languagePicks],
         equipmentChoice: this.state.equipmentChoice,
         cantripIds: cls?.spellcasting ? [...this.state.cantripPicks] : undefined,
         preparedSpellIds: cls?.spellcasting ? [...this.state.spellPicks] : undefined,

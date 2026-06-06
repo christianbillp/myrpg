@@ -108,6 +108,46 @@ describe('PlayerDef builder (US-122)', () => {
     expect(pd.maxHp).toBe(8 + abilityModifier(15) + 1);
   });
 
+  it('assigns Common + the two chosen Standard languages', () => {
+    const choices: CharacterCreationChoices = {
+      name: 'Linguist', speciesId: 'human', backgroundId: 'soldier', classId: 'fighter',
+      abilityMethod: 'standard-array', baseAbilityScores: arr(15, 13, 14, 8, 12, 10),
+      backgroundAbility: { kind: 'two-one', plusTwo: 'str', plusOne: 'con' },
+      skillProficiencies: ['athletics', 'perception'],
+      languages: ['Elvish', 'Dwarvish'],
+    };
+    const r = buildPlayerDef(choices, defs);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.playerDef.languages).toEqual(['Common', 'Elvish', 'Dwarvish']);
+  });
+
+  it('grants Thieves’ Cant to a rogue (feature grantsLanguages)', () => {
+    const choices: CharacterCreationChoices = {
+      name: 'Sneak', speciesId: 'halfling', backgroundId: 'criminal', classId: 'rogue',
+      abilityMethod: 'standard-array', baseAbilityScores: arr(8, 15, 14, 10, 12, 13),
+      backgroundAbility: { kind: 'two-one', plusTwo: 'dex', plusOne: 'con' },
+      skillProficiencies: ['stealth', 'acrobatics', 'perception', 'investigation'],  // rogue picks 4
+      languages: ['Elvish', 'Goblin'],
+    };
+    const r = buildPlayerDef(choices, defs);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.playerDef.languages).toContain('Thieves’ Cant'.replace('’', "'"));  // Thieves' Cant
+    expect(r.playerDef.languages).toEqual(expect.arrayContaining(['Common', 'Elvish', 'Goblin', "Thieves' Cant"]));
+  });
+
+  it('rejects a non-Standard or wrong-count language pick', () => {
+    const base: CharacterCreationChoices = {
+      name: 'X', speciesId: 'human', backgroundId: 'soldier', classId: 'fighter',
+      abilityMethod: 'standard-array', baseAbilityScores: arr(15, 14, 13, 12, 10, 8),
+      backgroundAbility: { kind: 'one-one-one' }, skillProficiencies: ['athletics', 'perception'],
+    };
+    expect(buildPlayerDef({ ...base, languages: ['Abyssal', 'Elvish'] }, defs).ok).toBe(false);  // Abyssal is rare
+    expect(buildPlayerDef({ ...base, languages: ['Elvish'] }, defs).ok).toBe(false);             // only 1 (needs 2)
+    expect(buildPlayerDef({ ...base, languages: ['Common', 'Elvish'] }, defs).ok).toBe(false);   // Common not choosable
+  });
+
   it('rejects an over-budget point-buy and a bad skill pick', () => {
     const base: CharacterCreationChoices = {
       name: 'X', speciesId: 'human', backgroundId: 'soldier', classId: 'fighter',
