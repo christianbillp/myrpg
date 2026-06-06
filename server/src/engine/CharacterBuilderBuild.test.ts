@@ -61,6 +61,7 @@ describe('PlayerDef builder (US-122)', () => {
     expect(pd.defaultEquipment.weaponId).toBe('longsword'); // class starting loadout
     expect(pd.defaultFeatureIds).toContain('second-wind');
     expect(pd.spellcastingAbility).toBeUndefined();         // non-caster
+    expect(pd.tokenAsset.startsWith('/')).toBe(true);       // client builds `${API_URL}${tokenAsset}`
   });
 
   it('builds a wizard: caster fields + INT save + a free hand for casting', () => {

@@ -85,6 +85,13 @@ function slugify(name: string): string {
   return name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'character';
 }
 
+/** Token paths are consumed client-side as `${API_URL}${path}`, so they must
+ *  start with a leading slash; normalise any provided value. */
+function normalizeToken(path: string | undefined): string | undefined {
+  if (!path) return undefined;
+  return path.startsWith('/') ? path : `/${path}`;
+}
+
 function speciesHpBonusAtL1(species: SpeciesDef): number {
   let bonus = 0;
   for (const trait of species.traits) {
@@ -237,7 +244,7 @@ export function buildPlayerDef(choices: CharacterCreationChoices, defs: Characte
     defaultInventoryIds: [...(cls.startingInventoryIds ?? [])],
     defaultCp,
     mainAttack: { ...UNARMED },  // recomputed by applyEquipment below
-    tokenAsset: choices.tokenAsset ?? 'tokens/player_human_wizard.svg',
+    tokenAsset: normalizeToken(choices.tokenAsset) ?? '/tokens/player_human_wizard.svg',
     shortDescription: choices.shortDescription,
     description: choices.description,
     ...casterFields,

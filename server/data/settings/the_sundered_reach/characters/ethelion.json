@@ -1,0 +1,125 @@
+{
+  "id": "ethelion",
+  "name": "Ethelion",
+  "speciesName": "Elf",
+  "speciesId": "elf",
+  "speciesLineage": null,
+  "className": "Cleric",
+  "backgroundId": "criminal",
+  "featIds": [
+    "alert"
+  ],
+  "level": 1,
+  "maxHp": 11,
+  "ac": 16,
+  "str": 8,
+  "dex": 15,
+  "con": 17,
+  "int": 10,
+  "wis": 15,
+  "cha": 8,
+  "proficiencyBonus": 2,
+  "skills": {
+    "acrobatics": 2,
+    "animalHandling": 2,
+    "arcana": 0,
+    "athletics": -1,
+    "deception": -1,
+    "history": 0,
+    "insight": 4,
+    "intimidation": -1,
+    "investigation": 0,
+    "medicine": 2,
+    "nature": 0,
+    "perception": 2,
+    "performance": -1,
+    "persuasion": -1,
+    "religion": 2,
+    "sleightOfHand": 4,
+    "stealth": 4,
+    "survival": 2
+  },
+  "savingThrowProficiencies": [
+    "wis",
+    "cha"
+  ],
+  "savingThrows": {
+    "str": -1,
+    "dex": 2,
+    "con": 3,
+    "int": 0,
+    "wis": 4,
+    "cha": 1
+  },
+  "defaultFeatureIds": [
+    "cleric-spellcasting",
+    "divine-order"
+  ],
+  "hitDieType": 8,
+  "sneakAttackDice": 0,
+  "speed": 30,
+  "color": 8956620,
+  "xp": 0,
+  "savageAttacker": false,
+  "fightingStyleDefense": false,
+  "defaultEquipment": {
+    "armorId": "scale_mail",
+    "weaponId": "quarterstaff",
+    "shieldId": null
+  },
+  "defaultInventoryIds": [],
+  "defaultCp": 5000,
+  "mainAttack": {
+    "name": "Quarterstaff",
+    "statKey": "str",
+    "damageDice": 1,
+    "damageSides": 8,
+    "damageType": "bludgeoning",
+    "savageAttacker": false,
+    "finesse": false,
+    "graze": false,
+    "vex": false,
+    "sap": false,
+    "slow": false,
+    "push": false,
+    "topple": true,
+    "heavy": false,
+    "reach": false
+  },
+  "tokenAsset": "/tokens/player_human_wizard.svg",
+  "shortDescription": "",
+  "description": "",
+  "spellcastingAbility": "wis",
+  "defaultCantripIds": [
+    "sacred-flame",
+    "light",
+    "mending"
+  ],
+  "defaultPreparedSpellIds": [
+    "healing-word",
+    "cure-wounds",
+    "detect-magic",
+    "guiding-bolt"
+  ],
+  "defaultSpellSlots": [
+    2
+  ],
+  "size": "medium",
+  "senses": {
+    "darkvision": 60
+  },
+  "originModifiers": [
+    {
+      "type": "advantage",
+      "on": "save",
+      "key": "charmed"
+    }
+  ],
+  "modifiers": [
+    {
+      "type": "advantage",
+      "on": "save",
+      "key": "charmed"
+    }
+  ]
+}
