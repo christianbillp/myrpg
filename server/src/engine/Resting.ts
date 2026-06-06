@@ -20,15 +20,20 @@
  * at L1-2 (the scope our level-up system currently supports).
  */
 import type {
-  PlayerDef, FeatureDef, SpellDef, PlayerState, NpcState,
+  PlayerDef, FeatureDef, SpellDef, PlayerState, NpcState, ClassDef,
   LongRestPreview, LongRestChoices,
 } from '../../../shared/types.js';
+import { preparedSpellsAt } from '../../../shared/classProgression.js';
 
 export interface RestingInputs {
   playerDef: PlayerDef;
   player: PlayerState;
   features: FeatureDef[];
   spells: SpellDef[];
+  /** Resolved class definition — the single source of truth for the
+   *  prepared-spell cap and the spellbook learn model. Null for an
+   *  unrecognised class (no rest-time prep picker). */
+  classDef: ClassDef | null;
   /** Live NPCs — companions among them share the rest's benefits. */
   npcs?: NpcState[];
 }
@@ -46,36 +51,13 @@ function restingCompanions(npcs: NpcState[] | undefined): NpcState[] {
   return (npcs ?? []).filter((n) => n.companion && n.hp > 0);
 }
 
-/**
- * SRD Wizard Features table — number of prepared spells of level 1+ by
- * Wizard level. Index 0 = L1. Plateaus reflect the official table.
- */
-const WIZARD_PREPARED_BY_LEVEL: readonly number[] = [
-  4,  // L1
-  5,  // L2
-  6,  // L3
-  7,  // L4
-  9,  // L5
-  10, // L6
-  11, // L7
-  12, // L8
-  14, // L9
-  15, // L10
-  16, // L11
-  16, // L12
-  17, // L13
-  17, // L14
-  18, // L15
-  18, // L16
-  19, // L17
-  20, // L18
-  21, // L19
-  22, // L20
-];
-
-/** Cap = max(SRD table value, current preparation count) so feat-granted extras (Magic Initiate, etc.) are not silently stripped on rest. */
-function wizardPreparedCap(level: number, currentlyPreparedCount: number): number {
-  const tableValue = WIZARD_PREPARED_BY_LEVEL[Math.max(1, Math.min(20, level)) - 1];
+/** Cap = max(class `preparedSpellsByLevel` value, current preparation count)
+ *  so feat-granted extras (Magic Initiate, etc.) are not silently stripped on
+ *  rest. The per-level table lives on the class definition
+ *  (`spellcasting.preparedSpellsByLevel`) — the single source of truth shared
+ *  with level-up — rather than being duplicated here. */
+function preparedCap(classDef: ClassDef | null, level: number, currentlyPreparedCount: number): number {
+  const tableValue = classDef ? preparedSpellsAt(classDef, level) : 0;
   return Math.max(tableValue, currentlyPreparedCount);
 }
 
@@ -121,11 +103,13 @@ export function buildLongRestPreview(inputs: RestingInputs): LongRestPreview {
     }
   }
 
-  // Wizard prep picker — only when the class is Wizard. The picker shows
-  // every spell in the spellbook; the player ticks up to `maxPrepared`.
+  // Spellbook prep picker — only for spellbook-learn-model casters (Wizard).
+  // The picker shows every spell in the spellbook; the player ticks up to
+  // `maxPrepared`. Driven by the class definition's learn model rather than a
+  // class-name check, so a new spellbook class needs no engine change.
   let wizardSpellPrep: LongRestPreview['wizardSpellPrep'] | undefined;
-  const isWizard = (playerDef.className ?? '').toLowerCase() === 'wizard';
-  if (isWizard) {
+  const isSpellbookCaster = inputs.classDef?.spellcasting?.learnModel === 'spellbook';
+  if (isSpellbookCaster) {
     const book = playerDef.defaultSpellbookIds ?? [];
     const known = new Set(book);
     const spellbookSpells = spells
@@ -135,7 +119,7 @@ export function buildLongRestPreview(inputs: RestingInputs): LongRestPreview {
     wizardSpellPrep = {
       spellbookSpells,
       currentlyPrepared,
-      maxPrepared: wizardPreparedCap(playerDef.level, currentlyPrepared.length),
+      maxPrepared: preparedCap(inputs.classDef, playerDef.level, currentlyPrepared.length),
     };
   }
 
@@ -202,9 +186,9 @@ export function applyLongRest(
     npc.conditions = npc.conditions.filter((c) => !REST_CLEARABLE_CONDITIONS.has(c));
   }
 
-  // Wizard prepared-spell rebuild.
-  const isWizard = (playerDef.className ?? '').toLowerCase() === 'wizard';
-  if (isWizard && preview.wizardSpellPrep) {
+  // Spellbook prepared-spell rebuild (Wizard learn model).
+  const isSpellbookCaster = inputs.classDef?.spellcasting?.learnModel === 'spellbook';
+  if (isSpellbookCaster && preview.wizardSpellPrep) {
     const picks = choices.wizardPreparedSpellIds ?? [];
     const book = new Set(playerDef.defaultSpellbookIds ?? []);
     for (const id of picks) {

@@ -62,7 +62,7 @@ import { publishHpThresholdCrossings } from './ThresholdPublisher.js';
 import { WeaponDef } from './types.js';
 import { buildLevelUpPreview, applyLevelUp, applyLevelUpHistory, syncCharacterTracks } from './Leveling.js';
 import { canLevelUp } from '../../../shared/xpTable.js';
-import type { LevelUpPreview, LevelUpChoices, LongRestPreview, LongRestChoices } from '../../../shared/types.js';
+import type { LevelUpPreview, LevelUpChoices, LongRestPreview, LongRestChoices, ClassDef } from '../../../shared/types.js';
 import { buildLongRestPreview, applyLongRest } from './Resting.js';
 import { dispatchPlayerAction } from './playerActions/registry.js';
 
@@ -1293,6 +1293,14 @@ export class GameEngine {
 
   // ── Long Rest ──────────────────────────────────────────────────────────────
 
+  /** Resolve the player's `ClassDef` from the loaded class data, or null for
+   *  an unrecognised class. Used wherever rest / prep logic needs the class's
+   *  spellcasting metadata instead of branching on the class name. */
+  private resolvePlayerClassDef(): ClassDef | null {
+    const key = (this.playerDef.className ?? '').toLowerCase();
+    return this.defs.classes.find((c) => c.id.toLowerCase() === key) ?? null;
+  }
+
   /**
    * Build the SRD Long Rest preview the LongRestOverlay renders. Returns
    * `null` when the current encounter doesn't permit Long Rest or the
@@ -1306,6 +1314,7 @@ export class GameEngine {
       player: this.state.player,
       features: this.defs.features,
       spells: this.defs.spells,
+      classDef: this.resolvePlayerClassDef(),
       npcs: this.state.npcs,
     });
   }
@@ -1320,7 +1329,7 @@ export class GameEngine {
     if (!preview) throw new Error('Long Rest is not available here.');
 
     applyLongRest(
-      { playerDef: this.playerDef, player: this.state.player, features: this.defs.features, spells: this.defs.spells, npcs: this.state.npcs },
+      { playerDef: this.playerDef, player: this.state.player, features: this.defs.features, spells: this.defs.spells, classDef: this.resolvePlayerClassDef(), npcs: this.state.npcs },
       choices,
       preview,
     );

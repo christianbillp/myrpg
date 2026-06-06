@@ -804,9 +804,9 @@ SRD 5.2.1 Long Rest (Rules Glossary → Long Rest). Eligibility is per-encounter
 | GET | `/game/session/:id/long-rest` | Returns `{ preview: LongRestPreview \| null }`. `null` means the encounter doesn't permit Long Rest, or the player isn't in exploration. |
 | POST | `/game/session/:id/long-rest` | Body `{ choices: LongRestChoices }`. Server runs `commitLongRest`, persists the rested state to `CharSave` (HP, spell slots, prepared spells, resources), broadcasts a `state_update`, and returns `{ preview, state, playerDef }`. |
 
-### Wizard prepared-spell cap
+### Prepared-spell cap
 
-SRD Wizard Features table values for L1–L20, indexed by level (L1 = 4, L2 = 5, L5 = 9, …) live in `WIZARD_PREPARED_BY_LEVEL` inside `Resting.ts`. The effective cap is `max(table[level], currentlyPreparedCount)` so feat-granted extras (e.g. Magic Initiate adding a prepared spell at L1) survive rest.
+The per-level prepared-spell counts live on the **class definition** (`spellcasting.preparedSpellsByLevel`, e.g. Wizard L1 = 4, L2 = 5, L5 = 9, …) — the single source of truth shared with the level-up resolver via `preparedSpellsAt(classDef, level)` in `shared/classProgression.ts`. `Resting.ts` reads that table rather than duplicating it; the effective cap is `max(preparedSpellsAt(classDef, level), currentlyPreparedCount)` so feat-granted extras (e.g. Magic Initiate adding a prepared spell at L1) survive rest. The Long Rest prep picker itself is gated on `classDef.spellcasting.learnModel === 'spellbook'` (Wizard today), not a class-name check — a new spellbook class needs no engine change.
 
 ### Persistence
 
