@@ -42,6 +42,7 @@ describe('PlayerDef builder (US-122)', () => {
       baseAbilityScores: arr(15, 13, 14, 8, 12, 10),
       backgroundAbility: { kind: 'two-one', plusTwo: 'str', plusOne: 'con' },
       skillProficiencies: ['athletics', 'perception'],
+      speciesSkills: ['intimidation'], speciesFeat: 'alert',  // Human Skillful + Versatile
       equipmentChoice: 'A',
     };
     const r = buildPlayerDef(choices, defs);
@@ -71,6 +72,7 @@ describe('PlayerDef builder (US-122)', () => {
       baseAbilityScores: arr(8, 14, 13, 15, 12, 10),
       backgroundAbility: { kind: 'two-one', plusTwo: 'int', plusOne: 'con' },
       skillProficiencies: ['arcana', 'investigation'],
+      speciesSkills: ['perception'],  // Elf Keen Senses (insight/perception/survival)
       equipmentChoice: 'A',
       cantripIds: ['fire-bolt', 'light', 'ray-of-frost'],
       preparedSpellIds: ['magic-missile', 'shield', 'mage-armor', 'detect-magic'],
@@ -114,6 +116,7 @@ describe('PlayerDef builder (US-122)', () => {
       abilityMethod: 'standard-array', baseAbilityScores: arr(15, 13, 14, 8, 12, 10),
       backgroundAbility: { kind: 'two-one', plusTwo: 'str', plusOne: 'con' },
       skillProficiencies: ['athletics', 'perception'],
+      speciesSkills: ['intimidation'], speciesFeat: 'alert',  // Human grants
       languages: ['Elvish', 'Dwarvish'],
     };
     const r = buildPlayerDef(choices, defs);
@@ -142,10 +145,40 @@ describe('PlayerDef builder (US-122)', () => {
       name: 'X', speciesId: 'human', backgroundId: 'soldier', classId: 'fighter',
       abilityMethod: 'standard-array', baseAbilityScores: arr(15, 14, 13, 12, 10, 8),
       backgroundAbility: { kind: 'one-one-one' }, skillProficiencies: ['athletics', 'perception'],
+      speciesSkills: ['intimidation'], speciesFeat: 'alert',  // satisfy Human grants so only the language check fails
     };
     expect(buildPlayerDef({ ...base, languages: ['Abyssal', 'Elvish'] }, defs).ok).toBe(false);  // Abyssal is rare
     expect(buildPlayerDef({ ...base, languages: ['Elvish'] }, defs).ok).toBe(false);             // only 1 (needs 2)
     expect(buildPlayerDef({ ...base, languages: ['Common', 'Elvish'] }, defs).ok).toBe(false);   // Common not choosable
+  });
+
+  it('grants a Human its Skillful skill + Versatile Origin feat', () => {
+    const choices: CharacterCreationChoices = {
+      name: 'Versatile Hero', speciesId: 'human', backgroundId: 'soldier', classId: 'fighter',
+      abilityMethod: 'standard-array', baseAbilityScores: arr(15, 13, 14, 8, 12, 10),
+      backgroundAbility: { kind: 'two-one', plusTwo: 'str', plusOne: 'con' },
+      skillProficiencies: ['athletics', 'perception'],
+      speciesSkills: ['arcana'],   // Skillful: a free skill
+      speciesFeat: 'skilled',      // Versatile: an Origin feat
+    };
+    const r = buildPlayerDef(choices, defs);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.playerDef.skills.arcana).toBe(abilityModifier(r.playerDef.int) + 2);  // now proficient
+    expect(r.playerDef.featIds).toContain('skilled');
+    expect(r.playerDef.featIds.length).toBeGreaterThanOrEqual(2);  // background feat + origin feat
+  });
+
+  it('rejects a Human with no Origin feat or a non-Origin feat', () => {
+    const base: CharacterCreationChoices = {
+      name: 'H', speciesId: 'human', backgroundId: 'soldier', classId: 'fighter',
+      abilityMethod: 'standard-array', baseAbilityScores: arr(15, 14, 13, 12, 10, 8),
+      backgroundAbility: { kind: 'one-one-one' }, skillProficiencies: ['athletics', 'perception'],
+      speciesSkills: ['arcana'],
+    };
+    expect(buildPlayerDef(base, defs).ok).toBe(false);                              // no speciesFeat
+    expect(buildPlayerDef({ ...base, speciesFeat: 'great-weapon-fighting' }, defs).ok).toBe(false);  // not an Origin feat
+    expect(buildPlayerDef({ ...base, speciesFeat: 'alert' }, defs).ok).toBe(true);  // valid Origin feat
   });
 
   it('rejects an over-budget point-buy and a bad skill pick', () => {
@@ -153,6 +186,7 @@ describe('PlayerDef builder (US-122)', () => {
       name: 'X', speciesId: 'human', backgroundId: 'soldier', classId: 'fighter',
       abilityMethod: 'point-buy', baseAbilityScores: arr(15, 15, 15, 15, 8, 8),
       backgroundAbility: { kind: 'one-one-one' }, skillProficiencies: ['athletics', 'perception'],
+      speciesSkills: ['intimidation'], speciesFeat: 'alert',  // satisfy Human grants so only the intended check fails
     };
     expect(buildPlayerDef(base, defs).ok).toBe(false);  // 15,15,15,15 = 36 > 27
     const badSkill = { ...base, abilityMethod: 'standard-array' as const, baseAbilityScores: arr(15, 14, 13, 12, 10, 8), skillProficiencies: ['arcana', 'stealth'] };

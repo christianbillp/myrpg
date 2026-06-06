@@ -45,6 +45,10 @@ interface CreatorState {
   /** Source values to assign (Standard Array / rolled set). */
   pool: number[];
   skillPicks: Set<string>;
+  /** Species-granted skill picks (Human "Skillful"). */
+  speciesSkillPicks: Set<string>;
+  /** Species-granted Origin feat id (Human "Versatile"); "" when none/unset. */
+  speciesFeat: string;
   languagePicks: Set<string>;
   cantripPicks: Set<string>;
   spellPicks: Set<string>;
@@ -52,6 +56,13 @@ interface CreatorState {
 }
 
 const STEPS = ["Concept", "Origin", "Abilities", "Skills", "Spells", "Review"] as const;
+
+/** The 18 SRD skill ids (for the species "any skill" pick). */
+const ALL_SKILLS: readonly string[] = [
+  "acrobatics", "animalHandling", "arcana", "athletics", "deception", "history",
+  "insight", "intimidation", "investigation", "medicine", "nature", "perception",
+  "performance", "persuasion", "religion", "sleightOfHand", "stealth", "survival",
+];
 
 export class CharacterCreatorScene extends Phaser.Scene {
   private root: HTMLDivElement | null = null;
@@ -71,7 +82,8 @@ export class CharacterCreatorScene extends Phaser.Scene {
     scores: { str: 10, dex: 10, con: 10, int: 10, wis: 10, cha: 10 },
     backgroundAbility: { kind: "one-one-one" },  // replaced with the bg's first two on load
     pool: [...STANDARD_ARRAY],
-    skillPicks: new Set(), languagePicks: new Set(), cantripPicks: new Set(), spellPicks: new Set(),
+    skillPicks: new Set(), speciesSkillPicks: new Set(), speciesFeat: "",
+    languagePicks: new Set(), cantripPicks: new Set(), spellPicks: new Set(),
     equipmentChoice: "A",
   };
 
@@ -90,6 +102,7 @@ export class CharacterCreatorScene extends Phaser.Scene {
     this.state.backgroundId ||= this.backgrounds[0]?.id ?? "";
     this.state.classId ||= this.classes[0]?.id ?? "";
     this.state.backgroundAbility = this.defaultBackgroundAbility();
+    this.resetSpeciesGrants();
 
     this.buildShell();
     this.renderStep();
@@ -253,8 +266,13 @@ export class CharacterCreatorScene extends Phaser.Scene {
   // ── Step 1 — Origin ──────────────────────────────────────────────────────
   private renderOrigin(): void {
     const c = this.content!;
-    c.appendChild(this.selectRow("Species", this.species.map((s) => ({ value: s.id, label: s.name })), this.state.speciesId, (v) => { this.state.speciesId = v; this.renderStep(); }));
+    c.appendChild(this.selectRow("Species", this.species.map((s) => ({ value: s.id, label: s.name })), this.state.speciesId, (v) => {
+      this.state.speciesId = v;
+      this.resetSpeciesGrants();  // species grants (Skillful skill, Versatile feat) reset with the species
+      this.renderStep();
+    }));
     c.appendChild(this.speciesPanel());
+    c.appendChild(this.originFeatPicker());
     c.appendChild(this.selectRow("Background", this.backgrounds.map((b) => ({ value: b.id, label: b.name })), this.state.backgroundId, (v) => {
       this.state.backgroundId = v;
       this.state.backgroundAbility = this.defaultBackgroundAbility();  // keep the bonus choice valid for the new bg
@@ -431,6 +449,50 @@ export class CharacterCreatorScene extends Phaser.Scene {
     return wrap;
   }
 
+  // ── Species grants (Human Skillful + Versatile, US-122) ──────────────────
+  private currentSpecies(): SpeciesDef | undefined { return this.species.find((s) => s.id === this.state.speciesId); }
+  /** Number of free skill proficiencies the species grants (Human = 1). */
+  private speciesSkillCount(): number {
+    return this.currentSpecies()?.traits.map((t) => t.effects.skillProficiency).find(Boolean)?.count ?? 0;
+  }
+  /** Skills the species pick may choose from (`["any"]` → all 18). */
+  private speciesSkillChoices(): string[] {
+    const choices = this.currentSpecies()?.traits.map((t) => t.effects.skillProficiency).find(Boolean)?.choices ?? [];
+    return choices.includes("any") ? [...ALL_SKILLS] : choices;
+  }
+  private speciesGrantsOriginFeat(): boolean {
+    return !!this.currentSpecies()?.traits.some((t) => t.effects.originFeat);
+  }
+  private originFeats(): FeatDef[] { return this.feats.filter((f) => f.category === "origin"); }
+  /** Reset species-granted picks when the species changes (or on load). */
+  private resetSpeciesGrants(): void {
+    this.state.speciesSkillPicks = new Set();
+    this.state.speciesFeat = this.speciesGrantsOriginFeat() ? (this.originFeats()[0]?.id ?? "") : "";
+  }
+
+  /** Origin-feat picker shown under the Species panel when the species grants
+   *  one (Human "Versatile"): a dropdown of Origin-category feats + the chosen
+   *  feat's description. */
+  private originFeatPicker(): HTMLElement {
+    const wrap = document.createElement("div");
+    if (!this.speciesGrantsOriginFeat()) return wrap;
+    wrap.style.cssText = "margin:4px 0 12px;padding:8px 10px;border:1px solid #2a4a3a;background:#11201a;";
+    const feats = this.originFeats();
+    const head = document.createElement("div");
+    head.style.cssText = "font-size:11px;color:#9ac6a0;margin-bottom:6px;";
+    head.innerHTML = `Origin feat — <b>${esc(this.currentSpecies()?.name ?? "Species")}</b> grants an Origin feat of your choice:`;
+    wrap.appendChild(head);
+    wrap.appendChild(this.miniSelect("Feat", feats.map((f) => ({ value: f.id, label: f.name })), this.state.speciesFeat, (v) => { this.state.speciesFeat = v; this.renderStep(); }));
+    const sel = feats.find((f) => f.id === this.state.speciesFeat);
+    if (sel) {
+      const d = document.createElement("div");
+      d.style.cssText = "font-size:11px;color:#aabbcc;line-height:1.5;margin-top:6px;";
+      d.textContent = sel.description;
+      wrap.appendChild(d);
+    }
+    return wrap;
+  }
+
   /** Feature description panel shown under the Species dropdown (US-122). Lists
    *  the selected species' traits (Darkvision, resistances, etc.). */
   private speciesPanel(): HTMLElement {
@@ -558,6 +620,27 @@ export class CharacterCreatorScene extends Phaser.Scene {
         return true;
       }));
     }
+
+    // Species skill grant (Human "Skillful") — an extra proficiency in any skill
+    // the character doesn't already get from class/background.
+    const speciesCount = this.speciesSkillCount();
+    if (speciesCount > 0) {
+      const taken = new Set<string>([...this.state.skillPicks, ...(this.backgrounds.find((b) => b.id === this.state.backgroundId)?.skillProficiencies ?? [])]);
+      const sHead = document.createElement("div");
+      sHead.style.cssText = "font-size:12px;color:#9ac6a0;margin:14px 0 6px;";
+      const label = () => `${this.currentSpecies()?.name ?? "Species"} skill — choose ${speciesCount} more (${this.state.speciesSkillPicks.size}/${speciesCount}):`;
+      sHead.textContent = label();
+      c.appendChild(sHead);
+      for (const sk of this.speciesSkillChoices()) {
+        if (taken.has(sk)) continue;  // can't pick a skill you already have
+        c.appendChild(this.checkRow(prettify(sk), this.state.speciesSkillPicks.has(sk), (on) => {
+          if (on) { if (this.state.speciesSkillPicks.size >= speciesCount) return false; this.state.speciesSkillPicks.add(sk); }
+          else this.state.speciesSkillPicks.delete(sk);
+          sHead.textContent = label();
+          return true;
+        }));
+      }
+    }
   }
 
   // ── Step 4 — Spells (casters) ────────────────────────────────────────────
@@ -667,6 +750,8 @@ export class CharacterCreatorScene extends Phaser.Scene {
         baseAbilityScores: this.state.scores,
         backgroundAbility: this.state.backgroundAbility,
         skillProficiencies: [...this.state.skillPicks],
+        speciesSkills: [...this.state.speciesSkillPicks],
+        speciesFeat: this.state.speciesFeat || undefined,
         languages: [...this.state.languagePicks],
         equipmentChoice: this.state.equipmentChoice,
         cantripIds: cls?.spellcasting ? [...this.state.cantripPicks] : undefined,

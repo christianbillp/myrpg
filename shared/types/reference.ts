@@ -67,6 +67,12 @@ export interface SpeciesTraitEffects {
   damageResistance?: string[];
   savingThrowAdvantage?: Array<{ condition?: string; ability?: string }>;
   hpMaxBonus?: { atLevel1: number; perLevel: number };
+  /** SRD species skill grant (Human "Skillful") — choose `count` skills. `choices`
+   *  is `["any"]` for a free pick, or an explicit skill-id list. (US-122) */
+  skillProficiency?: { choices: string[]; count: number };
+  /** SRD species Origin-feat grant (Human "Versatile") — choose `count` feats.
+   *  `choices` is `"origin"` (any Origin-category feat) or an explicit id list. */
+  originFeat?: { choices: string | string[]; count: number };
   lineageChoice?: {
     spellcastingAbility: { choices: string[] };
     options: Array<{ id: string; level1?: { speedBonus?: number; [k: string]: unknown }; [k: string]: unknown }>;
