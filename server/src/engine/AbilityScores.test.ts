@@ -61,6 +61,19 @@ describe('Ability-score generation (US-122)', () => {
     expect(all.str).toBe(10);  // outside the allowed set — untouched
   });
 
+  it('caps a background increase at 20 (SRD: cannot raise a score above 20)', () => {
+    const allowed = ['str', 'con', 'dex'] as const;
+    // A rolled 19 + 2 would be 21 → capped to 20; a 20 + 1 stays 20.
+    const base = scores(19, 10, 20, 8, 8, 8);
+    const out = applyBackgroundAbilityChoice(base, { kind: 'two-one', plusTwo: 'str', plusOne: 'con' }, allowed);
+    expect(out.str).toBe(20);  // 19 + 2 capped at 20
+    expect(out.con).toBe(20);  // already 20, +1 stays 20
+    const all = applyBackgroundAbilityChoice(base, { kind: 'one-one-one' }, allowed);
+    expect(all.str).toBe(20);  // 19 + 1 = 20
+    expect(all.con).toBe(20);  // 20 + 1 capped
+    expect(all.dex).toBe(11);  // 10 + 1, no cap
+  });
+
   it('rejects a two-one choice that picks an ability outside the background set or repeats one', () => {
     const allowed = ['int', 'wis', 'cha'] as const;
     expect(isValidBackgroundAbilityChoice({ kind: 'two-one', plusTwo: 'str', plusOne: 'int' }, allowed)).toBe(false);

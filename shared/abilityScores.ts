@@ -81,19 +81,25 @@ export function isValidBackgroundAbilityChoice(
   return choice.plusTwo !== choice.plusOne && set.has(choice.plusTwo) && set.has(choice.plusOne);
 }
 
+/** Maximum a score may reach from a background increase (SRD: "None of these
+ *  increases can raise a score above 20"). */
+export const ABILITY_SCORE_MAX = 20;
+
 /** Apply a background ability-increase choice to a base score set, returning a
- *  new set (the base set is not mutated). */
+ *  new set (the base set is not mutated). Per SRD each increase is capped so it
+ *  cannot raise a score above 20. */
 export function applyBackgroundAbilityChoice(
   base: AbilityScores,
   choice: BackgroundAbilityChoice,
   allowed: readonly AbilityKey[],
 ): AbilityScores {
   const out: AbilityScores = { ...base };
+  const bump = (k: AbilityKey, by: number) => { out[k] = Math.min(ABILITY_SCORE_MAX, out[k] + by); };
   if (choice.kind === 'one-one-one') {
-    for (const k of allowed) out[k] += 1;
+    for (const k of allowed) bump(k, 1);
   } else {
-    out[choice.plusTwo] += 2;
-    out[choice.plusOne] += 1;
+    bump(choice.plusTwo, 2);
+    bump(choice.plusOne, 1);
   }
   return out;
 }
