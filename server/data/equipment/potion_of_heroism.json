@@ -1,0 +1,8 @@
+{
+  "id": "potion_of_heroism",
+  "name": "Potion of Heroism",
+  "type": "consumable",
+  "tempHpDice": 0,
+  "tempHpSides": 0,
+  "tempHpBonus": 10
+}

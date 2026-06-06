@@ -352,10 +352,23 @@ export function playerSecondWind(level: number): { healed: number; logs: LogEntr
   return { healed, logs: [{ left: `Second Wind — +${healed} HP restored`, right: `1d10+${level}=[${roll}]+${level}`, style: 'heal' }] };
 }
 
-export function drinkPotion(item: ConsumableDef): { healed: number; logs: LogEntry[] } {
-  const { total: healed, rolls } = rollDice(item.healDice, item.healSides);
-  const total = healed + item.healBonus;
-  return { healed: total, logs: [{ left: `Drinks ${item.name} — +${total} HP`, right: `${item.healDice}d${item.healSides}[${rolls.join(',')}]+${item.healBonus}`, style: 'heal' }] };
+export function drinkPotion(item: ConsumableDef): { healed: number; tempHp: number; logs: LogEntry[] } {
+  const logs: LogEntry[] = [];
+  let healed = 0;
+  if (item.healDice || item.healBonus) {
+    const { total, rolls } = rollDice(item.healDice ?? 0, item.healSides ?? 0);
+    healed = total + (item.healBonus ?? 0);
+    logs.push({ left: `Drinks ${item.name} — +${healed} HP`, right: `${item.healDice ?? 0}d${item.healSides ?? 0}[${rolls.join(',')}]+${item.healBonus ?? 0}`, style: 'heal' });
+  }
+  // US-124 potions beyond healing: temporary HP.
+  let tempHp = 0;
+  if (item.tempHpDice || item.tempHpBonus) {
+    const { total, rolls } = rollDice(item.tempHpDice ?? 0, item.tempHpSides ?? 0);
+    tempHp = total + (item.tempHpBonus ?? 0);
+    logs.push({ left: `Drinks ${item.name} — +${tempHp} temporary HP`, right: `${item.tempHpDice ?? 0}d${item.tempHpSides ?? 0}[${rolls.join(',')}]+${item.tempHpBonus ?? 0}`, style: 'heal' });
+  }
+  if (logs.length === 0) logs.push({ left: `Drinks ${item.name}`, style: 'status' });
+  return { healed, tempHp, logs };
 }
 
 export function rollDeathSave(): { roll: number; outcome: 'nat20' | 'success' | 'failure' | 'nat1' } {

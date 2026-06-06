@@ -422,9 +422,10 @@ Used from inventory. Currently only Health Potions are implemented.
 | `id` | string | Unique key. |
 | `name` | string | Display name. |
 | `type` | string | `"consumable"` |
-| `healDice` | number | Number of healing dice. |
-| `healSides` | number | Die size for healing roll. |
-| `healBonus` | number | Flat bonus added to healing. |
+| `healDice` | number | *(optional)* Number of healing dice. |
+| `healSides` | number | *(optional)* Die size for healing roll. |
+| `healBonus` | number | *(optional)* Flat bonus added to healing. |
+| `tempHpDice` `tempHpSides` `tempHpBonus` | number | *(optional, US-124)* Temporary HP granted on use — a non-healing potion (e.g. `potion_of_heroism`) omits the heal fields and sets these. Applied per the SRD temp-HP rule (higher of current vs granted; doesn't stack). |
 
 ---
 

@@ -364,9 +364,18 @@ export function doUsePotion(ctx: GameContext): void {
 
   const itemId = s.player.inventoryIds.splice(idx, 1)[0];
   const item = ctx.defs.equipment.find((i) => i.id === itemId) as ConsumableDef;
-  const { healed, logs } = drinkPotion(item);
-  const before = s.player.hp;
-  s.player.hp = Math.min(ctx.playerDef.maxHp, s.player.hp + healed);
-  ctx.addLogs([...logs, { left: `HP: ${before} → ${s.player.hp}/${ctx.playerDef.maxHp}`, style: 'status' }]);
+  const { healed, tempHp, logs } = drinkPotion(item);
+  const extra: LogEntry[] = [];
+  if (healed > 0) {
+    const before = s.player.hp;
+    s.player.hp = Math.min(ctx.playerDef.maxHp, s.player.hp + healed);
+    extra.push({ left: `HP: ${before} → ${s.player.hp}/${ctx.playerDef.maxHp}`, style: 'status' });
+  }
+  // SRD: Temporary HP doesn't stack — keep the higher of current vs granted.
+  if (tempHp > 0 && tempHp > (s.player.tempHp ?? 0)) {
+    s.player.tempHp = tempHp;
+    extra.push({ left: `Temporary HP: ${s.player.tempHp}`, style: 'status' });
+  }
+  ctx.addLogs([...logs, ...extra]);
   if (s.phase === 'player_turn') s.player.bonusActionUsed = true;
 }

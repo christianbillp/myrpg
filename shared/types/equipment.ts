@@ -8,7 +8,13 @@
 
 export interface ConsumableDef {
   id: string; name: string; type: 'consumable';
-  healDice: number; healSides: number; healBonus: number;
+  /** Healing rolled on use (`healDice`d`healSides` + `healBonus`). All optional
+   *  — a non-healing potion (e.g. a temp-HP draught) may omit them. */
+  healDice?: number; healSides?: number; healBonus?: number;
+  /** Temporary HP granted on use (US-124 potions beyond healing): rolled as
+   *  `tempHpDice`d`tempHpSides` + `tempHpBonus`. Applied per SRD temp-HP rules
+   *  (the higher of current vs granted; they don't stack). */
+  tempHpDice?: number; tempHpSides?: number; tempHpBonus?: number;
 }
 
 export type ArmorCategory = 'light' | 'medium' | 'heavy';
