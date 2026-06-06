@@ -138,6 +138,7 @@ SRD stat blocks for all creatures — both random enemies and the underlying sta
 | `resistances` | string[] | *(optional)* Damage types that deal half damage. |
 | `immunities` | string[] | *(optional)* Damage types that deal no damage. Immunity takes precedence over vulnerability. |
 | `conditionImmunities` | string[] | *(optional)* Conditions that cannot be applied to this creature. |
+| `multiattack` | number | *(optional)* SRD Multiattack (US-112): total melee attacks made on the creature's turn (each a separate roll with the same weapon). Absent / ≤ 1 = a single attack. `runEnemyTurn` rolls the extras; `runSingleEnemyTurn` applies them after the primary (and through the Shield reaction). |
 | `tokenAsset` | string | *(optional)* Path to the SVG token sprite. When omitted, the path is derived by convention: `/tokens/monster_<id>.svg`. See [tokens/](#tokens-1). |
 
 > **Monsters do not carry a `factionId`.** Monster JSONs are pure stat blocks (HP / AC / attacks / traits). Worldbuilding — faction membership, persona, named identity — lives on `NPCDef` (see [npcs/](#npcs)). When the deterministic encounter flow spawns a raw monster id (no NPC wrapper), `SpawnHelpers.spawnNpc` falls back to using the monster id itself as a faction-of-one. Encounter authors who want a raw monster spawn to participate in inter-faction politics should wrap the spawn in a thin `NPCDef` that declares the faction.

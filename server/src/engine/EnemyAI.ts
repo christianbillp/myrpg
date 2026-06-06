@@ -1,4 +1,4 @@
-import { NpcState, MonsterDef, GameEvent, LogEntry, AttackOnHitEffect } from './types.js';
+import { NpcState, MonsterDef, GameEvent, LogEntry, AttackOnHitEffect, ExtraAttack } from './types.js';
 import { tryNimbleEscape, enemyAttack, type RolledBonusDamage } from './CombatSystem.js';
 import { isIncapacitated, hasAttackDisadvantage, hasAttackAdvantage, hasSpeedZero, proneStandCost, grantsDisadvantageAgainst } from './ConditionSystem.js';
 
@@ -72,6 +72,11 @@ export interface EnemyTurnResult {
   /** Damage type of the primary attack (US-108) — threaded to the player damage
    *  path so species resistances apply. Undefined when no attack was made. */
   damageType?: string;
+  /** SRD Multiattack (US-112): additional attacks beyond the primary, each a
+   *  separate roll against the same target with the same Advantage state.
+   *  Applied by the caller after the primary (and after any Shield reaction).
+   *  Absent / empty for single-attack creatures. */
+  extraAttacks?: ExtraAttack[];
   /** On-hit effects authored on the attack (attach, etc.). The caller applies
    *  these only when the attack actually lands. */
   attackOnHit?: AttackOnHitEffect[];
@@ -177,6 +182,17 @@ export function runEnemyTurn(
   const { damage, isHit, isCrit, attackTotal, logs: attackLogs, bonusComponents } = enemyAttack(meleeAttack, target.ac, withAdvantage, withDisadvantage);
   logs.push(...attackLogs);
 
+  // SRD Multiattack (US-112): roll the remaining attacks now, with the same
+  // weapon and Advantage state. Each is a separate roll; the caller applies
+  // them after the primary (and after any Shield reaction the primary triggers).
+  const extraAttacks: ExtraAttack[] = [];
+  const totalAttacks = Math.max(1, def.multiattack ?? 1);
+  for (let i = 1; i < totalAttacks; i++) {
+    const ea = enemyAttack(meleeAttack, target.ac, withAdvantage, withDisadvantage);
+    logs.push(...ea.logs);
+    extraAttacks.push({ damage: ea.damage, isHit: ea.isHit, isCrit: ea.isCrit, damageType: meleeAttack.damageType, bonusComponents: ea.bonusComponents });
+  }
+
   // Making an attack gives away an unseen attacker's position — a hidden enemy
   // is revealed by its own strike, hit or miss (SRD 5.2.1: a hidden attacker
   // reveals its location when it attacks). The unseen-attacker advantage was
@@ -200,6 +216,7 @@ export function runEnemyTurn(
     damage, isHit, isCrit, attackTotal, attacked: true,
     attackedTargetId: target.id, damageType: meleeAttack.damageType,
     logs, events, finalTileX: tileX, finalTileY: tileY, hidden: enemyHidden, bonusComponents,
+    extraAttacks,
     attackOnHit: meleeAttack.onHit,
   };
 }

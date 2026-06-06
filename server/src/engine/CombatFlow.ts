@@ -763,6 +763,23 @@ export function doResolveReaction(ctx: GameContext, accept: boolean, events: Gam
       };
       applyEnemyHitToPlayer(ctx, attacker, synthResult, events);
     }
+    // SRD Multiattack (US-112): apply the attacker's remaining attacks after
+    // the primary (whether Shield was accepted or declined) so a Shield on the
+    // first hit doesn't cancel the rest of the multiattacker's turn. These were
+    // rolled before the prompt; if Shield was cast its +5 AC isn't retroactively
+    // re-checked here (documented minor compromise). Shield is always player-
+    // targeted, so the extras land on the player.
+    if (attacker && pending.extraAttacks?.length) {
+      for (const ex of pending.extraAttacks) {
+        if (!ex.isHit || s.player.hp <= 0) continue;
+        events.push({ type: 'play_sound', sound: 'physical_hit' });
+        applyEnemyHitToPlayer(ctx, attacker, {
+          damage: ex.damage, isCrit: ex.isCrit,
+          finalTileX: attacker.tileX, finalTileY: attacker.tileY,
+          bonusComponents: ex.bonusComponents, damageType: ex.damageType,
+        }, events);
+      }
+    }
     if (attacker) finalizeNpcTurn(ctx, attacker, events);
   }
 

@@ -6,7 +6,7 @@
  */
 
 // Cross-domain imports — keep these explicit so the dependency graph is visible.
-import type { RolledBonusDamage } from "./entities.js";
+import type { RolledBonusDamage, ExtraAttack } from "./entities.js";
 import type { LogEntry } from "./combatLog.js";
 
 //
@@ -38,6 +38,10 @@ export interface PendingReactionShield {
   incomingDamageType?: string;
   /** Secondary damage riders that also land if Shield is declined. */
   incomingBonusComponents: RolledBonusDamage[];
+  /** SRD Multiattack (US-112): the attacker's remaining attacks, applied after
+   *  the primary resolves (whether Shield is accepted or declined) so a Shield
+   *  on the first hit doesn't cancel the rest of a multiattacker's turn. */
+  extraAttacks?: ExtraAttack[];
   /** The attack roll total — exposed so the UI can explain what Shield would convert. */
   attackTotal: number;
   /** What the player's AC would become with Shield up. */

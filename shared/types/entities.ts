@@ -84,6 +84,17 @@ export interface RolledBonusDamage {
   rollStr: string;
 }
 
+/** One resolved extra attack from a Multiattack (US-112) — a separate roll
+ *  beyond the primary, applied by the caller after the primary (and after any
+ *  Shield reaction the primary triggers). */
+export interface ExtraAttack {
+  damage: number;
+  isHit: boolean;
+  isCrit: boolean;
+  damageType: string;
+  bonusComponents: RolledBonusDamage[];
+}
+
 export interface PlayerAttack {
   name: string;
   statKey: 'str' | 'dex';
@@ -337,6 +348,10 @@ export interface MonsterDef {
   size?: CreatureSize;
   speed: number;
   attacks: MonsterAttack[];
+  /** SRD Multiattack (US-112): total melee attacks this creature makes on its
+   *  turn. Absent / ≤ 1 means a single attack. Each is a separate attack roll
+   *  using the same chosen weapon. */
+  multiattack?: number;
   xp: number;
   cr: string;
   color: number;

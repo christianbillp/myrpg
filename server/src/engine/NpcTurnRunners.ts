@@ -13,7 +13,7 @@
  *     `doResolveReaction`).
  */
 import type { GameContext } from './GameContext.js';
-import type { GameEvent, NpcState, MonsterDef } from './types.js';
+import type { GameEvent, NpcState, MonsterDef, ExtraAttack } from './types.js';
 import {
   combatantDisplayName, playerCanReact, shieldAvailable,
   applyEnemyHitToPlayer, finalizeNpcTurn,
@@ -436,6 +436,7 @@ export function runSingleEnemyTurn(ctx: GameContext, npc: NpcState, events: Game
       incomingDamage: result.damage,
       incomingDamageType: result.damageType,
       incomingBonusComponents: result.bonusComponents,
+      extraAttacks: result.extraAttacks,
       attackTotal: result.attackTotal,
       shieldedAc: ctx.state.player.ac + 5,
       isCrit: result.isCrit,
@@ -458,8 +459,48 @@ export function runSingleEnemyTurn(ctx: GameContext, npc: NpcState, events: Game
       applyEnemyHitToNpc(ctx, npc, result.attackedTargetId, result);
     }
   }
+  // SRD Multiattack (US-112): the primary didn't pause for a reaction here, so
+  // apply the remaining attacks inline against the same target.
+  if (result.attacked && result.attackedTargetId && result.extraAttacks?.length) {
+    applyExtraAttacks(ctx, npc, result.attackedTargetId, result.extraAttacks, events);
+  }
   finalizeNpcTurn(ctx, npc, events);
   ctx.publish({ type: 'turn_ended', combatantId: npc.id });
+}
+
+/**
+ * Apply a Multiattack's extra attacks (US-112) against the same target as the
+ * primary. Each carries its own roll outcome; misses are skipped. Stops if the
+ * target drops. Extra attacks do NOT raise their own Shield prompt — only the
+ * primary does — but a Shield cast on the primary is already reflected in the
+ * player's AC, which these were rolled against on the resume path.
+ */
+function applyExtraAttacks(
+  ctx: GameContext,
+  attacker: NpcState,
+  attackedTargetId: string,
+  extras: ExtraAttack[],
+  events: GameEvent[],
+): void {
+  const s = ctx.state;
+  for (const ex of extras) {
+    if (!ex.isHit) continue;
+    if (attackedTargetId === 'player') {
+      if (s.player.hp <= 0) break;
+      events.push({ type: 'play_sound', sound: 'physical_hit' });
+      applyEnemyHitToPlayer(ctx, attacker, {
+        damage: ex.damage, isCrit: ex.isCrit,
+        finalTileX: attacker.tileX, finalTileY: attacker.tileY,
+        bonusComponents: ex.bonusComponents, damageType: ex.damageType,
+      }, events);
+    } else {
+      const t = s.npcs.find((n) => n.id === attackedTargetId);
+      if (!t || t.hp <= 0) break;
+      applyEnemyHitToNpc(ctx, attacker, attackedTargetId, {
+        damage: ex.damage, isCrit: ex.isCrit, bonusComponents: ex.bonusComponents,
+      });
+    }
+  }
 }
 
 /**
