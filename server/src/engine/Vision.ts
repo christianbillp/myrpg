@@ -48,6 +48,20 @@ export interface Observer {
   blinded?: boolean;
 }
 
+/** The player's effective senses: static species senses overlaid with any
+ *  granted by an active self-buff (Dwarf Stonecunning → Tremorsense). The
+ *  longest range per sense wins. */
+export function playerSenses(ctx: GameContext): Senses {
+  const base = ctx.playerDef.senses ?? {};
+  const buff = ctx.state.player.buffSenses;
+  if (!buff) return base;
+  const out: Senses = { ...base };
+  for (const k of ['darkvision', 'blindsight', 'tremorsense', 'truesight'] as const) {
+    if (typeof buff[k] === 'number') out[k] = Math.max(out[k] ?? 0, buff[k]!);
+  }
+  return out;
+}
+
 export interface VisionTarget {
   tileX: number;
   tileY: number;
@@ -180,7 +194,7 @@ const PASSIVE_REVEAL_RANGE_TILES = 10;
 export function runPassivePerceptionSweep(ctx: GameContext): string[] {
   const s = ctx.state;
   const px = s.player.tileX, py = s.player.tileY;
-  const observer: Observer = { tileX: px, tileY: py, senses: ctx.playerDef.senses };
+  const observer: Observer = { tileX: px, tileY: py, senses: playerSenses(ctx) };
   const passivePP = 10 + (ctx.playerDef.skills['perception'] ?? 0);
   const revealed: string[] = [];
 
@@ -250,7 +264,7 @@ export function runPerceptionSweep(ctx: GameContext, hider: 'player' | string): 
     if (typeof s.player.hideDC !== 'number') return false;
     hiderObs = {
       tileX: s.player.tileX, tileY: s.player.tileY,
-      senses: ctx.playerDef.senses,
+      senses: playerSenses(ctx),
     };
     hideDC = s.player.hideDC;
     hiderTarget = {
@@ -275,7 +289,7 @@ export function runPerceptionSweep(ctx: GameContext, hider: 'player' | string): 
     observers.push({
       id: 'player',
       pp: 10 + (ctx.playerDef.skills['perception'] ?? 0),
-      obs: { tileX: s.player.tileX, tileY: s.player.tileY, senses: ctx.playerDef.senses },
+      obs: { tileX: s.player.tileX, tileY: s.player.tileY, senses: playerSenses(ctx) },
       label: ctx.playerDef.name,
     });
   }

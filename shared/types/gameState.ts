@@ -7,7 +7,7 @@
 
 // Cross-domain imports — keep these explicit so the dependency graph is visible.
 import type { FeatureDef } from "./classes.js";
-import type { EquipmentSlots, OngoingEffect } from "./entities.js";
+import type { EquipmentSlots, OngoingEffect, Senses, CreatureSize } from "./entities.js";
 import type { GameState } from "./longRest.js";
 import type { Modifier } from "./modifiers.js";
 
@@ -105,6 +105,15 @@ export interface PlayerState {
    *  Added to base `playerDef.speed` when computing tile movement at the
    *  start of each player turn. Cleared on long rest. */
   speedBonus: number;
+  /** Special senses granted by active self-buffs (Dwarf Stonecunning →
+   *  Tremorsense), derived from buff `sense` modifiers by `recomputeBuffs` and
+   *  merged over `PlayerDef.senses` by the Vision layer. Absent when no
+   *  sense-granting buff is active. */
+  buffSenses?: Senses;
+  /** Creature size set by an active self-buff (Goliath Large Form → Large),
+   *  derived from a buff `size` modifier. Overrides `PlayerDef.size` for the
+   *  buff's duration. Absent when no size buff is active. */
+  buffSize?: CreatureSize;
   /** Set true by Expeditious Retreat; while active, the player may take the
    *  Dash action as a bonus action and receives the upfront Dash on the
    *  casting turn. Cleared when concentration on the spell ends. */

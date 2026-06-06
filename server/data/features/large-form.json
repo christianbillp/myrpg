@@ -1,0 +1,15 @@
+{
+  "id": "large-form",
+  "name": "Large Form",
+  "classId": "goliath",
+  "minLevel": 5,
+  "description": "Bonus Action: until the end of the encounter you become Large (if space allows), your Speed increases by 10 feet, and you have Advantage on Strength checks. You can use this once per Long Rest.",
+  "cost": { "kind": "bonus-action" },
+  "resource": { "kind": "uses-per-long-rest", "max": 1 },
+  "ui": {
+    "buttonLabel": "LARGE FORM",
+    "buttonColor": "#4a2f1a",
+    "resourceLabel": "Large Form: {remaining}/{max}"
+  },
+  "handler": "large-form"
+}

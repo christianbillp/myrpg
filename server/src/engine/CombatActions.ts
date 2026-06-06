@@ -650,7 +650,7 @@ function resolveUnarmedTarget(ctx: GameContext, targetId: string | undefined): N
   const s = ctx.state;
   const ok = (n: NpcState) => n.disposition === 'enemy' && n.hp > 0
     && chebyshev(s.player.tileX, s.player.tileY, n.tileX, n.tileY) <= 1
-    && withinShoveGrappleSize(ctx.playerDef.size, n.size);
+    && withinShoveGrappleSize(ctx.state.player.buffSize ?? ctx.playerDef.size, n.size);
   if (targetId) {
     const t = s.npcs.find((n) => n.id === targetId && ok(n));
     if (t) return t;

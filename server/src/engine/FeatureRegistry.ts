@@ -18,6 +18,7 @@ import type { GameContext } from './GameContext.js';
 import type { GameEvent } from './types.js';
 import { canUseFeature, playerArmorSpeedPenaltyFt } from './ActionGuards.js';
 import { speedAfterExhaustion } from './ConditionSystem.js';
+import { applySelfBuff } from './Buffs.js';
 import { playerSecondWind } from './CombatSystem.js';
 import { spellSaveDC, spellMod, npcSaveMod } from './SpellSystem.js';
 import { combatantDisplayName } from './CombatFlow.js';
@@ -132,6 +133,43 @@ registerFeatureHandler('adrenaline-rush', (ctx, featureId) => {
   s.player.bonusActionUsed = true;
   ctx.addLog({
     left: `${ctx.playerDef.name} surges with adrenaline — Dash (+${dashFt / 5} tiles) and ${pb} Temp HP (${s.player.resources[featureId]} uses left)`,
+    style: 'status',
+  });
+});
+
+/**
+ * Stonecunning (Dwarf species, US-122). A Bonus Action that grants Tremorsense
+ * 60 ft via a self-buff (`sense` modifier → `recomputeBuffs` → `buffSenses`,
+ * overlaid by the Vision layer). Uses = PB, refilled on a Long Rest. SRD ties
+ * this to touching a stone surface; the map has no stone-surface tile concept,
+ * so that prerequisite is not modelled.
+ */
+registerFeatureHandler('stonecunning', (ctx, featureId) => {
+  const s = ctx.state;
+  applySelfBuff(ctx, { spellId: 'stonecunning', modifiers: [{ type: 'sense', sense: 'tremorsense', range: 60 }] });
+  s.player.resources[featureId] = Math.max(0, (s.player.resources[featureId] ?? 0) - 1);
+  s.player.bonusActionUsed = true;
+  ctx.addLog({
+    left: `${ctx.playerDef.name} reads the trembling stone — Tremorsense 60 ft (${s.player.resources[featureId]} uses left)`,
+    style: 'status',
+  });
+});
+
+/**
+ * Large Form (Goliath species L5+, US-122). A Bonus Action that turns the
+ * Goliath Large and grants +10 ft Speed via a self-buff (`size` + `speed-bonus`
+ * modifiers → `recomputeBuffs`). Once per Long Rest. SRD also grants Advantage
+ * on Strength checks for the duration; ability checks have no advantage-source
+ * consumer yet, so that rider is not modelled (mirrors the Action Surge "no
+ * Magic action" gap — documented, not silently dropped).
+ */
+registerFeatureHandler('large-form', (ctx, featureId) => {
+  const s = ctx.state;
+  applySelfBuff(ctx, { spellId: 'large-form', modifiers: [{ type: 'size', size: 'large' }, { type: 'speed-bonus', value: 10 }] });
+  s.player.resources[featureId] = Math.max(0, (s.player.resources[featureId] ?? 0) - 1);
+  s.player.bonusActionUsed = true;
+  ctx.addLog({
+    left: `${ctx.playerDef.name} swells to Large — +10 ft Speed and the reach to grapple bigger foes`,
     style: 'status',
   });
 });

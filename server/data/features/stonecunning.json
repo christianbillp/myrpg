@@ -1,0 +1,15 @@
+{
+  "id": "stonecunning",
+  "name": "Stonecunning",
+  "classId": "dwarf",
+  "minLevel": 1,
+  "description": "Bonus Action: gain Tremorsense with a range of 60 feet until the end of the encounter. You regain all expended uses when you finish a Long Rest.",
+  "cost": { "kind": "bonus-action" },
+  "resource": { "kind": "uses-per-long-rest", "max": 2 },
+  "ui": {
+    "buttonLabel": "STONECUNNING",
+    "buttonColor": "#3a3a2a",
+    "resourceLabel": "Stonecunning: {remaining}/{max}"
+  },
+  "handler": "stonecunning"
+}

@@ -35,6 +35,8 @@ export function speciesAbilityResources(playerDef: PlayerDef, allSpecies: Specie
  *  stays the single source of truth for the ability's cost / resource / UI. */
 const TRAIT_FEATURE: ReadonlyArray<{ effect: string; featureId: string; minLevel: number }> = [
   { effect: 'dashAsBonusAction', featureId: 'adrenaline-rush', minLevel: 1 },
+  { effect: 'tremorsense', featureId: 'stonecunning', minLevel: 1 },
+  { effect: 'largeForm', featureId: 'large-form', minLevel: 5 },
 ];
 
 /** Activated-ability FeatureDef ids the character's species grants at its

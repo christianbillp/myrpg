@@ -15,6 +15,7 @@
  */
 import type { GameContext } from './GameContext.js';
 import type { ActiveBuff } from './types.js';
+import { sizeRank } from '../../../shared/types.js';
 import { applyEquipment } from './EquipmentSystem.js';
 
 /** Anything that can carry buffs — the player or an NPC. Both expose a
@@ -62,6 +63,20 @@ export function recomputeBuffs(ctx: GameContext): void {
   p.enhancedAbility = enhanced && enhanced.type === 'enhanced-ability' ? enhanced.ability : undefined;
   p.speedBonus = mods.reduce((max, m) => (m.type === 'speed-bonus' ? Math.max(max, m.value) : max), 0);
   p.magicWeaponBonus = mods.reduce((max, m) => (m.type === 'weapon-bonus' ? Math.max(max, m.value) : max), 0);
+  // Sense-granting buffs (Stonecunning → Tremorsense): merge the longest range
+  // per sense into `buffSenses`; the Vision layer overlays it on the static
+  // species senses. Cleared to undefined when no sense buff remains.
+  const senseMods = mods.filter((m): m is Extract<typeof m, { type: 'sense' }> => m.type === 'sense');
+  if (senseMods.length) {
+    const bs: Record<string, number> = {};
+    for (const m of senseMods) bs[m.sense] = Math.max(bs[m.sense] ?? 0, m.range);
+    p.buffSenses = bs;
+  } else {
+    p.buffSenses = undefined;
+  }
+  // Size-setting buffs (Large Form → Large): the largest wins.
+  const sizeMods = mods.filter((m): m is Extract<typeof m, { type: 'size' }> => m.type === 'size');
+  p.buffSize = sizeMods.length ? sizeMods.map((m) => m.size).reduce((a, b) => (sizeRank(b) > sizeRank(a) ? b : a)) : undefined;
   p.mirrorImages = buffs.find((b) => b.spellId === 'mirror-image')?.charges ?? 0;
   // shieldActive is owned outside the buff list (Shield is a reaction) — pass
   // it through unchanged; mageArmor now comes from the derived flag above.

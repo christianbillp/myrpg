@@ -18,8 +18,15 @@ export type Modifier =
   | { type: 'advantage'; on: 'attack' | 'save' | 'check' | 'initiative'; key?: string }
   /** Flat bonus to weapon attack AND damage rolls (Magic Weapon). */
   | { type: 'weapon-bonus'; value: number }
-  /** Flat bonus to movement speed in feet (Longstrider). */
+  /** Flat bonus to movement speed in feet (Longstrider, Goliath Large Form). */
   | { type: 'speed-bonus'; value: number }
+  /** A special sense granted for the buff's duration (Dwarf Stonecunning →
+   *  Tremorsense). Derived into `PlayerState.buffSenses` by `recomputeBuffs` and
+   *  merged over the static `PlayerDef.senses` by the Vision layer. */
+  | { type: 'sense'; sense: 'darkvision' | 'blindsight' | 'tremorsense' | 'truesight'; range: number }
+  /** Creature size set for the buff's duration (Goliath Large Form → Large).
+   *  Derived into `PlayerState.buffSize`; consumers read the effective size. */
+  | { type: 'size'; size: 'tiny' | 'small' | 'medium' | 'large' | 'huge' | 'gargantuan' }
   /** Advantage on ability checks of one ability score (Enhance Ability — the
    *  chosen ability). Projected onto `PlayerState.enhancedAbility`. */
   | { type: 'enhanced-ability'; ability: 'str' | 'dex' | 'con' | 'int' | 'wis' | 'cha' };
