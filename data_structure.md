@@ -613,7 +613,7 @@ Each spell carries SRD metadata (level, school, classes, casting time, range, co
 | `hpPool` | object? | *(Color Spray)* `{ dice: int, sides: int }`. Rolled once at cast; living creatures in the AOE are sorted by HP ascending and consume the pool until exhausted. Affected targets receive `effect.onFail` conditions. |
 | `chainOnDoubles` | object? | *(Chromatic Orb)* `{ rangeFeet: int }`. When two damage dice match, the spell leaps to the nearest other valid enemy within range and makes a fresh attack roll. |
 | `tempHpRoll` | object? | *(False Life)* `{ dice: int, sides: int, bonus?: int }`. Rolls temp HP at cast; applied to `PlayerState.tempHp` using the higher-of-two rule. |
-| `heal` | object? | *(Cure Wounds, Healing Word — US-120)* `{ dice: int, sides: int }`. `resolveHealSpell` restores HP = roll(dice + upcast, sides) + spellcasting-ability mod, clamped to the target's max HP, on the caster or a chosen ally; reviving a downed ally (0 HP) clears Unconscious/Stable. |
+| `heal` | object? | *(Cure Wounds, Healing Word — US-120)* `{ dice: int, sides: int, perLevel?: int }`. `resolveHealSpell` restores HP = roll(dice + perLevel×upcast, sides) + spellcasting-ability mod (`perLevel` defaults to `dice`), clamped to the target's max HP, on the caster or a chosen ally; reviving a downed ally (0 HP) clears Unconscious/Stable. |
 | `description` | string | The full SRD spell text — used by the AIGM for ruling and shown to the player. |
 | `scaling` | string? | "Cantrip Upgrade" or "Using a Higher-Level Spell Slot" text. |
 

@@ -1,0 +1,8 @@
+{
+  "id": "divine-intervention",
+  "name": "Divine Intervention",
+  "classId": "cleric",
+  "minLevel": 10,
+  "description": "As a Magic action, choose any Cleric spell of level 5 or lower that doesn't require a Reaction to cast, and cast it without expending a spell slot or needing Material components. Once you use this feature, you can't use it again until you finish a Long Rest.",
+  "cost": { "kind": "action" }
+}

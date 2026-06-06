@@ -1,0 +1,78 @@
+{
+  "id": "cleric",
+  "name": "Cleric",
+  "description": "A priestly champion who wields divine magic in service of a higher power. SRD 5.2.1 (2024) class data; covers levels 1–20 of the base class. The Life Domain subclass lives in a separate JSON.",
+
+  "primaryAbility": ["wis"],
+  "hitDie": 8,
+  "fixedHpPerLevel": 5,
+  "savingThrows": ["wis", "cha"],
+  "skillChoices": {
+    "count": 2,
+    "options": ["history", "insight", "medicine", "persuasion", "religion"]
+  },
+  "weaponProficiencies": ["simple"],
+  "armorTraining": ["light", "medium", "shields"],
+  "toolProficiencies": [],
+  "subclassLevels": [3, 6, 17],
+
+  "spellcasting": {
+    "ability": "wis",
+    "slotTableKind": "full",
+    "learnModel": "from-class-list",
+    "recovery": "long-rest",
+    "ritual": "ritual-only",
+    "focus": ["holy-symbol"],
+    "cantripsKnownByLevel": [3, 3, 3, 4, 4, 4, 4, 4, 4, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5],
+    "preparedSpellsByLevel": [4, 5, 6, 7, 9, 10, 11, 12, 14, 15, 16, 16, 17, 17, 18, 18, 19, 20, 21, 22],
+    "spellSlotsByLevel": [
+      [2, 0, 0, 0, 0, 0, 0, 0, 0],
+      [3, 0, 0, 0, 0, 0, 0, 0, 0],
+      [4, 2, 0, 0, 0, 0, 0, 0, 0],
+      [4, 3, 0, 0, 0, 0, 0, 0, 0],
+      [4, 3, 2, 0, 0, 0, 0, 0, 0],
+      [4, 3, 3, 0, 0, 0, 0, 0, 0],
+      [4, 3, 3, 1, 0, 0, 0, 0, 0],
+      [4, 3, 3, 2, 0, 0, 0, 0, 0],
+      [4, 3, 3, 3, 1, 0, 0, 0, 0],
+      [4, 3, 3, 3, 2, 0, 0, 0, 0],
+      [4, 3, 3, 3, 2, 1, 0, 0, 0],
+      [4, 3, 3, 3, 2, 1, 0, 0, 0],
+      [4, 3, 3, 3, 2, 1, 1, 0, 0],
+      [4, 3, 3, 3, 2, 1, 1, 0, 0],
+      [4, 3, 3, 3, 2, 1, 1, 1, 0],
+      [4, 3, 3, 3, 2, 1, 1, 1, 0],
+      [4, 3, 3, 3, 2, 1, 1, 1, 1],
+      [4, 3, 3, 3, 3, 1, 1, 1, 1],
+      [4, 3, 3, 3, 3, 2, 1, 1, 1],
+      [4, 3, 3, 3, 3, 2, 2, 1, 1]
+    ]
+  },
+
+  "tracksByLevel": {
+    "channel-divinity-uses": [0, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 4, 4, 4]
+  },
+
+  "progression": [
+    { "level":  1, "features": ["cleric-spellcasting", "divine-order"] },
+    { "level":  2, "features": ["channel-divinity"] },
+    { "level":  3, "subclass": true, "choices": [{ "kind": "subclass-choice" }] },
+    { "level":  4, "choices": [{ "kind": "asi-or-feat" }] },
+    { "level":  5, "features": ["sear-undead"] },
+    { "level":  6, "subclass": true },
+    { "level":  7, "features": ["blessed-strikes"] },
+    { "level":  8, "choices": [{ "kind": "asi-or-feat" }] },
+    { "level":  9 },
+    { "level": 10, "features": ["divine-intervention"] },
+    { "level": 11 },
+    { "level": 12, "choices": [{ "kind": "asi-or-feat" }] },
+    { "level": 13 },
+    { "level": 14, "features": ["improved-blessed-strikes"] },
+    { "level": 15 },
+    { "level": 16, "choices": [{ "kind": "asi-or-feat" }] },
+    { "level": 17, "subclass": true },
+    { "level": 18 },
+    { "level": 19, "features": ["epic-boon"], "choices": [{ "kind": "epic-boon-choice" }] },
+    { "level": 20, "features": ["greater-divine-intervention"] }
+  ]
+}

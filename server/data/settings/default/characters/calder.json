@@ -1,0 +1,71 @@
+{
+  "id": "calder",
+  "name": "Brother Calder",
+  "tokenAsset": "/tokens/player_dwarf_fighter.svg",
+  "speciesName": "Hill Dwarf",
+  "speciesId": "dwarf",
+  "className": "Cleric",
+  "backgroundId": "acolyte",
+  "featIds": [],
+  "level": 1,
+  "maxHp": 10,
+  "str": 13,
+  "dex": 10,
+  "con": 14,
+  "int": 10,
+  "wis": 16,
+  "cha": 12,
+  "proficiencyBonus": 2,
+  "savingThrowProficiencies": [
+    "wis",
+    "cha"
+  ],
+  "skills": {
+    "acrobatics": 0,
+    "animalHandling": 3,
+    "arcana": 0,
+    "athletics": 1,
+    "deception": 1,
+    "history": 0,
+    "insight": 5,
+    "intimidation": 1,
+    "investigation": 0,
+    "medicine": 5,
+    "nature": 0,
+    "perception": 3,
+    "performance": 1,
+    "persuasion": 3,
+    "religion": 2,
+    "sleightOfHand": 0,
+    "stealth": 0,
+    "survival": 3
+  },
+  "hitDieType": 8,
+  "sneakAttackDice": 0,
+  "color": 13743000,
+  "xp": 0,
+  "defaultEquipment": {
+    "armorId": "scale_mail",
+    "weaponId": "quarterstaff",
+    "shieldId": null
+  },
+  "defaultInventoryIds": [],
+  "defaultCp": 1500,
+  "spellcastingAbility": "wis",
+  "defaultCantripIds": [
+    "sacred-flame",
+    "light",
+    "mending"
+  ],
+  "defaultPreparedSpellIds": [
+    "cure-wounds",
+    "healing-word",
+    "guiding-bolt",
+    "detect-magic"
+  ],
+  "defaultSpellSlots": [
+    2
+  ],
+  "shortDescription": "A steady hill dwarf cleric who mends wounds and meets the wicked with radiant fire.",
+  "description": "Raised in a mountain temple, Calder took vows young and has tended the hurt and the dying ever since. Calm, dependable, and quietly unyielding against the undead."
+}

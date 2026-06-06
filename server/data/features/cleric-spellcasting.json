@@ -1,0 +1,8 @@
+{
+  "id": "cleric-spellcasting",
+  "name": "Spellcasting",
+  "classId": "cleric",
+  "minLevel": 1,
+  "description": "You prepare and cast Cleric spells from the Cleric spell list, using Wisdom as your spellcasting ability. Your spell save DC equals 8 + your Wisdom modifier + your Proficiency Bonus. Whenever you finish a Long Rest, you can change your list of prepared spells.",
+  "cost": { "kind": "passive" }
+}

@@ -1,0 +1,17 @@
+{
+  "id": "cure-wounds",
+  "name": "Cure Wounds",
+  "level": 1,
+  "school": "abjuration",
+  "classes": ["cleric"],
+  "castingTime": "action",
+  "range": "Touch",
+  "rangeFeet": 5,
+  "components": { "verbal": true, "somatic": true, "material": null },
+  "duration": "Instantaneous",
+  "concentration": false,
+  "ritual": false,
+  "heal": { "dice": 2, "sides": 8 },
+  "description": "A creature you touch regains a number of Hit Points equal to 2d8 plus your spellcasting ability modifier.",
+  "scaling": "The healing increases by 2d8 for each spell slot level above 1."
+}

@@ -1374,7 +1374,8 @@ function resolveHealSpell(ctx: GameContext, spell: SpellDef, targetIds: string[]
   if (!spell.heal) return false;
   const s = ctx.state;
   const upcast = Math.max(0, slotLevel - spell.level);
-  const { total } = rollDamage(spell.heal.dice + upcast, spell.heal.sides);
+  const perLevel = spell.heal.perLevel ?? spell.heal.dice;
+  const { total } = rollDamage(spell.heal.dice + perLevel * upcast, spell.heal.sides);
   const amount = Math.max(1, total + spellMod(ctx));
 
   const tid = targetIds?.[0] ?? s.selectedTargetId ?? 'player';

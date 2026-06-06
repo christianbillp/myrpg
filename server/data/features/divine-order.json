@@ -1,0 +1,8 @@
+{
+  "id": "divine-order",
+  "name": "Divine Order",
+  "classId": "cleric",
+  "minLevel": 1,
+  "description": "You dedicate yourself to a sacred role. As a Protector, you gain proficiency with Martial weapons and training with Heavy armor. As a Thaumaturge, you know one extra Cleric cantrip and add your Wisdom modifier to your Intelligence (Arcana or Religion) checks.",
+  "cost": { "kind": "passive" }
+}

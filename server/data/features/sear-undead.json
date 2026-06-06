@@ -1,0 +1,8 @@
+{
+  "id": "sear-undead",
+  "name": "Sear Undead",
+  "classId": "cleric",
+  "minLevel": 5,
+  "description": "Whenever you use Turn Undead, you can roll a number of d8s equal to your Wisdom modifier (minimum of 1d8) and add the rolls together. Each Undead that fails its saving throw takes Radiant damage equal to that total. This damage doesn't end the turn effect.",
+  "cost": { "kind": "passive" }
+}

@@ -1,0 +1,8 @@
+{
+  "id": "improved-blessed-strikes",
+  "name": "Improved Blessed Strikes",
+  "classId": "cleric",
+  "minLevel": 14,
+  "description": "The option you chose for Blessed Strikes grows more powerful. Divine Strike: the extra damage increases to 2d8. Potent Spellcasting: when you deal damage to a creature with a Cleric cantrip, you can grant a number of Temporary Hit Points equal to twice your Wisdom modifier to yourself or another creature within 60 feet of yourself.",
+  "cost": { "kind": "passive" }
+}

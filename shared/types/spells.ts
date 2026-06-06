@@ -140,10 +140,11 @@ export interface SpellDef {
   tempHpRoll?: { dice: number; sides: number; bonus?: number };
   /** SRD healing spell (Cure Wounds, Healing Word). The target — the caster or
    *  an ally, including a creature at 0 HP — regains HP equal to the roll plus
-   *  the caster's spellcasting ability modifier; upcasting adds `dice` more
-   *  dice per slot level above the spell's base level. Healing never exceeds the
+   *  the caster's spellcasting ability modifier; upcasting adds `perLevel` more
+   *  dice per slot level above the spell's base level (defaults to `dice`, since
+   *  SRD healing spells add their base dice per level). Healing never exceeds the
    *  target's max HP, and reviving a downed ally clears Unconscious/Stable. */
-  heal?: { dice: number; sides: number };
+  heal?: { dice: number; sides: number; perLevel?: number };
   /** SRD True Strike: the spell makes one attack with the caster's
    *  currently-equipped weapon using their spellcasting ability mod for
    *  both attack and damage rolls. On hit, the damage type defaults to the
