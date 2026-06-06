@@ -75,7 +75,7 @@ All D&D 5e SRD 5.2.1 mechanics — movement, combat, action economy, checks, sav
 - **Phase 4 — Spell-system depth:** US-116 (upcast-slot BUG fix + UI, V/S/M components, Cylinder/Emanation AoE, Dispel Magic).
 - **Phase 5 — Monster stat-block depth:** US-117.
 - **Phase 6 — Survival & world hazards:** US-118.
-- **Phase 7 — Class breadth & leveling:** ◐ US-119 level past L4 + L5+ features + fighting styles + epic boons (**core done** — PB-bug fix, Extra Attack, all L5+ feature defs, Archery wiring, Epic Boon builder; active-feature effect-wiring is a documented follow-up) · US-120 new classes (Cleric first) · US-121 multiclassing.
+- **Phase 7 — Class breadth & leveling:** ◐ US-119 level past L4 + L5+ features + fighting styles + epic boons (**core done** — PB-bug fix, Extra Attack, all L5+ feature defs, Archery wiring, Epic Boon builder; active-feature effect-wiring is a documented follow-up) · ◐ US-120 new classes — **Cleric MVP done** (full caster + healing + from-class-list prep + Life Domain + Channel Divinity; more classes later) · ⬜ US-121 multiclassing (next).
 - **Phase 8 — Character creation:** US-122 creation flow + ability-score generation · US-123 languages.
 - **Phase 9 — Items & economy:** ✅ US-124 magic items (enhancement bonuses, attunement, scrolls, potions-beyond-healing, identify) · ⬜ US-125 encumbrance / currency / tools / mounts.
 
