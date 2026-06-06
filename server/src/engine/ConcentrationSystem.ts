@@ -77,13 +77,12 @@ export function endConcentration(ctx: GameContext, reason: string): void {
   // buff cleanup above; clear the end-on-attack pointer so a future cast starts
   // clean.
   if (spellId === 'invisibility') s.player.invisibilityTargetId = undefined;
-  // Flaming Sphere (Concentration) — despawn the sphere when the spell
-  // ends. The summon NPC carries `summonSpellId === 'flaming-sphere'`,
-  // so the filter picks it up no matter how many were placed.
-  if (spellId === 'flaming-sphere') {
-    for (const sphere of s.npcs.filter((n) => n.summonSpellId === 'flaming-sphere' && n.summonOwnerId === 'player')) {
-      ctx.removeNpc(sphere.id);
-    }
+  // Concentration-bound summons (Flaming Sphere, …) despawn when the spell
+  // ends. Each summon NPC carries the `summonSpellId` that conjured it, so
+  // dropping every player-owned summon from the ending spell is generic — a
+  // new tethered-summon spell gets this for free, no id branch.
+  for (const summon of s.npcs.filter((n) => n.summonSpellId === spellId && n.summonOwnerId === 'player')) {
+    ctx.removeNpc(summon.id);
   }
   // (Ray of Enfeeblement's `enfeebled` is stripped by the generic
   // `effect.onFail` cleanup above — no spell-specific branch needed.)
