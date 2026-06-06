@@ -15,7 +15,7 @@ export type PlayerAction =
   | { type: 'moveTo'; tileX: number; tileY: number }
   | { type: 'attack'; targetId?: string }
   | { type: 'throw'; itemId: string; targetId?: string }
-  | { type: 'castSpell'; spellId: string; slotLevel: number; targetIds?: string[]; tile?: { x: number; y: number }; asRitual?: boolean; damageTypeChoice?: string; onFailChoice?: string; abilityChoice?: 'str' | 'dex' | 'con' | 'int' | 'wis' | 'cha' }
+  | { type: 'castSpell'; spellId: string; slotLevel: number; targetIds?: string[]; tile?: { x: number; y: number }; asRitual?: boolean; damageTypeChoice?: string; onFailChoice?: string; abilityChoice?: 'str' | 'dex' | 'con' | 'int' | 'wis' | 'cha'; scrollItemId?: string }
   /** Voluntarily drop the spell currently in `PlayerState.concentratingOn`.
    *  No action cost per SRD. Strips any conditions the spell applied and
    *  clears self-buff flags it set. No-op when not concentrating. */
@@ -32,6 +32,7 @@ export type PlayerAction =
   | { type: 'shove'; targetId?: string; effect?: 'push' | 'prone' }
   | { type: 'attune'; itemId: string }
   | { type: 'unattune'; itemId: string }
+  | { type: 'useScroll'; itemId: string }
   | { type: 'dash' }
   | { type: 'dodge' }
   | { type: 'disengage' }

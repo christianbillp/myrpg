@@ -101,6 +101,8 @@ export interface CharacterSheetCallbacks {
   onEquip: (slot: "armor" | "weapon" | "shield", itemId: string) => void;
   onUnequip: (slot: "armor" | "weapon" | "shield") => void;
   onUse: (itemId: string) => void;
+  /** Read a spell scroll (US-124): server casts the scroll's spell and consumes it. */
+  onCastScroll: (itemId: string) => void;
   /** Begin a normal cast for the named spell. Caller handles target prompting + closing the sheet. */
   onCastSpell: (spellId: string) => void;
   /** Begin a ritual cast for the named spell (no slot, exploring-only). */
@@ -518,6 +520,7 @@ export class CharacterSheetOverlay extends BaseOverlay {
     const consumables = inventory.filter((i) => i.type === "consumable");
     const ammunition  = inventory.filter((i) => i.type === "ammunition");
     const gear        = inventory.filter((i) => i.type === "gear");
+    const scrolls     = inventory.filter((i) => i.type === "scroll");
 
     const eqGroups: { item: EquipmentDef; count: number }[] = [];
     equippable.forEach((item) => {
@@ -577,6 +580,19 @@ export class CharacterSheetOverlay extends BaseOverlay {
         <span style="font-size:9px;color:#445566;width:72px;text-align:center;">AMMO</span>
       </div>`).join("");
 
+    // Spell scrolls (US-124): each lists a CAST button that reads the scroll
+    // (server resolves the spell + targeting; the scroll is consumed).
+    const scrollRows = scrolls.map((sc) => `
+      <div style="display:flex;align-items:center;justify-content:space-between;height:28px;padding:0 2px;">
+        <span style="font-size:11px;color:#b59bd8;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;margin-right:8px;">
+          ${escHtml(sc.name)}
+        </span>
+        <button data-cast-scroll="${escHtml(sc.id)}" class="gui-btn-overlay"
+          style="width:72px;height:22px;background:#1a1030;border:1px solid #7a5aaa;color:#c9b3e8;font-size:10px;">
+          CAST
+        </button>
+      </div>`).join("");
+
     const gGroups: Record<string, { name: string; count: number }> = {};
     gear.forEach((g) => {
       if (!gGroups[g.id]) gGroups[g.id] = { name: g.name, count: 0 };
@@ -590,7 +606,7 @@ export class CharacterSheetOverlay extends BaseOverlay {
         <span style="font-size:9px;color:#445566;width:72px;text-align:center;">GEAR</span>
       </div>`).join("");
 
-    const emptyCarried = eqGroups.length === 0 && Object.keys(cGroups).length === 0 && Object.keys(aGroups).length === 0 && Object.keys(gGroups).length === 0
+    const emptyCarried = eqGroups.length === 0 && Object.keys(cGroups).length === 0 && Object.keys(aGroups).length === 0 && Object.keys(gGroups).length === 0 && scrolls.length === 0
       ? `<div style="font-size:11px;color:#334455;padding:8px 2px;">No items carried.</div>`
       : "";
 
@@ -604,7 +620,7 @@ export class CharacterSheetOverlay extends BaseOverlay {
       <div style="height:1px;background:${DIM};margin:6px 0;"></div>
       <div style="font-size:10px;color:#556677;margin-bottom:4px;">CARRIED</div>
       <div style="flex:1;overflow-y:auto;scrollbar-width:thin;scrollbar-color:${ACCENT} transparent;min-height:0;" data-carry-area>
-        ${eqRows}${cRows}${aRows}${gRows}${emptyCarried}
+        ${eqRows}${cRows}${scrollRows}${aRows}${gRows}${emptyCarried}
       </div>
 
       <div style="height:1px;background:${DIM};margin:6px 0;"></div>
@@ -626,6 +642,9 @@ export class CharacterSheetOverlay extends BaseOverlay {
     });
     this.contentEl.querySelectorAll<HTMLButtonElement>("[data-use]").forEach(btn => {
       btn.addEventListener("pointerdown", () => this.callbacks.onUse(btn.dataset.use!));
+    });
+    this.contentEl.querySelectorAll<HTMLButtonElement>("[data-cast-scroll]").forEach(btn => {
+      btn.addEventListener("pointerdown", () => this.callbacks.onCastScroll(btn.dataset.castScroll!));
     });
   }
 

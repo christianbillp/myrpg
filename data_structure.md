@@ -429,6 +429,22 @@ Used from inventory. Currently only Health Potions are implemented.
 
 ---
 
+### type: `"scroll"`
+
+Single-use spell scroll (US-124). When read, it casts `spellId` and is consumed.
+
+| Field | Type | Notes |
+|---|---|---|
+| `id` | string | Unique key, e.g. `"scroll_of_magic_missile"`. |
+| `name` | string | Display name. |
+| `type` | string | `"scroll"` |
+| `spellId` | string | Id of the `SpellDef` cast on use. |
+| `magic` / `rarity` | — | Optional `MagicItemProps`. |
+
+Casting from a scroll (`doCastSpell` with `scrollItemId`, driven by the `useScroll` action) **bypasses the prepared/known + slot gate**, spends **no spell slot** (the scroll is the resource, consumed on cast), but still costs the spell's action. Targeting reuses the normal resolver (selected-target fallback for attack/auto-hit spells); the Equipment tab renders a **CAST** button per scroll. Shipped: `scroll_of_magic_missile`.
+
+---
+
 ### type: `"ammunition"`
 
 Stackable inventory item consumed automatically per ranged shot. Distinct from `consumable` so the Inventory Overlay can render it in its own section (no USE button — fired implicitly by the ATTACK action when a ranged weapon is equipped). Arrows recovered from the battlefield (the 50% per-shot recovery rule) are placed on the map as `mapItems` referencing this item by `id`.

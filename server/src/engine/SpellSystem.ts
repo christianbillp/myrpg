@@ -25,7 +25,7 @@ import { Logger } from '../Logger.js';
 import { canSee as visCanSee } from './Vision.js';
 import { hasModifierFlag, hasAdvantageOn } from './Modifiers.js';
 import { applySelfBuff, applyBuffTo } from './Buffs.js';
-import { SPEED_ZERO_CONDITIONS } from './ConditionSystem.js';
+import { SPEED_ZERO_CONDITIONS, isIncapacitated } from './ConditionSystem.js';
 import {
   tilesInArea, playerInArea, creaturesInArea,
   sphereRadiusTiles, chebyshevDiscTiles,
@@ -123,13 +123,15 @@ function applyDamageToNpc(
 
 // ── Action-economy + slot consumption ────────────────────────────────────────
 
-function consumeCastingResources(ctx: GameContext, spell: SpellDef, slotLevel: number, asRitual: boolean): void {
+function consumeCastingResources(ctx: GameContext, spell: SpellDef, slotLevel: number, asRitual: boolean, fromScroll = false): void {
   const s = ctx.state;
   // Ritual casts don't consume a spell slot (SRD: the spell is cast over 10
   // minutes from the spellbook). They also don't spend the action/bonus
   // action — they're a fictional time cost, only legal out of combat.
   if (asRitual) return;
-  if (spell.level > 0) {
+  // Scroll casts (US-124): expend no spell slot — the scroll itself is the
+  // resource (consumed by the caller) — but still cost the spell's action.
+  if (spell.level > 0 && !fromScroll) {
     const slotIdx = spell.level - 1;
     const before = s.player.spellSlots[slotIdx] ?? 0;
     s.player.spellSlots[slotIdx] = Math.max(0, before - 1);
@@ -1653,6 +1655,33 @@ function maybeAggroOnCast(
  * Resolve a player spell cast. Validates eligibility, consumes resources,
  * dispatches to the right resolution branch based on the spell's JSON shape.
  */
+/**
+ * US-124 — use a Spell Scroll from inventory. Resolves the scroll's spell and
+ * casts it via the scroll path (no slot; scroll consumed). Targeting reuses the
+ * normal resolver: attack / auto-hit spells fall back to the selected target,
+ * self / utility spells need none. (AOE-tile scrolls that need a chosen tile
+ * are not yet supported by this no-prompt path.)
+ */
+export function doUseScroll(ctx: GameContext, scrollItemId: string, events: GameEvent[]): void {
+  if (!ctx.state.player.inventoryIds.includes(scrollItemId)) return;
+  const scroll = ctx.defs.equipment.find((i) => i.id === scrollItemId);
+  if (!scroll || scroll.type !== 'scroll') return;
+  const spellId = (scroll as { spellId: string }).spellId;
+  const spell = ctx.defs.spells.find((sp) => sp.id === spellId);
+  if (!spell) return;
+  // Action economy: casting from a scroll still costs the spell's action. In
+  // combat, refuse when the required economy slot is already spent (the scroll
+  // path bypasses canCastSpell, so guard here).
+  const s = ctx.state;
+  if (s.phase === 'player_turn') {
+    if (isIncapacitated(s.player.conditions)) return;
+    if (spell.castingTime === 'action' && s.player.actionUsed) { ctx.addLog({ left: `No action left to read the scroll.`, style: 'miss' }); return; }
+    if (spell.castingTime === 'bonus-action' && s.player.bonusActionUsed) { ctx.addLog({ left: `No bonus action left to read the scroll.`, style: 'miss' }); return; }
+    if (spell.castingTime === 'reaction') return;  // reaction-cast scrolls aren't player-triggerable here
+  }
+  doCastSpell(ctx, spellId, spell.level, undefined, undefined, false, events, undefined, undefined, undefined, scrollItemId);
+}
+
 export function doCastSpell(
   ctx: GameContext,
   spellId: string,
@@ -1664,9 +1693,19 @@ export function doCastSpell(
   damageTypeChoice?: string,
   onFailChoice?: string,
   abilityChoice?: 'str' | 'dex' | 'con' | 'int' | 'wis' | 'cha',
+  /** When set, this cast comes from a Spell Scroll (US-124): no slot is spent
+   *  (the scroll is consumed instead) and the prepared/known + slot gates are
+   *  bypassed. The scroll's action cost still applies. */
+  scrollItemId?: string,
 ): void {
   const baseSpell = ctx.defs.spells.find((sp) => sp.id === spellId);
   if (!baseSpell) return;
+  // Validate the scroll up front: must be in inventory and cast its spell.
+  if (scrollItemId !== undefined) {
+    if (!ctx.state.player.inventoryIds.includes(scrollItemId)) return;
+    const scroll = ctx.defs.equipment.find((i) => i.id === scrollItemId);
+    if (!scroll || scroll.type !== 'scroll' || (scroll as { spellId: string }).spellId !== spellId) return;
+  }
 
   // Spells that let the caster pick a damage type at cast time (Chromatic
   // Orb, …) carry a `damageTypeChoices` list. Apply the player's choice by
@@ -1702,7 +1741,9 @@ export function doCastSpell(
     const known = ctx.playerDef.defaultSpellbookIds?.includes(spellId)
       ?? ctx.playerDef.defaultCantripIds?.includes(spellId);
     if (!known) { ctx.addLog({ left: `${spell.name} is not in your spellbook`, style: 'miss' }); return; }
-  } else if (!canCastSpell(ctx, spellId)) {
+  } else if (scrollItemId === undefined && !canCastSpell(ctx, spellId)) {
+    // Scroll casts bypass the prepared/known + slot gate (the scroll IS the
+    // resource); a normal cast must pass `canCastSpell`.
     return;
   }
 
@@ -1764,7 +1805,14 @@ export function doCastSpell(
   // rolls and area effects see them as valid hostiles.
   maybeAggroOnCast(ctx, spell, targetIds, tile, events);
 
-  consumeCastingResources(ctx, spell, slotLevel, asRitual);
+  consumeCastingResources(ctx, spell, slotLevel, asRitual, scrollItemId !== undefined);
+
+  // US-124: the scroll is expended on casting (regardless of hit/miss).
+  if (scrollItemId !== undefined) {
+    const idx = ctx.state.player.inventoryIds.indexOf(scrollItemId);
+    if (idx !== -1) ctx.state.player.inventoryIds.splice(idx, 1);
+    ctx.addLog({ left: `The scroll crumbles to ash as ${spell.name} is cast.`, style: 'status' });
+  }
 
   // SRD: a spell with a Verbal component spoken aloud breaks Hide on the
   // caster. We emit a `noise` event at the caster's tile; the Sound bus

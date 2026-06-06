@@ -123,5 +123,18 @@ export interface GearDef {
   areaDenial?: AreaDenialDef;
 }
 
+/**
+ * Spell scroll (US-124): a single-use item that casts its `spellId` when used,
+ * without expending a spell slot, then is consumed. Reuses the normal cast
+ * resolver + targeting; casting from a scroll bypasses the prepared/known and
+ * slot gates but still costs the spell's action.
+ */
+export interface ScrollDef extends MagicItemProps {
+  id: string; name: string; type: 'scroll';
+  /** Id of the `SpellDef` this scroll casts. */
+  spellId: string;
+  costCp?: number;
+}
+
 export type EquipmentDef = ArmorDef | ShieldDef | WeaponDef;
-export type ItemDef = ConsumableDef | AmmunitionDef | EquipmentDef | GearDef;
+export type ItemDef = ConsumableDef | AmmunitionDef | EquipmentDef | GearDef | ScrollDef;

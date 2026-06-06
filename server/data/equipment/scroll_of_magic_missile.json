@@ -1,0 +1,8 @@
+{
+  "id": "scroll_of_magic_missile",
+  "name": "Scroll of Magic Missile",
+  "type": "scroll",
+  "spellId": "magic-missile",
+  "magic": true,
+  "rarity": "common"
+}

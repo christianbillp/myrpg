@@ -24,7 +24,7 @@ import type { PlayerAction } from '../../../../shared/types.js';
 // Delegated imports — same set the old switch used.
 import { doMove as exDoMove, doMoveTo as exDoMoveTo, doSearch as exDoSearch, doShortRest as exDoShortRest, doUsePotion as exDoUsePotion } from '../ExplorationActions.js';
 import { doAttack as caDoAttack, doDash as caDoDash, doDodge as caDoDodge, doDisengage as caDoDisengage, doDetach as caDoDetach, doHide as caDoHide, throwItem as caThrowItem, doResolveReroll as caDoResolveReroll, doGrapple as caDoGrapple, doShove as caDoShove } from '../CombatActions.js';
-import { doCastSpell as spDoCastSpell } from '../SpellSystem.js';
+import { doCastSpell as spDoCastSpell, doUseScroll as spDoUseScroll } from '../SpellSystem.js';
 import { doEquip as ivDoEquip, doUnequip as ivDoUnequip, doAttune as ivDoAttune, doUnattune as ivDoUnattune } from '../InventoryActions.js';
 import { doCommandSummon, checkSummonTether } from '../SummonSystem.js';
 import { doResolveReaction as cfDoResolveReaction, endPlayerTurn as cfEndPlayerTurn, doRollDeathSave as cfDoRollDeathSave } from '../CombatFlow.js';
@@ -61,7 +61,7 @@ export const PLAYER_ACTIONS: Registry = {
   },
   castSpell:            (ctx, a, events) => spDoCastSpell(
     ctx, a.spellId, a.slotLevel, a.targetIds, a.tile, !!a.asRitual, events,
-    a.damageTypeChoice, a.onFailChoice, a.abilityChoice,
+    a.damageTypeChoice, a.onFailChoice, a.abilityChoice, a.scrollItemId,
   ),
   releaseConcentration: (ctx)            => endConcentration(ctx, 'released by caster'),
   hide:                 (ctx)            => caDoHide(ctx),
@@ -92,6 +92,7 @@ export const PLAYER_ACTIONS: Registry = {
   unequip:              (ctx, a)         => ivDoUnequip(ctx, a.slot),
   attune:               (ctx, a)         => ivDoAttune(ctx, a.itemId),
   unattune:             (ctx, a)         => ivDoUnattune(ctx, a.itemId),
+  useScroll:            (ctx, a, events) => spDoUseScroll(ctx, a.itemId, events),
   selectTarget:         (ctx, a)         => { ctx.state.selectedTargetId = a.entityId; },
   scrollLog:            (ctx, a)         => {
     const s = ctx.state;

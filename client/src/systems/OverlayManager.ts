@@ -16,6 +16,8 @@ export interface OverlayCallbacks {
   onEquip: (slot: "armor" | "weapon" | "shield", itemId: string) => void;
   onUnequip: (slot: "armor" | "weapon" | "shield") => void;
   onUsePotion: () => void;
+  /** Read a spell scroll (US-124) — sends `useScroll`. */
+  onUseScroll: (itemId: string) => void;
   /** Begin a normal cast — caller is responsible for prompting for a target if the spell needs one. */
   onBeginSpellCast: (spellId: string) => void;
   /** Begin a ritual cast — exploring-only, no slot consumed. Caller handles target prompting. */
@@ -164,6 +166,7 @@ export class OverlayManager {
       onEquip:   (slot, itemId) => this.callbacks.onEquip(slot, itemId),
       onUnequip: (slot)         => this.callbacks.onUnequip(slot),
       onUse:     (_itemId)      => this.callbacks.onUsePotion(),
+      onCastScroll: (itemId)    => { this.closeCharacterSheet(); this.callbacks.onUseScroll(itemId); },
       onCastSpell:  (spellId)   => { this.closeCharacterSheet(); this.callbacks.onBeginSpellCast(spellId); },
       onRitualCast: (spellId)   => { this.closeCharacterSheet(); this.callbacks.onBeginRitualCast(spellId); },
       onClose:   ()             => { this.characterSheet = null; WorldPause.release('overlay:character-sheet'); },

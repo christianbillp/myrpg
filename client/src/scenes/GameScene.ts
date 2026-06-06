@@ -296,6 +296,7 @@ export class GameScene extends Phaser.Scene {
       onEquip:     (slot, itemId) => gameClient.sendAction({ type: "equip", slot, itemId }),
       onUnequip:   (slot) => gameClient.sendAction({ type: "unequip", slot }),
       onUsePotion: () => gameClient.sendAction({ type: "usePotion" }),
+      onUseScroll: (itemId) => gameClient.sendAction({ type: "useScroll", itemId }),
       onBeginSpellCast:  (spellId) => this.beginSpellCast(spellId, false),
       onBeginRitualCast: (spellId) => this.beginSpellCast(spellId, true),
       onAcceptReaction:  () => gameClient.sendAction({ type: "resolveReaction", accept: true }),
