@@ -8,9 +8,11 @@
  * straight reads off `getDefs()`.
  */
 import type { FastifyInstance } from "fastify";
-import { readFile, readdir } from "fs/promises";
+import { readFile, readdir, writeFile, mkdir } from "fs/promises";
+import { existsSync } from "fs";
 import { join } from "path";
 import type { AppCtx } from "./ctx.js";
+import { buildPlayerDef, type CharacterCreationChoices } from "../engine/CharacterBuilder.js";
 
 async function readDir<T>(dir: string): Promise<T[]> {
   const files = await readdir(dir);
@@ -21,8 +23,32 @@ async function readDir<T>(dir: string): Promise<T[]> {
 }
 
 export function registerDefsRoutes(server: FastifyInstance, ctx: AppCtx): void {
-  const { getDefs, settingSubDir } = ctx;
+  const { getDefs, settingSubDir, loadDefs } = ctx;
   server.get("/characters",    async () => getDefs().playerDefs);
+
+  // Character creation (US-122): build a complete PlayerDef from the player's
+  // choices, persist it into the active setting's `characters/` dir so it joins
+  // the roster on the next `loadDefs`, and return the created def.
+  server.post("/characters", async (request, reply) => {
+    const choices = request.body as CharacterCreationChoices;
+    const defs = getDefs();
+    const result = buildPlayerDef(choices, defs);
+    if (!result.ok) return reply.code(400).send({ error: result.error });
+
+    const dir = settingSubDir("characters");
+    if (!dir) return reply.code(409).send({ error: "No active setting to save the character into." });
+    await mkdir(dir, { recursive: true });
+
+    // Ensure a unique id so two same-named characters don't overwrite.
+    let id = result.playerDef.id;
+    let n = 2;
+    while (existsSync(join(dir, `${id}.json`))) id = `${result.playerDef.id}-${n++}`;
+    const playerDef = { ...result.playerDef, id };
+
+    await writeFile(join(dir, `${id}.json`), JSON.stringify(playerDef, null, 2));
+    await loadDefs();
+    return { playerDef };
+  });
   server.get("/monsters",      async () => getDefs().monsters);
   server.get("/npcs",          async () => getDefs().npcs);
   server.get("/factions",      async () => getDefs().factions);

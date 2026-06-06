@@ -25,7 +25,7 @@ import {
 } from '../../../shared/abilityScores.js';
 import type {
   PlayerDef, ClassDef, BackgroundDef, SpeciesDef, FeatDef, FeatureDef, SpellDef,
-  EquipmentDef, PlayerAttack,
+  ItemDef, PlayerAttack,
 } from './types.js';
 
 /** SRD 4d6-drop-lowest: roll four d6, discard the lowest, sum the rest. */
@@ -47,7 +47,7 @@ export interface CharacterBuilderDefs {
   species: SpeciesDef[];
   feats: FeatDef[];
   features: FeatureDef[];
-  equipment: EquipmentDef[];
+  equipment: ItemDef[];
   spells: SpellDef[];
 }
 
