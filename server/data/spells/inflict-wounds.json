@@ -1,0 +1,18 @@
+{
+  "id": "inflict-wounds",
+  "name": "Inflict Wounds",
+  "level": 1,
+  "school": "necromancy",
+  "classes": ["cleric"],
+  "castingTime": "action",
+  "range": "Touch",
+  "rangeFeet": 5,
+  "components": { "verbal": true, "somatic": true, "material": null },
+  "duration": "Instantaneous",
+  "concentration": false,
+  "ritual": false,
+  "save": { "ability": "con", "halfOnSuccess": true },
+  "damage": { "dice": 2, "sides": 10, "type": "necrotic" },
+  "description": "A creature you touch makes a Constitution saving throw, taking 2d10 Necrotic damage on a failed save or half as much damage on a successful one.",
+  "scaling": "The damage increases by 1d10 for each spell slot level above 1."
+}

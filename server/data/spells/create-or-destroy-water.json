@@ -1,0 +1,16 @@
+{
+  "id": "create-or-destroy-water",
+  "name": "Create or Destroy Water",
+  "level": 1,
+  "school": "transmutation",
+  "classes": ["cleric", "druid"],
+  "castingTime": "action",
+  "range": "30 feet",
+  "rangeFeet": 30,
+  "components": { "verbal": true, "somatic": true, "material": "a mix of water and sand" },
+  "duration": "Instantaneous",
+  "concentration": false,
+  "ritual": false,
+  "description": "You do one of the following: Create Water — create up to 10 gallons of clean water within range in an open container, or rain in a 30-foot Cube that extinguishes exposed flames. Destroy Water — destroy up to 10 gallons of water in an open container, or destroy fog in a 30-foot Cube. Engine: a utility spell with no combat consumer; narrated by the AIGM.",
+  "scaling": "You create or destroy 10 additional gallons of water, or the Cube grows by 5 feet, for each spell slot level above 1."
+}

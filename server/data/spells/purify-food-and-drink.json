@@ -1,0 +1,15 @@
+{
+  "id": "purify-food-and-drink",
+  "name": "Purify Food and Drink",
+  "level": 1,
+  "school": "transmutation",
+  "classes": ["cleric", "druid", "paladin"],
+  "castingTime": "action",
+  "range": "10 feet",
+  "rangeFeet": 10,
+  "components": { "verbal": true, "somatic": true, "material": null },
+  "duration": "Instantaneous",
+  "concentration": false,
+  "ritual": true,
+  "description": "You remove poison and rot from nonmagical food and drink in a 5-foot-radius Sphere centered on a point within range. Engine: a utility spell with no combat consumer; narrated by the AIGM."
+}

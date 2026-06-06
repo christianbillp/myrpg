@@ -1,0 +1,16 @@
+{
+  "id": "detect-evil-and-good",
+  "name": "Detect Evil and Good",
+  "level": 1,
+  "school": "divination",
+  "classes": ["cleric", "paladin"],
+  "castingTime": "action",
+  "range": "Self",
+  "rangeFeet": 0,
+  "components": { "verbal": true, "somatic": true, "material": null },
+  "duration": "Concentration, up to 10 minutes",
+  "durationRounds": 100,
+  "concentration": true,
+  "ritual": false,
+  "description": "For the duration, you sense the location of any Aberration, Celestial, Elemental, Fey, Fiend, or Undead within 30 feet of yourself, and whether the Hallow spell is active there. Blocked by 1 foot of stone/dirt/wood, 1 inch of metal, or a thin sheet of lead. Engine: a detection utility narrated by the AIGM."
+}

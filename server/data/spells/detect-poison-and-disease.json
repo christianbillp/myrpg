@@ -1,0 +1,16 @@
+{
+  "id": "detect-poison-and-disease",
+  "name": "Detect Poison and Disease",
+  "level": 1,
+  "school": "divination",
+  "classes": ["cleric", "druid", "paladin", "ranger"],
+  "castingTime": "action",
+  "range": "Self",
+  "rangeFeet": 0,
+  "components": { "verbal": true, "somatic": true, "material": "a yew leaf" },
+  "duration": "Concentration, up to 10 minutes",
+  "durationRounds": 100,
+  "concentration": true,
+  "ritual": true,
+  "description": "For the duration, you sense the location of poisons, poisonous or venomous creatures, and magical contagions within 30 feet of yourself, and the kind of each. Blocked by 1 foot of stone/dirt/wood, 1 inch of metal, or a thin sheet of lead. Engine: a detection utility narrated by the AIGM."
+}

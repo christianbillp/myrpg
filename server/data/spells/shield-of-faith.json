@@ -1,0 +1,16 @@
+{
+  "id": "shield-of-faith",
+  "name": "Shield of Faith",
+  "level": 1,
+  "school": "abjuration",
+  "classes": ["cleric", "paladin"],
+  "castingTime": "bonus-action",
+  "range": "60 feet",
+  "rangeFeet": 60,
+  "components": { "verbal": true, "somatic": true, "material": "a prayer scroll" },
+  "duration": "Concentration, up to 10 minutes",
+  "durationRounds": 100,
+  "concentration": true,
+  "ritual": false,
+  "description": "A shimmering field surrounds a creature of your choice within range, granting it a +2 bonus to AC for the duration. Engine: the +2 AC is descriptive only until a flat-AC buff modifier lands."
+}

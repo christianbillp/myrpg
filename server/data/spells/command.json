@@ -1,0 +1,17 @@
+{
+  "id": "command",
+  "name": "Command",
+  "level": 1,
+  "school": "enchantment",
+  "classes": ["bard", "cleric", "paladin"],
+  "castingTime": "action",
+  "range": "60 feet",
+  "rangeFeet": 60,
+  "components": { "verbal": true, "somatic": false, "material": null },
+  "duration": "Instantaneous",
+  "concentration": false,
+  "ritual": false,
+  "save": { "ability": "wis", "halfOnSuccess": false },
+  "description": "You speak a one-word command to a creature you can see within range. The target must succeed on a Wisdom saving throw or follow the command on its next turn. Choose the command from these options: Approach, Drop, Flee, Grovel (Prone), or Halt. Engine: the forced behaviour is descriptive only — the save is rolled, but the AI compulsion isn't modelled.",
+  "scaling": "You can affect one additional creature for each spell slot level above 1."
+}

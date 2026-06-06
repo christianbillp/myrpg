@@ -1,0 +1,18 @@
+{
+  "id": "bane",
+  "name": "Bane",
+  "level": 1,
+  "school": "enchantment",
+  "classes": ["bard", "cleric", "warlock"],
+  "castingTime": "action",
+  "range": "30 feet",
+  "rangeFeet": 30,
+  "components": { "verbal": true, "somatic": true, "material": "a drop of blood" },
+  "duration": "Concentration, up to 1 minute",
+  "durationRounds": 10,
+  "concentration": true,
+  "ritual": false,
+  "save": { "ability": "cha", "halfOnSuccess": false },
+  "description": "Up to three creatures of your choice that you can see within range must each make a Charisma saving throw. Whenever a target that fails this save makes an attack roll or a saving throw before the spell ends, the target must subtract 1d4 from the attack roll or save. Engine: the -1d4 rider is descriptive only until the d20-test buff primitive lands.",
+  "scaling": "You can target one additional creature for each spell slot level above 1."
+}
