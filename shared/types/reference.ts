@@ -5,6 +5,7 @@
  * re-exports every domain module under `shared/types/`).
  */
 
+import type { Modifier } from "./modifiers.js";
 
 export interface FeatEffects {
   savageAttacker?: boolean;
@@ -45,6 +46,10 @@ export interface FeatDef {
   };
   description: string;
   effects: FeatEffects;
+  /** Typed modifiers this feat contributes (crit-range, flags, advantage).
+   *  Aggregated onto `PlayerDef.modifiers` and queried by resolvers — the
+   *  data-driven replacement for the ad-hoc `effects` flags. */
+  modifiers?: Modifier[];
 }
 
 export interface BackgroundDef {

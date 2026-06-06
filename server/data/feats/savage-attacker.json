@@ -9,7 +9,6 @@
     "repeatable": false
   },
   "description": "Once per turn when you hit a target with a weapon, you can roll the weapon's damage dice twice and use either roll against the target.",
-  "effects": {
-    "savageAttacker": true
-  }
+  "effects": {},
+  "modifiers": [{ "type": "flag", "name": "savage-attacker" }]
 }

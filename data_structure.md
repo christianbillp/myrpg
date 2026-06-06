@@ -26,7 +26,7 @@ server/data/
 One file per playable character. Defines identity, ability scores, class features, and default loadout. Several fields are **not stored in the JSON** — they are computed at runtime in this order:
 
 1. `applySpecies` — reads `speciesId` + `speciesLineage` from `species/` to derive `speed`
-2. `applyFeats` — reads `featIds` from `feats/` to derive `savageAttacker` and `fightingStyleDefense`
+2. `applyModifiers` — aggregates the `modifiers` from this character's `featIds` (`feats/`) + `defaultFeatureIds` (`features/`) onto `PlayerDef.modifiers`, then derives the legacy `savageAttacker` / `fightingStyleDefense` booleans from it (see [Modifier aggregator](#modifier-aggregator))
 3. `applyEquipment` — reads `defaultEquipment` from `equipment/` to derive effective `ac` and `mainAttack`
 
 ### Fields
@@ -40,7 +40,7 @@ One file per playable character. Defines identity, ability scores, class feature
 | `speciesLineage` | string \| null | Lineage sub-choice within the species (e.g. `"wood-elf"` within Elf). `null` for species with no lineage option. |
 | `className` | string | e.g. `"Fighter"`, `"Rogue"`. |
 | `backgroundId` | string | `id` of an entry in `backgrounds/`. |
-| `featIds` | string[] | Ordered list of feat `id` values from `feats/`. Processed by `applyFeats` to set `savageAttacker` and `fightingStyleDefense`. |
+| `featIds` | string[] | Ordered list of feat `id` values from `feats/`. Each feat's `modifiers` are aggregated by `applyModifiers` onto `PlayerDef.modifiers`. |
 | `level` | number | Character level. Determines Hit Dice count. |
 | `maxHp` | number | Maximum hit points. |
 | `str` `dex` `con` `int` `wis` `cha` | number | Ability scores (standard 3–20 range). |
@@ -68,8 +68,9 @@ One file per playable character. Defines identity, ability scores, class feature
 | Field | Computed by | How |
 |---|---|---|
 | `speed` | `applySpecies` | Species base speed + lineage speed bonus (e.g. Wood Elf +5) |
-| `savageAttacker` | `applyFeats` | `true` if any feat in `featIds` has `effects.savageAttacker` |
-| `fightingStyleDefense` | `applyFeats` | `true` if any feat in `featIds` has `effects.armorAcBonus` |
+| `modifiers` | `applyModifiers` | Flat list of typed `Modifier`s aggregated from this character's feats + class features (`crit-range`, `flag`, `advantage`). Queried by resolvers via `Modifiers.ts` helpers. |
+| `savageAttacker` | `applyModifiers` | Legacy projection: `true` if `modifiers` contains a `flag: "savage-attacker"` (Savage Attacker feat) |
+| `fightingStyleDefense` | `applyModifiers` | Legacy projection: `true` if `modifiers` contains a `flag: "fighting-style-defense"` (Defense feat) |
 | `ac` | `applyEquipment` | Armor category formula + DEX + defense style + shield |
 | `mainAttack` | `applyEquipment` | Weapon stats + finesse + mastery flags |
 
@@ -423,9 +424,27 @@ Catch-all for non-functional inventory items — class artifacts (a wizard's spe
 
 ---
 
+## Modifier aggregator
+
+The data-driven layer that replaces scattered `includes(featId)` / `switch(id)` branches for **passive** mechanics. A feat (`feats/`) or class feature (`features/`) declares a `modifiers: Modifier[]` array; at character load `Modifiers.applyModifiers` flattens every active source's modifiers onto `PlayerDef.modifiers`, and resolvers **query** that list instead of branching on ids.
+
+**`Modifier` types** (`shared/types/modifiers.ts`):
+
+| Type | Shape | Meaning |
+|---|---|---|
+| `crit-range` | `{ type, min }` | Lowers the natural-d20 crit threshold (Improved Critical `min:19`, Superior Critical `min:18`). Lowest `min` across sources wins. |
+| `flag` | `{ type, name }` | A named passive boolean a resolver checks (`savage-attacker`, `fighting-style-defense`, `potent-cantrip`). |
+| `advantage` | `{ type, on, key? }` | Advantage on `attack` / `save` / `check` / `initiative`; optional `key` narrows a check/save to an ability/skill (Remarkable Athlete → `initiative` + `check:athletics`). |
+
+**Query helpers** (`server/src/engine/Modifiers.ts`): `critFloor(playerDef)`, `hasModifierFlag(playerDef, name)`, `hasAdvantageOn(playerDef, on, key?)`. Consumed by `CombatSystem` (crit floor), `CombatFlow` (initiative advantage), `SpellSystem` (potent-cantrip), and `EquipmentSystem` (the derived `savageAttacker` / `fightingStyleDefense` AC/attack booleans).
+
+**Adding a passive that fits an existing type is pure data** — drop a `modifiers` entry on the feat/feature JSON; no engine change. (New modifier *types* still need a query helper + one consumption point. This is Phase 1 of the broader effort to make spells/feats/classes data-only.)
+
+---
+
 ## feats/
 
-One file per SRD feat. Feats are loaded at startup, served via `GET /feats`, and cached in the client registry. `applyFeats` reads a character's `featIds` list, looks up each feat, and writes mechanical flags onto `PlayerDef`.
+One file per SRD feat. Feats are loaded at startup, served via `GET /feats`, and cached in the client registry. A feat's mechanical contribution is its **`modifiers`** array (see [Modifier aggregator](#modifier-aggregator)), aggregated onto `PlayerDef.modifiers` by `applyModifiers`. (The older `effects` block is retained but is largely vestigial — most of its keys were never read; new mechanics should use `modifiers`.)
 
 ### Fields
 
@@ -436,7 +455,8 @@ One file per SRD feat. Feats are loaded at startup, served via `GET /feats`, and
 | `category` | string | `"origin"`, `"general"`, `"fighting-style"`, or `"epic-boon"`. |
 | `prerequisites` | object | `{ minLevel, minAbilityScore, requiresFeature, repeatable, repeatableNote }`. |
 | `description` | string | Full rules prose from the SRD. |
-| `effects` | object | Named, structured mechanical properties (see below). |
+| `modifiers` | Modifier[] | *(optional)* Typed passive contributions — `crit-range` / `flag` / `advantage`. The data-driven mechanical layer; see [Modifier aggregator](#modifier-aggregator). |
+| `effects` | object | *(legacy)* Named structured properties; mostly unread by the engine — prefer `modifiers`. |
 
 ### Effect keys (partial — only engine-consumed keys listed)
 
@@ -636,7 +656,7 @@ Subclass progression entries may carry `grantedSpells: string[]` (Cleric Domain 
 | `subclass-choice` | Subclasses with `classId === classDef.id` | Sets `playerDef.subclassId`; subclass features at the current level land in step 6 of `applyLevelUp` |
 | `asi-or-feat` | Feat catalogue minus existing feats; live ability scores | Either `+2 one ability`, `+1/+1 two abilities` (both gated to ≤ 20), or appends a feat id |
 | `expertise-pick` | Skills the character is currently proficient in (inferred from pre-baked `skills[k] - mod(ability) >= PB`) | Stacks PB on each chosen skill |
-| `fighting-style-pick` | Feats with `category === 'fighting-style'` minus existing | Appends feat id; rider applied by `applyFeats` on next session boot |
+| `fighting-style-pick` | Feats with `category === 'fighting-style'` minus existing | Appends feat id; its `modifiers` are aggregated by `applyModifiers` on next session boot |
 
 Unimplemented but reserved: `cantrip-known`, `cantrip-swap`, `spell-swap`, `metamagic-pick`, `invocation-pick`, `mystic-arcanum-pick`, `magical-secrets-pick`, `epic-boon-choice` — all surface as no-op prompts so an authored level entry doesn't crash the preview.
 
@@ -687,6 +707,7 @@ The shape mirrors `spells/`: data describes WHAT and WHEN; code describes HOW. N
 | `resource` | object? | `{ kind: 'uses-per-long-rest' \| 'uses-per-short-rest' \| 'pool' \| 'unlimited', max: integer }`. Omit when the feature has no resource pool. |
 | `ui` | object? | UI hints — `{ buttonLabel?, buttonColor?, resourceLabel? }`. `resourceLabel` is a template using `{remaining}` and `{max}` placeholders, e.g. `"Second Wind: {remaining}/{max}"`. Features without a `buttonLabel` aren't rendered as buttons (passive / attack-time features). |
 | `handler` | string? | Key into the server's `FeatureRegistry`. Omit for data-only features (Unarmored Defense applied at character load, Expertise as a skill modifier, etc.). |
+| `modifiers` | Modifier[]? | Passive typed contributions (`crit-range` / `flag` / `advantage`) aggregated onto `PlayerDef.modifiers` — e.g. Improved Critical, Remarkable Athlete, Potent Cantrip. See [Modifier aggregator](#modifier-aggregator). |
 
 ### Example — `features/second-wind.json`
 

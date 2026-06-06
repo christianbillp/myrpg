@@ -8,6 +8,7 @@
 // Cross-domain imports — keep these explicit so the dependency graph is visible.
 import type { ClassDef, SubclassDef } from "./classes.js";
 import type { EncounterDef } from "./encounter.js";
+import type { Modifier } from "./modifiers.js";
 import type { Disposition, PlayerState } from "./gameState.js";
 import type { NpcSave } from "./npcSave.js";
 import type { SpellcastingAbility } from "./spells.js";
@@ -109,6 +110,12 @@ export interface PlayerDef {
   senses?: Senses;
   color: number;
   xp: number;
+  /** Typed modifiers aggregated from this character's feats + class features at
+   *  load (`Modifiers.applyModifiers`). Resolvers query this (crit floor,
+   *  passive flags, advantage sources) instead of branching on feat/feature
+   *  ids. `savageAttacker` / `fightingStyleDefense` below are legacy projections
+   *  derived from it for the equipment math. */
+  modifiers?: Modifier[];
   savageAttacker: boolean;
   fightingStyleDefense: boolean;
   defaultEquipment: EquipmentSlots;

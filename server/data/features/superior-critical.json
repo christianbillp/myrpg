@@ -1,0 +1,9 @@
+{
+  "id": "superior-critical",
+  "name": "Superior Critical",
+  "classId": "fighter",
+  "minLevel": 15,
+  "description": "Your attack rolls with weapons and Unarmed Strikes can score a Critical Hit on a roll of 18-20 on the d20.",
+  "cost": { "kind": "passive" },
+  "modifiers": [{ "type": "crit-range", "min": 18 }]
+}

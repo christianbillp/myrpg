@@ -23,6 +23,7 @@ import { combatantDisplayName } from './CombatFlow.js';
 import { emitNoise, NOISE_SPELL_VERBAL } from './Sound.js';
 import { Logger } from '../Logger.js';
 import { canSee as visCanSee } from './Vision.js';
+import { hasModifierFlag } from './Modifiers.js';
 import { SPEED_ZERO_CONDITIONS } from './ConditionSystem.js';
 import {
   tilesInArea, playerInArea, creaturesInArea,
@@ -207,7 +208,7 @@ function resolveAttackRollSpell(
     // SRD Evoker Potent Cantrip — on a miss with a damaging cantrip, the
     // target still takes half the cantrip's damage. The rider applies to
     // every damaging cantrip (no school restriction per SRD 5.2.1).
-    if (spell.level === 0 && spell.damage && ctx.playerDef.defaultFeatureIds?.includes('potent-cantrip')) {
+    if (spell.level === 0 && spell.damage && hasModifierFlag(ctx.playerDef, 'potent-cantrip')) {
       const dieMult = cantripDiceMultiplier(ctx.playerDef.level);
       const dice = spell.damage.dice * dieMult;
       const { total: rawDmg } = rollDamage(dice, spell.damage.sides, spell.damage.bonus ?? 0);
@@ -1110,7 +1111,7 @@ function damageAfterSave(
 ): number {
   if (!success) return fullDamage;
   if (halfOnSuccess) return Math.floor(fullDamage / 2);
-  if (spell.level === 0 && spell.damage && ctx.playerDef.defaultFeatureIds?.includes('potent-cantrip')) {
+  if (spell.level === 0 && spell.damage && hasModifierFlag(ctx.playerDef, 'potent-cantrip')) {
     return Math.floor(fullDamage / 2);
   }
   return 0;

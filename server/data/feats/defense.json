@@ -9,7 +9,6 @@
     "repeatable": false
   },
   "description": "While you're wearing Light, Medium, or Heavy armor, you gain a +1 bonus to Armor Class.",
-  "effects": {
-    "armorAcBonus": 1
-  }
+  "effects": {},
+  "modifiers": [{ "type": "flag", "name": "fighting-style-defense" }]
 }

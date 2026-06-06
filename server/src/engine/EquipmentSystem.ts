@@ -1,5 +1,5 @@
 import { mod } from './Dice.js';
-import { PlayerDef, PlayerAttack, EquipmentSlots, ItemDef, ArmorDef, ShieldDef, WeaponDef, FeatDef, SpeciesDef } from './types.js';
+import { PlayerDef, PlayerAttack, EquipmentSlots, ItemDef, ArmorDef, ShieldDef, WeaponDef, SpeciesDef } from './types.js';
 
 export function computeAC(
   playerDef: PlayerDef,
@@ -118,18 +118,6 @@ export function applySpecies(playerDef: PlayerDef, allSpecies: SpeciesDef[]): vo
     // the static `playerDef.senses` block for now.
   }
   if (Object.keys(senses).length > 0) playerDef.senses = senses;
-}
-
-export function applyFeats(playerDef: PlayerDef, allFeats: FeatDef[]): void {
-  const byId = Object.fromEntries(allFeats.map((f) => [f.id, f]));
-  playerDef.savageAttacker = false;
-  playerDef.fightingStyleDefense = false;
-  for (const id of playerDef.featIds) {
-    const feat = byId[id];
-    if (!feat) continue;
-    if (feat.effects.savageAttacker) playerDef.savageAttacker = true;
-    if (feat.effects.armorAcBonus) playerDef.fightingStyleDefense = true;
-  }
 }
 
 export function applyEquipment(

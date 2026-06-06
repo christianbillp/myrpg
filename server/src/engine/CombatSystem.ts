@@ -1,6 +1,7 @@
 import { d, d20, mod, rollAdvantage, rollDisadvantage } from './Dice.js';
 import { PlayerDef, PlayerAttack, MonsterDef, MonsterAttack, ConsumableDef, LogEntry, BonusDamage, RolledBonusDamage } from './types.js';
 import { Logger } from '../Logger.js';
+import { critFloor } from './Modifiers.js';
 
 export type { RolledBonusDamage };
 
@@ -110,14 +111,11 @@ function resolvePlayerAttack(
   const natural1 = naturalRoll === 1;
   const effectiveAc = enemy.ac + coverAcBonus;
   // SRD Champion Improved Critical (L3): crit on 19-20. Superior Critical
-  // (L15): crit on 18-20. Read off the granted feature ids — both are
-  // additive so a Champion L15 has both ids on the playerDef. Crits always
-  // hit regardless of AC, so the crit-range floor expands `wouldHit` too.
-  const featIds = player.defaultFeatureIds ?? [];
-  const critFloor = featIds.includes('superior-critical') ? 18
-                  : featIds.includes('improved-critical') ? 19
-                  : 20;
-  const inCritRange = naturalRoll >= critFloor;
+  // (L15): crit on 18-20. The crit-range floor comes from the character's
+  // aggregated `crit-range` modifiers (lowest min wins). Crits always hit
+  // regardless of AC, so the floor expands `wouldHit` too.
+  const critFloorVal = critFloor(player);
+  const inCritRange = naturalRoll >= critFloorVal;
   const wouldHit = inCritRange || total >= effectiveAc;
   const isHit = wouldHit && !natural1;
   const isCrit = inCritRange || (autoCrit && isHit);
@@ -202,7 +200,7 @@ function resolvePlayerAttack(
     naturalRoll, total,
     adv: effAdv, dis: effDis,
     targetAc: enemy.ac, coverAcBonus, effectiveAc,
-    critFloor, inCritRange,
+    critFloor: critFloorVal, inCritRange,
     isHit, isCrit,
     sneakAttackAllowed, sneakAttackFired,
     damage,

@@ -3,6 +3,7 @@
  * actually lives in a per-domain module under `shared/types/`. Adding a new
  * domain means creating the file and adding one line here.
  */
+export * from "./types/modifiers.js";
 export * from "./types/reference.js";
 export * from "./types/entities.js";
 export * from "./types/conversation.js";

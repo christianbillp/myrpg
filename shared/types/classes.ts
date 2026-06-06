@@ -7,6 +7,7 @@
 
 // Cross-domain imports — keep these explicit so the dependency graph is visible.
 import type { LevelUpChoicePrompt } from "./levelUp.js";
+import type { Modifier } from "./modifiers.js";
 
 //
 // Features are class abilities described as data + handler. Each character
@@ -65,6 +66,13 @@ export interface FeatureDef {
    * character-load (Unarmored Defense, Expertise, etc.).
    */
   handler?: string;
+  /**
+   * Passive typed modifiers this feature contributes (crit-range, flags,
+   * advantage sources). Aggregated onto `PlayerDef.modifiers` and queried by
+   * resolvers — so a passive that fits an existing modifier type needs no
+   * engine code, just this data.
+   */
+  modifiers?: Modifier[];
 }
 
 // ── Class definitions ────────────────────────────────────────────────────────

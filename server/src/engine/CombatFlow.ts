@@ -10,6 +10,7 @@ import { runPerceptionSweep } from './Vision.js';
 import { mod, d20 as d20Local } from './Dice.js';
 import { runSingleEnemyTurn, runSingleAllyTurn } from './NpcTurnRunners.js';
 import { applyMonsterAttachToPlayer } from './OngoingEffectsSystem.js';
+import { hasAdvantageOn } from './Modifiers.js';
 import { tickActiveZones, tickZoneEnterSaves, runGustOfWindEndOfTurnSaves } from './SpellSystem.js';
 import { endConcentration } from './ConcentrationSystem.js';
 import { pingFactionAlert } from './npcSim/index.js';
@@ -100,10 +101,9 @@ export function doStartCombat(ctx: GameContext, events: GameEvent[]): void {
   // ── Roll Initiative for every combatant ─────────────────────────────────
   const logs: LogEntry[] = [{ left: '⚔ Combat begins', style: 'header' }];
 
-  // SRD Champion L3 Remarkable Athlete: Advantage on Initiative rolls.
-  // Future feature-driven Initiative-Adv sources (Alert feat) plug in here.
-  const features = ctx.playerDef.defaultFeatureIds ?? [];
-  const initAdvantage = features.includes('remarkable-athlete');
+  // Advantage on Initiative from any source that contributes an
+  // `advantage: { on: 'initiative' }` modifier (Remarkable Athlete, Alert, …).
+  const initAdvantage = hasAdvantageOn(ctx.playerDef, 'initiative');
   const playerInit = rollOneInitiative(mod(ctx.playerDef.dex), /*surprised*/false, /*invisible*/false, initAdvantage);
   s.player.initiativeRoll = playerInit.total;
   logs.push({

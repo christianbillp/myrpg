@@ -48,9 +48,9 @@ import { Logger } from "./Logger.js";
 import { PLAYER_FACTION_ID } from "../../shared/types.js";
 import {
   applyEquipment,
-  applyFeats,
   applySpecies,
 } from "./engine/EquipmentSystem.js";
+import { applyModifiers } from "./engine/Modifiers.js";
 import { CreateSessionRequest } from "./engine/types.js";
 import type { MapTilesetInfo, TokenSpec } from "../../shared/types.js";
 import {
@@ -233,7 +233,7 @@ async function loadDefs(): Promise<void> {
   defs.subclasses = subclasses;
   for (const p of defs.playerDefs) {
     applySpecies(p, defs.species);
-    applyFeats(p, defs.feats);
+    applyModifiers(p, defs.feats, defs.features);
     applyEquipment(p, p.defaultEquipment, defs.equipment);
   }
   defs.maps = await Promise.all(rawMaps.map(loadTiledMap));
