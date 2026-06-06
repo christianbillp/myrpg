@@ -18,6 +18,7 @@ import {
   canDetach as guardCanDetach, playerArmorSpeedPenaltyFt, playerHasStealthDisadvantage,
 } from './ActionGuards.js';
 import { publishNpcDamage } from './ThresholdPublisher.js';
+import { applyGiantGiftOnHit } from './GiantGifts.js';
 import { canSee as visCanSee } from './Vision.js';
 import { endConcentration } from './ConcentrationSystem.js';
 import type { PlayerDef } from '../../../shared/types.js';
@@ -349,6 +350,10 @@ function applyAttackOutcome(
       if (bdResistLog) ctx.addLog(bdResistLog);
       target.hp = Math.max(0, target.hp - bdFinal);
     }
+    // Goliath Giant Ancestry on-hit boon (Fire's Burn / Frost's Chill /
+    // Hill's Tumble) — folds its extra damage / condition in before the single
+    // damage publish and the kill check below.
+    applyGiantGiftOnHit(ctx, target, targetDef);
     publishNpcDamage(ctx, target, hpBeforeAtk, target.hp);
     ctx.applyMasteryConditions(target, vexApplied, slowApplied);
     // Push / Topple masteries — fire after the damage settles so a hit
@@ -551,6 +556,7 @@ function executeThrowOnTarget(
     if (bdResistLog) ctx.addLog(bdResistLog);
     target.hp = Math.max(0, target.hp - bdFinal);
   }
+  if (isHit) applyGiantGiftOnHit(ctx, target, targetDef);
   publishNpcDamage(ctx, target, hpBeforeThr, target.hp);
   ctx.applyMasteryConditions(target, vexApplied, slowApplied);
   if (isHit && target.hp > 0 && attack.push)   applyPushMastery(ctx, target);

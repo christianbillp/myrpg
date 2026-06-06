@@ -1,4 +1,5 @@
 import { PlayerDef, SpeciesDef } from './types.js';
+import { GIANT_GIFT_ID, giantGiftPoolMax } from './GiantGifts.js';
 
 /** Resource-pool key for the Orc "Relentless Endurance" trait. Active species
  *  abilities with limited uses share the same `player.resources` pool as
@@ -27,6 +28,8 @@ export function speciesAbilityResources(playerDef: PlayerDef, allSpecies: Specie
     const re = trait.effects.relentlessEndurance;
     if (re?.usesPerLongRest) out[RELENTLESS_ENDURANCE_ID] = re.usesPerLongRest;
   }
+  const giantGift = giantGiftPoolMax(playerDef, allSpecies);
+  if (giantGift !== null) out[GIANT_GIFT_ID] = giantGift;
   return out;
 }
 
