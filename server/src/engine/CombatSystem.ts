@@ -1,4 +1,4 @@
-import { d, d20, mod, rollAdvantage, rollDisadvantage } from './Dice.js';
+import { d, d20, mod, rollAdvantage, rollDisadvantage, applyHalflingLuck } from './Dice.js';
 import { PlayerDef, PlayerAttack, MonsterDef, MonsterAttack, ConsumableDef, LogEntry, BonusDamage, RolledBonusDamage, ResolvedAttackSnapshot } from './types.js';
 import { Logger } from '../Logger.js';
 import { critFloor, hasModifierFlag } from './Modifiers.js';
@@ -65,6 +65,8 @@ export function rollOneInitiative(
    *  Athlete (Fighter L3) is the SRD case. ORs with `invisible`; the
    *  Adv/Dis cancellation rule still applies if `surprised` is also true. */
   extraAdvantage = false,
+  /** SRD Halfling Luck on the initiative DEX check (player only). */
+  luck = false,
 ): { roll: number; total: number; rollStr: string } {
   const wantAdv = invisible || extraAdvantage;
   const wantDis = surprised;
@@ -83,6 +85,7 @@ export function rollOneInitiative(
     roll = d20();
     rollStr = `d20(${roll})`;
   }
+  ({ natural: roll, label: rollStr } = applyHalflingLuck(roll, luck, rollStr));
   const sign = modifier >= 0 ? '+' : '';
   return { roll, total: roll + modifier, rollStr: `${rollStr}${sign}${modifier}` };
 }
@@ -135,6 +138,8 @@ function resolvePlayerAttack(
     naturalRoll = d20();
     rollPart = `d20(${naturalRoll})`;
   }
+  // SRD Halfling Luck: reroll a natural 1 (after Adv/Dis selection) and use it.
+  ({ natural: naturalRoll, label: rollPart } = applyHalflingLuck(naturalRoll, player.halflingLuck, rollPart));
 
   const total = naturalRoll + attackBonus;
   const natural1 = naturalRoll === 1;
@@ -277,7 +282,8 @@ export function playerThrowAttack(
 export function playerHide(player: PlayerDef, disadvantage = false): { hidden: boolean; dc: number; logs: LogEntry[] } {
   const stealthBonus = player.skills['stealth'] ?? 0;
   // SRD armor Stealth penalty (US-111): Disadvantage on the Hide roll.
-  const natural = disadvantage ? rollDisadvantage().result : d20();
+  const rawNatural = disadvantage ? rollDisadvantage().result : d20();
+  const natural = applyHalflingLuck(rawNatural, player.halflingLuck).natural;
   const stealthRoll = natural + stealthBonus;
   const hidden = stealthRoll >= 15;
   const right = `Stealth ${disadvantage ? 'dis ' : ''}d20+${stealthBonus}=${stealthRoll} vs DC 15`;
@@ -374,8 +380,8 @@ export function drinkPotion(item: ConsumableDef): { healed: number; tempHp: numb
   return { healed, tempHp, logs };
 }
 
-export function rollDeathSave(): { roll: number; outcome: 'nat20' | 'success' | 'failure' | 'nat1' } {
-  const roll = d20();
+export function rollDeathSave(luck = false): { roll: number; outcome: 'nat20' | 'success' | 'failure' | 'nat1' } {
+  const roll = applyHalflingLuck(d20(), luck).natural;
   if (roll === 20) return { roll, outcome: 'nat20' };
   if (roll === 1) return { roll, outcome: 'nat1' };
   return { roll, outcome: roll >= 10 ? 'success' : 'failure' };
@@ -386,6 +392,7 @@ export function rollSkillCheck(
   dc: number,
   withAdvantage = false,
   withDisadvantage = false,
+  luck = false,
 ): { roll: number; total: number; success: boolean } {
   const effAdv = withAdvantage && !withDisadvantage;
   const effDis = withDisadvantage && !withAdvantage;
@@ -397,6 +404,7 @@ export function rollSkillCheck(
   } else {
     roll = d20();
   }
+  roll = applyHalflingLuck(roll, luck).natural;
   const total = roll + skillMod;
   return { roll, total, success: total >= dc };
 }
@@ -408,7 +416,7 @@ export function rollPlayerAttackVsAc(
   const attack = player.mainAttack;
   const statMod = attack.statKey === 'str' ? mod(player.str) : mod(player.dex);
   const bonus = statMod + player.proficiencyBonus;
-  const roll = d20();
+  const roll = applyHalflingLuck(d20(), player.halflingLuck).natural;
   const isCrit = roll === 20;
   const isHit = (isCrit || roll + bonus >= targetAc) && roll !== 1;
   let damage = 0;
@@ -448,6 +456,7 @@ export function rollSavingThrow(
   dc: number,
   withAdvantage = false,
   withDisadvantage = false,
+  luck = false,
 ): { roll: number; total: number; success: boolean } {
-  return rollSkillCheck(saveMod, dc, withAdvantage, withDisadvantage);
+  return rollSkillCheck(saveMod, dc, withAdvantage, withDisadvantage, luck);
 }

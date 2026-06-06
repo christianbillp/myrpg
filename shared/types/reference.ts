@@ -71,6 +71,9 @@ export interface SpeciesTraitEffects {
    *  outright, drop to 1 HP instead. `usesPerLongRest` feeds the player resource
    *  pool, refilled on a Long Rest like a class-feature resource. (US-122) */
   relentlessEndurance?: { usesPerLongRest: number };
+  /** SRD Halfling "Luck" — reroll a natural 1 on any D20 Test (and use the new
+   *  roll). Projected onto `PlayerDef.halflingLuck` by `applySpecies`. (US-122) */
+  rerollD20OnesOnTests?: boolean;
   /** SRD species skill grant (Human "Skillful") — choose `count` skills. `choices`
    *  is `["any"]` for a free pick, or an explicit skill-id list. (US-122) */
   skillProficiency?: { choices: string[]; count: number };

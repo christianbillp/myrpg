@@ -183,6 +183,11 @@ export interface PlayerDef {
    *  pass and the feat/feature pass (`applyModifiers`) don't clobber each other
    *  regardless of call order. */
   originModifiers?: Modifier[];
+  /** SRD Halfling "Luck": a natural 1 on any of this character's D20 Tests is
+   *  rerolled once and the new die must be used. Set by `applySpecies` from the
+   *  species `rerollD20OnesOnTests` trait; read at every player d20 roll site
+   *  via `applyHalflingLuck`. */
+  halflingLuck?: boolean;
   color: number;
   xp: number;
   /** Known languages (US-123). Common + the two Standard languages chosen at

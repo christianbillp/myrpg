@@ -5,7 +5,7 @@ import { doEnemyOpportunityAttack as caDoEnemyOA } from './CombatActions.js';
 import { doStartCombat as cfDoStartCombat } from './CombatFlow.js';
 import { chebyshev } from './EnemyAI.js';
 import { isIncapacitated, isVisible, clearHide } from './ConditionSystem.js';
-import { d, d20, mod } from './Dice.js';
+import { d, d20, mod, applyHalflingLuck } from './Dice.js';
 import { runPerceptionSweep, runPassivePerceptionSweep } from './Vision.js';
 import { canShortRest as guardCanShortRest, canSearch as guardCanSearch } from './ActionGuards.js';
 import { tickZoneEnterSaves } from './SpellSystem.js';
@@ -202,7 +202,7 @@ export function doSearch(ctx: GameContext): void {
   // sync — `canSearch` flips to false until the next turn.
   if (s.phase === 'player_turn') s.player.actionUsed = true;
 
-  const roll = d20() + (ctx.playerDef.skills['perception'] ?? 0);
+  const roll = applyHalflingLuck(d20(), ctx.playerDef.halflingLuck).natural + (ctx.playerDef.skills['perception'] ?? 0);
   const adj = s.secrets.filter(
     (sec) => chebyshev(s.player.tileX, s.player.tileY, sec.tileX, sec.tileY) <= 1,
   );

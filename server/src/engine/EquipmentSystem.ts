@@ -198,6 +198,10 @@ export function applySpecies(playerDef: PlayerDef, allSpecies: SpeciesDef[]): vo
   }
   if (resistances.length > 0) playerDef.resistances = resistances;
   if (originModifiers.length > 0) playerDef.originModifiers = originModifiers;
+
+  // SRD Halfling Luck: project the species trait onto a flag the player d20
+  // roll sites read (`applyHalflingLuck`) without re-scanning species traits.
+  if (species.traits.some((t) => t.effects.rerollD20OnesOnTests)) playerDef.halflingLuck = true;
 }
 
 export function applyEquipment(

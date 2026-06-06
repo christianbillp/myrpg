@@ -5,7 +5,7 @@
 // On failure, Concentration breaks and the spell ends.
 
 import type { GameContext } from './GameContext.js';
-import { d20, mod } from './Dice.js';
+import { d20, mod, applyHalflingLuck } from './Dice.js';
 import { Logger } from '../Logger.js';
 import { removeBuffsForSpell, removeSpellBuffsFrom } from './Buffs.js';
 
@@ -100,7 +100,7 @@ export function maybeBreakConcentration(ctx: GameContext, damage: number): void 
   const conMod = mod(ctx.playerDef.con);
   const conProf = ctx.playerDef.savingThrowProficiencies.includes('con') ? ctx.playerDef.proficiencyBonus : 0;
   const bonus = conMod + conProf;
-  const roll = d20();
+  const roll = applyHalflingLuck(d20(), ctx.playerDef.halflingLuck).natural;
   const total = roll + bonus;
   const success = total >= dc;
   ctx.addLog({

@@ -13,7 +13,7 @@
 
 import type { GameContext } from './GameContext.js';
 import type { GameEvent, NpcState, SpellDef, LogEntry, MonsterDef } from './types.js';
-import { d, d20, mod, rollAdvantage } from './Dice.js';
+import { d, d20, mod, rollAdvantage, applyHalflingLuck } from './Dice.js';
 import { chebyshev } from './EnemyAI.js';
 import { canCastSpell } from './ActionGuards.js';
 import { startConcentration, endConcentration } from './ConcentrationSystem.js';
@@ -194,7 +194,7 @@ function resolveAttackRollSpell(
   // explicitly enabled. Other callers may pass options.advantage too.
   const r1 = d20();
   const r2 = options?.advantage ? d20() : r1;
-  const roll = options?.advantage ? Math.max(r1, r2) : r1;
+  const roll = applyHalflingLuck(options?.advantage ? Math.max(r1, r2) : r1, ctx.playerDef.halflingLuck).natural;
   const isCrit = roll === 20;
   const total = roll + bonus;
   const hit = isCrit || (roll !== 1 && total >= effectiveAc);

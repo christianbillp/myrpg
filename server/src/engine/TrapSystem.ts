@@ -23,7 +23,7 @@
  */
 import type { GameContext } from './GameContext.js';
 import type { GameEvent, LogEntry, TrapState, ActiveZone, GearDef } from './types.js';
-import { d, d20, mod } from './Dice.js';
+import { d, d20, mod, applyHalflingLuck } from './Dice.js';
 import { chebyshev } from './EnemyAI.js';
 
 /** Passive Perception auto-spots a concealed trap within this Chebyshev range
@@ -58,7 +58,7 @@ export function springTrapOnPlayer(ctx: GameContext, trap: TrapState, events: Ga
   const tr = trap.trigger;
 
   const saveBonus = playerSaveBonus(ctx, tr.saveAbility);
-  const roll = d20();
+  const roll = applyHalflingLuck(d20(), ctx.playerDef.halflingLuck).natural;
   const total = roll + saveBonus;
   const success = total >= tr.saveDC;
 
@@ -138,7 +138,7 @@ export function doDisarmTrap(ctx: GameContext, tileX: number, tileY: number, eve
   const skillMod = ctx.playerDef.skills['sleightOfHand'] ?? 0;
   const r1 = d20();
   const r2 = d20();
-  const roll = hasTools ? Math.max(r1, r2) : r1;
+  const roll = applyHalflingLuck(hasTools ? Math.max(r1, r2) : r1, ctx.playerDef.halflingLuck).natural;
   const total = roll + skillMod;
   const success = total >= trap.disarmDC;
 

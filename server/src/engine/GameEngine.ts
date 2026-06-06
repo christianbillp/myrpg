@@ -875,7 +875,7 @@ export class GameEngine {
       withAdvantage = true;
       enhanceNote = `[Enhance Ability ${enhancedAbility.toUpperCase()}: Adv]`;
     }
-    const result = rollSkillCheck(skillMod, dc, withAdvantage, withDisadvantage);
+    const result = rollSkillCheck(skillMod, dc, withAdvantage, withDisadvantage, this.playerDef.halflingLuck);
     Logger.log('check.ability_check', {
       skill, dc, skillMod, exhaustionPenalty: exhaustionLevel * 2,
       adv: withAdvantage, dis: withDisadvantage,
@@ -895,7 +895,7 @@ export class GameEngine {
     const saveMod = (this.playerDef.savingThrows[ability] ?? 0) - exhaustionLevel * 2;
     const withAdvantage = ability === 'dex' && conditions.includes('dodging');
     const withDisadvantage = ability === 'dex' && conditions.includes('restrained');
-    return { ...rollSavingThrow(saveMod, dc, withAdvantage, withDisadvantage), autoFail: false };
+    return { ...rollSavingThrow(saveMod, dc, withAdvantage, withDisadvantage, this.playerDef.halflingLuck), autoFail: false };
   }
 
   rollAttackRoll(attacker: string, targetAc: number): { roll: number; total: number; isHit: boolean; isCrit: boolean; damage: number; rollStr: string } {

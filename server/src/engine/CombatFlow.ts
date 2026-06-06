@@ -106,7 +106,7 @@ export function doStartCombat(ctx: GameContext, events: GameEvent[]): void {
   // Advantage on Initiative from any source that contributes an
   // `advantage: { on: 'initiative' }` modifier (Remarkable Athlete, Alert, …).
   const initAdvantage = hasAdvantageOn(ctx.playerDef, 'initiative');
-  const playerInit = rollOneInitiative(mod(ctx.playerDef.dex), /*surprised*/false, /*invisible*/false, initAdvantage);
+  const playerInit = rollOneInitiative(mod(ctx.playerDef.dex), /*surprised*/false, /*invisible*/false, initAdvantage, ctx.playerDef.halflingLuck);
   s.player.initiativeRoll = playerInit.total;
   logs.push({
     left: `${ctx.playerDef.name} rolls Initiative`,
@@ -385,7 +385,7 @@ export function doRollDeathSave(ctx: GameContext, events: GameEvent[]): void {
   const s = ctx.state;
   if (s.phase !== 'death_saves') return;
 
-  const { roll, outcome } = rollDeathSave();
+  const { roll, outcome } = rollDeathSave(ctx.playerDef.halflingLuck);
   const logs: LogEntry[] = [{ left: `${ctx.playerDef.name} death save: d20 = ${roll}`, style: 'normal' }];
   let nextPhase: CombatMode = 'death_saves';
 
