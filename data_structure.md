@@ -380,7 +380,22 @@ Equipped in the `armor` slot. `applyEquipment` computes effective AC from `categ
 | Medium | `baseAc + min(DEX mod, 2)` |
 | Heavy | `baseAc` |
 
-A shield adds `+2`, Fighting Style: Defense adds `+1` (if `fightingStyleDefense` is true on the character).
+A shield adds `+2`, Fighting Style: Defense adds `+1` (if `fightingStyleDefense` is true on the character), and a magic armor's `bonus` adds `+N` (US-124).
+
+---
+
+### Magic-item properties (US-124)
+
+Weapons, armor, and shields share an optional `MagicItemProps` block:
+
+| Field | Type | Notes |
+|---|---|---|
+| `magic` | boolean | Marks the item as magical (flavour / future identify gating). |
+| `rarity` | string | `"common"` / `"uncommon"` / `"rare"` / `"very-rare"` / `"legendary"` / `"artifact"`. |
+| `bonus` | number | SRD enhancement bonus (+1/+2/+3). **Weapon:** added to attack & damage via the shared `magicWeaponBonus` path (does NOT stack with the Magic Weapon spell — the higher wins). **Armor / shield:** added to AC in `computeAC`. Per SRD these +N items don't require attunement, so the bonus applies whenever equipped. |
+| `requiresAttunement` | boolean | SRD attunement (US-124 Slice 2). When `true`, the item's `bonus` applies only while its id is in `PlayerState.attunedItemIds` (≤ 3 attuned). `effectiveItemBonus(item, attuned)` gates this for `computeAC` / `applyEquipment`. Attune via the `attune` action (`doAttune`, exploration-phase Short-Rest bond); `unattune` ends it. |
+
+Shipped examples: `longsword_plus_1`, `leather_armor_plus_1`. *(Attunement, identify, scrolls/wands, and potions-beyond-healing are later Phase 9 slices.)*
 
 ---
 

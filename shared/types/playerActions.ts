@@ -30,6 +30,8 @@ export type PlayerAction =
   | { type: 'resolveReroll'; accept: boolean }
   | { type: 'grapple'; targetId?: string }
   | { type: 'shove'; targetId?: string; effect?: 'push' | 'prone' }
+  | { type: 'attune'; itemId: string }
+  | { type: 'unattune'; itemId: string }
   | { type: 'dash' }
   | { type: 'dodge' }
   | { type: 'disengage' }

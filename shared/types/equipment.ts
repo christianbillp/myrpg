@@ -13,7 +13,27 @@ export interface ConsumableDef {
 
 export type ArmorCategory = 'light' | 'medium' | 'heavy';
 
-export interface ArmorDef {
+/** SRD magic-item rarity (US-124). */
+export type Rarity = 'common' | 'uncommon' | 'rare' | 'very-rare' | 'legendary' | 'artifact';
+
+/**
+ * Common magic-item metadata shared by weapons / armor / shields (US-124).
+ * `bonus` is the SRD enhancement bonus (+1/+2/+3): added to attack & damage for
+ * weapons, to AC for armor / shields. Per SRD, +N weapons & armor do NOT require
+ * attunement, so the bonus applies whenever the item is equipped. (Attunement
+ * gating for items that need it is a later slice.)
+ */
+export interface MagicItemProps {
+  magic?: boolean;
+  rarity?: Rarity;
+  bonus?: number;
+  /** SRD attunement (US-124 Slice 2): when true, the item's `bonus` (and future
+   *  effects) apply only while the player is attuned to it (≤ 3 attuned items,
+   *  bonded over a Short Rest). */
+  requiresAttunement?: boolean;
+}
+
+export interface ArmorDef extends MagicItemProps {
   id: string; name: string; type: 'armor';
   category: ArmorCategory;
   baseAc: number; addDex: boolean; maxDex: number | null;
@@ -23,7 +43,7 @@ export interface ArmorDef {
   costCp?: number;
 }
 
-export interface ShieldDef {
+export interface ShieldDef extends MagicItemProps {
   id: string; name: string; type: 'shield';
   acBonus: number;
   costCp?: number;
@@ -31,7 +51,7 @@ export interface ShieldDef {
 
 export type WeaponMastery = 'graze' | 'vex' | 'sap' | 'nick' | 'topple' | 'push' | 'cleave' | 'slow';
 
-export interface WeaponDef {
+export interface WeaponDef extends MagicItemProps {
   id: string; name: string; type: 'weapon';
   statKey: 'str' | 'dex';
   damageDice: number; damageSides: number; damageType: string;

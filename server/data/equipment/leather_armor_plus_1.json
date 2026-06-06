@@ -1,0 +1,14 @@
+{
+  "id": "leather_armor_plus_1",
+  "name": "Leather Armor +1",
+  "type": "armor",
+  "category": "light",
+  "baseAc": 11,
+  "addDex": true,
+  "maxDex": null,
+  "stealthDisadv": false,
+  "minStr": null,
+  "magic": true,
+  "rarity": "uncommon",
+  "bonus": 1
+}

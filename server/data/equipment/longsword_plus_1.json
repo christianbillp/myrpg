@@ -1,0 +1,19 @@
+{
+  "id": "longsword_plus_1",
+  "name": "Longsword +1",
+  "type": "weapon",
+  "statKey": "str",
+  "damageDice": 1,
+  "damageSides": 8,
+  "damageType": "slashing",
+  "mastery": "sap",
+  "finesse": false,
+  "twoHanded": false,
+  "thrown": false,
+  "throwNormal": 0,
+  "throwLong": 0,
+  "versatile": { "damageDice": 1, "damageSides": 10 },
+  "magic": true,
+  "rarity": "uncommon",
+  "bonus": 1
+}

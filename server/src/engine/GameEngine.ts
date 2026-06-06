@@ -141,7 +141,7 @@ export class GameEngine {
       ...defs,
       playerDefs: defs.playerDefs.map((p) => p.id === this.playerDef.id ? this.playerDef : p),
     };
-    applyEquipment(this.playerDef, state.player.equippedSlots, this.defs.equipment, state.player.mageArmor, state.player.shieldActive);
+    applyEquipment(this.playerDef, state.player.equippedSlots, this.defs.equipment, state.player.mageArmor, state.player.shieldActive, 0, state.player.attunedItemIds ?? []);
     state.player.ac = this.playerDef.ac;
     state.player.equippedSlotLabels = computeEquippedSlotLabels(this.playerDef, state.player.equippedSlots, this.defs.equipment);
 
@@ -1179,6 +1179,19 @@ export class GameEngine {
       grappleableTargetIds = adj.filter((n) => !n.conditions.includes('grappled')).map((n) => n.id);
     }
 
+    // Attunement (US-124): magic + requiresAttunement items the player holds,
+    // not yet attuned, while exploring with fewer than 3 attuned.
+    let attunableItemIds: string[] = [];
+    const attuned = p.attunedItemIds ?? [];
+    if (phase === 'exploring' && attuned.length < 3) {
+      const held = new Set<string>([...p.inventoryIds, ...Object.values(p.equippedSlots).filter((x): x is string => !!x)]);
+      attunableItemIds = [...held].filter((id) => {
+        if (attuned.includes(id)) return false;
+        const it = this.defs.equipment.find((e) => e.id === id) as { magic?: boolean; requiresAttunement?: boolean } | undefined;
+        return !!it?.magic && !!it?.requiresAttunement;
+      });
+    }
+
     s.availableActions = {
       canAttack: Guard.canAttackTarget(this.ctx),
       throwableItemIds,
@@ -1201,6 +1214,7 @@ export class GameEngine {
       deployableGearIds,
       grappleableTargetIds,
       shoveableTargetIds,
+      attunableItemIds,
     };
   }
 

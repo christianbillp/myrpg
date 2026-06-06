@@ -43,6 +43,7 @@ Defined in `client/src/ui/PlayerPanel.ts`. HTML DOM panel; **open by default** (
 | **LEAVE ENCOUNTER**| Button at the very bottom of the panel; always visible. Triggers auto-save and returns to the Encounter Setup screen. |
 | **★ LEVEL UP**     | Top-of-action-stack button; visible only during the `exploring` phase when `availableActions.canLevelUp` is true (XP reached the SRD threshold for the next level and the character isn't yet at L20). Opens the [Level Up Overlay](#level-up-overlay). Hidden in combat — the overlay's HP / spell-slot changes would land mid-turn otherwise. |
 | **☾ LONG REST**    | Above LEVEL UP (just over MOVE) during the `exploring` phase when `availableActions.canLongRest` is true. The flag is set by the encounter (`EncounterDef.allowsLongRest = true`) — taverns / safehouses / camps qualify; wilderness exploration does not. Opens the [Long Rest Overlay](#long-rest-overlay). |
+| **✶ ATTUNE**       | Under "⋯ More" during the `exploring` phase when `availableActions.attunableItemIds` is non-empty (the player holds a magical item that `requiresAttunement`, isn't attuned to it, and has fewer than 3 attunements). Attunes the first eligible item (SRD: bonds over a Short Rest) so its bonus takes effect; the server enforces the ≤3 cap (US-124). |
 
 ### Action Buttons
 

@@ -1013,6 +1013,7 @@ export class GameScene extends Phaser.Scene {
       onDisengage:      () => gameClient.sendAction({ type: "disengage" }),
       onGrapple:        () => gameClient.sendAction({ type: "grapple", targetId: this.gameState?.selectedTargetId ?? undefined }),
       onShove:          (effect) => gameClient.sendAction({ type: "shove", targetId: this.gameState?.selectedTargetId ?? undefined, effect }),
+      onAttune:         (itemId) => gameClient.sendAction({ type: "attune", itemId }),
       onDetach:         () => gameClient.sendAction({ type: "detach" }),
       onUseFeature:     (featureId) => gameClient.sendAction({ type: "useFeature", featureId }),
       onHide:           () => gameClient.sendAction({ type: "hide" }),

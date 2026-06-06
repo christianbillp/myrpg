@@ -291,7 +291,7 @@ export function enterPlayerTurn(ctx: GameContext): void {
   // anything reads it this turn.
   if (s.player.shieldActive) {
     s.player.shieldActive = false;
-    applyEquipment(ctx.playerDef, s.player.equippedSlots, ctx.defs.equipment, s.player.mageArmor, false);
+    applyEquipment(ctx.playerDef, s.player.equippedSlots, ctx.defs.equipment, s.player.mageArmor, false, 0, s.player.attunedItemIds ?? []);
     s.player.ac = ctx.playerDef.ac;
   }
   s.player.conditions = s.player.conditions.filter((c) => !TURN_CONDITIONS.includes(c));
@@ -716,7 +716,7 @@ export function doResolveReaction(ctx: GameContext, accept: boolean, events: Gam
       if ((s.player.spellSlots[0] ?? 0) > 0) s.player.spellSlots[0] -= 1;
       s.player.reactionUsed = true;
       s.player.shieldActive = true;
-      applyEquipment(ctx.playerDef, s.player.equippedSlots, ctx.defs.equipment, s.player.mageArmor, s.player.shieldActive);
+      applyEquipment(ctx.playerDef, s.player.equippedSlots, ctx.defs.equipment, s.player.mageArmor, s.player.shieldActive, 0, s.player.attunedItemIds ?? []);
       s.player.ac = ctx.playerDef.ac;
       ctx.addLog({ left: `⚡ ${ctx.playerDef.name} casts Shield (reaction) — AC ${s.player.ac} until next turn`, style: 'status' });
       // SRD: crits bypass AC entirely, so Shield can't turn the triggering

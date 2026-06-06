@@ -65,7 +65,7 @@ export function recomputeBuffs(ctx: GameContext): void {
   p.mirrorImages = buffs.find((b) => b.spellId === 'mirror-image')?.charges ?? 0;
   // shieldActive is owned outside the buff list (Shield is a reaction) — pass
   // it through unchanged; mageArmor now comes from the derived flag above.
-  applyEquipment(ctx.playerDef, p.equippedSlots, ctx.defs.equipment, p.mageArmor, p.shieldActive, p.magicWeaponBonus);
+  applyEquipment(ctx.playerDef, p.equippedSlots, ctx.defs.equipment, p.mageArmor, p.shieldActive, p.magicWeaponBonus, p.attunedItemIds ?? []);
   p.ac = ctx.playerDef.ac;
 }
 

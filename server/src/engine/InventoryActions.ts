@@ -102,7 +102,7 @@ export function doEquip(ctx: GameContext, slot: 'armor' | 'weapon' | 'shield', i
   const removeIdx = s.player.inventoryIds.indexOf(itemId);
   if (removeIdx !== -1) s.player.inventoryIds.splice(removeIdx, 1);
   s.player.equippedSlots[slotKey] = itemId;
-  applyEquipment(ctx.playerDef, s.player.equippedSlots, ctx.defs.equipment, s.player.mageArmor, s.player.shieldActive);
+  applyEquipment(ctx.playerDef, s.player.equippedSlots, ctx.defs.equipment, s.player.mageArmor, s.player.shieldActive, 0, s.player.attunedItemIds ?? []);
   s.player.ac = ctx.playerDef.ac;
   s.player.equippedSlots = { ...s.player.equippedSlots };
   s.player.equippedSlotLabels = computeEquippedSlotLabels(ctx.playerDef, s.player.equippedSlots, ctx.defs.equipment);
@@ -124,10 +124,67 @@ export function doUnequip(ctx: GameContext, slot: 'armor' | 'weapon' | 'shield')
 
   s.player.inventoryIds.push(currentId);
   s.player.equippedSlots[slotKey] = null;
-  applyEquipment(ctx.playerDef, s.player.equippedSlots, ctx.defs.equipment, s.player.mageArmor, s.player.shieldActive);
+  applyEquipment(ctx.playerDef, s.player.equippedSlots, ctx.defs.equipment, s.player.mageArmor, s.player.shieldActive, 0, s.player.attunedItemIds ?? []);
   s.player.ac = ctx.playerDef.ac;
   s.player.equippedSlots = { ...s.player.equippedSlots };
   s.player.equippedSlotLabels = computeEquippedSlotLabels(ctx.playerDef, s.player.equippedSlots, ctx.defs.equipment);
 
   applyEquipmentCost(ctx, gate.costAction);
+}
+
+/** Re-derive AC / mainAttack / slot labels after an attunement change so a
+ *  newly-attuned (or un-attuned) item's bonus takes effect immediately. */
+function refreshEquipment(ctx: GameContext): void {
+  const s = ctx.state;
+  applyEquipment(ctx.playerDef, s.player.equippedSlots, ctx.defs.equipment, s.player.mageArmor, s.player.shieldActive, 0, s.player.attunedItemIds ?? []);
+  s.player.ac = ctx.playerDef.ac;
+  s.player.equippedSlotLabels = computeEquippedSlotLabels(ctx.playerDef, s.player.equippedSlots, ctx.defs.equipment);
+}
+
+const MAX_ATTUNED = 3;
+
+/** Whether the player has `itemId` to hand (equipped or carried). */
+function playerHasItem(ctx: GameContext, itemId: string): boolean {
+  const s = ctx.state;
+  return s.player.inventoryIds.includes(itemId)
+    || Object.values(s.player.equippedSlots).includes(itemId);
+}
+
+/**
+ * SRD attunement (US-124): bond to a magic item over a Short Rest. Modelled as
+ * an exploration-phase action (no combat). Gated to magic items that
+ * `requiresAttunement`; the player must have the item; at most 3 attuned at
+ * once. Re-derives equipment so the item's bonus applies at once.
+ */
+export function doAttune(ctx: GameContext, itemId: string): void {
+  const s = ctx.state;
+  if (s.phase !== 'exploring') {
+    ctx.addLog({ left: `Attuning to an item takes a Short Rest — not possible in combat.`, style: 'status' });
+    return;
+  }
+  const item = ctx.defs.equipment.find((i) => i.id === itemId) as { id: string; name: string; magic?: boolean; requiresAttunement?: boolean } | undefined;
+  if (!item || !item.magic || !item.requiresAttunement) return;
+  if (!playerHasItem(ctx, itemId)) return;
+  s.player.attunedItemIds = s.player.attunedItemIds ?? [];
+  if (s.player.attunedItemIds.includes(itemId)) return;
+  if (s.player.attunedItemIds.length >= MAX_ATTUNED) {
+    ctx.addLog({ left: `Already attuned to ${MAX_ATTUNED} items — break attunement with one first.`, style: 'status' });
+    return;
+  }
+  s.player.attunedItemIds.push(itemId);
+  refreshEquipment(ctx);
+  ctx.addLog({ left: `${ctx.playerDef.name} attunes to ${item.name}.`, style: 'status' });
+}
+
+/** End attunement to an item (SRD: free on a rest — modelled as a simple
+ *  exploration action). */
+export function doUnattune(ctx: GameContext, itemId: string): void {
+  const s = ctx.state;
+  const list = s.player.attunedItemIds ?? [];
+  const idx = list.indexOf(itemId);
+  if (idx === -1) return;
+  list.splice(idx, 1);
+  refreshEquipment(ctx);
+  const item = ctx.defs.equipment.find((i) => i.id === itemId);
+  ctx.addLog({ left: `${ctx.playerDef.name} ends attunement to ${item?.name ?? itemId}.`, style: 'status' });
 }

@@ -116,6 +116,10 @@ export interface PlayerState {
    *  the Magic Weapon cast, cleared when the 1-hour duration ends or the
    *  player casts Magic Weapon again. */
   magicWeaponBonus: number;
+  /** SRD attunement (US-124): ids of magic items the player is currently
+   *  attuned to (≤ 3). A `requiresAttunement` item's bonus applies only while
+   *  its id is in this list. */
+  attunedItemIds?: string[];
   /** SRD See Invisibility — while true, the player sees creatures with the
    *  Invisible condition as if they were visible. Set by the See Invisibility
    *  cast, cleared after 1 hour (handled as a narrative timer for now —
@@ -200,4 +204,8 @@ export interface AvailableActions {
   /** Enemy NPC ids the player could Shove right now — adjacent, alive, and no
    *  more than one size larger (US-050). Drives the SHOVE button. */
   shoveableTargetIds: string[];
+  /** Magic-item ids (equipped or carried) the player could attune to right now
+   *  — magical, `requiresAttunement`, not yet attuned, fewer than 3 attuned,
+   *  and exploring (US-124). Drives the ATTUNE button. */
+  attunableItemIds: string[];
 }

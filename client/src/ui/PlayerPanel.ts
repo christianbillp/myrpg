@@ -85,6 +85,8 @@ export interface PlayerPanelCallbacks {
   /** Grapple (US-110) / Shove (US-050) the selected adjacent enemy. */
   onGrapple: () => void;
   onShove: (effect: 'push' | 'prone') => void;
+  /** Attune to a magic item (US-124). */
+  onAttune: (itemId: string) => void;
   onDetach: () => void;
   onHide: () => void;
   onDeathSave: () => void;
@@ -137,7 +139,7 @@ type ActionGroup = 'action' | 'bonus' | 'move' | 'free' | 'more' | 'companion';
  *  (★ LEVEL UP, ☾ LONG REST) are left alone — see `iconFor`. */
 const ACTION_ICONS: Record<string, string> = {
   ATTACK: '⚔', THROW: '➶', DODGE: '❖', DASH: '»', DISENGAGE: '↩', DETACH: '⤴',
-  GRAPPLE: '✊', SHOVE: '🤚', 'SHOVE PRONE': '⤓',
+  GRAPPLE: '✊', SHOVE: '🤚', 'SHOVE PRONE': '⤓', ATTUNE: '✶',
   HIDE: '◐', SEARCH: '⚲', MOVE: '⤧', TALK: '❝', CAST: '✦',
   'SHORT REST': '☕', 'ROLL DEATH SAVE': '☠',
 };
@@ -445,6 +447,11 @@ export class PlayerPanel {
       if (aa.canShortRest) groups.more.push(this.makeBtn('SHORT REST', '#1a2a3a', this.callbacks.onShortRest));
       for (const summon of state.summons) {
         groups.more.push(this.makeBtn(`DIRECT ${summon.name.toUpperCase()}`, '#2a3a55', () => this.callbacks.onCommandSummon(summon.id)));
+      }
+      // Attune to a held magic item that requires attunement (US-124). Attunes
+      // the first eligible item; the server enforces the ≤3 cap.
+      if (aa.attunableItemIds.length > 0) {
+        groups.more.push(this.makeBtn('ATTUNE', '#2a2a5a', () => this.callbacks.onAttune(aa.attunableItemIds[0])));
       }
       if (aa.canLevelUp) groups.more.push(this.makeBtn('★ LEVEL UP', '#3a2a5a', this.callbacks.onLevelUp));
       if (aa.canLongRest) groups.more.push(this.makeBtn('☾ LONG REST', '#1a2a4a', this.callbacks.onLongRest));

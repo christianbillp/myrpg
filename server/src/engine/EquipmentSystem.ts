@@ -1,12 +1,24 @@
 import { mod } from './Dice.js';
 import { PlayerDef, PlayerAttack, EquipmentSlots, ItemDef, ArmorDef, ShieldDef, WeaponDef, SpeciesDef, parseCreatureSize, sizeRank, CreatureSize, Modifier } from './types.js';
 
+/** A magic item's effective enhancement bonus (US-124): its `bonus`, gated to 0
+ *  when the item requires attunement and the player isn't attuned to it. */
+export function effectiveItemBonus(
+  item: { id: string; bonus?: number; requiresAttunement?: boolean } | null,
+  attunedItemIds: string[],
+): number {
+  if (!item) return 0;
+  if (item.requiresAttunement && !attunedItemIds.includes(item.id)) return 0;
+  return item.bonus ?? 0;
+}
+
 export function computeAC(
   playerDef: PlayerDef,
   armor: ArmorDef | null,
   shield: ShieldDef | null,
   mageArmor = false,
   shieldSpellActive = false,
+  attunedItemIds: string[] = [],
 ): number {
   const dexMod = mod(playerDef.dex);
   let ac: number;
@@ -17,10 +29,10 @@ export function computeAC(
     const dexBonus = armor.addDex
       ? (armor.maxDex !== null ? Math.min(dexMod, armor.maxDex) : dexMod)
       : 0;
-    ac = armor.baseAc + dexBonus;
+    ac = armor.baseAc + dexBonus + effectiveItemBonus(armor, attunedItemIds);  // US-124 magic armor +N
     if (playerDef.fightingStyleDefense) ac += 1;
   }
-  if (shield) ac += shield.acBonus;
+  if (shield) ac += shield.acBonus + effectiveItemBonus(shield, attunedItemIds);  // US-124 magic shield +N
   // SRD Shield reaction: +5 AC until the start of the caster's next turn,
   // including against the triggering attack roll. Stacks on top of armor /
   // mundane shield / Mage Armor.
@@ -83,7 +95,7 @@ export function computeEquippedSlotLabels(
   if (armor) {
     const dexMod = mod(playerDef.dex);
     const dexBonus = armor.addDex ? (armor.maxDex !== null ? Math.min(dexMod, armor.maxDex) : dexMod) : 0;
-    const ac = armor.baseAc + dexBonus + (playerDef.fightingStyleDefense ? 1 : 0);
+    const ac = armor.baseAc + dexBonus + (armor.bonus ?? 0) + (playerDef.fightingStyleDefense ? 1 : 0);
     const catLabel = armor.category.charAt(0).toUpperCase() + armor.category.slice(1);
     armorLabel = `${catLabel} · AC ${ac}`;
   }
@@ -182,23 +194,26 @@ export function applyEquipment(
   mageArmor = false,
   shieldSpellActive = false,
   magicWeaponBonus = 0,
+  attunedItemIds: string[] = [],
 ): void {
   const byId = Object.fromEntries(allItems.map((i) => [i.id, i]));
   const armor = slots.armorId ? (byId[slots.armorId] as ArmorDef | undefined) ?? null : null;
   const shield = slots.shieldId ? (byId[slots.shieldId] as ShieldDef | undefined) ?? null : null;
   const weapon = slots.weaponId ? (byId[slots.weaponId] as WeaponDef | undefined) ?? null : null;
 
-  playerDef.ac = computeAC(playerDef, armor, shield, mageArmor, shieldSpellActive);
+  playerDef.ac = computeAC(playerDef, armor, shield, mageArmor, shieldSpellActive, attunedItemIds);
   // SRD Versatile (US-111): two-handed grip when a versatile weapon is held
   // with no shield equipped → larger damage die.
   const twoHandedGrip = !!weapon?.versatile && !shield;
   const base = weapon
     ? makePlayerAttack(playerDef, weapon, twoHandedGrip)
     : { name: 'Unarmed Strike', statKey: 'str' as const, damageDice: 1, damageSides: 1, damageType: 'bludgeoning', savageAttacker: false, finesse: false, graze: false, vex: false, sap: false, slow: false, push: false, topple: false };
-  // SRD Magic Weapon spell: +N to attack and damage rolls. The bonus rides
-  // on the PlayerAttack so the existing CombatSystem resolver consumes it
-  // without a separate state lookup; reset to 0 when the spell ends.
-  playerDef.mainAttack = magicWeaponBonus > 0
-    ? { ...base, magicWeaponBonus }
+  // SRD Magic Weapon spell + magic-weapon enhancement bonus (US-124): both are
+  // +N to attack and damage rolls. They do NOT stack (both are enhancement
+  // bonuses), so take the higher. The bonus rides on the PlayerAttack so the
+  // existing CombatSystem resolver consumes it without a separate state lookup.
+  const weaponBonus = Math.max(magicWeaponBonus, effectiveItemBonus(weapon, attunedItemIds));
+  playerDef.mainAttack = weaponBonus > 0
+    ? { ...base, magicWeaponBonus: weaponBonus }
     : base;
 }
