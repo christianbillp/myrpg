@@ -263,6 +263,22 @@ export class CharacterCreatorScene extends Phaser.Scene {
     }
     c.appendChild(toggle);
 
+    // Keep the array/roll assignment a valid one-each permutation before we
+    // read the scores to derive the origin bonus.
+    if (this.state.method !== "point-buy") this.ensurePoolAssigned();
+
+    // Origin bonus banner — names the background and which abilities it raises,
+    // so the bonus baked into the final scores below is never a mystery.
+    const bonuses = this.backgroundBonuses();
+    const bg = this.backgrounds.find((b) => b.id === this.state.backgroundId);
+    const bonusList = ABILITY_KEYS.filter((k) => bonuses[k]).map((k) => `+${bonuses[k]} ${ABILITY_LABEL[k]}`).join(", ");
+    if (bg && bonusList) {
+      const note = document.createElement("div");
+      note.style.cssText = "font-size:11px;color:#9ac6a0;margin-bottom:10px;line-height:1.5;";
+      note.innerHTML = `Origin bonus — <b>${bg.name}</b> grants ${bonusList} (the +2 goes to your highest of ${(bg.abilityScores as string[]).map((a) => a.toUpperCase()).join("/")}). Included in the <b>final</b> scores below.`;
+      c.appendChild(note);
+    }
+
     if (this.state.method === "point-buy") {
       const total = pointBuyTotalCost(this.state.scores);
       const remaining = POINT_BUY_BUDGET - total;
@@ -270,21 +286,22 @@ export class CharacterCreatorScene extends Phaser.Scene {
       budget.style.cssText = `font-size:12px;margin-bottom:8px;color:${remaining < 0 ? "#e89090" : ACCENT};`;
       budget.textContent = `Points remaining: ${remaining} / ${POINT_BUY_BUDGET}`;
       c.appendChild(budget);
-      for (const k of ABILITY_KEYS) c.appendChild(this.pointBuyRow(k));
+      for (const k of ABILITY_KEYS) c.appendChild(this.pointBuyRow(k, bonuses));
     } else {
-      // Assignment of the pool values via per-ability dropdowns.
+      // Assignment of the pool values via per-ability dropdowns — kept as a
+      // one-each permutation of the pool (each array value used exactly once).
       const poolNote = document.createElement("div");
       poolNote.style.cssText = "font-size:11px;color:#88aacc;margin-bottom:8px;";
-      poolNote.textContent = `Assign these values: ${[...this.state.pool].sort((a, b) => b - a).join(", ")}`;
+      poolNote.textContent = `Assign these values (each used once): ${[...this.state.pool].sort((a, b) => b - a).join(", ")}`;
       c.appendChild(poolNote);
       if (this.state.method === "roll") {
         c.appendChild(this.button("⟳ REROLL", "#1a1a2a", () => { this.state.pool = rollSet(); this.renderStep(); }));
       }
-      for (const k of ABILITY_KEYS) c.appendChild(this.assignRow(k));
+      for (const k of ABILITY_KEYS) c.appendChild(this.assignRow(k, bonuses));
     }
   }
 
-  private pointBuyRow(k: AbilityKey): HTMLElement {
+  private pointBuyRow(k: AbilityKey, bonuses: Partial<Record<AbilityKey, number>>): HTMLElement {
     const row = document.createElement("div");
     row.style.cssText = "display:flex;align-items:center;gap:10px;margin:4px 0;font-size:12px;";
     const score = this.state.scores[k];
@@ -300,12 +317,58 @@ export class CharacterCreatorScene extends Phaser.Scene {
     });
     const mod = document.createElement("span");
     mod.style.cssText = "color:#88aacc;margin-left:8px;";
-    mod.textContent = `(cost ${pointBuyCost(score)}) → ${fmtMod(abilityModifier(score))}`;
+    mod.innerHTML = `(cost ${pointBuyCost(score)})${this.finalSuffix(k, score, bonuses)}`;
     row.appendChild(dec); row.appendChild(val); row.appendChild(inc); row.appendChild(mod);
     return row;
   }
 
-  private assignRow(k: AbilityKey): HTMLElement {
+  /** The background ability-score increase per ability (US-122 / SRD): +2 to
+   *  the highest-rated of the background's three abilities and +1 to the next.
+   *  Mirrors the `backgroundAbility` inference in `submit()` so the displayed
+   *  final scores match what gets built. */
+  private backgroundBonuses(): Partial<Record<AbilityKey, number>> {
+    const bg = this.backgrounds.find((b) => b.id === this.state.backgroundId);
+    if (!bg) return {};
+    const ordered = [...bg.abilityScores as AbilityKey[]].sort((a, b) => this.state.scores[b] - this.state.scores[a]);
+    const out: Partial<Record<AbilityKey, number>> = {};
+    if (ordered.length >= 2) { out[ordered[0]] = 2; out[ordered[1]] = 1; }
+    return out;
+  }
+
+  /** "→ final (mod)" suffix for an ability row, annotating any origin bonus and
+   *  the resulting final score (capped at 20, matching the builder). */
+  private finalSuffix(k: AbilityKey, base: number, bonuses: Partial<Record<AbilityKey, number>>): string {
+    const bonus = bonuses[k] ?? 0;
+    const final = Math.min(20, base + bonus);
+    const bgName = this.backgrounds.find((b) => b.id === this.state.backgroundId)?.name ?? "background";
+    const src = bonus > 0 ? ` <span style="color:#9ac6a0;">+${bonus} (${bgName})</span>` : "";
+    return `${src} → <b style="color:#e8e8f8;">${final}</b> (${fmtMod(abilityModifier(final))})`;
+  }
+
+  /** Make `state.scores` a valid one-each assignment of `state.pool`. Keeps the
+   *  current assignment when it already is one (preserves the AI's priority
+   *  assignment or the player's prior swaps); otherwise assigns the pool to the
+   *  six abilities in order (e.g. after switching from Point Buy or a reroll). */
+  private ensurePoolAssigned(): void {
+    const pool = [...this.state.pool].sort((a, b) => a - b);
+    const cur = ABILITY_KEYS.map((k) => this.state.scores[k]).sort((a, b) => a - b);
+    const isPermutation = pool.length === cur.length && pool.every((v, i) => v === cur[i]);
+    if (isPermutation) return;
+    ABILITY_KEYS.forEach((k, i) => { this.state.scores[k] = this.state.pool[i] ?? 8; });
+  }
+
+  /** Assign `value` to ability `k`. If another ability currently holds `value`,
+   *  give it `k`'s old value (a swap) so the assignment stays a permutation of
+   *  the pool — i.e. each array value is selectable only once. */
+  private swapAssign(k: AbilityKey, value: number): void {
+    const old = this.state.scores[k];
+    if (old === value) return;
+    const other = ABILITY_KEYS.find((a) => a !== k && this.state.scores[a] === value);
+    if (other) this.state.scores[other] = old;
+    this.state.scores[k] = value;
+  }
+
+  private assignRow(k: AbilityKey, bonuses: Partial<Record<AbilityKey, number>>): HTMLElement {
     const row = document.createElement("div");
     row.style.cssText = "display:flex;align-items:center;gap:10px;margin:4px 0;font-size:12px;";
     row.innerHTML = `<span style="width:40px;color:${ACCENT};">${ABILITY_LABEL[k]}</span>`;
@@ -318,10 +381,12 @@ export class CharacterCreatorScene extends Phaser.Scene {
       if (this.state.scores[k] === v) opt.selected = true;
       sel.appendChild(opt);
     }
-    sel.addEventListener("change", () => { this.state.scores[k] = Number(sel.value); this.renderStep(); });
+    // Single-use: picking a value another ability already holds swaps them, so
+    // the six abilities always remain a one-each assignment of the array/pool.
+    sel.addEventListener("change", () => { this.swapAssign(k, Number(sel.value)); this.renderStep(); });
     const mod = document.createElement("span");
     mod.style.cssText = "color:#88aacc;";
-    mod.textContent = fmtMod(abilityModifier(this.state.scores[k]));
+    mod.innerHTML = this.finalSuffix(k, this.state.scores[k], bonuses);
     row.appendChild(sel); row.appendChild(mod);
     return row;
   }
@@ -416,9 +481,15 @@ export class CharacterCreatorScene extends Phaser.Scene {
     const summary = document.createElement("div");
     summary.style.cssText = "margin-top:14px;font-size:11px;color:#a8b8c8;line-height:1.7;border-top:1px solid #334455;padding-top:10px;";
     const cls = this.classOf(this.state.classId);
+    // Final scores = assigned base + origin bonus (capped at 20), matching what
+    // the server builds.
+    const bonuses = this.backgroundBonuses();
     summary.innerHTML =
       `<b style="color:${ACCENT};">${this.species.find((s) => s.id === this.state.speciesId)?.name ?? "?"} ${cls?.name ?? "?"}</b> · ${bg?.name ?? "?"}<br/>` +
-      ABILITY_KEYS.map((k) => `${ABILITY_LABEL[k]} ${this.state.scores[k]} (${fmtMod(abilityModifier(this.state.scores[k]))})`).join(" · ");
+      ABILITY_KEYS.map((k) => {
+        const final = Math.min(20, this.state.scores[k] + (bonuses[k] ?? 0));
+        return `${ABILITY_LABEL[k]} ${final} (${fmtMod(abilityModifier(final))})`;
+      }).join(" · ");
     c.appendChild(summary);
   }
 
