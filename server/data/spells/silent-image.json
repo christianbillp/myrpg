@@ -13,5 +13,6 @@
   "concentration": true,
   "ritual": false,
   "area": { "shape": "cube", "sizeFeet": 15 },
+  "zone": { "tintHex": "#a08adf", "groundPlaceable": true },
   "description": "You create the image of an object, a creature, or some other visible phenomenon that is no larger than a 15-foot Cube within range. The image lasts for the duration. It is purely visual; it isn't accompanied by sound, smell, or other sensations. You can use a Magic action to cause it to move; physical interaction reveals it as illusion (since things can pass through it). A creature can use its action to inspect the image and discern its true nature with a successful Intelligence (Investigation) check against your spell save DC."
 }

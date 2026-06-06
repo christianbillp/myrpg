@@ -36,6 +36,38 @@ export interface SpellArea {
    *  non-ally). Sleep uses this; Color Spray / Thunderwave / Grease do not. */
   creaturesOfYourChoice?: boolean;
 }
+/**
+ * Persistent-zone descriptor for AOE spells that occupy ground for their
+ * duration (Fog Cloud, Darkness, Web, Grease, Silent Image, …). The engine's
+ * cast resolver reads this instead of branching on `spell.id`, so a new zone
+ * spell is data-only. Three mutually-exclusive cast modes:
+ *
+ *  - `castCondition`: tag every creature in the area at cast time with a
+ *    condition, no save (Fog Cloud / Darkness → `heavily-obscured`).
+ *  - `castSave`: each creature rolls a save or takes the condition (Web → DEX
+ *    or `restrained`).
+ *  - `groundPlaceable`: the zone IS the spell — register it even with no
+ *    creature in the area at cast time (Grease, Silent Image, Gust of Wind).
+ *
+ * `enterSave` is the ongoing rider for creatures that later enter / start a
+ * turn in the zone (Web re-roll; Grease's prone rider).
+ */
+export interface SpellZone {
+  /** Map overlay tint (hex) so the player can tell zones apart. */
+  tintHex?: string;
+  /** Zone tiles count as Difficult Terrain (Web, Grease). */
+  difficultTerrain?: boolean;
+  /** Cast-time condition applied with no save (Fog Cloud, Darkness). */
+  castCondition?: string;
+  /** Log-line label for the cast-time condition. Defaults to the condition. */
+  castLabel?: string;
+  /** Cast-time save — creatures in the area roll or take `condition` (Web). */
+  castSave?: { ability: 'str' | 'dex' | 'con' | 'int' | 'wis' | 'cha'; condition: string; label?: string };
+  /** Ongoing enter/turn-start save for creatures wading into the zone. */
+  enterSave?: { ability: 'str' | 'dex' | 'con' | 'int' | 'wis' | 'cha'; condition?: string };
+  /** Register the zone even when no creature is in the area at cast time. */
+  groundPlaceable?: boolean;
+}
 export interface SpellEffect {
   /** Condition(s) applied to the target on a failed save. Accepts either a
    *  single condition name (Sleep's `incapacitated`) or an array
@@ -69,6 +101,7 @@ export interface SpellDef {
   save?: SpellSave;
   damage?: SpellDamage;
   area?: SpellArea;
+  zone?: SpellZone;                // persistent-zone descriptor (Fog Cloud, Web, Grease, …)
   darts?: number;                  // Magic Missile: guaranteed-hit projectile count
   rider?: string;                  // narrative one-line secondary effect on hit
   effect?: SpellEffect;            // condition outcomes (Sleep)

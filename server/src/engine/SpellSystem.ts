@@ -777,7 +777,7 @@ function registerActiveZone(
     tiles,
     condition,
     enterSave,
-    difficultTerrain: spell.id === 'web' || spell.id === 'grease',
+    difficultTerrain: spell.zone?.difficultTerrain ?? false,
     affectedNpcIds: [] as string[],
     affectedPlayer: false,
     roundsRemaining: Math.max(1, spell.durationRounds ?? 10),
@@ -1345,6 +1345,24 @@ function resolveUtilitySpell(ctx: GameContext, spell: SpellDef, slotLevel: numbe
   // reaction) handled by spell-id switch — kept here, not as separate files,
   // since each is one-line semantic flag flips.
   const s = ctx.state;
+  // Cast-time persistent zones (Fog Cloud, Darkness, Web) — data-driven from
+  // `spell.zone`. Each tags creatures in the area (with or without a save) and
+  // registers the visible zone for its duration. Ground-placeable zones
+  // (Grease, Silent Image, …) are registered by the trailing block in
+  // `doCastSpell` instead, so they fall through to the switch's narration.
+  if (spell.zone?.castSave) {
+    const cs = spell.zone.castSave;
+    applyZoneSave(ctx, spell, tile, cs.ability, cs.condition, cs.label ?? cs.condition);
+    if (spell.zone.enterSave) {
+      const z = s.activeZones?.[s.activeZones.length - 1];
+      if (z && z.spellId === spell.id) z.enterSave = { ability: spell.zone.enterSave.ability, dc: spellSaveDC(ctx) };
+    }
+    return;
+  }
+  if (spell.zone?.castCondition) {
+    applyZoneCondition(ctx, spell, tile, spell.zone.castCondition, spell.zone.castLabel ?? spell.zone.castCondition, spell.zone.tintHex);
+    return;
+  }
   switch (spell.id) {
     case 'mage-armor':
       // Self/touch: target self (the only valid target without an ally system).
@@ -1515,43 +1533,6 @@ function resolveUtilitySpell(ctx: GameContext, spell: SpellDef, slotLevel: numbe
         left: `${ctx.playerDef.name} teleports — (${fromX},${fromY}) → (${tile.x},${tile.y})`,
         style: 'status',
       });
-      break;
-    }
-    case 'fog-cloud': {
-      // SRD: 20-ft-radius Sphere of Heavily Obscured fog at the chosen point.
-      // `applyZoneCondition` tags every creature in the sphere at cast time
-      // AND pushes an `ActiveZone` onto the state so the cloud is visible
-      // on the map and persists for the spell's duration — independent of
-      // the caster's concentration, per the project ruling on AOE
-      // persistence. Mobile creatures stepping in/out mid-spell are still
-      // a known gap until the re-tag-on-enter hook lands.
-      applyZoneCondition(ctx, spell, tile, 'heavily-obscured', 'Heavily Obscured', '#c8d0d6');
-      break;
-    }
-    case 'darkness': {
-      // SRD: 15-ft-radius Sphere of magical Darkness for the duration.
-      // Same shape as Fog Cloud (heavily-obscured) but rendered in near-black
-      // so the player can tell the two clouds apart at a glance. Persists
-      // for the spell's duration regardless of concentration.
-      applyZoneCondition(ctx, spell, tile, 'heavily-obscured', 'Heavily Obscured (Darkness)', '#1a1a22');
-      break;
-    }
-    case 'web': {
-      // SRD: 20-ft Cube of webs. Each creature in the area at cast time
-      // (and the first time it enters / starts its turn there) makes a
-      // DEX save vs spell save DC; on failure it is Restrained. The
-      // cast-time save is rolled inline by `applyZoneSave`; the enter
-      // check is driven by `tickZoneEnterSaves` below, called from the
-      // NPC-turn-start hook so a creature wading into the web mid-spell
-      // also rolls.
-      applyZoneSave(ctx, spell, tile, 'dex', 'restrained', 'Restrained (Web)');
-      // Stamp the enter-save info onto the just-pushed zone so
-      // `tickZoneEnterSaves` knows what to roll. The zone is the last
-      // entry in `state.activeZones`.
-      const z = ctx.state.activeZones?.[ctx.state.activeZones.length - 1];
-      if (z && z.spellId === 'web') {
-        z.enterSave = { ability: 'dex', dc: spellSaveDC(ctx) };
-      }
       break;
     }
     case 'enhance-ability': {
@@ -1898,40 +1879,22 @@ export function doCastSpell(
   // A new concentration spell drops any previous one first.
   if (spell.concentration && anyEffect) startConcentration(ctx, spell.id);
 
-  // Persistent-zone auto-registration for non-condition AOEs that occupy
-  // ground for the duration (Grease, Silent Image, Minor Illusion,
-  // Gust of Wind). Fog Cloud / Darkness / Web go through the zone helpers
-  // which already register. Spells whose area is just a cast-time picker
-  // (Sleep — `creaturesOfYourChoice` snapshots targets and is done) are
-  // NOT zones; the SRD's "sphere" wording for Sleep is selection geometry,
-  // not an occupied space. The `ZONE_SPELL_IDS` whitelist keeps the
-  // auto-register honest — adding a new ground-occupying AOE is one entry.
-  // Ground-occupying AOEs (Grease, Silent Image, Minor Illusion, Gust of
-  // Wind) drop the `anyEffect` gate — they're the point even when no
-  // creature is in the area at cast time. The zone itself IS the spell;
-  // creatures who later enter trigger their save / push during movement
-  // (and, for Gust, at end of turn via `runGustOfWindEndOfTurnSaves`).
-  // Recasting a non-concentration variant replaces nothing (multiple
-  // Grease patches stack); recasting a concentration variant drops the
-  // prior instance inside `registerActiveZone`.
-  const ZONE_SPELL_IDS = new Set(['grease', 'silent-image', 'minor-illusion', 'gust-of-wind']);
-  if (spell.area && ZONE_SPELL_IDS.has(spell.id) && tile) {
-    const tintByShape: Record<string, string> = {
-      grease: '#5a4a2a',
-      'silent-image': '#a08adf',
-      'minor-illusion': '#a08adf',
-      'gust-of-wind': '#aedfff',
-    };
-    // Per-spell enter-save configuration. Grease's SRD rider: every
-    // creature that enters or ends its turn in the area must succeed on
-    // a DEX save or fall Prone. Silent Image / Minor Illusion are visual
-    // — no enter-save. Adding a new ground-zone with a rider is one entry.
-    const ENTER_SAVE_BY_SPELL: Record<string, { ability: 'str' | 'dex' | 'con' | 'int' | 'wis' | 'cha'; condition: string } | undefined> = {
-      grease: { ability: 'dex', condition: 'prone' },
-    };
-    const cfg = ENTER_SAVE_BY_SPELL[spell.id];
-    const enterSave = cfg ? { ability: cfg.ability, dc: spellSaveDC(ctx) } : undefined;
-    registerActiveZone(ctx, spell, tile, cfg?.condition, tintByShape[spell.id], enterSave);
+  // Ground-placeable persistent zones (Grease, Silent Image, Minor Illusion,
+  // Gust of Wind) — data-driven from `spell.zone.groundPlaceable`. The zone
+  // IS the spell, so it registers even with no creature in the area at cast
+  // time (the `anyEffect` gate is dropped); creatures who later enter trigger
+  // the zone's `enterSave` during movement / turn-start, or — for Gust — at
+  // end of turn via `runGustOfWindEndOfTurnSaves`. Cast-time zones (Fog Cloud,
+  // Darkness, Web) register inside `resolveUtilitySpell`'s zone handler and do
+  // NOT carry `groundPlaceable`, so they skip this block. Recasting a non-
+  // concentration variant stacks (multiple Grease patches); a concentration
+  // variant drops the prior instance inside `registerActiveZone`. Spells whose
+  // area is just a cast-time picker (Sleep) carry no `zone` and are skipped.
+  if (spell.area && spell.zone?.groundPlaceable && tile) {
+    const enterSave = spell.zone.enterSave
+      ? { ability: spell.zone.enterSave.ability, dc: spellSaveDC(ctx) }
+      : undefined;
+    registerActiveZone(ctx, spell, tile, spell.zone.enterSave?.condition, spell.zone.tintHex, enterSave);
   }
 }
 

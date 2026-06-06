@@ -13,6 +13,7 @@
   "concentration": true,
   "ritual": false,
   "area": { "shape": "sphere", "sizeFeet": 20 },
+  "zone": { "tintHex": "#c8d0d6", "castCondition": "heavily-obscured", "castLabel": "Heavily Obscured" },
   "description": "You create a 20-foot-radius Sphere of fog centered on a point within range. The Sphere is Heavily Obscured. The fog spreads around corners. Wind disperses it; otherwise it lasts for the duration.",
   "scaling": "The Sphere's radius increases by 20 feet for each spell slot level above 1."
 }
