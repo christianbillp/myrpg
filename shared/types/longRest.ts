@@ -12,6 +12,7 @@ import type { ActiveConversation } from "./conversation.js";
 import type { EncounterDef, EncounterEnvironment, EncounterTileProperty, MapTilesetInfo, SecretDef } from "./encounter.js";
 import type { WorldFlagValue } from "./engineEvents.js";
 import type { Attitude, NPCDef, OngoingEffect } from "./entities.js";
+import type { ActiveBuff } from "./gameState.js";
 import type { PLAYER_FACTION_ID, Rumor } from "./factions.js";
 import type { AvailableActions, CombatMode, Disposition, PlayerState } from "./gameState.js";
 import type { PlayerAction } from "./playerActions.js";
@@ -97,6 +98,10 @@ export interface NpcState {
   isActive: boolean;
   reactionUsed: boolean;
   conditions: string[];
+  /** Active buffs this creature carries (e.g. Invisibility cast on it by the
+   *  player). Creature-agnostic — the same `ActiveBuff` shape the player uses.
+   *  Cleaned up generically by `endConcentration` when the source spell ends. */
+  activeBuffs?: ActiveBuff[];
   /** SRD Hide outcome for this NPC — Stealth roll total recorded when the
    *  creature took the Hide action. Opposed by player / other NPC Perception. */
   hideDC?: number;

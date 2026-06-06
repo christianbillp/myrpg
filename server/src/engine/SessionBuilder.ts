@@ -280,7 +280,10 @@ export function buildSessionState(
         )).map((sp) => sp.id)
       : (req.resumePreparedSpellIds ?? [...(playerDef.defaultPreparedSpellIds ?? [])]),
     concentratingOn: req.resumeConcentratingOn ?? null,
-    activeBuffs: [],
+    // Mage Armor persists across resume — re-seed its buff so `recomputeBuffs`
+    // keeps deriving `mageArmor` (the boolean below is the immediate AC seed the
+    // GameEngine ctor's `applyEquipment` reads before any recompute runs).
+    activeBuffs: req.resumeMageArmor ? [{ spellId: 'mage-armor', modifiers: [{ type: 'flag' as const, name: 'mage-armor' }] }] : [],
     mageArmor: req.resumeMageArmor ?? false,
     shieldActive: false,
     speedBonus: 0,

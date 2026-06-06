@@ -3,6 +3,7 @@ import type { GameContext } from './GameContext.js';
 import { applyEquipment, computeEquippedSlotLabels } from './EquipmentSystem.js';
 import { canSpendAction } from './ActionGuards.js';
 import { isIncapacitated } from './ConditionSystem.js';
+import { removeBuffsForSpell } from './Buffs.js';
 
 /**
  * SRD-faithful gate for equip/unequip:
@@ -91,7 +92,7 @@ export function doEquip(ctx: GameContext, slot: 'armor' | 'weapon' | 'shield', i
     }
   }
   if (slot === 'armor' && s.player.mageArmor) {
-    s.player.mageArmor = false;
+    removeBuffsForSpell(ctx, 'mage-armor');
     ctx.addLog({ left: `Mage Armor ends — armor donned.`, style: 'status' });
   }
 

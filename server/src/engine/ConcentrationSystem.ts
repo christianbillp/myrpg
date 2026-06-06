@@ -7,7 +7,7 @@
 import type { GameContext } from './GameContext.js';
 import { d20, mod } from './Dice.js';
 import { Logger } from '../Logger.js';
-import { removeBuffsForSpell } from './Buffs.js';
+import { removeBuffsForSpell, removeSpellBuffsFrom } from './Buffs.js';
 
 /** Begin concentrating on `spellId` — drops any previous concentration first. */
 export function startConcentration(ctx: GameContext, spellId: string): void {
@@ -68,22 +68,15 @@ export function endConcentration(ctx: GameContext, reason: string): void {
   }
   // Self-buffs recorded on `activeBuffs` (Blur's `blurred` condition, Magic
   // Weapon's bonus, …) — strip their conditions, drop the buff, and recompute
-  // the derived fields generically. Replaces the per-spell branches.
+  // the derived fields generically. Replaces the per-spell branches. The buff
+  // may live on the player (self-cast) OR an NPC (Invisibility on another
+  // creature), so sweep every creature for buffs from the ending spell.
   removeBuffsForSpell(ctx, spellId);
-  // Invisibility (Concentration) — strip the `invisible` condition from
-  // whichever creature was the Invisibility target. `invisibilityTargetId`
-  // points at the recipient ('player' for self-cast, or an NPC id). Clear
-  // the field so future Invisibility casts start clean.
-  if (spellId === 'invisibility') {
-    const tid = s.player.invisibilityTargetId;
-    if (tid === 'player') {
-      s.player.conditions = s.player.conditions.filter((c) => c !== 'invisible');
-    } else if (tid) {
-      const t = s.npcs.find((n) => n.id === tid);
-      if (t) t.conditions = t.conditions.filter((c) => c !== 'invisible');
-    }
-    s.player.invisibilityTargetId = undefined;
-  }
+  for (const npc of s.npcs) removeSpellBuffsFrom(npc, spellId);
+  // Invisibility's `invisible` condition is stripped by the creature-agnostic
+  // buff cleanup above; clear the end-on-attack pointer so a future cast starts
+  // clean.
+  if (spellId === 'invisibility') s.player.invisibilityTargetId = undefined;
   // Flaming Sphere (Concentration) — despawn the sphere when the spell
   // ends. The summon NPC carries `summonSpellId === 'flaming-sphere'`,
   // so the filter picks it up no matter how many were placed.

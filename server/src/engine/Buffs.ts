@@ -1,62 +1,84 @@
 /**
- * Self-buff registry — data-driven replacement for the per-spell
- * `switch(spell.id)` buff applications + the per-spell concentration cleanup.
+ * Buff registry — data-driven replacement for the per-spell `switch(spell.id)`
+ * buff applications + the per-spell concentration cleanup.
  *
- * A self-buff spell records an `ActiveBuff` (its contributed `modifiers` +
- * any conditions it applied) on `PlayerState.activeBuffs`. `recomputeBuffs`
- * then DERIVES the legacy buff fields the rest of the engine already reads
- * (`magicWeaponBonus`, `speedBonus`, `seeInvisible`) — and rebuilds AC/attack
- * via `applyEquipment` — so no consumer changes. `removeBuffsForSpell` drops a
- * buff (e.g. on concentration end), strips its conditions, and recomputes.
+ * A buff records an `ActiveBuff` (its contributed `modifiers`, any `conditions`
+ * it applied, and an optional `charges` counter) on a creature's `activeBuffs`.
+ * The store is **creature-agnostic** — `applyBuffTo` / `removeSpellBuffsFrom`
+ * operate on the player OR any NPC (Invisibility cast on another creature), so
+ * the same primitive backs self-buffs and creature-targeted buffs.
  *
- * Buffs that are parameterised or stateful (Enhance Ability's chosen ability,
- * Mirror Image's counter) and Mage Armor (persisted across resume) stay on
- * their existing paths for now.
+ * For the PLAYER, `recomputeBuffs` additionally DERIVES the legacy buff fields
+ * the rest of the engine reads (`magicWeaponBonus`, `speedBonus`, `seeInvisible`,
+ * `expeditiousRetreat`, `enhancedAbility`, `mageArmor`, `mirrorImages`) and
+ * rebuilds AC/attack via `applyEquipment` — so no consumer changes.
  */
 import type { GameContext } from './GameContext.js';
 import type { ActiveBuff } from './types.js';
 import { applyEquipment } from './EquipmentSystem.js';
 
-/** Derive the legacy buff fields from the active-buff modifier list and rebuild
+/** Anything that can carry buffs — the player or an NPC. Both expose a
+ *  `conditions` list and an optional `activeBuffs` store. */
+export interface BuffTarget {
+  conditions: string[];
+  activeBuffs?: ActiveBuff[];
+}
+
+/** Apply a buff to any creature: replace any existing buff from the same spell,
+ *  record it, and apply the conditions it grants. Creature-agnostic — no
+ *  player-specific derivation (call `recomputeBuffs` afterwards for the player). */
+export function applyBuffTo(target: BuffTarget, buff: ActiveBuff): void {
+  target.activeBuffs = [...(target.activeBuffs ?? []).filter((b) => b.spellId !== buff.spellId), buff];
+  for (const c of buff.conditions ?? []) {
+    if (!target.conditions.includes(c)) target.conditions.push(c);
+  }
+}
+
+/** Remove every buff a creature carries from `spellId`, stripping the
+ *  conditions they applied. Returns true when something was removed. */
+export function removeSpellBuffsFrom(target: BuffTarget, spellId: string): boolean {
+  const ending = (target.activeBuffs ?? []).filter((b) => b.spellId === spellId);
+  if (ending.length === 0) return false;
+  for (const b of ending) {
+    for (const c of b.conditions ?? []) {
+      target.conditions = target.conditions.filter((x) => x !== c);
+    }
+  }
+  target.activeBuffs = (target.activeBuffs ?? []).filter((b) => b.spellId !== spellId);
+  return true;
+}
+
+/** Derive the player's legacy buff fields from its active-buff list and rebuild
  *  AC + main attack. The derived fields are sourced SOLELY from buffs, so this
  *  also resets them to their no-buff defaults when a buff is removed. */
 export function recomputeBuffs(ctx: GameContext): void {
   const p = ctx.state.player;
-  const mods = (p.activeBuffs ?? []).flatMap((b) => b.modifiers ?? []);
+  const buffs = p.activeBuffs ?? [];
+  const mods = buffs.flatMap((b) => b.modifiers ?? []);
   p.seeInvisible = mods.some((m) => m.type === 'flag' && m.name === 'see-invisible');
   p.expeditiousRetreat = mods.some((m) => m.type === 'flag' && m.name === 'expeditious-retreat');
+  p.mageArmor = mods.some((m) => m.type === 'flag' && m.name === 'mage-armor');
   const enhanced = mods.find((m) => m.type === 'enhanced-ability');
   p.enhancedAbility = enhanced && enhanced.type === 'enhanced-ability' ? enhanced.ability : undefined;
   p.speedBonus = mods.reduce((max, m) => (m.type === 'speed-bonus' ? Math.max(max, m.value) : max), 0);
   p.magicWeaponBonus = mods.reduce((max, m) => (m.type === 'weapon-bonus' ? Math.max(max, m.value) : max), 0);
-  // mageArmor + shieldActive are owned outside the buff list (Mage Armor is
-  // resumed; Shield is a reaction) — pass them through unchanged.
+  p.mirrorImages = buffs.find((b) => b.spellId === 'mirror-image')?.charges ?? 0;
+  // shieldActive is owned outside the buff list (Shield is a reaction) — pass
+  // it through unchanged; mageArmor now comes from the derived flag above.
   applyEquipment(ctx.playerDef, p.equippedSlots, ctx.defs.equipment, p.mageArmor, p.shieldActive, p.magicWeaponBonus);
+  p.ac = ctx.playerDef.ac;
 }
 
-/** Apply a self-buff: record it, apply any conditions it grants to the player,
+/** Apply a self-buff to the player: record it, apply any conditions it grants,
  *  then recompute the derived fields. Replaces a buff with the same spellId. */
 export function applySelfBuff(ctx: GameContext, buff: ActiveBuff): void {
-  const p = ctx.state.player;
-  p.activeBuffs = [...(p.activeBuffs ?? []).filter((b) => b.spellId !== buff.spellId), buff];
-  for (const c of buff.playerConditions ?? []) {
-    if (!p.conditions.includes(c)) p.conditions.push(c);
-  }
+  applyBuffTo(ctx.state.player, buff);
   recomputeBuffs(ctx);
 }
 
-/** Remove every active buff cast by `spellId`, strip the conditions it applied
- *  from the player, and recompute. Called from `endConcentration` (and could be
- *  called on duration expiry). No-op when the spell granted no tracked buff. */
+/** Remove every player buff cast by `spellId`, strip the conditions it applied,
+ *  and recompute. Called from `endConcentration` (and on duration expiry). No-op
+ *  when the spell granted no tracked player buff. */
 export function removeBuffsForSpell(ctx: GameContext, spellId: string): void {
-  const p = ctx.state.player;
-  const ending = (p.activeBuffs ?? []).filter((b) => b.spellId === spellId);
-  if (ending.length === 0) return;
-  for (const b of ending) {
-    for (const c of b.playerConditions ?? []) {
-      p.conditions = p.conditions.filter((x) => x !== c);
-    }
-  }
-  p.activeBuffs = (p.activeBuffs ?? []).filter((b) => b.spellId !== spellId);
-  recomputeBuffs(ctx);
+  if (removeSpellBuffsFrom(ctx.state.player, spellId)) recomputeBuffs(ctx);
 }

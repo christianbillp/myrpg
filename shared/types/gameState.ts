@@ -11,14 +11,17 @@ import type { EquipmentSlots, OngoingEffect } from "./entities.js";
 import type { GameState } from "./longRest.js";
 import type { Modifier } from "./modifiers.js";
 
-/** One active self-buff spell on the player. Its `modifiers` are derived into
- *  the legacy buff fields by `Buffs.recomputeBuffs`; `playerConditions` are the
- *  conditions it applied (stripped when the buff ends). `concentration` buffs
- *  are removed by `endConcentration`. */
+/** One active buff spell on a creature (the player or an NPC). Its `modifiers`
+ *  are derived into the player's legacy buff fields by `Buffs.recomputeBuffs`;
+ *  `conditions` are the conditions it applied to its host creature (stripped
+ *  when the buff ends); `charges` is a consumable counter (Mirror Image's
+ *  duplicates). `concentration` buffs are removed by `endConcentration` from
+ *  whichever creature holds them. */
 export interface ActiveBuff {
   spellId: string;
   modifiers?: Modifier[];
-  playerConditions?: string[];
+  conditions?: string[];
+  charges?: number;
   concentration?: boolean;
 }
 

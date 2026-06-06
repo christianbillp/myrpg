@@ -17,14 +17,13 @@ import { d, d20, mod } from './Dice.js';
 import { chebyshev } from './EnemyAI.js';
 import { canCastSpell } from './ActionGuards.js';
 import { startConcentration, endConcentration } from './ConcentrationSystem.js';
-import { applyEquipment } from './EquipmentSystem.js';
 import { publishNpcDamage } from './ThresholdPublisher.js';
 import { combatantDisplayName } from './CombatFlow.js';
 import { emitNoise, NOISE_SPELL_VERBAL } from './Sound.js';
 import { Logger } from '../Logger.js';
 import { canSee as visCanSee } from './Vision.js';
 import { hasModifierFlag } from './Modifiers.js';
-import { applySelfBuff } from './Buffs.js';
+import { applySelfBuff, applyBuffTo } from './Buffs.js';
 import { SPEED_ZERO_CONDITIONS } from './ConditionSystem.js';
 import {
   tilesInArea, playerInArea, creaturesInArea,
@@ -1385,9 +1384,10 @@ function resolveUtilitySpell(ctx: GameContext, spell: SpellDef, slotLevel: numbe
         ctx.addLog({ left: `Mage Armor fizzles — already wearing armor`, style: 'miss' });
         return;
       }
-      s.player.mageArmor = true;
-      applyEquipment(ctx.playerDef, s.player.equippedSlots, ctx.defs.equipment, true, s.player.shieldActive);
-      s.player.ac = ctx.playerDef.ac;
+      // Recorded as a self-buff (`mage-armor` flag) → `recomputeBuffs` derives
+      // `mageArmor` and rebuilds AC (base 13 + DEX). Donning armor or losing the
+      // buff resets it. Persisted across resume by re-seeding the buff.
+      applySelfBuff(ctx, { spellId: 'mage-armor', modifiers: [{ type: 'flag', name: 'mage-armor' }] });
       ctx.addLog({ left: `${ctx.playerDef.name} casts Mage Armor — AC ${ctx.playerDef.ac} for 8 hours`, style: 'status' });
       break;
     case 'detect-magic':
@@ -1479,15 +1479,15 @@ function resolveUtilitySpell(ctx: GameContext, spell: SpellDef, slotLevel: numbe
       // SRD: attackers have Disadvantage on attack rolls against you
       // (Concentration). Self-buff records the `blurred` condition; the generic
       // `removeBuffsForSpell` in endConcentration strips it when the spell ends.
-      applySelfBuff(ctx, { spellId: 'blur', playerConditions: ['blurred'], concentration: true });
+      applySelfBuff(ctx, { spellId: 'blur', conditions: ['blurred'], concentration: true });
       ctx.addLog({ left: `${ctx.playerDef.name} casts Blur — attackers have Disadvantage`, style: 'status' });
       break;
     case 'mirror-image': {
-      // SRD: three illusory duplicates appear in your space. Set the counter
-      // to 3; the damage path (applyEnemyHitToPlayer) handles the per-hit
-      // d6-per-duplicate roll and decrements on absorb. Re-casting refreshes
-      // back to 3 even if some images remain.
-      s.player.mirrorImages = 3;
+      // SRD: three illusory duplicates appear in your space. Recorded as a buff
+      // with `charges: 3`; `recomputeBuffs` derives `mirrorImages`, and the
+      // damage path (CombatFlow) decrements the buff's charges per absorbed hit,
+      // removing the buff at 0. Re-casting replaces the buff (refreshes to 3).
+      applySelfBuff(ctx, { spellId: 'mirror-image', charges: 3 });
       ctx.addLog({ left: `${ctx.playerDef.name} casts Mirror Image — three duplicates shimmer into being`, style: 'status' });
       break;
     }
@@ -1500,15 +1500,20 @@ function resolveUtilitySpell(ctx: GameContext, spell: SpellDef, slotLevel: numbe
       // attack-resolution paths know which creature to watch for the
       // end-on-attack trigger; concentration end strips the condition and
       // clears the field.
+      // The buff (carrying the `invisible` condition) lives on whichever
+      // creature is the recipient — the player (self-cast) or an NPC. The
+      // creature-agnostic store handles both; `endConcentration` strips it from
+      // the right host. `invisibilityTargetId` stays as the pointer the
+      // end-on-attack triggers watch.
       const tid = targetIds?.[0];
       if (tid) {
         const target = s.npcs.find((n) => n.id === tid && n.hp > 0);
         if (!target) { ctx.addLog({ left: `${spell.name}: invalid target`, style: 'miss' }); break; }
-        if (!target.conditions.includes('invisible')) target.conditions.push('invisible');
+        applyBuffTo(target, { spellId: 'invisibility', conditions: ['invisible'], concentration: true });
         s.player.invisibilityTargetId = target.id;
         ctx.addLog({ left: `${ctx.playerDef.name} casts Invisibility on ${target.revealedName ?? target.name}`, style: 'status' });
       } else {
-        if (!s.player.conditions.includes('invisible')) s.player.conditions.push('invisible');
+        applySelfBuff(ctx, { spellId: 'invisibility', conditions: ['invisible'], concentration: true });
         s.player.invisibilityTargetId = 'player';
         ctx.addLog({ left: `${ctx.playerDef.name} casts Invisibility on themselves — they vanish`, style: 'status' });
       }

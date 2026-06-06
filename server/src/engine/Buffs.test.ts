@@ -5,8 +5,8 @@
  */
 import { describe, it, expect } from "vitest";
 import type { GameContext } from "./GameContext.js";
-import type { PlayerDef } from "./types.js";
-import { applySelfBuff, removeBuffsForSpell, recomputeBuffs } from "./Buffs.js";
+import type { PlayerDef, ActiveBuff } from "./types.js";
+import { applySelfBuff, removeBuffsForSpell, recomputeBuffs, applyBuffTo, removeSpellBuffsFrom } from "./Buffs.js";
 
 function mkCtx() {
   const player = {
@@ -20,6 +20,7 @@ function mkCtx() {
     seeInvisible: false,
     expeditiousRetreat: false,
     enhancedAbility: undefined as undefined | "str" | "dex" | "con" | "int" | "wis" | "cha",
+    mirrorImages: 0,
   };
   const playerDef = { dex: 14, str: 10 } as unknown as PlayerDef;
   const ctx = { state: { player }, playerDef, defs: { equipment: [] } } as unknown as GameContext;
@@ -56,7 +57,7 @@ describe("self-buff registry", () => {
 
   it("applies and strips player conditions (Blur)", () => {
     const { ctx, player } = mkCtx();
-    applySelfBuff(ctx, { spellId: "blur", playerConditions: ["blurred"], concentration: true });
+    applySelfBuff(ctx, { spellId: "blur", conditions: ["blurred"], concentration: true });
     expect(player.conditions).toContain("blurred");
     removeBuffsForSpell(ctx, "blur");
     expect(player.conditions).not.toContain("blurred");
@@ -79,6 +80,39 @@ describe("self-buff registry", () => {
     applySelfBuff(ctx, { spellId: "magic-weapon", modifiers: [{ type: "weapon-bonus", value: 3 }], concentration: true });
     expect(player.activeBuffs).toHaveLength(1);
     expect(player.magicWeaponBonus).toBe(3);
+  });
+
+  it("Mage Armor: the flag buff derives mageArmor + AC, cleared on removal", () => {
+    const { ctx, player, playerDef } = mkCtx();
+    applySelfBuff(ctx, { spellId: "mage-armor", modifiers: [{ type: "flag", name: "mage-armor" }] });
+    expect(player.mageArmor).toBe(true);
+    expect(playerDef.ac).toBe(15); // 13 + DEX(+2)
+    removeBuffsForSpell(ctx, "mage-armor");
+    expect(player.mageArmor).toBe(false);
+    expect(playerDef.ac).toBe(12); // 10 + DEX(+2)
+  });
+
+  it("Mirror Image: charges derive mirrorImages and clear at zero", () => {
+    const { ctx, player } = mkCtx();
+    applySelfBuff(ctx, { spellId: "mirror-image", charges: 3 });
+    expect(player.mirrorImages).toBe(3);
+    const buff = player.activeBuffs!.find((b) => b.spellId === "mirror-image")!;
+    buff.charges = 2;
+    recomputeBuffs(ctx);
+    expect(player.mirrorImages).toBe(2);
+    removeBuffsForSpell(ctx, "mirror-image");
+    expect(player.mirrorImages).toBe(0);
+  });
+
+  it("creature-agnostic: a buff applied to an NPC carries + clears its condition", () => {
+    const npc = { conditions: [] as string[], activeBuffs: [] as ActiveBuff[] };
+    applyBuffTo(npc, { spellId: "invisibility", conditions: ["invisible"], concentration: true });
+    expect(npc.conditions).toContain("invisible");
+    expect(npc.activeBuffs).toHaveLength(1);
+    expect(removeSpellBuffsFrom(npc, "invisibility")).toBe(true);
+    expect(npc.conditions).not.toContain("invisible");
+    expect(npc.activeBuffs).toHaveLength(0);
+    expect(removeSpellBuffsFrom(npc, "invisibility")).toBe(false); // idempotent
   });
 
   it("removeBuffsForSpell is a no-op when no matching buff", () => {

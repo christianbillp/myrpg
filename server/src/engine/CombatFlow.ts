@@ -13,6 +13,7 @@ import { applyMonsterAttachToPlayer } from './OngoingEffectsSystem.js';
 import { hasAdvantageOn } from './Modifiers.js';
 import { tickActiveZones, tickZoneEnterSaves, runGustOfWindEndOfTurnSaves } from './SpellSystem.js';
 import { endConcentration } from './ConcentrationSystem.js';
+import { recomputeBuffs, removeBuffsForSpell } from './Buffs.js';
 import { pingFactionAlert } from './npcSim/index.js';
 
 // ── Combat lifecycle ────────────────────────────────────────────────────────
@@ -473,19 +474,24 @@ export function applyEnemyHitToPlayer(
   // damage from the attack. Blindsight / Truesight / Blinded attackers
   // ignore the spell per SRD (descriptive only — we don't model attacker
   // sense types yet). When all three images are destroyed the spell ends.
-  if ((s.player.mirrorImages ?? 0) > 0) {
-    const count = s.player.mirrorImages!;
+  const mirrorBuff = s.player.activeBuffs?.find((b) => b.spellId === 'mirror-image');
+  if (mirrorBuff && (mirrorBuff.charges ?? 0) > 0) {
+    const count = mirrorBuff.charges!;
     const rolls: number[] = [];
     for (let i = 0; i < count; i++) rolls.push(Math.floor(Math.random() * 6) + 1);
     const anyHit = rolls.some((r) => r >= 3);
     if (anyHit) {
-      s.player.mirrorImages = count - 1;
+      // Decrement the buff's charges; remove it (and reset the derived
+      // `mirrorImages`) when the last duplicate is spent.
+      mirrorBuff.charges = count - 1;
+      if (mirrorBuff.charges <= 0) removeBuffsForSpell(ctx, 'mirror-image');
+      else recomputeBuffs(ctx);
       ctx.addLog({
         left: `↪ Mirror Image — one duplicate absorbs the hit (${s.player.mirrorImages} remaining)`,
         right: `${count}d6[${rolls.join(',')}]`,
         style: 'status',
       });
-      if (s.player.mirrorImages === 0) {
+      if ((s.player.mirrorImages ?? 0) === 0) {
         ctx.addLog({ left: `Mirror Image fades — all duplicates destroyed`, style: 'status' });
       }
       // The hit is voided — no damage, no bonus damage, no on-hit riders.
