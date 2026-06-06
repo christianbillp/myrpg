@@ -26,7 +26,7 @@ import { generateMapAgentic } from "../engine/maps/mapAgent.js";
 import { refineEncounter, type EncounterDraftForRefine } from "../encounterRefiner.js";
 import { refineAdventure, type AdventureDraftForRefine, type EncounterPoolEntry } from "../adventureRefiner.js";
 import { refineNpc, type NpcDraftForRefine } from "../npcRefiner.js";
-import { suggestCharacter, type SuggestCharacterRequest } from "../characterSuggester.js";
+import { suggestCharacter, generateCharacterIdentity, type SuggestCharacterRequest, type GenerateIdentityRequest } from "../characterSuggester.js";
 import type { GameDefs } from "../engine/types.js";
 import { STARTING_ZONE_PLAYER } from "../../../shared/startingZones.js";
 import { safeId, asString, asArray } from "../util/requestValidation.js";
@@ -940,6 +940,29 @@ export function registerGenerateRoutes(server: FastifyInstance, ctx: GenerateRou
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       Logger.log("anomaly.generate_character_failed", { error: msg }, "error");
+      return reply.code(400).send({ error: msg });
+    }
+  });
+
+  /**
+   * Generate identity text (name / tagline / backstory) for an already-built
+   * character (US-122 Review step). `fields` selects which to produce, so a
+   * player can regenerate all three or just one; the rest are passed as context
+   * so the result stays coherent. Honours the active setting's lore + the build.
+   */
+  server.post<{
+    Body: GenerateIdentityRequest;
+  }>("/generate/character/identity", async (req, reply) => {
+    const fields = req.body?.fields;
+    if (!Array.isArray(fields) || fields.length === 0) {
+      return reply.code(400).send({ error: "fields must be a non-empty array" });
+    }
+    try {
+      const result = await generateCharacterIdentity(anthropic, getDefs(), req.body);
+      return reply.send(result);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      Logger.log("anomaly.generate_character_identity_failed", { error: msg }, "error");
       return reply.code(400).send({ error: msg });
     }
   });

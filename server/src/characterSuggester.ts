@@ -163,3 +163,117 @@ GUIDELINES:
 - \`abilityPriority\` lists ALL SIX ability keys (str, dex, con, int, wis, cha) ordered from the one this character should value most to least — put the class's spellcasting / attack ability first.
 - \`name\` is just the name (no class/title). \`shortDescription\` is a single evocative line. \`description\` is 2-3 sentences of backstory grounded in the setting.`;
 }
+
+// ── Identity generator (US-122 — Review step) ────────────────────────────────
+
+/** Which identity fields to (re)generate. */
+export type IdentityField = "name" | "shortDescription" | "description";
+
+/**
+ * Generate the requested identity fields (name / tagline / backstory) for an
+ * already-built character, honouring the active setting's lore and the full
+ * build (species, background, class, top abilities, skills, languages). Only
+ * the requested fields are produced — so the player can regenerate one field
+ * (e.g. just the tagline) without disturbing the others — and any fields they
+ * already wrote are passed as context so the result stays coherent.
+ */
+export interface GenerateIdentityRequest {
+  speciesId: string;
+  backgroundId: string;
+  classId: string;
+  fields: IdentityField[];
+  /** Fields the player has already filled in — kept as context. */
+  current?: { name?: string; shortDescription?: string; description?: string };
+  /** Optional build colour for richer prompts. */
+  topAbilities?: string[];   // highest-rated ability keys, best first
+  skills?: string[];
+  languages?: string[];
+}
+
+export interface GenerateIdentityResponse {
+  name?: string;
+  shortDescription?: string;
+  description?: string;
+}
+
+const FIELD_BLURB: Record<IdentityField, string> = {
+  name: "`name`: just a personal name fitting the setting (no class, title, or epithet)",
+  shortDescription: "`shortDescription`: a single evocative tagline (≤ 120 characters)",
+  description: "`description`: 2-3 sentences of backstory grounded in the setting",
+};
+
+export async function generateCharacterIdentity(
+  anthropic: Anthropic,
+  defs: GameDefs,
+  req: GenerateIdentityRequest,
+): Promise<GenerateIdentityResponse> {
+  const fields = (req.fields ?? []).filter((f): f is IdentityField => f in FIELD_BLURB);
+  if (fields.length === 0) throw new Error("No identity fields requested.");
+
+  const nameOf = (arr: { id: string; name: string }[], id: string) => arr.find((x) => x.id === id)?.name ?? id;
+  const species = nameOf(defs.species, req.speciesId);
+  const background = nameOf(defs.backgrounds, req.backgroundId);
+  const className = nameOf(defs.classes, req.classId);
+
+  const setting = settingPromptBlock(defs.activeSetting ?? null, "full");
+  const buildLines = [
+    `Species: ${species}`,
+    `Background: ${background}`,
+    `Class: ${className}`,
+    req.topAbilities?.length ? `Strongest abilities: ${req.topAbilities.map((a) => a.toUpperCase()).join(", ")}` : "",
+    req.skills?.length ? `Skill proficiencies: ${req.skills.join(", ")}` : "",
+    req.languages?.length ? `Languages: ${req.languages.join(", ")}` : "",
+  ].filter(Boolean).join("\n");
+
+  const current = req.current ?? {};
+  const keepLines = (["name", "shortDescription", "description"] as IdentityField[])
+    .filter((f) => !fields.includes(f) && current[f])
+    .map((f) => `${f}: ${current[f]}`);
+  const contextLines = (["name", "shortDescription", "description"] as IdentityField[])
+    .filter((f) => current[f])
+    .map((f) => `${f}: ${current[f]}`);
+
+  const system = `${setting ? setting + "\n\n" : ""}You write identity text for a level-1 player character in an SRD 5.2.1 RPG. Produce ONLY these fields via the submit_identity tool, honouring the active setting${setting ? " (above)" : ""} — names, tone, and backstory must fit it; do not invent factions or places outside it:
+${fields.map((f) => "- " + FIELD_BLURB[f]).join("\n")}
+
+THE CHARACTER'S BUILD:
+${buildLines}${keepLines.length ? `\n\nKeep these already-chosen fields consistent (do not change them):\n${keepLines.join("\n")}` : ""}
+
+Match the requested fields to the build and the setting. Do not return fields you weren't asked for.`;
+
+  const user = contextLines.length
+    ? `Generate: ${fields.join(", ")}.\nExisting fields:\n${contextLines.join("\n")}`
+    : `Generate: ${fields.join(", ")}.`;
+
+  const resp = await anthropic.messages.create({
+    model: "claude-sonnet-4-6",
+    max_tokens: 1024,
+    system,
+    tools: [IDENTITY_TOOL],
+    tool_choice: { type: "tool", name: "submit_identity" },
+    messages: [{ role: "user", content: user }],
+  });
+  const block = resp.content.find((b) => b.type === "tool_use");
+  if (!block || block.type !== "tool_use") throw new Error("Model did not return a tool_use block.");
+  const p = block.input as GenerateIdentityResponse;
+
+  // Return only the requested fields, trimmed/clamped.
+  const out: GenerateIdentityResponse = {};
+  if (fields.includes("name") && p.name) out.name = p.name.trim().slice(0, 40);
+  if (fields.includes("shortDescription") && p.shortDescription) out.shortDescription = p.shortDescription.trim().slice(0, 120);
+  if (fields.includes("description") && p.description) out.description = p.description.trim().slice(0, 600);
+  return out;
+}
+
+const IDENTITY_TOOL: Anthropic.Tool = {
+  name: "submit_identity",
+  description: "Submit the requested character identity fields.",
+  input_schema: {
+    type: "object",
+    properties: {
+      name: { type: "string", description: "Personal name fitting the setting (no titles)." },
+      shortDescription: { type: "string", description: "One-line tagline (≤ 120 chars)." },
+      description: { type: "string", description: "2-3 sentence backstory consistent with the setting + build." },
+    },
+  },
+};

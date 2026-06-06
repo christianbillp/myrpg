@@ -17,10 +17,10 @@ import { gameClient } from "../net/GameClient";
 import {
   STANDARD_ARRAY, POINT_BUY_BUDGET, POINT_BUY_MIN, POINT_BUY_MAX,
   pointBuyCost, pointBuyTotalCost, abilityModifier, ABILITY_KEYS,
-  type AbilityScores, type AbilityScoreMethod, type AbilityKey,
+  type AbilityScores, type AbilityScoreMethod, type AbilityKey, type BackgroundAbilityChoice,
 } from "../../../shared/abilityScores";
 import { STANDARD_LANGUAGES, STANDARD_LANGUAGE_CHOICES, COMMON } from "../../../shared/languages";
-import type { ClassDef, SpeciesDef, BackgroundDef, SpellDef } from "../../../shared/types";
+import type { ClassDef, SpeciesDef, BackgroundDef, SpellDef, FeatDef } from "../../../shared/types";
 
 const ACCENT = "#e2b96f";
 const ABILITY_LABEL: Record<AbilityKey, string> = {
@@ -39,6 +39,9 @@ interface CreatorState {
   classId: string;
   method: AbilityScoreMethod;
   scores: AbilityScores;
+  /** Player's chosen background ability-increase distribution (SRD: +2/+1 to
+   *  two of the background's three abilities, or +1 to all three). */
+  backgroundAbility: BackgroundAbilityChoice;
   /** Source values to assign (Standard Array / rolled set). */
   pool: number[];
   skillPicks: Set<string>;
@@ -58,6 +61,7 @@ export class CharacterCreatorScene extends Phaser.Scene {
   private species: SpeciesDef[] = [];
   private backgrounds: BackgroundDef[] = [];
   private spells: SpellDef[] = [];
+  private feats: FeatDef[] = [];
   private busy = false;
 
   private state: CreatorState = {
@@ -65,6 +69,7 @@ export class CharacterCreatorScene extends Phaser.Scene {
     speciesId: "", backgroundId: "", classId: "",
     method: "standard-array",
     scores: { str: 10, dex: 10, con: 10, int: 10, wis: 10, cha: 10 },
+    backgroundAbility: { kind: "one-one-one" },  // replaced with the bg's first two on load
     pool: [...STANDARD_ARRAY],
     skillPicks: new Set(), languagePicks: new Set(), cantripPicks: new Set(), spellPicks: new Set(),
     equipmentChoice: "A",
@@ -79,10 +84,12 @@ export class CharacterCreatorScene extends Phaser.Scene {
     this.species = (this.registry.get("species") as SpeciesDef[]) ?? [];
     this.backgrounds = (this.registry.get("backgrounds") as BackgroundDef[]) ?? [];
     this.spells = (this.registry.get("spells") as SpellDef[]) ?? [];
+    this.feats = (this.registry.get("feats") as FeatDef[]) ?? [];
     // Sensible defaults so a player can click straight through manually.
     this.state.speciesId ||= this.species[0]?.id ?? "";
     this.state.backgroundId ||= this.backgrounds[0]?.id ?? "";
     this.state.classId ||= this.classes[0]?.id ?? "";
+    this.state.backgroundAbility = this.defaultBackgroundAbility();
 
     this.buildShell();
     this.renderStep();
@@ -192,6 +199,7 @@ export class CharacterCreatorScene extends Phaser.Scene {
       if (this.classes.some((x) => x.id === s.classId)) this.state.classId = s.classId;
       if (this.species.some((x) => x.id === s.speciesId)) this.state.speciesId = s.speciesId;
       if (this.backgrounds.some((x) => x.id === s.backgroundId)) this.state.backgroundId = s.backgroundId;
+      this.state.backgroundAbility = this.defaultBackgroundAbility();  // keep valid for the (possibly new) background
       this.state.rationale = s.rationale;
       // Auto-assign the Standard Array along the AI's ability priority.
       this.state.method = "standard-array";
@@ -209,11 +217,50 @@ export class CharacterCreatorScene extends Phaser.Scene {
     }
   }
 
+  /** Generate one or more identity fields (name / tagline / backstory) from the
+   *  whole build, honouring the setting lore. Used by the Review-step buttons. */
+  private async genIdentity(fields: Array<"name" | "shortDescription" | "description">): Promise<void> {
+    if (this.busy) return;
+    this.busy = true;
+    this.setStatus("Generating…");
+    try {
+      const bonuses = this.backgroundBonuses();
+      const topAbilities = [...ABILITY_KEYS]
+        .sort((a, b) => (this.state.scores[b] + (bonuses[b] ?? 0)) - (this.state.scores[a] + (bonuses[a] ?? 0)))
+        .slice(0, 3);
+      const out = await gameClient.generateCharacterIdentity({
+        speciesId: this.state.speciesId,
+        backgroundId: this.state.backgroundId,
+        classId: this.state.classId,
+        fields,
+        current: { name: this.state.name, shortDescription: this.state.shortDescription, description: this.state.description },
+        topAbilities,
+        skills: [...this.state.skillPicks],
+        languages: [...this.state.languagePicks],
+      });
+      if (out.name !== undefined) this.state.name = out.name;
+      if (out.shortDescription !== undefined) this.state.shortDescription = out.shortDescription;
+      if (out.description !== undefined) this.state.description = out.description;
+      this.setStatus("Generated.");
+      this.renderStep();
+    } catch (e) {
+      this.setStatus(e instanceof Error ? e.message : "Generation failed.", true);
+    } finally {
+      this.busy = false;
+    }
+  }
+
   // ── Step 1 — Origin ──────────────────────────────────────────────────────
   private renderOrigin(): void {
     const c = this.content!;
-    c.appendChild(this.selectRow("Species", this.species.map((s) => ({ value: s.id, label: s.name })), this.state.speciesId, (v) => { this.state.speciesId = v; }));
-    c.appendChild(this.selectRow("Background", this.backgrounds.map((b) => ({ value: b.id, label: b.name })), this.state.backgroundId, (v) => { this.state.backgroundId = v; }));
+    c.appendChild(this.selectRow("Species", this.species.map((s) => ({ value: s.id, label: s.name })), this.state.speciesId, (v) => { this.state.speciesId = v; this.renderStep(); }));
+    c.appendChild(this.speciesPanel());
+    c.appendChild(this.selectRow("Background", this.backgrounds.map((b) => ({ value: b.id, label: b.name })), this.state.backgroundId, (v) => {
+      this.state.backgroundId = v;
+      this.state.backgroundAbility = this.defaultBackgroundAbility();  // keep the bonus choice valid for the new bg
+      this.renderStep();
+    }));
+    c.appendChild(this.backgroundPanel());
     c.appendChild(this.selectRow("Class", this.classes.map((cl) => ({ value: cl.id, label: cl.name })), this.state.classId, (v) => {
       this.state.classId = v;
       this.state.skillPicks = new Set();
@@ -221,13 +268,6 @@ export class CharacterCreatorScene extends Phaser.Scene {
       this.state.spellPicks = new Set();
       this.renderStep();  // class change alters later steps
     }));
-    const bg = this.backgrounds.find((b) => b.id === this.state.backgroundId);
-    if (bg) {
-      const note = document.createElement("div");
-      note.style.cssText = "font-size:11px;color:#88aacc;margin-top:10px;line-height:1.5;";
-      note.textContent = `${bg.name} grants skills: ${bg.skillProficiencies.join(", ")} · ability bonus among ${bg.abilityScores.map((a) => a.toUpperCase()).join("/")} (applied as +2/+1).`;
-      c.appendChild(note);
-    }
 
     // Languages (US-123): every character knows Common; choose two more.
     const langHead = document.createElement("div");
@@ -267,17 +307,11 @@ export class CharacterCreatorScene extends Phaser.Scene {
     // read the scores to derive the origin bonus.
     if (this.state.method !== "point-buy") this.ensurePoolAssigned();
 
-    // Origin bonus banner — names the background and which abilities it raises,
-    // so the bonus baked into the final scores below is never a mystery.
+    // Origin bonus picker — the player chooses how the background's SRD ability
+    // increase is distributed (+2/+1 to two of its abilities, or +1 to all
+    // three). Drives the final scores shown below.
+    c.appendChild(this.backgroundAbilityPicker());
     const bonuses = this.backgroundBonuses();
-    const bg = this.backgrounds.find((b) => b.id === this.state.backgroundId);
-    const bonusList = ABILITY_KEYS.filter((k) => bonuses[k]).map((k) => `+${bonuses[k]} ${ABILITY_LABEL[k]}`).join(", ");
-    if (bg && bonusList) {
-      const note = document.createElement("div");
-      note.style.cssText = "font-size:11px;color:#9ac6a0;margin-bottom:10px;line-height:1.5;";
-      note.innerHTML = `Origin bonus — <b>${bg.name}</b> grants ${bonusList} (the +2 goes to your highest of ${(bg.abilityScores as string[]).map((a) => a.toUpperCase()).join("/")}). Included in the <b>final</b> scores below.`;
-      c.appendChild(note);
-    }
 
     if (this.state.method === "point-buy") {
       const total = pointBuyTotalCost(this.state.scores);
@@ -322,17 +356,130 @@ export class CharacterCreatorScene extends Phaser.Scene {
     return row;
   }
 
-  /** The background ability-score increase per ability (US-122 / SRD): +2 to
-   *  the highest-rated of the background's three abilities and +1 to the next.
-   *  Mirrors the `backgroundAbility` inference in `submit()` so the displayed
-   *  final scores match what gets built. */
+  /** A sensible default distribution for the current background: +2 to its
+   *  first ability, +1 to its second. */
+  private defaultBackgroundAbility(): BackgroundAbilityChoice {
+    const a = (this.backgrounds.find((b) => b.id === this.state.backgroundId)?.abilityScores ?? []) as AbilityKey[];
+    return a.length >= 2 ? { kind: "two-one", plusTwo: a[0], plusOne: a[1] } : { kind: "one-one-one" };
+  }
+
+  /** The background ability-score increase per ability, from the player's chosen
+   *  distribution (SRD: +2/+1 to two of the background's three abilities, or +1
+   *  to all three). Drives the displayed final scores AND what `submit()` sends. */
   private backgroundBonuses(): Partial<Record<AbilityKey, number>> {
     const bg = this.backgrounds.find((b) => b.id === this.state.backgroundId);
     if (!bg) return {};
-    const ordered = [...bg.abilityScores as AbilityKey[]].sort((a, b) => this.state.scores[b] - this.state.scores[a]);
+    const allowed = bg.abilityScores as AbilityKey[];
+    const choice = this.state.backgroundAbility;
     const out: Partial<Record<AbilityKey, number>> = {};
-    if (ordered.length >= 2) { out[ordered[0]] = 2; out[ordered[1]] = 1; }
+    if (choice.kind === "one-one-one") {
+      for (const k of allowed) out[k] = 1;
+    } else if (allowed.includes(choice.plusTwo) && allowed.includes(choice.plusOne) && choice.plusTwo !== choice.plusOne) {
+      out[choice.plusTwo] = 2;
+      out[choice.plusOne] = 1;
+    }
     return out;
+  }
+
+  /** SRD background ability-increase picker: choose +2/+1 to two of the
+   *  background's three abilities, or +1 to all three. Renders a mode toggle
+   *  plus (for the +2/+1 mode) two dropdowns constrained to the background's
+   *  abilities and kept distinct. */
+  private backgroundAbilityPicker(): HTMLElement {
+    const wrap = document.createElement("div");
+    wrap.style.cssText = "margin-bottom:12px;padding:8px 10px;border:1px solid #2a4a3a;background:#11201a;";
+    const bg = this.backgrounds.find((b) => b.id === this.state.backgroundId);
+    if (!bg) return wrap;
+    const allowed = bg.abilityScores as AbilityKey[];
+
+    const head = document.createElement("div");
+    head.style.cssText = "font-size:11px;color:#9ac6a0;margin-bottom:6px;line-height:1.5;";
+    head.innerHTML = `Origin bonus — <b>${esc(bg.name)}</b>: distribute its ability increase across ${allowed.map((a) => a.toUpperCase()).join("/")} (included in the final scores below).`;
+    wrap.appendChild(head);
+
+    const choice = this.state.backgroundAbility;
+    // Mode toggle.
+    const modes = document.createElement("div");
+    modes.style.cssText = "display:flex;gap:8px;margin-bottom:6px;";
+    modes.appendChild(this.button("+2 / +1", choice.kind === "two-one" ? "#3a2a1a" : "#1a1a2a", () => {
+      const [a, b] = allowed;
+      this.state.backgroundAbility = { kind: "two-one", plusTwo: a, plusOne: b };
+      this.renderStep();
+    }));
+    modes.appendChild(this.button("+1 / +1 / +1", choice.kind === "one-one-one" ? "#3a2a1a" : "#1a1a2a", () => {
+      this.state.backgroundAbility = { kind: "one-one-one" };
+      this.renderStep();
+    }));
+    wrap.appendChild(modes);
+
+    if (choice.kind === "two-one") {
+      const opts = allowed.map((a) => ({ value: a, label: ABILITY_LABEL[a] }));
+      const row = document.createElement("div");
+      row.style.cssText = "display:flex;gap:14px;align-items:center;font-size:11px;color:#aabbcc;";
+      row.appendChild(this.miniSelect("+2 to", opts, choice.plusTwo, (v) => {
+        const plusTwo = v as AbilityKey;
+        const plusOne = choice.plusOne === plusTwo ? (allowed.find((a) => a !== plusTwo)!) : choice.plusOne;
+        this.state.backgroundAbility = { kind: "two-one", plusTwo, plusOne };
+        this.renderStep();
+      }));
+      row.appendChild(this.miniSelect("+1 to", opts.filter((o) => o.value !== choice.plusTwo), choice.plusOne, (v) => {
+        this.state.backgroundAbility = { kind: "two-one", plusTwo: choice.plusTwo, plusOne: v as AbilityKey };
+        this.renderStep();
+      }));
+      wrap.appendChild(row);
+    }
+    return wrap;
+  }
+
+  /** Feature description panel shown under the Species dropdown (US-122). Lists
+   *  the selected species' traits (Darkvision, resistances, etc.). */
+  private speciesPanel(): HTMLElement {
+    const wrap = document.createElement("div");
+    wrap.style.cssText = "margin:4px 0 12px;padding:8px 10px;border-left:2px solid #334455;background:#11111e;";
+    const sp = this.species.find((s) => s.id === this.state.speciesId);
+    if (!sp) return wrap;
+    const size = typeof sp.size === "string" ? sp.size : "Small or Medium";
+    const head = document.createElement("div");
+    head.style.cssText = "font-size:11px;color:#88aacc;margin-bottom:4px;";
+    head.textContent = `${sp.name} — ${size}, Speed ${sp.speed} ft`;
+    wrap.appendChild(head);
+    for (const t of sp.traits) {
+      const row = document.createElement("div");
+      row.style.cssText = "font-size:11px;line-height:1.5;margin-top:4px;";
+      row.innerHTML = `<b style="color:${ACCENT};">${esc(t.name)}.</b> <span style="color:#aabbcc;">${esc(t.description)}</span>`;
+      wrap.appendChild(row);
+    }
+    return wrap;
+  }
+
+  /** Feature description panel shown under the Background dropdown (US-122).
+   *  Lists skill/tool proficiencies, the granted feat, the ability options, and
+   *  the equipment packages. */
+  private backgroundPanel(): HTMLElement {
+    const wrap = document.createElement("div");
+    wrap.style.cssText = "margin:4px 0 12px;padding:8px 10px;border-left:2px solid #334455;background:#11111e;";
+    const bg = this.backgrounds.find((b) => b.id === this.state.backgroundId);
+    if (!bg) return wrap;
+    const tool = typeof bg.toolProficiency === "string"
+      ? prettify(bg.toolProficiency)
+      : bg.toolProficiency ? `choose ${bg.toolProficiency.count} of ${bg.toolProficiency.choices.map(prettify).join(", ")}` : "—";
+    const feat = this.feats.find((f) => f.id === bg.feat?.id);
+    const lines: string[] = [
+      `<b style="color:${ACCENT};">Skill Proficiencies.</b> ${bg.skillProficiencies.map(prettify).join(", ")}`,
+      `<b style="color:${ACCENT};">Tool Proficiency.</b> ${tool}`,
+      `<b style="color:${ACCENT};">Ability Scores.</b> ${(bg.abilityScores as string[]).map((a) => a.toUpperCase()).join(", ")} — you choose the +2/+1 (or +1/+1/+1) split on the Abilities step`,
+      feat
+        ? `<b style="color:${ACCENT};">Feat — ${esc(feat.name)}.</b> <span style="color:#aabbcc;">${esc(feat.description)}</span>`
+        : (bg.feat?.id ? `<b style="color:${ACCENT};">Feat.</b> ${prettify(bg.feat.id)}` : ""),
+      `<b style="color:${ACCENT};">Equipment.</b> ${bg.equipmentOptions.map((o) => `${o.label}: ${(o.items.map((i) => i.name ?? i.itemId).filter(Boolean).join(", ") || "—")}${o.gold ? ` + ${o.gold} gp` : ""}`).join("  ·  ")}`,
+    ].filter(Boolean);
+    for (const l of lines) {
+      const row = document.createElement("div");
+      row.style.cssText = "font-size:11px;line-height:1.5;margin-top:4px;color:#aabbcc;";
+      row.innerHTML = l;
+      wrap.appendChild(row);
+    }
+    return wrap;
   }
 
   /** "→ final (mod)" suffix for an ability row, annotating any origin bonus and
@@ -453,6 +600,18 @@ export class CharacterCreatorScene extends Phaser.Scene {
   // ── Step 5 — Review + Create ─────────────────────────────────────────────
   private renderReview(): void {
     const c = this.content!;
+
+    // AI identity generation (US-122) — generate name + tagline + backstory from
+    // the whole build, or any one field individually. Honours the setting lore.
+    const genRow = document.createElement("div");
+    genRow.style.cssText = "display:flex;flex-wrap:wrap;gap:8px;margin-bottom:10px;align-items:center;";
+    genRow.innerHTML = `<span style="font-size:11px;color:#88aacc;">AI:</span>`;
+    genRow.appendChild(this.button("✦ GENERATE ALL", "#2a3a5a", () => this.genIdentity(["name", "shortDescription", "description"])));
+    genRow.appendChild(this.button("✦ NAME", "#1a1a2a", () => this.genIdentity(["name"])));
+    genRow.appendChild(this.button("✦ TAGLINE", "#1a1a2a", () => this.genIdentity(["shortDescription"])));
+    genRow.appendChild(this.button("✦ BACKSTORY", "#1a1a2a", () => this.genIdentity(["description"])));
+    c.appendChild(genRow);
+
     c.appendChild(this.inputRow("Name", this.state.name, (v) => { this.state.name = v; }));
     c.appendChild(this.inputRow("Tagline", this.state.shortDescription, (v) => { this.state.shortDescription = v; }));
     const descLabel = document.createElement("div");
@@ -497,16 +656,8 @@ export class CharacterCreatorScene extends Phaser.Scene {
     this.busy = true; this.setStatus("Creating…");
     try {
       const cls = this.classOf(this.state.classId);
-      const bg = this.backgrounds.find((b) => b.id === this.state.backgroundId);
-      // SRD background ability increase: +2 to the first of its abilities the
-      // player rated highest, +1 to the next — we infer it from the assigned
-      // scores so the increase reinforces their intent. (The UI applies the
-      // bump server-side; here we send the +2/+1 picks.)
-      const ordered = [...(bg?.abilityScores ?? [])].sort((a, b) => this.state.scores[b as AbilityKey] - this.state.scores[a as AbilityKey]) as AbilityKey[];
-      const backgroundAbility = ordered.length >= 2
-        ? { kind: "two-one" as const, plusTwo: ordered[0], plusOne: ordered[1] }
-        : { kind: "one-one-one" as const };
-
+      // SRD background ability increase — the player's chosen distribution
+      // (the Abilities-step picker), sent through as-is.
       const choices = {
         name: this.state.name,
         speciesId: this.state.speciesId,
@@ -514,7 +665,7 @@ export class CharacterCreatorScene extends Phaser.Scene {
         classId: this.state.classId,
         abilityMethod: this.state.method,
         baseAbilityScores: this.state.scores,
-        backgroundAbility,
+        backgroundAbility: this.state.backgroundAbility,
         skillProficiencies: [...this.state.skillPicks],
         languages: [...this.state.languagePicks],
         equipmentChoice: this.state.equipmentChoice,
@@ -562,6 +713,24 @@ export class CharacterCreatorScene extends Phaser.Scene {
     b.style.padding = "2px 8px";
     return b;
   }
+  /** A compact inline "<label> [select]" used by the background-ability picker. */
+  private miniSelect(label: string, opts: Array<{ value: string; label: string }>, value: string, onChange: (v: string) => void): HTMLElement {
+    const span = document.createElement("span");
+    span.style.cssText = "display:inline-flex;align-items:center;gap:6px;";
+    span.innerHTML = `<span style="color:#88aacc;">${label}</span>`;
+    const sel = document.createElement("select");
+    sel.style.cssText = "background:#11111e;border:1px solid #334455;color:#c8dae8;font-family:monospace;padding:2px 4px;";
+    for (const o of opts) {
+      const opt = document.createElement("option");
+      opt.value = o.value; opt.textContent = o.label;
+      if (o.value === value) opt.selected = true;
+      sel.appendChild(opt);
+    }
+    sel.addEventListener("change", () => onChange(sel.value));
+    span.appendChild(sel);
+    return span;
+  }
+
   private selectRow(label: string, opts: Array<{ value: string; label: string }>, value: string, onChange: (v: string) => void): HTMLElement {
     const row = document.createElement("div");
     row.style.cssText = "display:flex;align-items:center;gap:10px;margin:6px 0;font-size:12px;";
@@ -606,6 +775,17 @@ export class CharacterCreatorScene extends Phaser.Scene {
 }
 
 function fmtMod(m: number): string { return m >= 0 ? `+${m}` : String(m); }
+
+/** Escape text for safe innerHTML insertion. */
+function esc(s: string): string {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+/** Turn an id like `animalHandling` / `thieves-tools` into "Animal Handling". */
+function prettify(id: string): string {
+  const spaced = id.replace(/[-_]/g, " ").replace(/([a-z])([A-Z])/g, "$1 $2");
+  return spaced.charAt(0).toUpperCase() + spaced.slice(1);
+}
 
 /** Client-side 4d6-drop-lowest set (the 'roll' method isn't strictly validated
  *  server-side, which accepts any 3..18 assignment). */

@@ -362,6 +362,26 @@ export class GameClient {
     return await res.json();
   }
 
+  /** Generate identity text (name / tagline / backstory) for an in-progress
+   *  character build (US-122 Review step). `fields` selects which to produce. */
+  async generateCharacterIdentity(req: {
+    speciesId: string; backgroundId: string; classId: string;
+    fields: Array<"name" | "shortDescription" | "description">;
+    current?: { name?: string; shortDescription?: string; description?: string };
+    topAbilities?: string[]; skills?: string[]; languages?: string[];
+  }): Promise<{ name?: string; shortDescription?: string; description?: string }> {
+    const res = await fetch(`${API_URL}/generate/character/identity`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(req),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({})) as { error?: string };
+      throw new Error(err.error ?? `Identity generation failed: ${res.status}`);
+    }
+    return await res.json();
+  }
+
   /** Re-fetch the character roster (after creating one) so the setup scene can
    *  refresh its carousel. */
   async fetchCharacters(): Promise<PlayerDef[]> {
