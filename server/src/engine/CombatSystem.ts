@@ -103,12 +103,16 @@ function resolvePlayerAttack(
    *  adjacent alternative, and the "no Disadvantage" rider. When `false`,
    *  Sneak dice are NOT added even if the attack has Advantage. */
   sneakAttackAllowed = false,
+  /** Flat modifier to the attack roll from caller-side state the resolver can't
+   *  see — currently the SRD Exhaustion penalty (−2 × level, a D20 Test;
+   *  US-113). Negative lowers the roll. */
+  extraAttackMod = 0,
 ): ResolvedPlayerAttack {
   const statMod = attack.statKey === 'str' ? mod(player.str) : mod(player.dex);
   // SRD Magic Weapon spell — flat bonus to attack rolls (consumed below
   // when damage is rolled).
   const magicWeaponBonus = attack.magicWeaponBonus ?? 0;
-  const attackBonus = statMod + profBonus + magicWeaponBonus;
+  const attackBonus = statMod + profBonus + magicWeaponBonus + extraAttackMod;
   const logs: LogEntry[] = [];
 
   const effAdv = withAdvantage && !withDisadvantage;
@@ -239,8 +243,9 @@ export function playerMeleeAttack(
   playerHidden = false,
   coverAcBonus = 0,
   sneakAttackAllowed = false,
+  extraAttackMod = 0,
 ): ResolvedPlayerAttack {
-  return resolvePlayerAttack(player, player.mainAttack, enemy, withAdvantage, withDisadvantage, player.proficiencyBonus, autoCrit, playerHidden, coverAcBonus, sneakAttackAllowed);
+  return resolvePlayerAttack(player, player.mainAttack, enemy, withAdvantage, withDisadvantage, player.proficiencyBonus, autoCrit, playerHidden, coverAcBonus, sneakAttackAllowed, extraAttackMod);
 }
 
 export function playerThrowAttack(
@@ -254,8 +259,9 @@ export function playerThrowAttack(
   playerHidden = false,
   coverAcBonus = 0,
   sneakAttackAllowed = false,
+  extraAttackMod = 0,
 ): ResolvedPlayerAttack {
-  return resolvePlayerAttack(player, attack, enemy, withAdvantage, withDisadvantage, profBonus ?? player.proficiencyBonus, autoCrit, playerHidden, coverAcBonus, sneakAttackAllowed);
+  return resolvePlayerAttack(player, attack, enemy, withAdvantage, withDisadvantage, profBonus ?? player.proficiencyBonus, autoCrit, playerHidden, coverAcBonus, sneakAttackAllowed, extraAttackMod);
 }
 
 /**
@@ -265,11 +271,13 @@ export function playerThrowAttack(
  * opposes that DC. The gate (Heavily Obscured / Cover / LOS) is enforced by
  * the caller (CombatActions.doHide) before this is invoked.
  */
-export function playerHide(player: PlayerDef): { hidden: boolean; dc: number; logs: LogEntry[] } {
+export function playerHide(player: PlayerDef, disadvantage = false): { hidden: boolean; dc: number; logs: LogEntry[] } {
   const stealthBonus = player.skills['stealth'] ?? 0;
-  const stealthRoll = d20() + stealthBonus;
+  // SRD armor Stealth penalty (US-111): Disadvantage on the Hide roll.
+  const natural = disadvantage ? rollDisadvantage().result : d20();
+  const stealthRoll = natural + stealthBonus;
   const hidden = stealthRoll >= 15;
-  const right = `Stealth d20+${stealthBonus}=${stealthRoll} vs DC 15`;
+  const right = `Stealth ${disadvantage ? 'dis ' : ''}d20+${stealthBonus}=${stealthRoll} vs DC 15`;
   if (hidden) {
     return { hidden: true, dc: stealthRoll, logs: [{ left: `${player.name} slips into the shadows`, right: `${right} ✓`, style: 'status' }] };
   }

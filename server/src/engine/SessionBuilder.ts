@@ -422,6 +422,8 @@ export function buildSessionState(
       canLongRest: false,
       disarmableTrapTiles: [],
       deployableGearIds: [],
+      grappleableTargetIds: [],
+      shoveableTargetIds: [],
     },
     pendingReaction: null,
     pendingReroll: null,

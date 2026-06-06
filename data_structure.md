@@ -345,7 +345,9 @@ Equipped in the `weapon` slot. `applyEquipment` derives the character's `mainAtt
 | `rangeLong` | number? | *(ranged weapons)* Maximum ranged attack range in feet. Beyond this distance the player cannot fire. |
 | `ammunitionType` | string? | *(ranged weapons)* Canonical key for the ammo item id consumed per shot, e.g. `"arrow"`, `"bolt"`, `"bullet"`, `"needle"`. Each attack consumes one matching item from inventory. |
 | `loading` | boolean? | *(ranged weapons)* SRD Loading property. When `true`, only one shot per Action/Bonus Action/Reaction regardless of Extra Attack count. (Field is wired but not enforced until Extra Attack ships — no current Level 1 character has it.) |
-| `heavy` | boolean? | *(ranged weapons)* SRD Heavy property. When `true`, DEX < 13 imposes Disadvantage on ranged attack rolls. |
+| `heavy` | boolean? | SRD Heavy property (US-111). When `true`: DEX < 13 imposes Disadvantage on **ranged** attacks; STR < 13 imposes Disadvantage on **melee** attacks. Carried onto `PlayerAttack.heavy` for both. |
+| `versatile` | object? | SRD Versatile property (US-111): `{ damageDice, damageSides }` — the larger die used when the weapon is wielded two-handed (no shield equipped). `makePlayerAttack` selects it when `twoHandedGrip` is true. Authored on battleaxe/longsword (1d10) and quarterstaff (1d8). |
+| `reach` | boolean? | SRD Reach property (US-111). When `true`, melee reach is 10 ft (2 tiles) — `playerAttackReachTiles` returns 2. Surfaced on `PlayerAttack.reach`. (No reach weapon ships in the roster yet — content.) |
 | `cost` | number | Gold piece value. |
 
 A weapon is **ranged** iff `rangeNormal > 0`. Ranged player attacks are dispatched through the same ATTACK button as melee — the engine routes via `mainAttack.rangeNormal` and consumes ammunition from inventory. After every shot, there is a **50% chance per shot** that the arrow/bolt lands on the target's tile as a `mapItem` and can be picked up by walking onto it.

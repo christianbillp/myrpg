@@ -82,6 +82,9 @@ export interface PlayerPanelCallbacks {
   onDash: () => void;
   onDodge: () => void;
   onDisengage: () => void;
+  /** Grapple (US-110) / Shove (US-050) the selected adjacent enemy. */
+  onGrapple: () => void;
+  onShove: (effect: 'push' | 'prone') => void;
   onDetach: () => void;
   onHide: () => void;
   onDeathSave: () => void;
@@ -134,6 +137,7 @@ type ActionGroup = 'action' | 'bonus' | 'move' | 'free' | 'more' | 'companion';
  *  (★ LEVEL UP, ☾ LONG REST) are left alone — see `iconFor`. */
 const ACTION_ICONS: Record<string, string> = {
   ATTACK: '⚔', THROW: '➶', DODGE: '❖', DASH: '»', DISENGAGE: '↩', DETACH: '⤴',
+  GRAPPLE: '✊', SHOVE: '🤚', 'SHOVE PRONE': '⤓',
   HIDE: '◐', SEARCH: '⚲', MOVE: '⤧', TALK: '❝', CAST: '✦',
   'SHORT REST': '☕', 'ROLL DEATH SAVE': '☠',
 };
@@ -477,6 +481,17 @@ export class PlayerPanel {
       const dis = this.makeBtn('DISENGAGE', dashDisColor, this.callbacks.onDisengage);
       dis.disabled = !aa.canDisengage;
       econ().push(dis);
+
+      // SRD Unarmed Strike options (US-110 Grapple / US-050 Shove). The server
+      // populates the target lists only when an adjacent, size-eligible enemy
+      // exists and the Action is free, so a rendered button is always usable.
+      if (aa.grappleableTargetIds.length > 0) {
+        groups.action.push(this.makeBtn('GRAPPLE', GREEN, this.callbacks.onGrapple));
+      }
+      if (aa.shoveableTargetIds.length > 0) {
+        groups.action.push(this.makeBtn('SHOVE', GREEN, () => this.callbacks.onShove('push')));
+        groups.action.push(this.makeBtn('SHOVE PRONE', GREEN, () => this.callbacks.onShove('prone')));
+      }
 
       if (aa.canDetach) groups.action.push(this.makeBtn('DETACH', GREEN, this.callbacks.onDetach));
 

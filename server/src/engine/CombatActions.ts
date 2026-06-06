@@ -1,4 +1,4 @@
-import { GameEvent, NpcState, PlayerAttack, ItemDef, WeaponDef, MonsterDef, LogEntry } from './types.js';
+import { GameEvent, NpcState, PlayerAttack, ItemDef, WeaponDef, MonsterDef, LogEntry, sizeRank } from './types.js';
 import type { RolledBonusDamage, ResolvedPlayerAttack } from './CombatSystem.js';
 import type { GameContext } from './GameContext.js';
 import {
@@ -15,7 +15,7 @@ import {
   canSpendAction, canDash as guardCanDash, canDodge as guardCanDodge,
   canDisengage as guardCanDisengage, canHide as guardCanHide,
   canAttackTarget, playerAttackReachTiles, hasCunningAction,
-  canDetach as guardCanDetach,
+  canDetach as guardCanDetach, playerArmorSpeedPenaltyFt, playerHasStealthDisadvantage,
 } from './ActionGuards.js';
 import { publishNpcDamage } from './ThresholdPublisher.js';
 import { canSee as visCanSee } from './Vision.js';
@@ -32,6 +32,13 @@ import { combatantDisplayName } from './CombatFlow.js';
 export function attacksPerAction(playerDef: PlayerDef): number {
   const v = playerDef.tracks?.['extra-attacks'];
   return typeof v === 'number' && v > 0 ? v : 1;
+}
+
+/** SRD Exhaustion penalty to the player's attack rolls (a D20 Test): −2 ×
+ *  exhaustion level (US-113), mirroring the check/save penalty in
+ *  `GameEngine.rollAbilityCheck` / `rollSavingThrow`. */
+function exhaustionAttackMod(ctx: GameContext): number {
+  return -((ctx.state.player.exhaustionLevel ?? 0) * 2);
 }
 
 /**
@@ -76,16 +83,16 @@ function sneakAttackEligible(
 }
 
 /**
- * SRD Push mastery — a hit can shove the target 10 ft directly away from
- * the attacker (Large or smaller). Stops at impassable terrain, other
- * creatures, or the attacker's own tile.
+ * Shove a target directly away from the player up to `tiles` tiles. Stops at
+ * impassable terrain, other creatures, the map edge, or the player's own tile.
+ * Returns the number of tiles actually moved. Shared by the Push mastery (10 ft)
+ * and the Shove action (5 ft, US-050).
  */
-function applyPushMastery(ctx: GameContext, target: NpcState): void {
+function pushAway(ctx: GameContext, target: NpcState, tiles: number): number {
   const s = ctx.state;
-  const tiles = 2;  // 10 ft = 2 tiles.
   const dx = Math.sign(target.tileX - s.player.tileX);
   const dy = Math.sign(target.tileY - s.player.tileY);
-  if (dx === 0 && dy === 0) return;
+  if (dx === 0 && dy === 0) return 0;
   let moved = 0;
   for (let step = 0; step < tiles; step++) {
     const nx = target.tileX + dx;
@@ -98,8 +105,18 @@ function applyPushMastery(ctx: GameContext, target: NpcState): void {
     target.tileY = ny;
     moved++;
   }
+  return moved;
+}
+
+/**
+ * SRD Push mastery — a hit can shove the target 10 ft directly away from
+ * the attacker (Large or smaller). Stops at impassable terrain, other
+ * creatures, or the attacker's own tile.
+ */
+function applyPushMastery(ctx: GameContext, target: NpcState): void {
+  const moved = pushAway(ctx, target, 2);  // 10 ft = 2 tiles.
   if (moved > 0) {
-    ctx.addLog({ left: `↪ Push mastery — ${combatantDisplayName(target, s.npcs)} pushed ${moved * 5} ft`, style: 'status' });
+    ctx.addLog({ left: `↪ Push mastery — ${combatantDisplayName(target, ctx.state.npcs)} pushed ${moved * 5} ft`, style: 'status' });
   }
 }
 
@@ -239,7 +256,9 @@ export function doAttack(ctx: GameContext, targetId: string | undefined, events:
   const steadyAimAdv = !!s.player.steadyAim;
   if (steadyAimAdv) s.player.steadyAim = false;
   const withAdvantage = playerHidden || hasAttackAdvantage(s.player.conditions) || grantsAdvantageAgainst(target.conditions, dist) || steadyAimAdv;
-  const withDisadvantage = hasAttackDisadvantage(s.player.conditions) || grantsDisadvantageAgainst(target.conditions, dist, s.player.seeInvisible) || rangedDisadvantage;
+  // SRD Heavy on a melee weapon (US-111): STR < 13 imposes Disadvantage.
+  const heavyMeleeDisadvantage = !isRangedWeapon && !!atk.heavy && ctx.playerDef.str < 13;
+  const withDisadvantage = hasAttackDisadvantage(s.player.conditions) || grantsDisadvantageAgainst(target.conditions, dist, s.player.seeInvisible) || rangedDisadvantage || heavyMeleeDisadvantage;
   const autoCrit = isAutoCrit(target.conditions, dist);
   const { bonus: coverBonus, untargetable } = coverBonusVsTarget(ctx, target);
   if (untargetable) {
@@ -249,7 +268,7 @@ export function doAttack(ctx: GameContext, targetId: string | undefined, events:
   const sneakAttackAllowed = sneakAttackEligible(ctx, atk, target, withAdvantage, withDisadvantage);
   const params = { withAdvantage, withDisadvantage, autoCrit, playerHidden, coverBonus, sneakAttackAllowed };
   const resolved = playerThrowAttack(
-    ctx.playerDef, atk, targetDef, withAdvantage, withDisadvantage, ctx.playerDef.proficiencyBonus, autoCrit, playerHidden, coverBonus, sneakAttackAllowed,
+    ctx.playerDef, atk, targetDef, withAdvantage, withDisadvantage, ctx.playerDef.proficiencyBonus, autoCrit, playerHidden, coverBonus, sneakAttackAllowed, exhaustionAttackMod(ctx),
   );
 
   // US-109a — Heroic Inspiration: pause BEFORE any consequence and offer the
@@ -381,7 +400,7 @@ export function doResolveReroll(ctx: GameContext, accept: boolean, events: GameE
     resolved = playerThrowAttack(
       ctx.playerDef, atk, targetDef,
       p.params.withAdvantage, p.params.withDisadvantage, ctx.playerDef.proficiencyBonus,
-      p.params.autoCrit, p.params.playerHidden, p.params.coverBonus, p.params.sneakAttackAllowed,
+      p.params.autoCrit, p.params.playerHidden, p.params.coverBonus, p.params.sneakAttackAllowed, exhaustionAttackMod(ctx),
     );
     ctx.addLog({ left: `${ctx.playerDef.name} expends Heroic Inspiration to reroll`, right: `d20 ${p.rolledNatural} → ${resolved.naturalRoll}`, style: 'header' });
   }
@@ -525,7 +544,7 @@ export function doHide(ctx: GameContext): void {
     ctx.addLog({ left: `${ctx.playerDef.name} has no cover or obscurance — cannot hide here`, style: 'miss' });
     return;
   }
-  const { hidden, dc, logs } = playerHide(ctx.playerDef);
+  const { hidden, dc, logs } = playerHide(ctx.playerDef, playerHasStealthDisadvantage(ctx));
   if (hidden) {
     // SRD: on a successful Hide the creature gains the Invisible condition
     // (Adv on Initiative, Adv on attacks, attacks vs you have Disadv,
@@ -578,14 +597,100 @@ function canTakeHideAction(ctx: GameContext): boolean {
   return true;
 }
 
+// ── Unarmed Strike options: Shove (US-050) & Grapple (US-110) ───────────────
+// Both are SRD Unarmed Strike options costing the Action: the target makes a
+// Strength OR Dexterity saving throw (its choice — we take the better mod)
+// against DC 8 + the player's STR modifier + Proficiency Bonus, and may be no
+// more than one size larger than the player (US-107 size gate).
+
+/** SRD Unarmed Strike save DC for Grapple/Shove: 8 + STR mod + PB. */
+function unarmedStrikeDC(ctx: GameContext): number {
+  return 8 + mod(ctx.playerDef.str) + ctx.playerDef.proficiencyBonus;
+}
+
+/** The better of the target's STR / DEX save mod — the SRD lets it choose. */
+function bestStrDexSaveMod(def: MonsterDef): number {
+  const strMod = def.savingThrows?.['str'] ?? mod(def.str);
+  const dexMod = def.savingThrows?.['dex'] ?? mod(def.dex);
+  return Math.max(strMod, dexMod);
+}
+
+/** Target no more than one size larger than the player (US-107 gate). */
+export function withinShoveGrappleSize(playerSize: string | undefined, targetSize: string | undefined): boolean {
+  return sizeRank((targetSize ?? 'medium') as never) - sizeRank((playerSize ?? 'medium') as never) <= 1;
+}
+
+/** Adjacent, living, hostile, size-eligible Unarmed-Strike target (explicit id
+ *  first, else the nearest qualifying enemy). */
+function resolveUnarmedTarget(ctx: GameContext, targetId: string | undefined): NpcState | null {
+  const s = ctx.state;
+  const ok = (n: NpcState) => n.disposition === 'enemy' && n.hp > 0
+    && chebyshev(s.player.tileX, s.player.tileY, n.tileX, n.tileY) <= 1
+    && withinShoveGrappleSize(ctx.playerDef.size, n.size);
+  if (targetId) {
+    const t = s.npcs.find((n) => n.id === targetId && ok(n));
+    if (t) return t;
+  }
+  return s.npcs.find(ok) ?? null;
+}
+
+export function doShove(ctx: GameContext, targetId: string | undefined, effect: 'push' | 'prone' = 'push'): void {
+  const s = ctx.state;
+  if (!canSpendAction(ctx)) return;
+  const target = resolveUnarmedTarget(ctx, targetId);
+  if (!target) return;
+  const def = ctx.resolveMonsterDef(target.defId);
+  if (!def) return;
+  const dc = unarmedStrikeDC(ctx);
+  const saveMod = bestStrDexSaveMod(def);
+  const roll = d20();
+  const total = roll + saveMod;
+  const right = `save d20(${roll})+${saveMod}=${total} vs DC ${dc}`;
+  const label = combatantDisplayName(target, s.npcs);
+  if (total >= dc) {
+    ctx.addLog({ left: `${ctx.playerDef.name} tries to shove ${label} — it holds firm`, right, style: 'normal' });
+  } else if (effect === 'prone') {
+    if (!target.conditions.includes('prone')) target.conditions.push('prone');
+    ctx.addLog({ left: `${ctx.playerDef.name} shoves ${label} to the ground — Prone`, right, style: 'status' });
+  } else {
+    const moved = pushAway(ctx, target, 1);  // Shove = 5 ft = 1 tile.
+    ctx.addLog({ left: `${ctx.playerDef.name} shoves ${label} ${moved * 5} ft back`, right, style: 'status' });
+  }
+  s.player.actionUsed = true;
+}
+
+export function doGrapple(ctx: GameContext, targetId: string | undefined): void {
+  const s = ctx.state;
+  if (!canSpendAction(ctx)) return;
+  const target = resolveUnarmedTarget(ctx, targetId);
+  if (!target || target.conditions.includes('grappled')) return;
+  const def = ctx.resolveMonsterDef(target.defId);
+  if (!def) return;
+  const dc = unarmedStrikeDC(ctx);
+  const saveMod = bestStrDexSaveMod(def);
+  const roll = d20();
+  const total = roll + saveMod;
+  const right = `save d20(${roll})+${saveMod}=${total} vs DC ${dc}`;
+  const label = combatantDisplayName(target, s.npcs);
+  if (total >= dc) {
+    ctx.addLog({ left: `${ctx.playerDef.name} tries to grapple ${label} — it breaks free`, right, style: 'normal' });
+  } else {
+    target.conditions.push('grappled');  // Speed 0 via ConditionSystem.
+    ctx.addLog({ left: `${ctx.playerDef.name} grapples ${label} — Speed 0`, right, style: 'status' });
+  }
+  s.player.actionUsed = true;
+}
+
 export function doDash(ctx: GameContext): void {
   const s = ctx.state;
   if (!guardCanDash(ctx)) return;
-  const dashTiles = speedAfterExhaustion(ctx.playerDef.speed, s.player.exhaustionLevel ?? 0) / 5;
-  s.player.movesLeft += dashTiles;
+  // Dash grants extra movement equal to Speed — apply the same exhaustion and
+  // armor-Strength (US-111) reductions as the turn-start speed.
+  const dashFt = Math.max(0, speedAfterExhaustion(ctx.playerDef.speed, s.player.exhaustionLevel ?? 0) - playerArmorSpeedPenaltyFt(ctx));
+  s.player.movesLeft += dashFt / 5;
   s.player.conditions.push('dashing');
   spendCunningOrAction(ctx);
-  ctx.addLog({ left: `${ctx.playerDef.name} Dashes — +${dashTiles} tiles movement`, style: 'status' });
+  ctx.addLog({ left: `${ctx.playerDef.name} Dashes — +${dashFt / 5} tiles movement`, style: 'status' });
 }
 
 export function doDodge(ctx: GameContext): void {
@@ -680,7 +785,7 @@ export function doPlayerOpportunityAttack(ctx: GameContext, npc: NpcState): void
   // Advantage.
   const oaWithAdvantage = hasAttackAdvantage(s.player.conditions);
   const oaWithDisadvantage = hasAttackDisadvantage(s.player.conditions);
-  const { damage, isHit: oaIsHit, logs, vexApplied, slowApplied, bonusComponents } = playerMeleeAttack(ctx.playerDef, targetDef, oaWithAdvantage, oaWithDisadvantage, oaAutoCrit, false, oaCoverBonus);
+  const { damage, isHit: oaIsHit, logs, vexApplied, slowApplied, bonusComponents } = playerMeleeAttack(ctx.playerDef, targetDef, oaWithAdvantage, oaWithDisadvantage, oaAutoCrit, false, oaCoverBonus, false, exhaustionAttackMod(ctx));
   ctx.addLogs([{ left: `⚡ ${ctx.playerDef.name} makes an Opportunity Attack!`, style: 'header' }, ...logs]);
   emitPhysicalAttackSound(ctx, oaIsHit);
   const { finalDamage, log: oaResistLog } = ctx.resistMod(damage, ctx.playerDef.mainAttack.damageType, targetDef, npc.name);

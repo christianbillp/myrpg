@@ -5,6 +5,7 @@ import { chebyshev } from './EnemyAI.js';
 import { isIncapacitated, hasSpeedZero, proneStandCost, speedAfterExhaustion, TURN_CONDITIONS, clearHide } from './ConditionSystem.js';
 import { Logger } from '../Logger.js';
 import { applyEquipment } from './EquipmentSystem.js';
+import { playerArmorSpeedPenaltyFt } from './ActionGuards.js';
 import { runFlamingSphereEndOfTurnSaves } from './SummonSystem.js';
 import { runPerceptionSweep } from './Vision.js';
 import { mod, d20 as d20Local } from './Dice.js';
@@ -301,7 +302,13 @@ export function enterPlayerTurn(ctx: GameContext): void {
     // base speed. Expeditious Retreat additionally grants a free Dash each
     // turn while active (added once movement is computed, mirroring
     // CombatActions' Dash semantics).
-    const baseFt = speedAfterExhaustion(ctx.playerDef.speed + s.player.speedBonus, s.player.exhaustionLevel ?? 0);
+    // SRD armor Strength requirement (US-111): −10 ft when wearing armor whose
+    // minStr exceeds the player's Strength.
+    const baseFt = Math.max(
+      0,
+      speedAfterExhaustion(ctx.playerDef.speed + s.player.speedBonus, s.player.exhaustionLevel ?? 0)
+        - playerArmorSpeedPenaltyFt(ctx),
+    );
     const tileSpeed = baseFt / 5;
     const standCost = proneStandCost(s.player.conditions, tileSpeed);
     s.player.movesLeft = Math.max(0, tileSpeed - standCost);

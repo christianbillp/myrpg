@@ -193,4 +193,11 @@ export interface AvailableActions {
   /** Inventory ids of area-denial gear (caltrops, ball bearings) the player
    *  could Deploy right now. Drives the SET TRAP / DEPLOY button. */
   deployableGearIds: string[];
+  /** Enemy NPC ids the player could Grapple right now — adjacent, alive, not
+   *  already grappled, and no more than one size larger (US-110). Drives the
+   *  GRAPPLE button. */
+  grappleableTargetIds: string[];
+  /** Enemy NPC ids the player could Shove right now — adjacent, alive, and no
+   *  more than one size larger (US-050). Drives the SHOVE button. */
+  shoveableTargetIds: string[];
 }

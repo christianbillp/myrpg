@@ -28,15 +28,27 @@ export function computeAC(
   return ac;
 }
 
-export function makePlayerAttack(playerDef: PlayerDef, weapon: WeaponDef): PlayerAttack {
+/**
+ * SRD armor Strength requirement (US-111): wearing armor whose `minStr` exceeds
+ * your Strength score reduces your speed by 10 ft. Returns the penalty in feet
+ * (0 or 10). `null` armor (unarmored) is never penalised.
+ */
+export function armorSpeedPenaltyFt(armor: ArmorDef | null, str: number): number {
+  return armor && armor.minStr != null && str < armor.minStr ? 10 : 0;
+}
+
+export function makePlayerAttack(playerDef: PlayerDef, weapon: WeaponDef, twoHandedGrip = false): PlayerAttack {
   let statKey: 'str' | 'dex' = weapon.statKey;
   if (weapon.finesse) statKey = mod(playerDef.dex) >= mod(playerDef.str) ? 'dex' : 'str';
   const isRanged = !!weapon.rangeNormal && weapon.rangeNormal > 0;
+  // SRD Versatile (US-111): a versatile weapon wielded two-handed (no shield)
+  // uses its larger damage die.
+  const useVersatile = !!weapon.versatile && twoHandedGrip;
   return {
     name: weapon.name,
     statKey,
-    damageDice: weapon.damageDice,
-    damageSides: weapon.damageSides,
+    damageDice: useVersatile ? weapon.versatile!.damageDice : weapon.damageDice,
+    damageSides: useVersatile ? weapon.versatile!.damageSides : weapon.damageSides,
     damageType: weapon.damageType,
     savageAttacker: playerDef.savageAttacker,
     finesse: !!weapon.finesse,
@@ -50,7 +62,10 @@ export function makePlayerAttack(playerDef: PlayerDef, weapon: WeaponDef): Playe
     rangeLong:   isRanged ? weapon.rangeLong : undefined,
     ammunitionType: isRanged ? weapon.ammunitionType : undefined,
     loading: isRanged ? !!weapon.loading : undefined,
-    heavy:   isRanged ? !!weapon.heavy : undefined,
+    // Heavy applies to both ranged (DEX<13) and melee (STR<13), so carry it for
+    // all weapons; `reach` widens melee reach to 2 tiles.
+    heavy:   !!weapon.heavy,
+    reach:   !isRanged && !!weapon.reach,
   };
 }
 
@@ -77,7 +92,7 @@ export function computeEquippedSlotLabels(
 
   let weaponLabel: string | null = null;
   if (weapon) {
-    const attack = makePlayerAttack(playerDef, weapon);
+    const attack = makePlayerAttack(playerDef, weapon, !!weapon.versatile && !shield);
     const statMod = mod(playerDef[attack.statKey]);
     const diceStr = `${attack.damageDice}d${attack.damageSides}`;
     const sign = statMod >= 0 ? '+' : '';
@@ -174,8 +189,11 @@ export function applyEquipment(
   const weapon = slots.weaponId ? (byId[slots.weaponId] as WeaponDef | undefined) ?? null : null;
 
   playerDef.ac = computeAC(playerDef, armor, shield, mageArmor, shieldSpellActive);
+  // SRD Versatile (US-111): two-handed grip when a versatile weapon is held
+  // with no shield equipped → larger damage die.
+  const twoHandedGrip = !!weapon?.versatile && !shield;
   const base = weapon
-    ? makePlayerAttack(playerDef, weapon)
+    ? makePlayerAttack(playerDef, weapon, twoHandedGrip)
     : { name: 'Unarmed Strike', statKey: 'str' as const, damageDice: 1, damageSides: 1, damageType: 'bludgeoning', savageAttacker: false, finesse: false, graze: false, vex: false, sap: false, slow: false, push: false, topple: false };
   // SRD Magic Weapon spell: +N to attack and damage rolls. The bonus rides
   // on the PlayerAttack so the existing CombatSystem resolver consumes it

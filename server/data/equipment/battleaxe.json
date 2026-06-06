@@ -12,5 +12,6 @@
   "thrown": false,
   "throwNormal": 0,
   "throwLong": 0,
+  "versatile": { "damageDice": 1, "damageSides": 10 },
   "costCp": 1000
 }

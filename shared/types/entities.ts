@@ -112,7 +112,8 @@ export interface PlayerAttack {
   rangeLong?: number;
   ammunitionType?: string;  // e.g. "arrow", "bolt" — consumed from inventory per shot
   loading?: boolean;        // SRD Loading property — one shot per Action/Bonus/Reaction
-  heavy?: boolean;          // SRD Heavy property — DEX < 13 imposes Disadvantage on ranged
+  heavy?: boolean;          // SRD Heavy property — Disadvantage if DEX < 13 (ranged) or STR < 13 (melee) (US-111)
+  reach?: boolean;          // SRD Reach property — melee reach is 10 ft (2 tiles) instead of 5 (US-111)
   /** SRD Magic Weapon spell — flat bonus to attack and damage rolls while
    *  the spell is active. Written by `applyEquipment` when the player's
    *  `PlayerState.magicWeaponBonus > 0`; read by `resolvePlayerAttack`.

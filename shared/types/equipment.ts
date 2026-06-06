@@ -43,7 +43,12 @@ export interface WeaponDef {
   rangeLong?: number;         // feet — maximum ranged range
   ammunitionType?: string;    // e.g. "arrow", "bolt", "bullet", "needle"
   loading?: boolean;          // one shot per Action/Bonus/Reaction
-  heavy?: boolean;            // Disadvantage on ranged attacks if DEX < 13
+  heavy?: boolean;            // SRD Heavy — Disadvantage if DEX < 13 (ranged) or STR < 13 (melee) (US-111)
+  /** SRD Versatile — the larger damage die used when wielded two-handed (no
+   *  shield equipped). Absent for non-versatile weapons. (US-111) */
+  versatile?: { damageDice: number; damageSides: number };
+  /** SRD Reach — melee reach is 10 ft (2 tiles) instead of 5. (US-111) */
+  reach?: boolean;
   costCp?: number;
 }
 

@@ -33,7 +33,7 @@ import {
   doAttack as caDoAttack, throwItem as caThrowItem,
   doHide as caDoHide, doDash as caDoDash, doDodge as caDoDodge,
   doDisengage as caDoDisengage, doDetach as caDoDetach,
-  doPlayerOpportunityAttack as caDoPlayerOA,
+  doPlayerOpportunityAttack as caDoPlayerOA, withinShoveGrappleSize,
 } from './CombatActions.js';
 import {
   doMove as exDoMove, doMoveTo as exDoMoveTo,
@@ -851,6 +851,8 @@ export class GameEngine {
     const skillMod = (this.playerDef.skills[skill] ?? 0) - exhaustionLevel * 2;
     let withAdvantage = false;
     let withDisadvantage = conditions.includes('poisoned') || conditions.includes('frightened');
+    // SRD armor Stealth penalty (US-111): Disadvantage on Dex (Stealth) checks.
+    if (skill === 'stealth' && Guard.playerHasStealthDisadvantage(this.ctx)) withDisadvantage = true;
     let attitudeNote = '';
     if (targetNpcEntity && INFLUENCE_SKILLS.includes(skill)) {
       const npc = this.resolveNpcByEntity(targetNpcEntity);
@@ -1164,6 +1166,19 @@ export class GameEngine {
       });
     }
 
+    // Shove (US-050) / Grapple (US-110): adjacent, living, size-eligible enemies
+    // while the player has an Action. Grapple additionally excludes the already-
+    // grappled.
+    let grappleableTargetIds: string[] = [];
+    let shoveableTargetIds: string[] = [];
+    if (Guard.canSpendAction(this.ctx)) {
+      const adj = s.npcs.filter((n) => n.disposition === 'enemy' && n.hp > 0
+        && chebyshev(p.tileX, p.tileY, n.tileX, n.tileY) <= 1
+        && withinShoveGrappleSize(this.playerDef.size, n.size));
+      shoveableTargetIds = adj.map((n) => n.id);
+      grappleableTargetIds = adj.filter((n) => !n.conditions.includes('grappled')).map((n) => n.id);
+    }
+
     s.availableActions = {
       canAttack: Guard.canAttackTarget(this.ctx),
       throwableItemIds,
@@ -1184,6 +1199,8 @@ export class GameEngine {
       canLongRest: phase === 'exploring' && s.allowsLongRest === true,
       disarmableTrapTiles,
       deployableGearIds,
+      grappleableTargetIds,
+      shoveableTargetIds,
     };
   }
 

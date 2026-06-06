@@ -3,7 +3,9 @@
 // enforcement) call into these — never re-derive the same preconditions.
 
 import type { GameContext } from './GameContext.js';
+import type { ArmorDef } from './types.js';
 import { isIncapacitated } from './ConditionSystem.js';
+import { armorSpeedPenaltyFt } from './EquipmentSystem.js';
 import { chebyshev } from './EnemyAI.js';
 import { isHostileTo } from './FactionRelations.js';
 import { PLAYER_FACTION_ID } from '../../../shared/types.js';
@@ -173,10 +175,31 @@ export function canShortRest(ctx: GameContext): boolean {
  *   - ranged weapon → floor(rangeLong / 5) tiles
  *   - thrown attacks are NOT considered here (they use the THROW button / tool)
  */
+/** SRD armor Strength-requirement speed penalty for the player (US-111), in
+ *  feet (0 or 10): resolves the equipped armor and compares its `minStr` to the
+ *  player's Strength. */
+export function playerArmorSpeedPenaltyFt(ctx: GameContext): number {
+  const armorId = ctx.state.player.equippedSlots.armorId;
+  if (!armorId) return 0;
+  const armor = ctx.defs.equipment.find((i) => i.id === armorId && i.type === 'armor') as ArmorDef | undefined;
+  return armorSpeedPenaltyFt(armor ?? null, ctx.playerDef.str);
+}
+
+/** SRD armor Stealth penalty (US-111): wearing armor flagged `stealthDisadv`
+ *  imposes Disadvantage on the player's Dexterity (Stealth) checks (the Hide
+ *  roll and any stealth ability check). */
+export function playerHasStealthDisadvantage(ctx: GameContext): boolean {
+  const armorId = ctx.state.player.equippedSlots.armorId;
+  if (!armorId) return false;
+  const armor = ctx.defs.equipment.find((i) => i.id === armorId && i.type === 'armor') as ArmorDef | undefined;
+  return !!armor?.stealthDisadv;
+}
+
 export function playerAttackReachTiles(ctx: GameContext): number {
   const atk = ctx.playerDef.mainAttack;
   if (atk.rangeLong && atk.rangeLong > 0) return Math.floor(atk.rangeLong / 5);
-  return 1;
+  // SRD Reach (US-111): a melee Reach weapon strikes at 10 ft (2 tiles).
+  return atk.reach ? 2 : 1;
 }
 
 /**

@@ -23,7 +23,7 @@ import type { PlayerAction } from '../../../../shared/types.js';
 
 // Delegated imports — same set the old switch used.
 import { doMove as exDoMove, doMoveTo as exDoMoveTo, doSearch as exDoSearch, doShortRest as exDoShortRest, doUsePotion as exDoUsePotion } from '../ExplorationActions.js';
-import { doAttack as caDoAttack, doDash as caDoDash, doDodge as caDoDodge, doDisengage as caDoDisengage, doDetach as caDoDetach, doHide as caDoHide, throwItem as caThrowItem, doResolveReroll as caDoResolveReroll } from '../CombatActions.js';
+import { doAttack as caDoAttack, doDash as caDoDash, doDodge as caDoDodge, doDisengage as caDoDisengage, doDetach as caDoDetach, doHide as caDoHide, throwItem as caThrowItem, doResolveReroll as caDoResolveReroll, doGrapple as caDoGrapple, doShove as caDoShove } from '../CombatActions.js';
 import { doCastSpell as spDoCastSpell } from '../SpellSystem.js';
 import { doEquip as ivDoEquip, doUnequip as ivDoUnequip } from '../InventoryActions.js';
 import { doCommandSummon, checkSummonTether } from '../SummonSystem.js';
@@ -68,6 +68,8 @@ export const PLAYER_ACTIONS: Registry = {
   useFeature:           (ctx, a, events) => doUseFeature(ctx, a.featureId, { targetId: a.targetId, tile: a.tile }, events),
   resolveReaction:      (ctx, a, events) => cfDoResolveReaction(ctx, a.accept, events),
   resolveReroll:        (ctx, a, events) => caDoResolveReroll(ctx, a.accept, events),
+  grapple:              (ctx, a)         => caDoGrapple(ctx, a.targetId),
+  shove:                (ctx, a)         => caDoShove(ctx, a.targetId, a.effect ?? 'push'),
   dash:                 (ctx)            => caDoDash(ctx),
   dodge:                (ctx)            => caDoDodge(ctx),
   disengage:            (ctx)            => caDoDisengage(ctx),
