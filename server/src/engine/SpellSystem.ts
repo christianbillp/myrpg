@@ -42,7 +42,7 @@ function visCanSeeTargetCover(ctx: GameContext, target: NpcState): 'none' | 'hal
 }
 
 /** Ability mod for the player's spellcasting ability (defaults to 0 if unset). */
-function spellMod(ctx: GameContext): number {
+export function spellMod(ctx: GameContext): number {
   const ab = ctx.playerDef.spellcastingAbility;
   if (!ab) return 0;
   return mod(ctx.playerDef[ab]);
@@ -76,7 +76,7 @@ function rollDamage(dice: number, sides: number, bonus = 0): { total: number; ro
   return { total: rolls.reduce((a, b) => a + b, 0) + bonus, rolls };
 }
 
-function npcSaveMod(target: NpcState, def: MonsterDef, ability: string): number {
+export function npcSaveMod(target: NpcState, def: MonsterDef, ability: string): number {
   // Use the monster's saving throw map if present; otherwise raw ability mod.
   if (def.savingThrows && def.savingThrows[ability] !== undefined) return def.savingThrows[ability];
   const score = (def as unknown as Record<string, number>)[ability];
@@ -1376,7 +1376,10 @@ function resolveHealSpell(ctx: GameContext, spell: SpellDef, targetIds: string[]
   const upcast = Math.max(0, slotLevel - spell.level);
   const perLevel = spell.heal.perLevel ?? spell.heal.dice;
   const { total } = rollDamage(spell.heal.dice + perLevel * upcast, spell.heal.sides);
-  const amount = Math.max(1, total + spellMod(ctx));
+  // SRD Life Domain — Disciple of Life: a level-1+ healing spell restores an
+  // extra 2 + the slot level to the target.
+  const discipleBonus = spell.level >= 1 && hasModifierFlag(ctx.playerDef, 'disciple-of-life') ? 2 + slotLevel : 0;
+  const amount = Math.max(1, total + spellMod(ctx) + discipleBonus);
 
   const tid = targetIds?.[0] ?? s.selectedTargetId ?? 'player';
   const ally = tid !== 'player' ? s.npcs.find((n) => n.id === tid && n.disposition === 'ally') : undefined;

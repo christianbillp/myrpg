@@ -1,0 +1,13 @@
+{
+  "id": "divine-spark",
+  "name": "Divine Spark",
+  "classId": "cleric",
+  "minLevel": 2,
+  "description": "As a Magic action, expend a use of Channel Divinity to point your Holy Symbol at a creature within 30 feet. Roll 1d8 (2d8 at level 7, 3d8 at 13, 4d8 at 18) and add your Wisdom modifier; either restore that many Hit Points to the creature, or force a Constitution saving throw for that much Radiant damage (half on a success).",
+  "cost": { "kind": "action" },
+  "handler": "divine-spark",
+  "ui": {
+    "buttonLabel": "DIVINE SPARK",
+    "buttonColor": "#3a2a4a"
+  }
+}

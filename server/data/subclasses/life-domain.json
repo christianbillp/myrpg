@@ -1,0 +1,12 @@
+{
+  "id": "life-domain",
+  "classId": "cleric",
+  "name": "Life Domain",
+  "description": "Cleric subclass channeling the positive energy that sustains all life — masters of healing. SRD 5.2.1.",
+
+  "progression": [
+    { "level":  3, "features": ["disciple-of-life", "preserve-life"] },
+    { "level":  6, "features": ["blessed-healer"] },
+    { "level": 17, "features": ["supreme-healing"] }
+  ]
+}

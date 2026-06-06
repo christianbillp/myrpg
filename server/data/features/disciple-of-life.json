@@ -1,0 +1,9 @@
+{
+  "id": "disciple-of-life",
+  "name": "Disciple of Life",
+  "classId": "cleric",
+  "minLevel": 3,
+  "description": "Whenever a level 1+ spell you cast restores Hit Points to a creature, that creature regains additional Hit Points equal to 2 plus the spell's level.",
+  "cost": { "kind": "passive" },
+  "modifiers": [{ "type": "flag", "name": "disciple-of-life" }]
+}

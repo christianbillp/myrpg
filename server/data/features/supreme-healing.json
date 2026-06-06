@@ -1,0 +1,8 @@
+{
+  "id": "supreme-healing",
+  "name": "Supreme Healing",
+  "classId": "cleric",
+  "minLevel": 17,
+  "description": "When you would normally roll one or more dice to restore Hit Points with a spell or Channel Divinity, you instead use the highest number possible for each die.",
+  "cost": { "kind": "passive" }
+}

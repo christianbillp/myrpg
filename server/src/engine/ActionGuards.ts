@@ -107,6 +107,12 @@ export function canUseFeature(ctx: GameContext, featureId: string): boolean {
     if (s.phase !== 'player_turn') return false;
     if (!s.player.actionUsed) return false;
   }
+  // Channel Divinity options (Cleric, US-120) share one pool held on the
+  // `channel-divinity` feature, so they gate on that shared resource rather
+  // than an own resource. Action economy is already checked above (cost: action).
+  if (featureId === 'turn-undead' || featureId === 'divine-spark' || featureId === 'preserve-life') {
+    if ((s.player.resources['channel-divinity'] ?? 0) <= 0) return false;
+  }
   if (featureId === 'steady-aim') {
     // SRD: only on the rogue's own combat turn, and only if they haven't
     // moved this turn (tracked via `movedThisTurn`, reset at

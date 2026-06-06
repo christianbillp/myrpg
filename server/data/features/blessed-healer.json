@@ -1,0 +1,8 @@
+{
+  "id": "blessed-healer",
+  "name": "Blessed Healer",
+  "classId": "cleric",
+  "minLevel": 6,
+  "description": "Immediately after you cast a spell with a spell slot that restores Hit Points to one or more creatures other than yourself, you regain Hit Points equal to 2 plus the spell slot's level.",
+  "cost": { "kind": "passive" }
+}

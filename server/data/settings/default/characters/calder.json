@@ -6,9 +6,19 @@
   "speciesId": "dwarf",
   "className": "Cleric",
   "backgroundId": "acolyte",
+  "subclassId": "life-domain",
   "featIds": [],
-  "level": 1,
-  "maxHp": 10,
+  "defaultFeatureIds": [
+    "cleric-spellcasting",
+    "divine-order",
+    "channel-divinity",
+    "turn-undead",
+    "divine-spark",
+    "disciple-of-life",
+    "preserve-life"
+  ],
+  "level": 3,
+  "maxHp": 24,
   "str": 13,
   "dex": 10,
   "con": 14,
@@ -43,7 +53,7 @@
   "hitDieType": 8,
   "sneakAttackDice": 0,
   "color": 13743000,
-  "xp": 0,
+  "xp": 900,
   "defaultEquipment": {
     "armorId": "scale_mail",
     "weaponId": "quarterstaff",
@@ -61,9 +71,12 @@
     "cure-wounds",
     "healing-word",
     "guiding-bolt",
-    "detect-magic"
+    "detect-magic",
+    "hold-person",
+    "enhance-ability"
   ],
   "defaultSpellSlots": [
+    4,
     2
   ],
   "shortDescription": "A steady hill dwarf cleric who mends wounds and meets the wicked with radiant fire.",

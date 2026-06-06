@@ -802,6 +802,8 @@ The shape mirrors `spells/`: data describes WHAT and WHEN; code describes HOW. N
 4. **Use**: client sends `{ type: 'useFeature', featureId }`; server dispatches to `doUseFeature` → handler in the registry, which consumes the resource, spends the action/bonus-action, and applies the effect.
 5. **Persistence**: `PlayerState.resources` is written to `CharSave.resources` on every action and reloaded on resume. A Long Rest (= new encounter) refills any `uses-per-long-rest` pool by re-running the SessionBuilder seeding.
 
+**Shared resource pools (Channel Divinity, US-120).** The Cleric's three Channel Divinity options — `turn-undead`, `divine-spark`, `preserve-life` — have no own `resource`; they draw from one pool held on the `channel-divinity` feature (`resources['channel-divinity']`, `uses-per-short-rest` max 2). `canUseFeature` special-cases the three to gate on that shared key, and each handler decrements it via `spendChannelDivinity`. Handlers that find no valid target (Turn Undead with no undead in range; Preserve Life with no bloodied creature) return without spending the use or the Action. Divine Spark reads `state.selectedTargetId` to choose heal-ally/self vs radiant-damage-enemy. (The pool max is static at 2 — the per-level `channel-divinity-uses` track scaling to 3/4 is a known gap, shared with the Second Wind static-max limitation.)
+
 ---
 
 ## Level Advancement

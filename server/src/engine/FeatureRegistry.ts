@@ -18,6 +18,10 @@ import type { GameContext } from './GameContext.js';
 import type { GameEvent } from './types.js';
 import { canUseFeature } from './ActionGuards.js';
 import { playerSecondWind } from './CombatSystem.js';
+import { spellSaveDC, spellMod, npcSaveMod } from './SpellSystem.js';
+import { combatantDisplayName } from './CombatFlow.js';
+import { chebyshev } from './EnemyAI.js';
+import { d, d20 } from './Dice.js';
 
 export interface FeatureUseAction {
   targetId?: string;
@@ -106,4 +110,147 @@ registerFeatureHandler('steady-aim', (ctx) => {
     left: `${ctx.playerDef.name} steadies their aim — Advantage on the next attack this turn`,
     style: 'status',
   });
+});
+
+// ── Cleric Channel Divinity (US-120) ─────────────────────────────────────────
+// The three options below share one pool held on the `channel-divinity` feature
+// (gated in `canUseFeature`). Each spends one use from that shared key.
+
+const CHANNEL_DIVINITY_RANGE_TILES = 6;  // 30 ft
+
+function spendChannelDivinity(ctx: GameContext): void {
+  const r = ctx.state.player.resources;
+  r['channel-divinity'] = Math.max(0, (r['channel-divinity'] ?? 0) - 1);
+}
+
+/** SRD Turn Undead — each Undead of your choice within 30 ft makes a WIS save
+ *  or is Frightened + Incapacitated. We affect every undead in range. */
+registerFeatureHandler('turn-undead', (ctx) => {
+  const s = ctx.state;
+  const dc = spellSaveDC(ctx);
+  const targets = s.npcs.filter((n) => {
+    if (n.hp <= 0) return false;
+    const def = ctx.resolveMonsterDef(n.defId);
+    if (!def || !def.type.toLowerCase().includes('undead')) return false;
+    return chebyshev(s.player.tileX, s.player.tileY, n.tileX, n.tileY) <= CHANNEL_DIVINITY_RANGE_TILES;
+  });
+  if (targets.length === 0) {
+    ctx.addLog({ left: `${ctx.playerDef.name} channels Turn Undead — no Undead within range`, style: 'status' });
+    return;  // don't waste a use on an empty censure
+  }
+  ctx.addLog({ left: `${ctx.playerDef.name} presents a Holy Symbol — Turn Undead (DC ${dc})`, style: 'header' });
+  for (const npc of targets) {
+    const def = ctx.resolveMonsterDef(npc.defId)!;
+    const roll = d20();
+    const bonus = npcSaveMod(npc, def, 'wis');
+    const total = roll + bonus;
+    const right = `WIS d20(${roll})+${bonus}=${total} vs DC ${dc}`;
+    if (total < dc) {
+      for (const c of ['frightened', 'incapacitated']) {
+        if (!npc.conditions.includes(c)) npc.conditions.push(c);
+      }
+      ctx.addLog({ left: `${combatantDisplayName(npc, s.npcs)} is turned — Frightened & Incapacitated`, right, style: 'status' });
+    } else {
+      ctx.addLog({ left: `${combatantDisplayName(npc, s.npcs)} resists`, right, style: 'normal' });
+    }
+  }
+  spendChannelDivinity(ctx);
+  s.player.actionUsed = true;
+});
+
+/** SRD Divine Spark — roll d8s + WIS mod; heal the selected ally/self, or force
+ *  a CON save on the selected enemy for Radiant damage (half on success). */
+registerFeatureHandler('divine-spark', (ctx) => {
+  const s = ctx.state;
+  const tid = s.selectedTargetId;
+  const lvl = ctx.playerDef.level;
+  const dice = lvl >= 18 ? 4 : lvl >= 13 ? 3 : lvl >= 7 ? 2 : 1;
+  let rolled = 0;
+  for (let i = 0; i < dice; i++) rolled += d(8);
+  const amount = Math.max(1, rolled + spellMod(ctx));
+
+  const ally = tid && tid !== 'player' ? s.npcs.find((n) => n.id === tid && n.disposition === 'ally') : undefined;
+  const enemy = tid && tid !== 'player' ? s.npcs.find((n) => n.id === tid && n.hp > 0 && n.disposition !== 'ally') : undefined;
+
+  // Heal mode — self or a chosen ally.
+  if (tid === 'player' || ally) {
+    if (ally) {
+      const before = ally.hp;
+      ally.hp = Math.min(ally.maxHp, ally.hp + amount);
+      if (before <= 0 && ally.hp > 0) ally.conditions = ally.conditions.filter((c) => c !== 'unconscious' && c !== 'stable');
+      ctx.addLog({ left: `${ctx.playerDef.name} channels Divine Spark — ${combatantDisplayName(ally, s.npcs)} regains ${ally.hp - before} HP`, style: 'heal' });
+    } else {
+      const before = s.player.hp;
+      s.player.hp = Math.min(ctx.playerDef.maxHp, s.player.hp + amount);
+      ctx.addLog({ left: `${ctx.playerDef.name} channels Divine Spark — regains ${s.player.hp - before} HP`, style: 'heal' });
+    }
+    spendChannelDivinity(ctx);
+    s.player.actionUsed = true;
+    return;
+  }
+
+  // Damage mode — the selected enemy makes a CON save for half.
+  if (!enemy) {
+    ctx.addLog({ left: `Divine Spark: select a creature within 30 feet first.`, style: 'miss' });
+    return;
+  }
+  const def = ctx.resolveMonsterDef(enemy.defId);
+  if (!def) return;
+  if (chebyshev(s.player.tileX, s.player.tileY, enemy.tileX, enemy.tileY) > CHANNEL_DIVINITY_RANGE_TILES) {
+    ctx.addLog({ left: `Divine Spark: ${combatantDisplayName(enemy, s.npcs)} is out of range`, style: 'miss' });
+    return;
+  }
+  const dc = spellSaveDC(ctx);
+  const roll = d20();
+  const bonus = npcSaveMod(enemy, def, 'con');
+  const total = roll + bonus;
+  const saved = total >= dc;
+  const { finalDamage, log } = ctx.resistMod(saved ? Math.floor(amount / 2) : amount, 'radiant', def, enemy.name);
+  const before = enemy.hp;
+  enemy.hp = Math.max(0, enemy.hp - finalDamage);
+  ctx.addLog({ left: `Divine Spark sears ${combatantDisplayName(enemy, s.npcs)} for ${finalDamage} radiant${saved ? ' (save)' : ''}`, right: `CON d20(${roll})+${bonus}=${total} vs DC ${dc}`, style: 'hit' });
+  if (log) ctx.addLog(log);
+  if (enemy.hp <= 0 && before > 0) ctx.killWithReward(enemy, def, `☠ ${combatantDisplayName(enemy, s.npcs)} is unmade by radiant fire!`);
+  spendChannelDivinity(ctx);
+  s.player.actionUsed = true;
+});
+
+/** SRD Life Domain Preserve Life — restore 5×level HP split among Bloodied
+ *  creatures (self + allies) within 30 ft, none above half their max HP. */
+registerFeatureHandler('preserve-life', (ctx) => {
+  const s = ctx.state;
+  let pool = 5 * ctx.playerDef.level;
+  const isBloodied = (hp: number, maxHp: number) => hp <= Math.floor(maxHp / 2);
+
+  // Heal targets in priority order: self first, then bloodied allies in range.
+  const healOne = (cur: number, maxHp: number): number => {
+    const half = Math.floor(maxHp / 2);
+    if (cur >= half) return cur;                 // already at/above half — skip
+    const grant = Math.min(pool, half - cur);
+    pool -= grant;
+    return cur + grant;
+  };
+
+  let healedAny = false;
+  if (pool > 0 && isBloodied(s.player.hp, ctx.playerDef.maxHp)) {
+    const before = s.player.hp;
+    s.player.hp = healOne(s.player.hp, ctx.playerDef.maxHp);
+    if (s.player.hp > before) { healedAny = true; ctx.addLog({ left: `Preserve Life — ${ctx.playerDef.name} regains ${s.player.hp - before} HP`, style: 'heal' }); }
+  }
+  for (const npc of s.npcs) {
+    if (pool <= 0) break;
+    if (npc.disposition !== 'ally' || npc.hp <= 0) continue;
+    if (chebyshev(s.player.tileX, s.player.tileY, npc.tileX, npc.tileY) > CHANNEL_DIVINITY_RANGE_TILES) continue;
+    if (!isBloodied(npc.hp, npc.maxHp)) continue;
+    const before = npc.hp;
+    npc.hp = healOne(npc.hp, npc.maxHp);
+    if (npc.hp > before) { healedAny = true; ctx.addLog({ left: `Preserve Life — ${combatantDisplayName(npc, s.npcs)} regains ${npc.hp - before} HP`, style: 'heal' }); }
+  }
+
+  if (!healedAny) {
+    ctx.addLog({ left: `Preserve Life — no Bloodied creatures within range to heal`, style: 'status' });
+    return;  // don't spend a use when it would do nothing
+  }
+  spendChannelDivinity(ctx);
+  s.player.actionUsed = true;
 });

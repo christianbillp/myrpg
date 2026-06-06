@@ -1,0 +1,13 @@
+{
+  "id": "turn-undead",
+  "name": "Turn Undead",
+  "classId": "cleric",
+  "minLevel": 2,
+  "description": "As a Magic action, expend a use of Channel Divinity to present your Holy Symbol and censure the Undead. Each Undead of your choice within 30 feet makes a Wisdom saving throw; on a failure it has the Frightened and Incapacitated conditions for 1 minute (ending early if it takes damage).",
+  "cost": { "kind": "action" },
+  "handler": "turn-undead",
+  "ui": {
+    "buttonLabel": "TURN UNDEAD",
+    "buttonColor": "#3a2a4a"
+  }
+}

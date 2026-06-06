@@ -1,0 +1,13 @@
+{
+  "id": "preserve-life",
+  "name": "Preserve Life",
+  "classId": "cleric",
+  "minLevel": 3,
+  "description": "As a Magic action, expend a use of Channel Divinity to restore Hit Points equal to five times your Cleric level, divided among Bloodied creatures within 30 feet of you (which can include you). This can't restore a creature above half its Hit Point maximum.",
+  "cost": { "kind": "action" },
+  "handler": "preserve-life",
+  "ui": {
+    "buttonLabel": "PRESERVE LIFE",
+    "buttonColor": "#1a4a3a"
+  }
+}

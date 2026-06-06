@@ -4,5 +4,9 @@
   "classId": "cleric",
   "minLevel": 2,
   "description": "You can channel divine energy to fuel magical effects such as Divine Spark and Turn Undead. You regain one expended use when you finish a Short Rest and all expended uses when you finish a Long Rest. If an effect requires a saving throw, the DC equals your spell save DC.",
-  "cost": { "kind": "passive" }
+  "cost": { "kind": "passive" },
+  "resource": { "kind": "uses-per-short-rest", "max": 2 },
+  "ui": {
+    "resourceLabel": "Channel Divinity: {remaining}/{max}"
+  }
 }
