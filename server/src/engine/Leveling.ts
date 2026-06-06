@@ -420,9 +420,24 @@ function expandChoices(
         });
         break;
       }
+      case 'epic-boon-choice': {
+        // SRD Epic Boon (level 19) — list every feat tagged
+        // `category: "epic-boon"` minus any the character already has.
+        const have = new Set(playerDef.featIds ?? []);
+        const options = feats
+          .filter((f) => f.category === 'epic-boon' && !have.has(f.id))
+          .map((f) => ({ id: f.id, name: f.name, description: f.description }));
+        out.push({
+          kind: 'epic-boon-choice',
+          label: 'Epic Boon',
+          description: 'Choose an Epic Boon feat.',
+          options,
+        });
+        break;
+      }
       // The remaining template kinds — cantrip-known, cantrip-swap,
       // spell-swap, metamagic-pick, invocation-pick, mystic-arcanum-pick,
-      // magical-secrets-pick, epic-boon-choice — don't yet have runtime
+      // magical-secrets-pick — don't yet have runtime
       // prompt builders. They surface as no-ops here so an authored level
       // entry that includes them doesn't crash the preview while they're
       // being implemented.

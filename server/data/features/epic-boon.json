@@ -1,0 +1,8 @@
+{
+  "id": "epic-boon",
+  "name": "Epic Boon",
+  "classId": "",
+  "minLevel": 19,
+  "description": "You gain an Epic Boon feat of your choice (a feat in the Epic Boon category) or another feat for which you qualify. You typically gain an Epic Boon feat only from this feature.",
+  "cost": { "kind": "passive" }
+}

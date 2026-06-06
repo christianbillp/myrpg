@@ -100,6 +100,14 @@ export type LevelUpChoicePrompt =
        *  character already has — Fighting Style can be swapped on later
        *  level-up but not duplicated. */
       options: Array<{ id: string; name: string; description: string }>;
+    }
+  | {
+      kind: 'epic-boon-choice';
+      label: string;
+      description: string;
+      /** Epic Boon feat ids (category 'epic-boon') the player may take at the
+       *  class's level-19 boon, excluding any already taken. */
+      options: Array<{ id: string; name: string; description: string }>;
     };
 
 /** Player-supplied answers to a `LevelUpPreview`. Each chosen value matches
@@ -128,4 +136,6 @@ export interface LevelUpChoices {
   /** Fighting Style feat id chosen at Fighter L1 or any later level-up that
    *  surfaces the prompt (Champion L7 Additional Fighting Style). */
   fightingStylePick?: string;
+  /** Epic Boon feat id chosen at the class's level-19 boon. */
+  epicBoonChoice?: string;
 }

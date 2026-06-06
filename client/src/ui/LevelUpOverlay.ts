@@ -225,10 +225,11 @@ export class LevelUpOverlay extends BaseOverlay {
       return wrap;
     }
 
-    if (prompt.kind === "fighting-style-pick") {
+    if (prompt.kind === "fighting-style-pick" || prompt.kind === "epic-boon-choice") {
+      const isBoon = prompt.kind === "epic-boon-choice";
       if (prompt.options.length === 0) {
         const note = document.createElement("div");
-        note.textContent = "No fighting styles available.";
+        note.textContent = isBoon ? "No Epic Boons available." : "No fighting styles available.";
         note.style.cssText = "font-size: 10px; color: #aa7733; font-style: italic; margin-top: 4px;";
         wrap.appendChild(note);
         return wrap;
@@ -252,7 +253,8 @@ export class LevelUpOverlay extends BaseOverlay {
         card.appendChild(desc);
         card.dataset.featId = ft.id;
         card.addEventListener("click", () => {
-          this.choices.fightingStylePick = ft.id;
+          if (isBoon) this.choices.epicBoonChoice = ft.id;
+          else this.choices.fightingStylePick = ft.id;
           for (const c of Array.from(cards.children) as HTMLButtonElement[]) {
             const picked = c === card;
             c.style.background = picked ? "#3a2a1a" : "#1a1a2a";
@@ -560,6 +562,9 @@ export class LevelUpOverlay extends BaseOverlay {
         if (prompt.options.length > 0 && picked < prompt.count) return false;
       }
       if (prompt.kind === "fighting-style-pick" && !this.choices.fightingStylePick) {
+        if (prompt.options.length > 0) return false;
+      }
+      if (prompt.kind === "epic-boon-choice" && !this.choices.epicBoonChoice) {
         if (prompt.options.length > 0) return false;
       }
     }

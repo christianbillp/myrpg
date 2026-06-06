@@ -139,6 +139,18 @@ const HANDLERS: Record<LevelUpChoicePrompt['kind'], Handler> = {
     // The feat's effect rider lands when `applyFeats` runs on the next
     // session boot (Defense: sets `fightingStyleDefense = true`).
   },
+  'epic-boon-choice': (prompt, ctx) => {
+    if (prompt.kind !== 'epic-boon-choice') return;
+    const pick = ctx.choices.epicBoonChoice;
+    if (!pick) throw new Error('Epic Boon requires a feat id.');
+    if (!prompt.options.some((f) => f.id === pick)) {
+      throw new Error(`Epic Boon "${pick}" isn't in the epic-boon-choice option list.`);
+    }
+    const feats = new Set(ctx.playerDef.featIds ?? []);
+    if (feats.has(pick)) throw new Error(`Epic Boon "${pick}" is already on this character.`);
+    feats.add(pick);
+    ctx.playerDef.featIds = Array.from(feats);
+  },
 };
 
 /** Dispatch a single prompt to its handler. Unknown kinds (templates the

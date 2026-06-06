@@ -719,8 +719,9 @@ Subclass progression entries may carry `grantedSpells: string[]` (Cleric Domain 
 | `asi-or-feat` | Feat catalogue minus existing feats; live ability scores | Either `+2 one ability`, `+1/+1 two abilities` (both gated to ≤ 20), or appends a feat id |
 | `expertise-pick` | Skills the character is currently proficient in (inferred from pre-baked `skills[k] - mod(ability) >= PB`) | Stacks PB on each chosen skill |
 | `fighting-style-pick` | Feats with `category === 'fighting-style'` minus existing | Appends feat id; its `modifiers` are aggregated by `applyModifiers` on next session boot |
+| `epic-boon-choice` | Feats with `category === 'epic-boon'` minus existing (the level-19 boon, US-119) | Appends the chosen boon feat id to `featIds` (answer field `epicBoonChoice`) |
 
-Unimplemented but reserved: `cantrip-known`, `cantrip-swap`, `spell-swap`, `metamagic-pick`, `invocation-pick`, `mystic-arcanum-pick`, `magical-secrets-pick`, `epic-boon-choice` — all surface as no-op prompts so an authored level entry doesn't crash the preview.
+Unimplemented but reserved: `cantrip-known`, `cantrip-swap`, `spell-swap`, `metamagic-pick`, `invocation-pick`, `mystic-arcanum-pick`, `magical-secrets-pick` — all surface as no-op prompts so an authored level entry doesn't crash the preview.
 
 ### Track-driven engine consumers
 
