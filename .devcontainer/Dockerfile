@@ -7,8 +7,8 @@ RUN apt-get update && apt-get install -y \
     psmisc \
     && rm -rf /var/lib/apt/lists/*
 
-# Install global dev tools
-RUN npm install -g typescript@latest vite@latest
+# Install global dev tools (incl. the Claude Code CLI — the `claude` command)
+RUN npm install -g typescript@latest vite@latest @anthropic-ai/claude-code@latest
 
 WORKDIR /workspace
 
