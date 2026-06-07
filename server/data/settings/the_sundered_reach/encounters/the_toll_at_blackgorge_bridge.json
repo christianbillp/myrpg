@@ -498,21 +498,6 @@
         }
       ],
       "once": true
-    },
-    {
-      "id": "far_side_reached_xp",
-      "when": {
-        "event": "flag_set",
-        "name": "blackgorge_bridge_crossed"
-      },
-      "if": [],
-      "then": [
-        {
-          "type": "award_xp",
-          "amount": 50
-        }
-      ],
-      "once": true
     }
   ]
 }

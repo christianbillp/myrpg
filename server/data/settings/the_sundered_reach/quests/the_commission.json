@@ -1,0 +1,15 @@
+{
+  "id": "the_commission",
+  "title": "The Commission",
+  "description": "Earn a place on the Bureau of Adjustment's roster at Harrowgate station — one contract, one entry in the ledger, the start of a name worth having.",
+  "scope": "adventure",
+  "steps": [
+    {
+      "id": "signing_on",
+      "text": "Survive the proving contract and earn a place on the Bureau roster.",
+      "completeWhen": [{ "type": "flag_equals", "name": "part_one_signed_on", "value": true }],
+      "xpReward": 150
+    }
+  ],
+  "xpReward": 0
+}

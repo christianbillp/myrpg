@@ -4,6 +4,7 @@
  * advance/complete/fail levers.
  */
 import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'node:fs';
 import { buildTestContext } from '../test/buildTestContext.js';
 import { registerQuestSystem, startQuest, advanceQuest, completeQuest, failQuest } from './QuestSystem.js';
 import { fireAction, registerTriggers } from './TriggerSystem.js';
@@ -128,6 +129,62 @@ describe('QuestSystem', () => {
     ctx.publish({ type: 'combat_started' });                 // camp_scouted set → cascades to completion
     expect(state.quests[0].status).toBe('completed');
     expect(state.player.xp).toBe(xp0 + 25 + 100 + 50);
+  });
+
+  it('optional side-goals complete out of order, grant XP, and never drive the spine or finish the quest', () => {
+    const { ctx, state } = buildTestContext();
+    registerQuestSystem(ctx);
+    const xp0 = state.player.xp;
+    startQuest(ctx, quest({
+      steps: [
+        { id: 's1', text: 'Spine A', completeWhen: [{ type: 'flag_equals', name: 'a', value: true }], xpReward: 10 },
+        { id: 'opt', text: 'Bonus find', optional: true, completeWhen: [{ type: 'flag_equals', name: 'bonus', value: true }], xpReward: 40 },
+        { id: 's2', text: 'Spine B', completeWhen: [{ type: 'flag_equals', name: 'b', value: true }], xpReward: 20 },
+      ],
+      xpReward: 0,
+    }));
+    expect(state.quests[0].currentStepId).toBe('s1');        // optional isn't the spine start
+    expect(state.objective).toBe('Spine A');
+
+    setFlag(ctx, state, 'bonus');                            // optional completes out of order
+    expect(state.quests[0].completedStepIds).toContain('opt');
+    expect(state.quests[0].currentStepId).toBe('s1');        // spine untouched
+    expect(state.quests[0].status).toBe('active');           // quest not finished by an optional
+    expect(state.objective).toBe('Spine A');                 // objective still the current spine step
+    expect(state.player.xp).toBe(xp0 + 40);
+
+    setFlag(ctx, state, 'a');                                // spine advances s1 → s2 (skipping the optional)
+    expect(state.quests[0].currentStepId).toBe('s2');
+    setFlag(ctx, state, 'b');                                // last SPINE step → quest completes
+    expect(state.quests[0].status).toBe('completed');
+    expect(state.player.xp).toBe(xp0 + 40 + 10 + 20);
+  });
+
+  it('migrated adventure data: The Reach Circuit advances through its real chapter flags, including optional finds, for 1150 XP', () => {
+    const dir = 'data/settings/the_sundered_reach/quests';
+    const load = (name: string): QuestDef => JSON.parse(readFileSync(`${dir}/${name}.json`, 'utf8'));
+    const reach = load('the_reach_circuit');
+    const total = (d: QuestDef): number => d.steps.reduce((n, s) => n + (s.xpReward ?? 0), 0) + (d.xpReward ?? 0);
+    expect(total(reach)).toBe(1150);             // XP preserved from the original encounter award_xp triggers
+    expect(total(load('the_moons_ledger'))).toBe(900);
+    expect(total(load('the_commission'))).toBe(150);
+    expect(reach.steps.filter((s) => s.optional).map((s) => s.id)).toEqual(['dedication_stone', 'vael_seal']);
+
+    const { ctx, state } = buildTestContext();
+    ctx.defs.quests.push(reach);
+    registerQuestSystem(ctx);
+    const xp0 = state.player.xp;
+    startQuest(ctx, reach);
+    expect(state.objective).toBe(reach.steps[0].text);   // first spine step drives the objective
+
+    for (const f of [
+      'waystation_leads_gathered', 'wardstone_one_cleared', 'blackgorge_bridge_crossed',
+      'dedication_stone_examined', 'vael_seal_examined', 'sage_way_down_given', 'keystone_ward_sealed',
+    ]) setFlag(ctx, state, f);
+
+    expect(state.quests[0].status).toBe('completed');
+    expect(state.quests[0].completedStepIds).toEqual(expect.arrayContaining(['dedication_stone', 'vael_seal']));
+    expect(state.player.xp).toBe(xp0 + 1150);
   });
 
   it('resolves authored quests from defs.quests (non-runtime)', () => {

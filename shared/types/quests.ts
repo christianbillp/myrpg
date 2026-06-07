@@ -36,6 +36,12 @@ export interface QuestStepDef {
   completeWhen?: TriggerGuard[];
   /** XP granted when this step completes. No tangible loot — by design. */
   xpReward?: number;
+  /** Optional side-goal: evaluated every tick regardless of the current step,
+   *  completes (granting XP + firing onComplete) the moment its guards hold, and
+   *  never drives the OBJECTIVE line or blocks/finishes the quest. Use for bonus
+   *  discoveries whose XP should be a visible goal without forcing player order.
+   *  Steps without this flag form the ordered "spine" that drives progression. */
+  optional?: boolean;
   /** Effects fired when this step completes (set flags, narrate, …). For runtime
    *  (AIGM-created) quests these are validated to a safe subset. */
   onComplete?: TriggerAction[];

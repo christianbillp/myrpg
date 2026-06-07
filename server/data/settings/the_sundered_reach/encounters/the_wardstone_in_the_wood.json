@@ -951,20 +951,6 @@
       "once": true
     },
     {
-      "id": "victory_xp",
-      "when": {
-        "event": "encounter_completed"
-      },
-      "if": [],
-      "then": [
-        {
-          "type": "award_xp",
-          "amount": 300
-        }
-      ],
-      "once": true
-    },
-    {
       "id": "victory_aigm",
       "when": {
         "event": "encounter_completed"

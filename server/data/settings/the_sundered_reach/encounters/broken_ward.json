@@ -850,20 +850,6 @@
       "once": true
     },
     {
-      "id": "sealing_complete_xp",
-      "when": {
-        "event": "encounter_completed"
-      },
-      "if": [],
-      "then": [
-        {
-          "type": "award_xp",
-          "amount": 600
-        }
-      ],
-      "once": true
-    },
-    {
       "id": "sealing_complete_narration",
       "when": {
         "event": "encounter_completed"

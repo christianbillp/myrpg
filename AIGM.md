@@ -675,7 +675,7 @@ Writes a value to `GameState.worldFlags[name]`. Use when a narrative resolution 
 
 ### Quests & objectives
 
-Quests are **structured** — an ordered list of steps, each with a player-facing objective line. The player's OBJECTIVE line and the Quest Log show the active quest's current step. Active quests appear in CURRENT STATE under **ACTIVE QUESTS** with their `id`, current step id/text, and the full step list — use those ids with the tools below. Authored quests (`quest_id`) may auto-advance via their own conditions; calling these tools is still safe. **Quests grant XP only** — never promise gold or items through a quest; hand tangible rewards over in the world/dialogue (a paymaster, a body, a chest) so the fiction stays intact.
+Quests are **structured** — an ordered list of steps, each with a player-facing objective line. The player's OBJECTIVE line and the Quest Log show the active quest's current step. Active quests appear in CURRENT STATE under **ACTIVE QUESTS** with their `id`, current step id/text, and the full step list — use those ids with the tools below. Authored quests (`quest_id`) may auto-advance via their own conditions; calling these tools is still safe. Authored quests may also carry **optional bonus steps** (marked optional in their def) that the engine completes on its own, in any order, when their conditions hold — do **not** `advance_quest` toward those; just narrate the discovery when it lands. **Quests grant XP only** — never promise gold or items through a quest; hand tangible rewards over in the world/dialogue (a paymaster, a body, a chest) so the fiction stays intact.
 
 #### `set_objective`
 

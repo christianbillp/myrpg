@@ -1,0 +1,33 @@
+{
+  "id": "the_moons_ledger",
+  "title": "The Moon's Ledger",
+  "description": "Break into the Circus way-house, take back the page with your old name on it, and get out — past the wires, the sweep, and the one they sent to wait for you.",
+  "scope": "adventure",
+  "steps": [
+    {
+      "id": "approach",
+      "text": "Reach the way-house door and deal with the sentry — quietly, if you can.",
+      "completeWhen": [{ "type": "flag_equals", "name": "ledger_approach_clear", "value": true }],
+      "xpReward": 100
+    },
+    {
+      "id": "corridor",
+      "text": "Cross the rigged corridor — spot and disarm the traps — and deal with the watchman.",
+      "completeWhen": [{ "type": "flag_equals", "name": "ledger_corridor_crossed", "value": true }],
+      "xpReward": 150
+    },
+    {
+      "id": "sweep",
+      "text": "Shake the sweep — control the approach with caltrops and ball bearings, then put both pursuers down.",
+      "completeWhen": [{ "type": "flag_equals", "name": "ledger_sweep_shaken", "value": true }],
+      "xpReward": 200
+    },
+    {
+      "id": "ledger_room",
+      "text": "Spot the waiting enforcer, get past the trapped ledger case, and take back the page.",
+      "completeWhen": [{ "type": "flag_equals", "name": "ledger_page_taken", "value": true }],
+      "xpReward": 450
+    }
+  ],
+  "xpReward": 0
+}

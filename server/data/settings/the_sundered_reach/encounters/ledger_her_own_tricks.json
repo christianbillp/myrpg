@@ -26,6 +26,20 @@
         }
       ],
       "once": true
+    },
+    {
+      "id": "sweep_shaken_flag",
+      "when": {
+        "event": "encounter_completed"
+      },
+      "then": [
+        {
+          "type": "set_flag",
+          "name": "ledger_sweep_shaken",
+          "value": true
+        }
+      ],
+      "once": true
     }
   ],
   "startingZones": {

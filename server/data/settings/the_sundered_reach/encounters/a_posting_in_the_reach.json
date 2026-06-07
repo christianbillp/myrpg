@@ -194,7 +194,21 @@
       ],
       "once": true
     },
-{
+    {
+      "id": "start_reach_circuit_quest",
+      "when": {
+        "event": "encounter_started"
+      },
+      "if": [],
+      "then": [
+        {
+          "type": "start_quest",
+          "questId": "the_reach_circuit"
+        }
+      ],
+      "once": true
+    },
+    {
       "id": "bram_conversation_auto_open",
       "when": {
         "event": "player_moved",
@@ -259,21 +273,6 @@
         {
           "type": "send_aigm_message",
           "message": "The player has confirmed the key lead — the cracked wardstone in the north wood. Narrate a quiet moment of consolidation: Reed notes it in their satchel ledger, the way a new Cape does when theory becomes field reality. The room feels a little smaller than it did. Remind the player gently that they can keep asking questions or indicate they are ready to move on."
-        }
-      ],
-      "once": true
-    },
-    {
-      "id": "wardstone_lead_flag",
-      "when": {
-        "event": "flag_set",
-        "name": "wardstone_lead_confirmed"
-      },
-      "if": [],
-      "then": [
-        {
-          "type": "award_xp",
-          "amount": 25
         }
       ],
       "once": true

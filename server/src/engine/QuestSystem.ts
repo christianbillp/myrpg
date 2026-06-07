@@ -42,6 +42,16 @@ function stepOf(def: QuestDef, stepId: string): QuestStepDef | undefined {
   return def.steps.find((s) => s.id === stepId);
 }
 
+/** The ordered "spine" is the non-optional steps; they drive the OBJECTIVE and
+ *  quest completion. Optional steps are bonus side-goals evaluated independently. */
+function firstSpineStep(def: QuestDef): QuestStepDef | undefined {
+  return def.steps.find((s) => !s.optional);
+}
+function nextSpineStep(def: QuestDef, afterStepId: string): QuestStepDef | undefined {
+  const idx = def.steps.findIndex((s) => s.id === afterStepId);
+  return def.steps.slice(idx + 1).find((s) => !s.optional);
+}
+
 function allHold(ctx: GameContext, guards: readonly import('../../../shared/types.js').TriggerGuard[] | undefined): boolean {
   return !!guards && guards.length > 0 && guards.every((g) => guardHolds(ctx, g));
 }
@@ -73,7 +83,7 @@ export function startQuest(ctx: GameContext, def: QuestDef): QuestState | null {
   if (def.runtime && !ctx.state.runtimeQuestDefs.some((d) => d.id === def.id)) {
     ctx.state.runtimeQuestDefs.push(def);
   }
-  const qs: QuestState = { questId: def.id, status: 'active', currentStepId: def.steps[0].id, completedStepIds: [] };
+  const qs: QuestState = { questId: def.id, status: 'active', currentStepId: (firstSpineStep(def) ?? def.steps[0]).id, completedStepIds: [] };
   ctx.state.quests.push(qs);
   ctx.addLog({ left: `New quest: ${def.title}`, style: 'header' });
   syncObjective(ctx);
@@ -93,8 +103,7 @@ function completeCurrentStep(ctx: GameContext, qs: QuestState, def: QuestDef): v
   // Advance (or finish) BEFORE firing onComplete: those effects can publish
   // events that re-enter the quest evaluation, and we want re-entry to see the
   // NEW current step — not re-complete the one we just finished.
-  const idx = def.steps.findIndex((s) => s.id === step.id);
-  const next = def.steps[idx + 1];
+  const next = nextSpineStep(def, step.id);
   if (next) {
     qs.currentStepId = next.id;
     ctx.addLog({ left: `Objective: ${next.text}`, style: 'status' });
@@ -114,12 +123,26 @@ function finishQuest(ctx: GameContext, qs: QuestState, def: QuestDef): void {
   syncObjective(ctx);
 }
 
-/** Evaluate one active quest: fail it if `failWhen` holds, else auto-advance as
- *  far as its step guards currently allow (bounded by the step count). */
+/** Award any optional side-goals whose guards now hold. Independent of the spine:
+ *  they grant XP + fire onComplete once, never touch currentStep or finish the
+ *  quest. Marked complete BEFORE firing onComplete (re-entrancy, mirrors the spine). */
+function completeReadyOptionalSteps(ctx: GameContext, qs: QuestState, def: QuestDef): void {
+  for (const step of def.steps) {
+    if (!step.optional || qs.completedStepIds.includes(step.id)) continue;
+    if (!allHold(ctx, step.completeWhen)) continue;
+    qs.completedStepIds.push(step.id);
+    awardXp(ctx, step.xpReward, `${def.title}: ${step.text}`);
+    for (const a of step.onComplete ?? []) fireAction(ctx, a);
+  }
+}
+
+/** Evaluate one active quest: fail it if `failWhen` holds, else complete any ready
+ *  optional side-goals and auto-advance the spine as far as its guards allow. */
 function evaluateActiveQuest(ctx: GameContext, qs: QuestState): void {
   const def = resolveQuestDef(ctx, qs.questId);
   if (!def || qs.status !== 'active') return;
   if (allHold(ctx, def.failWhen)) { failQuest(ctx, qs.questId); return; }
+  completeReadyOptionalSteps(ctx, qs, def);
   // A step whose guards already hold completes; its onComplete may satisfy the
   // next step too, so loop (bounded) rather than wait for the next event.
   for (let guard = 0; guard < def.steps.length + 1 && qs.status === 'active'; guard++) {

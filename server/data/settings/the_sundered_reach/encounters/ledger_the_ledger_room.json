@@ -82,6 +82,20 @@
         }
       ],
       "once": true
+    },
+    {
+      "id": "page_taken_flag",
+      "when": {
+        "event": "encounter_completed"
+      },
+      "then": [
+        {
+          "type": "set_flag",
+          "name": "ledger_page_taken",
+          "value": true
+        }
+      ],
+      "once": true
     }
   ],
   "startingZones": {

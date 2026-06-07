@@ -1317,7 +1317,7 @@ export class GameScene extends Phaser.Scene {
       return [{
         id: def.id, title: def.title, description: def.description, status: qs.status,
         steps: def.steps.map((s) => ({
-          id: s.id, text: s.text,
+          id: s.id, text: s.text, optional: s.optional,
           done: qs.completedStepIds.includes(s.id),
           current: qs.status === 'active' && s.id === qs.currentStepId,
         })),

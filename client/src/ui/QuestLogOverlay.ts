@@ -14,7 +14,7 @@ const ACCENT = "#e2b96f";
 const PANEL_W = 520;
 const PANEL_H = 540;
 
-export interface QuestLogStep { id: string; text: string; done: boolean; current: boolean; }
+export interface QuestLogStep { id: string; text: string; done: boolean; current: boolean; optional?: boolean; }
 export interface QuestLogEntry {
   id: string;
   title: string;
@@ -98,10 +98,11 @@ export class QuestLogOverlay extends BaseOverlay {
 
     for (const s of q.steps) {
       const row = document.createElement("div");
-      const glyph = s.done ? '✓' : s.current ? '▸' : '·';
+      const glyph = s.done ? '✓' : s.optional ? '◇' : s.current ? '▸' : '·';
       const color = s.done ? '#7ec27e' : s.current ? ACCENT : '#667788';
       row.style.cssText = `font-size:11px;color:${s.current ? '#dfe8f2' : color};line-height:1.6;`;
-      row.innerHTML = `<span style="color:${color};display:inline-block;width:14px;">${glyph}</span>${esc(s.text)}`;
+      const tag = s.optional ? ` <span style="font-size:9px;letter-spacing:1px;color:#667788;">OPTIONAL</span>` : '';
+      row.innerHTML = `<span style="color:${color};display:inline-block;width:14px;">${glyph}</span>${esc(s.text)}${tag}`;
       card.appendChild(row);
     }
     return card;

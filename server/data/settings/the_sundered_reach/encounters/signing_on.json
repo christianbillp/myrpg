@@ -720,6 +720,15 @@
   ],
   "triggers": [
     {
+      "id": "start_commission_quest",
+      "when": { "event": "encounter_started" },
+      "if": [],
+      "then": [
+        { "type": "start_quest", "questId": "the_commission" }
+      ],
+      "once": true
+    },
+    {
       "id": "hub_clear_bandits",
       "when": { "event": "encounter_started" },
       "if": [{ "type": "flag_set", "name": "part_one_signed_on" }],

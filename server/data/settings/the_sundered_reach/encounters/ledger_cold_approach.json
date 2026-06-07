@@ -14,6 +14,19 @@
   "allowsLongRest": false,
   "triggers": [
     {
+      "id": "start_moons_ledger_quest",
+      "when": {
+        "event": "encounter_started"
+      },
+      "then": [
+        {
+          "type": "start_quest",
+          "questId": "the_moons_ledger"
+        }
+      ],
+      "once": true
+    },
+    {
       "id": "approach_intro",
       "when": {
         "event": "encounter_started"
@@ -22,6 +35,20 @@
         {
           "type": "send_aigm_message",
           "message": "Open on the long, lantern-lit approach to the Circus way-house. One sentry, half-asleep, between Wren and the door. Remind her — in the fiction — that she is at her best unseen: she can HIDE and close under cover for a Sneak Attack, or try to slip past. One short paragraph, then hand control to the player."
+        }
+      ],
+      "once": true
+    },
+    {
+      "id": "approach_clear_flag",
+      "when": {
+        "event": "encounter_completed"
+      },
+      "then": [
+        {
+          "type": "set_flag",
+          "name": "ledger_approach_clear",
+          "value": true
         }
       ],
       "once": true

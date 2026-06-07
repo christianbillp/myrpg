@@ -85,6 +85,20 @@
         }
       ],
       "once": true
+    },
+    {
+      "id": "corridor_crossed_flag",
+      "when": {
+        "event": "encounter_completed"
+      },
+      "then": [
+        {
+          "type": "set_flag",
+          "name": "ledger_corridor_crossed",
+          "value": true
+        }
+      ],
+      "once": true
     }
   ],
   "startingZones": {
