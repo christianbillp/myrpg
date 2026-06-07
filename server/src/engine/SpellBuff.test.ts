@@ -7,9 +7,11 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { applySelfBuff, recomputeBuffs } from './Buffs.js';
 import { computeAC } from './EquipmentSystem.js';
+import { npcBanePenalty } from './CombatSystem.js';
+import { npcSaveMod } from './SpellSystem.js';
 import { rollDiceBonus, mod } from './Dice.js';
-import { buildTestContext } from '../test/buildTestContext.js';
-import type { PlayerDef } from './types.js';
+import { buildTestContext, makeNpc } from '../test/buildTestContext.js';
+import type { PlayerDef, MonsterDef } from './types.js';
 
 afterEach(() => vi.restoreAllMocks());
 
@@ -64,5 +66,23 @@ describe('computeAC + rollDiceBonus', () => {
     vi.spyOn(Math, 'random').mockReturnValue(0.5);   // d4 → floor(0.5*4)+1 = 3
     expect(rollDiceBonus({ count: 1, sides: 4 })).toBe(3);
     expect(rollDiceBonus(undefined)).toBe(0);
+  });
+});
+
+describe('Bane (enemy debuff)', () => {
+  const def = { dex: 14, savingThrows: { dex: 2 } } as unknown as MonsterDef;
+
+  it('npcBanePenalty rolls 1d4 for a baned creature, 0 otherwise', () => {
+    vi.spyOn(Math, 'random').mockReturnValue(0.5);   // d4 → 3
+    const baned = makeNpc({ id: 'e1', activeBuffs: [{ spellId: 'bane' }] } as never);
+    const plain = makeNpc({ id: 'e2' });
+    expect(npcBanePenalty(baned)).toBe(3);
+    expect(npcBanePenalty(plain)).toBe(0);
+  });
+
+  it('npcSaveMod subtracts the Bane penalty from the save bonus', () => {
+    vi.spyOn(Math, 'random').mockReturnValue(0.5);   // d4 → 3
+    const baned = makeNpc({ id: 'e1', activeBuffs: [{ spellId: 'bane' }] } as never);
+    expect(npcSaveMod(baned, def, 'dex')).toBe(2 - 3);   // savingThrows.dex 2, minus 1d4(3)
   });
 });

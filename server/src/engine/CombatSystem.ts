@@ -1,5 +1,5 @@
 import { d, d20, mod, rollAdvantage, rollDisadvantage, applyHalflingLuck } from './Dice.js';
-import { PlayerDef, PlayerAttack, MonsterDef, MonsterAttack, ConsumableDef, LogEntry, BonusDamage, RolledBonusDamage, ResolvedAttackSnapshot } from './types.js';
+import { PlayerDef, PlayerAttack, MonsterDef, MonsterAttack, ConsumableDef, LogEntry, BonusDamage, RolledBonusDamage, ResolvedAttackSnapshot, NpcState } from './types.js';
 import { Logger } from '../Logger.js';
 import { critFloor, hasModifierFlag } from './Modifiers.js';
 
@@ -293,6 +293,13 @@ export function playerHide(player: PlayerDef, disadvantage = false): { hidden: b
   return { hidden: false, dc: 0, logs: [{ left: `${player.name} fails to hide`, right: `${right} ✗`, style: 'miss' }] };
 }
 
+/** SRD Bane: a creature that failed Bane's save subtracts 1d4 from its attack
+ *  rolls and saving throws. Returns a fresh rolled penalty (≥0) for a baned
+ *  creature, else 0. Callers subtract it (attack roll mod / save mod). */
+export function npcBanePenalty(npc: NpcState): number {
+  return (npc.activeBuffs ?? []).some((b) => b.spellId === 'bane') ? d(4) : 0;
+}
+
 export function enemyAttack(
   attack: MonsterAttack,
   playerAc: number,
@@ -300,6 +307,9 @@ export function enemyAttack(
   withDisadvantage = false,
   /** SRD Cover the player benefits from against this NPC's attack. */
   coverAcBonus = 0,
+  /** Flat modifier to the attacker's roll (SRD Bane → −1d4 when the attacker
+   *  failed Bane's save; pass a negative value). */
+  attackRollMod = 0,
 ): { damage: number; isHit: boolean; isCrit: boolean; attackTotal: number; naturalRoll: number; logs: LogEntry[]; bonusComponents: RolledBonusDamage[] } {
   const logs: LogEntry[] = [];
   const effAdv = withAdvantage && !withDisadvantage;
@@ -316,7 +326,7 @@ export function enemyAttack(
     naturalRoll = d20(); rollPart = `d20(${naturalRoll})`;
   }
 
-  const attackTotal = naturalRoll + attack.bonus;
+  const attackTotal = naturalRoll + attack.bonus + attackRollMod;
   const effectiveAc = playerAc + coverAcBonus;
   const isCrit = naturalRoll === 20;
   const isHit = (isCrit || attackTotal >= effectiveAc) && naturalRoll !== 1;

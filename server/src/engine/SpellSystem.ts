@@ -18,7 +18,7 @@ import { chebyshev } from './EnemyAI.js';
 import { canCastSpell } from './ActionGuards.js';
 import { startConcentration, endConcentration } from './ConcentrationSystem.js';
 import { publishNpcDamage } from './ThresholdPublisher.js';
-import { applyDamageWithTempHp } from './CombatSystem.js';
+import { applyDamageWithTempHp, npcBanePenalty } from './CombatSystem.js';
 import { combatantDisplayName } from './CombatFlow.js';
 import { emitNoise, NOISE_SPELL_VERBAL } from './Sound.js';
 import { Logger } from '../Logger.js';
@@ -77,10 +77,11 @@ function rollDamage(dice: number, sides: number, bonus = 0): { total: number; ro
 }
 
 export function npcSaveMod(target: NpcState, def: MonsterDef, ability: string): number {
+  const banePenalty = npcBanePenalty(target);
   // Use the monster's saving throw map if present; otherwise raw ability mod.
-  if (def.savingThrows && def.savingThrows[ability] !== undefined) return def.savingThrows[ability];
+  if (def.savingThrows && def.savingThrows[ability] !== undefined) return def.savingThrows[ability] - banePenalty;
   const score = (def as unknown as Record<string, number>)[ability];
-  return typeof score === 'number' ? mod(score) : 0;
+  return (typeof score === 'number' ? mod(score) : 0) - banePenalty;
 }
 
 /**
@@ -1351,11 +1352,18 @@ function resolveSingleTargetSaveSpell(
     });
     return !success && conds.length > 0;
   } else {
+    // SRD Bane: a creature that fails the save subtracts 1d4 from its attack
+    // rolls and saving throws for the duration. Recorded as a creature buff the
+    // enemy attack/save paths consume via `npcBanePenalty`; stripped when the
+    // caster's Concentration ends.
+    if (spell.id === 'bane' && !success) {
+      applyBuffTo(target, { spellId: 'bane', concentration: true });
+    }
     // Pure narrative single-target save (Charm Person, Hideous Laughter). The
     // outcome is logged but no engine-tracked condition is set yet — content
     // can wire one via spell.effect.onFail when needed.
     ctx.addLog({
-      left: `${combatantDisplayName(target, ctx.state.npcs)} ${success ? 'resists' : 'is affected'}`,
+      left: `${combatantDisplayName(target, ctx.state.npcs)} ${success ? 'resists' : (spell.id === 'bane' ? 'is baned — −1d4 to attacks and saves' : 'is affected')}`,
       right: `d20(${roll})+${saveBonus}=${total} vs DC ${dc}`,
       style: success ? 'normal' : 'status',
     });

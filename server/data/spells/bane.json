@@ -13,6 +13,6 @@
   "concentration": true,
   "ritual": false,
   "save": { "ability": "cha", "halfOnSuccess": false },
-  "description": "Up to three creatures of your choice that you can see within range must each make a Charisma saving throw. Whenever a target that fails this save makes an attack roll or a saving throw before the spell ends, the target must subtract 1d4 from the attack roll or save. Engine: the -1d4 rider is descriptive only until the d20-test buff primitive lands.",
+  "description": "Up to three creatures of your choice that you can see within range must each make a Charisma saving throw. Whenever a target that fails this save makes an attack roll or a saving throw before the spell ends, the target must subtract 1d4 from the attack roll or save. Engine: the selected enemy that fails the CHA save is baned — its attack rolls (vs you) and saving throws (vs your spells) subtract 1d4 until your Concentration ends; multi-target is descriptive (the engine debuffs the single targeted enemy).",
   "scaling": "You can target one additional creature for each spell slot level above 1."
 }
