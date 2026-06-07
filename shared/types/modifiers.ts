@@ -45,7 +45,12 @@ export type Modifier =
   /** Flat dice reduction to incoming damage of one type (Resistance cantrip →
    *  −1d4 of the chosen type). Derived into `PlayerState.buffDamageReduction`
    *  and applied in `GameEngine.applyDamageToPlayer`. */
-  | { type: 'damage-reduction'; damageType: string; count: number; sides: number };
+  | { type: 'damage-reduction'; damageType: string; count: number; sides: number }
+  /** Flat HP-maximum increase for the buff's duration (Aid → +5). Applied by
+   *  directly raising the session `PlayerDef.maxHp` at cast (every HP read site
+   *  already consumes `maxHp`); the `value` is recorded so a Long Rest can
+   *  reverse it exactly. */
+  | { type: 'max-hp'; value: number };
 
 /**
  * Shared contract for anything that contributes typed `Modifier`s to a

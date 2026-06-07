@@ -1461,6 +1461,18 @@ function resolveUtilitySpell(ctx: GameContext, spell: SpellDef, slotLevel: numbe
       applySelfBuff(ctx, { spellId: 'beacon-of-hope', modifiers: [{ type: 'advantage', on: 'save', key: 'wis' }], concentration: true });
       ctx.addLog({ left: `${ctx.playerDef.name} radiates hope — Advantage on Wisdom saves`, style: 'status' });
       return;
+    // Aid: raise the caster's HP maximum and current HP by 5 (+5 per slot level
+    // above 2) for the duration. Implemented by directly raising the session
+    // `playerDef.maxHp` (which every HP read site consumes) and current HP; the
+    // bonus is recorded on the buff so a Long Rest reverses it exactly.
+    case 'aid': {
+      const amt = 5 + 5 * Math.max(0, slotLevel - 2);
+      ctx.playerDef.maxHp += amt;
+      s.player.hp += amt;
+      applySelfBuff(ctx, { spellId: 'aid', modifiers: [{ type: 'max-hp', value: amt }] });
+      ctx.addLog({ left: `${ctx.playerDef.name} is bolstered by Aid — +${amt} HP maximum (now ${s.player.hp}/${ctx.playerDef.maxHp})`, style: 'heal' });
+      return;
+    }
     // Resistance (cantrip): reduce damage of one chosen type by 1d4.
     case 'resistance': {
       const dt = (spell.damageTypeChoices?.includes(damageTypeChoice ?? '') ? damageTypeChoice : spell.damageTypeChoices?.[0]) ?? 'fire';

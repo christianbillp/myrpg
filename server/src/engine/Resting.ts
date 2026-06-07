@@ -185,6 +185,17 @@ export function applyLongRest(
 ): void {
   const { playerDef, player, features } = inputs;
 
+  // SRD Aid (and kin) — an HP-maximum buff expires on a Long Rest (it lasts 8
+  // hours = the rest). Reverse the recorded `max-hp` bonus from the session
+  // `playerDef.maxHp` and drop the buff before HP refills to the base maximum.
+  const aidBonus = (player.activeBuffs ?? [])
+    .flatMap((b) => b.modifiers ?? [])
+    .reduce((sum, m) => (m.type === 'max-hp' ? sum + m.value : sum), 0);
+  if (aidBonus > 0) {
+    playerDef.maxHp -= aidBonus;
+    player.activeBuffs = (player.activeBuffs ?? []).filter((b) => !(b.modifiers ?? []).some((m) => m.type === 'max-hp'));
+  }
+
   player.hp = playerDef.maxHp;
   player.hitDiceUsed = 0;
   // SRD: Temporary HP is lost at the end of a Long Rest (US-109).

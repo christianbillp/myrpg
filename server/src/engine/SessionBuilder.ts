@@ -227,7 +227,9 @@ export function buildSessionState(
   const player = {
     defId: playerDef.id,
     tileX: pX, tileY: pY,
-    hp: req.resumeHp ?? playerDef.maxHp,
+    // Aid isn't resumed (only Mage Armor is), so clamp a stale over-base HP
+    // saved while an HP-maximum buff was active back to the base maximum.
+    hp: Math.min(req.resumeHp ?? playerDef.maxHp, playerDef.maxHp),
     xp: req.resumeXp ?? playerDef.xp,
     balanceCp: req.resumeCp ?? playerDef.defaultCp ?? 0,
     inventoryIds,

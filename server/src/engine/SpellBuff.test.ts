@@ -9,9 +9,10 @@ import { applySelfBuff, recomputeBuffs } from './Buffs.js';
 import { computeAC } from './EquipmentSystem.js';
 import { npcBanePenalty } from './CombatSystem.js';
 import { npcSaveMod } from './SpellSystem.js';
+import { applyLongRest, buildLongRestPreview, type RestingInputs } from './Resting.js';
 import { rollDiceBonus, mod } from './Dice.js';
 import { buildTestContext, makeNpc } from '../test/buildTestContext.js';
-import type { PlayerDef, MonsterDef } from './types.js';
+import type { PlayerDef, PlayerState, MonsterDef } from './types.js';
 
 afterEach(() => vi.restoreAllMocks());
 
@@ -84,5 +85,20 @@ describe('Bane (enemy debuff)', () => {
     vi.spyOn(Math, 'random').mockReturnValue(0.5);   // d4 → 3
     const baned = makeNpc({ id: 'e1', activeBuffs: [{ spellId: 'bane' }] } as never);
     expect(npcSaveMod(baned, def, 'dex')).toBe(2 - 3);   // savingThrows.dex 2, minus 1d4(3)
+  });
+});
+
+describe('Aid (HP-maximum buff)', () => {
+  it('reverses the +HP-maximum bonus on a Long Rest and refills to the base max', () => {
+    const playerDef = { name: 'C', level: 1, maxHp: 15, className: 'Cleric', defaultSpellSlots: [], defaultFeatureIds: [] } as unknown as PlayerDef;
+    const player = {
+      hp: 12, hitDiceUsed: 0, spellSlots: [], resources: {}, exhaustionLevel: 0, tempHp: 0, preparedSpellIds: [],
+      activeBuffs: [{ spellId: 'aid', modifiers: [{ type: 'max-hp', value: 5 }] }],
+    } as unknown as PlayerState;
+    const inputs: RestingInputs = { playerDef, player, features: [], spells: [], classDef: null };
+    applyLongRest(inputs, {}, buildLongRestPreview(inputs));
+    expect(playerDef.maxHp).toBe(10);     // 15 − 5 reversed
+    expect(player.hp).toBe(10);           // refilled to the base maximum
+    expect(player.activeBuffs).toEqual([]);
   });
 });
