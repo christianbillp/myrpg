@@ -498,6 +498,7 @@ The data-driven layer that replaces scattered `includes(featId)` / `switch(id)` 
 | `ac-bonus` | `{ type, value }` | Flat AC bonus from a buff (Shield of Faith +2, Haste +2; stacks). Projected onto `PlayerState.acBonus`, added in `computeAC`. |
 | `dice-bonus` | `{ type, on, count, sides }` | An extra die added to a category of d20 Test (Bless → `on:'attack'`+`'save'`; Guidance → `'check'`). Projected per-category onto `PlayerState`; rolled by `Dice.rollDiceBonus` at the roll sites. Largest die per category wins. |
 | `resistance` | `{ type, damageType }` | Damage resistance for the buff's duration (Protection from Energy). Projected onto `PlayerState.buffResistances`, merged by `GameEngine.playerResistMod`. |
+| `damage-reduction` | `{ type, damageType, count, sides }` | Flat typed damage reduction (Resistance cantrip → −1d4 of the chosen type). Projected onto `PlayerState.buffDamageReduction`, applied in `applyDamageToPlayer`. |
 
 **Query helpers** (`server/src/engine/Modifiers.ts`): `critFloor(playerDef)`, `hasModifierFlag(playerDef, name)`, `hasAdvantageOn(playerDef, on, key?)`. Consumed by `CombatSystem` (crit floor), `CombatFlow` (initiative advantage), `SpellSystem` (potent-cantrip), and `EquipmentSystem` (the derived `savageAttacker` / `fightingStyleDefense` AC/attack booleans).
 
