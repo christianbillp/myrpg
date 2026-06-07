@@ -33,6 +33,7 @@ import { endConcentration } from '../ConcentrationSystem.js';
 import { startConversation as cnStartConversation, advanceConversation as cnAdvanceConversation, endConversation as cnEndConversation } from '../ConversationSystem.js';
 import { runCompanionTick } from '../WorldTick.js';
 import { doDisarmTrap, doDeployGear } from '../TrapSystem.js';
+import { doStudy, doMagicRite } from '../StudySystem.js';
 
 /** The thin slice of `GameEngine` the handlers need. Keeping this
  *  explicit lets us test handlers without instantiating the whole
@@ -88,6 +89,8 @@ export const PLAYER_ACTIONS: Registry = {
   shortRest:            (ctx)            => exDoShortRest(ctx),
   search:               (ctx)            => exDoSearch(ctx),
   disarmTrap:           (ctx, a, events) => doDisarmTrap(ctx, a.tileX, a.tileY, events),
+  study:                (ctx, a, events) => doStudy(ctx, a.tileX, a.tileY, events),
+  magic:                (ctx, a, events) => doMagicRite(ctx, a.tileX, a.tileY, events),
   deployGear:           (ctx, a, events) => doDeployGear(ctx, a.itemId, a.tileX, a.tileY, events),
   usePotion:            (ctx)            => exDoUsePotion(ctx),
   equip:                (ctx, a)         => ivDoEquip(ctx, a.slot, a.itemId),

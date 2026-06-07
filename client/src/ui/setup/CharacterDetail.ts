@@ -89,6 +89,7 @@ export class CharacterDetail {
   private placeHandler!: () => void;
   private def: PlayerDef | null = null;
   private save: CharacterDetailSave | null = null;
+  private hasAdventureProgress = false;
   private currentTab: TabId = "stats";
 
   constructor(opts: CharacterDetailOptions) {
@@ -127,6 +128,14 @@ export class CharacterDetail {
 
   setSave(save: CharacterDetailSave | null): void {
     this.save = save;
+    if (this.def) this.render();
+  }
+
+  /** Adventure Setup only: whether the displayed character has an adventure save
+   *  to reset. Drives the RESET ADVENTURE button's enabled state, mirroring how
+   *  `save` drives DELETE SAVE — no progress, no reset. */
+  setHasAdventureProgress(has: boolean): void {
+    this.hasAdventureProgress = has;
     if (this.def) this.render();
   }
 
@@ -253,19 +262,21 @@ export class CharacterDetail {
       deleteBtn.addEventListener("click", () => save && this.opts.callbacks.onDeleteSave(def));
       actionRow.appendChild(deleteBtn);
       if (this.opts.callbacks.onResetAdventure) {
+        const hasProgress = this.hasAdventureProgress;
         const resetBtn = document.createElement("button");
         resetBtn.type = "button";
         resetBtn.textContent = "RESET ADVENTURE [DEV]";
         resetBtn.style.cssText = `
           flex: 1;
-          background: #2a1a3a;
-          color: #d6c6ff;
-          border: 1px solid #6644aa;
+          background: ${hasProgress ? "#2a1a3a" : "#15101a"};
+          color: ${hasProgress ? "#d6c6ff" : "#554466"};
+          border: 1px solid ${hasProgress ? "#6644aa" : "#2a2033"};
           font-family: monospace; font-size: 10px;
           letter-spacing: 1px; padding: 6px 8px;
-          cursor: pointer;
+          cursor: ${hasProgress ? "pointer" : "not-allowed"};
         `;
-        resetBtn.addEventListener("click", () => this.opts.callbacks.onResetAdventure!(def));
+        resetBtn.disabled = !hasProgress;
+        resetBtn.addEventListener("click", () => hasProgress && this.opts.callbacks.onResetAdventure!(def));
         actionRow.appendChild(resetBtn);
       }
       this.root.appendChild(actionRow);

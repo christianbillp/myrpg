@@ -42,6 +42,13 @@ export interface MagicItemProps {
    *  the player until identified (Identify spell or a Short Rest examining it).
    *  Identification is informational; the item still functions when used/worn. */
   startsUnidentified?: boolean;
+  /** Masked name shown while unidentified, in place of the generic
+   *  "Unidentified <category>". Lets a magic item pose as a mundane object
+   *  (a Cloak of Protection reading as "Senior White Cape"). */
+  unidentifiedName?: string;
+  /** Cloak/Ring-of-Protection pattern: while ATTUNED, grants +N to AC and +N to
+   *  every saving throw. Independent of the weapon/armor enhancement `bonus`. */
+  protectionBonus?: number;
 }
 
 export interface ArmorDef extends MagicItemProps {
@@ -121,7 +128,7 @@ export interface AreaDenialDef {
 // the inventory as flavour/lore objects with no UI action button. Distinct
 // from ammunition (which is auto-consumed) and consumables (which have USE).
 // `areaDenial` upgrades a piece of gear into a deployable trap (see above).
-export interface GearDef {
+export interface GearDef extends MagicItemProps {
   id: string; name: string; type: 'gear';
   description?: string;
   costCp?: number;
@@ -156,6 +163,9 @@ export function isItemIdentified(item: ItemDef, identifiedItemIds: string[] | un
  *  masked "Unidentified <category>" (US-124). */
 export function itemDisplayName(item: ItemDef, identifiedItemIds: string[] | undefined): string {
   if (isItemIdentified(item, identifiedItemIds)) return item.name;
+  // A masked name lets a magic item pose as something mundane while unidentified.
+  const masked = (item as MagicItemProps).unidentifiedName;
+  if (masked) return masked;
   const cat = item.type === 'scroll' ? 'Scroll'
     : item.type === 'armor' ? 'Armor'
     : item.type === 'shield' ? 'Shield'

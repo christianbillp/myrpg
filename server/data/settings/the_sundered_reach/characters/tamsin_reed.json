@@ -62,7 +62,8 @@
     "mage-armor",
     "sleep",
     "feather-fall",
-    "detect-magic"
+    "detect-magic",
+    "identify"
   ],
   "defaultPreparedSpellIds": ["magic-missile", "shield", "mage-armor", "sleep"],
   "defaultSpellSlots": [2],

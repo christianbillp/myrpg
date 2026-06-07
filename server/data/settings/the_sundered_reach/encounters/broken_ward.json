@@ -10,9 +10,9 @@
   ],
   "allyIds": [],
   "enemyIds": [],
-  "customIntroduction": "The stair the sage showed you goes down further than the chapter-house above it has any right to. The air thickens with cold and old incense. At the bottom, the catacombs open into a vaulted gallery of burial niches, and at the far end — you feel it before you see it — the keystone ward: a great carved disc set into the floor, its glyphs guttering like a candle in a draught. A figure in a Cape's robe lies slumped against it, very still, one hand still pressed to the stone. The bindings are coming apart. In the dark of the niches, something dry begins to move.",
-  "customContext": "You are beneath the chapter-house. The Circuit's keystone — the binding that anchors the whole network of wards — is here, set into the floor of the innermost chamber. Its glyphs are failing. Senior Cape Edran Vael came down to hold the line alone; he never came back up.\n\nThe encounter runs in three beats.\n\n**Beat 1 — Discovery.** Reed descends and explores the catacomb gallery. The burial niches are cold and still; the ward's guttering light throws long shadows across carved names she does not recognise. Vael's body spawns dead on his keystone tile (engine `set_npc_dead` with `corpseSearch.dc = 1` and `dropInventory: false`) — the moment Reed steps adjacent and presses SEARCH, the engine resolves it and the Event Log surfaces his field-note and licence-seal in the success branch. The rite is carved around the keystone's rim (Arcana / History DC 13–14; reduced by 1–2 if she read the dedication stone in the previous encounter): three passes of inscription, a breath held at each glyph-junction, her own seal pressed to the stone at the close. It is not beyond her. It was written to be performed by a single Cape alone if it had to be.\n\n**Beat 2 — Combat.** Three skeletons spawn alongside Vael but are tagged `set_npc_hidden { revealedBy: 'trigger' }` so the niches stay silent — no token, no Target Panel, no AIGM combatant entry. As Reed crosses the threshold into the keystone chamber, the `keystone_threshold_combat` trigger fires an unfocused announcement (\"The dead stir. Skeletons come to life and attack!\"), reveals the skeletons, flips their disposition to enemy, and starts combat. They are **vulnerable to bludgeoning** and **immune to poison**: her quarterstaff lands harder than her Fire Bolt here, and the encounter is designed to teach that. The fight is tense but survivable for a caster of her level; she may have a healing draught and her prepared spells in reserve, and the chamber's geometry gives her room to manoeuvre.\n\n**Beat 3 — The Sealing.** With the skeletons down, Reed performs the binding rite at the keystone. This is a short skill challenge — two or three Arcana checks, not a single roll — eased by the dedication stone she may have read, Vael's notes, and anything the sage told her. Let her describe what she does and reward preparation. On success, the glyphs steady and warm, the cold lifts, the draught dies. The Circuit holds. She certifies the work in her own hand, with her own seal. There is no senior to countersign. The cape, for the first time, fits.\n\nIf the sealing falters on a check, she spends a resource and tries again. This is a graduation, not a trap. Do not let a bad roll close the door — the skeletons are the danger, the sealing is the ceremony. Vael is at rest. He is never hostile, never animated. His last act was to hold this line for whoever came next, and she is whoever came next.\n\nTriggers (matches the actual `triggers[]` array — DO NOT describe a different layout to the player):\n1. (T0 — `descent_fade_in` on `encounter_started`) Slow screen fade-in as Reed reaches the bottom of the stair.\n2. (T1 — `catacomb_opening_narration` on `encounter_started`) AIGM cue: open with the read-aloud passage (cold, incense, guttering glyphs, still figure, first dry sound from the niches). Do NOT describe the skeletons' positions; they are hidden.\n3. (T2 — `vael_corpse_setup` on `encounter_started`) Engine action: Vael spawns dead at his tile with `corpseSearch.dc = 1` and `dropInventory: false`. The success/failure text owns the field-note reveal — do NOT request a Perception check on his body; the SEARCH button will resolve it, and CURRENT STATE will tag the corpse `[SEARCHED]` once it has.\n4. (T3 — `skeletons_hidden_at_start` on `encounter_started`) Engine action: every `skeleton` is marked hidden with `revealedBy: 'trigger'`. They are invisible to passive Perception and walk-through for movement until the combat trigger fires.\n5. (T4 — `gallery_unease` on entering the gallery proper) DC 10 Perception check; pass reveals a faint scrape of bone on stone; fail gives only uneasy silence.\n6. (T5 — `keystone_threshold_combat` on entering the keystone-chamber threshold) Unfocused announcement \"The dead stir. Skeletons come to life and attack!\" → `set_npc_hidden { hidden: false }` reveals the skeletons (and bumps them off any tile the player happens to occupy) → `set_disposition_by_def_id { enemy }` flips + aggros → `trigger_combat` starts initiative.\n7. (T6 — `sealing_complete_xp` on `encounter_completed`) Award the campaign's largest XP grant.\n8. (T7 — `sealing_complete_narration` on `encounter_completed`) AIGM cue: narrate the sealing succeeding — glyphs steadying, cold lifting, Reed pressing her own seal to the stone for the first time without a senior beside her.",
-  "objective": "Reach the keystone chamber, put down the risen dead, and perform the binding rite to re-seal the Circuit's keystone ward — certifying the work in your own hand, with your own seal.",
+  "customIntroduction": "The stair the sage showed you goes down further than the chapter-house above has any right to. The air thickens with cold and old incense. At the bottom the catacombs open into a vaulted gallery of burial niches, the shadows between them long and unmoving. Somewhere deeper, past the reach of your lamp, something is failing — you feel the wrongness of it before the dark gives up anything to see.",
+  "customContext": "Beneath the chapter-house: the Circuit's keystone — the binding that anchors every ward — set into the floor of the innermost chamber, its glyphs failing. Senior Cape Edran Vael came down to hold the line alone and never came back up. The finale runs in three beats.\n\n**Beat 1 — Discovery.** Reed explores the catacomb gallery; the ward's guttering light throws long shadows over carved names. Vael's body stays hidden until Reed has line of sight to it — it surfaces slumped at the stone the moment she can see into the keystone chamber — pressing SEARCH on it surfaces his field-note and licence-seal (don't request a Perception check; the SEARCH action owns the reveal). The binding rite is carved around the keystone's rim (Arcana/History DC 13–14, easier if she read the dedication stone last chapter): three passes of inscription, her own seal pressed at the close. It was written to be performed by a single Cape alone.\n\n**Beat 2 — Combat.** Skeletons rise from the niches when Reed crosses into the keystone chamber. They are **vulnerable to bludgeoning** and **immune to poison** — her quarterstaff lands harder than her Fire Bolt, and the fight is built to teach that. Tense but survivable; the chamber gives her room to manoeuvre.\n\n**Beat 3 — The Sealing.** With the dead down, Reed performs the rite at the keystone (3,10). She STUDIES the stone (Arcana) to read the Rite of Sealed Thresholds, then uses the **Magic action** on it to channel the binding home — that, not clearing the room, is what completes the chapter (combat-clear alone won't finish it while the rite is pending). The glyphs steady and warm, the cold lifts, the Circuit holds; she certifies the work in her own hand, with no senior to countersign. The cape, for the first time, fits.\n\nThis is a graduation, not a trap: a faltered check costs a resource and she tries again — don't let a bad roll close the door. The skeletons are the danger; the sealing is the ceremony. Vael is at rest — never hostile, never animated. His last act was to hold this line for whoever came next, and she is whoever came next.",
+  "objective": "Reach the keystone at the bottom of the catacombs and renew its failing binding by hand — trace the rite, set your own seal, and certify the work yourself.",
   "completionFlag": "keystone_ward_sealed",
   "startingZones": {
     "width": 30,
@@ -731,7 +731,7 @@
       "then": [
         {
           "type": "send_aigm_message",
-          "message": "CLIMACTIC EXPLORATION + COMBAT — the finale. Open with the read-aloud: the stair going down further than it should, the cold and old incense, the vaulted gallery of burial niches, the keystone ward's glyphs guttering like a candle in a draught, the still figure in a Cape's robe slumped against it one hand pressed to the stone, and — in the dark of the niches — something dry beginning to move. Establish atmosphere before anything moves. This is Beat 1 (Discovery): secrets system active, no combat yet. The skeletons are hidden inside the burial niches and have not yet shown themselves — do NOT describe them or their positions until the combat trigger fires."
+          "message": "CLIMACTIC EXPLORATION + COMBAT — the finale. The intro is on screen: the long stair down, the cold and old incense, the gallery of burial niches, and a felt wrongness somewhere deeper. Don't re-describe it — open the moment and let Reed explore into the dark. Beat 1 (Discovery): secrets active, no combat yet. The keystone, Vael's body, and the rite are DISCOVERIES — do NOT describe the keystone or the slumped figure until Reed reaches the far chamber and the map reveals them (the SEARCH on the body surfaces his field-note). The skeletons are hidden in the niches — do NOT mention them or their positions until the combat trigger fires."
         }
       ],
       "once": true
@@ -747,10 +747,12 @@
           "type": "set_npc_dead",
           "defId": "edran_vael",
           "dropInventory": false,
+          "hiddenUntilSeen": true,
           "corpseSearch": {
             "dc": 1,
-            "successText": "Tucked beneath the hem of his cloak, half-hidden, a field-note in a cramped hand and a licence-seal on a short chain. The note ends mid-sentence: '—recertification cannot be filed. The stone must be re-sung by a living Cape. I have bought what time I—'",
-            "failureText": "Vael lies as he fell — robes stiff with cold, one hand still on the stone. You find nothing on him you can use."
+            "successText": "A field-note in a cramped hand, and the white cape itself — stiff with cold but whole. The note ends mid-sentence: '—recertification cannot be filed. The binding must be renewed by hand, by a living Cape at the stone. I have bought what time I—' You gather the cape from his shoulders; it is heavier than its weave should be.",
+            "failureText": "Vael lies as he fell — robes stiff with cold, one hand still on the stone. You find nothing on him you can use.",
+            "rewardItemId": "cloak_of_protection"
           }
         }
       ],
@@ -858,7 +860,57 @@
       "then": [
         {
           "type": "send_aigm_message",
-          "message": "THE SEALING IS COMPLETE. Narrate the close of Beat 3: the glyphs steadying and warming under Reed's hands, the cold lifting from the chamber, the draught dying as the ward locks back into itself. Describe her pressing her own seal to the stone — no senior beside her, no countersignature, just her mark and the silence that follows. Vael's hand has gone still; his line held. The cape fits. Award closing loot as fits the setting: his licence-seal as a keepsake, a salvaged focus from his pack, the Circuit's gratitude pending. If you want a colder final note, one wardstone on the Circuit remains uncertified — a hook for her next posting."
+          "message": "THE SEALING IS COMPLETE. Close Beat 3: the glyphs steadying and warming under Reed's hands, the cold lifting, the ward locking back into itself. She presses her own seal to the stone — no senior beside her, no countersignature, just her mark and the silence after. Vael's hand has gone still; his line held. The cape fits. Award closing loot that fits the setting — his seal as a keepsake, a salvaged focus from his pack. For a colder last note: one wardstone on the Circuit remains uncertified, a hook for her next posting."
+        }
+      ],
+      "once": true
+    },
+    {
+      "id": "keystone_study",
+      "when": {
+        "event": "study_feature",
+        "tile": { "x": 3, "y": 10 }
+      },
+      "if": [],
+      "then": [
+        {
+          "type": "player_ability_check",
+          "skill": "arcana",
+          "dc": 13,
+          "onPass": [
+            {
+              "type": "show_log",
+              "message": "The binding-rite is carved around the keystone's rim — the Rite of Sealed Thresholds, three passes of inscription closed with a Cape's own seal. You can perform it here: channel the binding into the stone with the Magic action."
+            }
+          ],
+          "onFail": [
+            {
+              "type": "show_log",
+              "message": "The rim is dense with worn glyphwork — a binding-rite of some kind, but its order escapes you on this pass. Study it again."
+            }
+          ]
+        }
+      ],
+      "once": false
+    },
+    {
+      "id": "keystone_rite",
+      "when": {
+        "event": "magic_feature",
+        "tile": { "x": 3, "y": 10 }
+      },
+      "if": [],
+      "then": [
+        {
+          "type": "show_announcement",
+          "text": "You trace the rite and press your seal to the stone. The ward locks home.",
+          "durationMs": 3500,
+          "mode": "focused"
+        },
+        {
+          "type": "set_flag",
+          "name": "keystone_ward_sealed",
+          "value": true
         }
       ],
       "once": true

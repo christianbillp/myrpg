@@ -199,6 +199,13 @@ export function runPassivePerceptionSweep(ctx: GameContext): string[] {
   const revealed: string[] = [];
 
   for (const npc of s.npcs) {
+    // LOS-gated NPCs (typically corpses) surface the moment the player can see
+    // them — no Perception check, just line of sight via the same `canSee`.
+    if (npc.hiddenUntilSeen && !npc.seen) {
+      const probe: VisionTarget = { tileX: npc.tileX, tileY: npc.tileY, id: npc.id, conditions: npc.conditions };
+      if (canSee(s, observer, probe).sees) { npc.seen = true; revealed.push(npc.id); }
+      continue;
+    }
     if (isDead(npc)) continue;
     if (!npc.conditions.includes('hidden')) continue;
     if (typeof npc.hideDC !== 'number') continue;

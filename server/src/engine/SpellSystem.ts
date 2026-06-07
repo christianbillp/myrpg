@@ -16,6 +16,7 @@ import type { GameEvent, NpcState, SpellDef, LogEntry, MonsterDef } from './type
 import { d, d20, mod, rollAdvantage, applyHalflingLuck, rollDiceBonus } from './Dice.js';
 import { chebyshev } from './EnemyAI.js';
 import { canCastSpell } from './ActionGuards.js';
+import { computeEquippedSlotLabels } from './EquipmentSystem.js';
 import { isMagicInitiateSpell, magicInitiateResourceId } from './MagicInitiate.js';
 import { startConcentration, endConcentration } from './ConcentrationSystem.js';
 import { publishNpcDamage } from './ThresholdPublisher.js';
@@ -1512,9 +1513,51 @@ function resolveUtilitySpell(ctx: GameContext, spell: SpellDef, slotLevel: numbe
       applySelfBuff(ctx, { spellId: 'mage-armor', modifiers: [{ type: 'flag', name: 'mage-armor' }] });
       ctx.addLog({ left: `${ctx.playerDef.name} casts Mage Armor — AC ${ctx.playerDef.ac} for 8 hours`, style: 'status' });
       break;
-    case 'detect-magic':
-      ctx.addLog({ left: `${ctx.playerDef.name} casts Detect Magic — senses magical effects within 30 ft`, style: 'status' });
+    case 'detect-magic': {
+      // Sense magical auras: flag magic items held or lying within 30 ft (6
+      // tiles). Surfaces an aura in the inventory + on the map even while the
+      // item is unidentified — knowing a thing is magical isn't knowing what it
+      // does (that's Identify).
+      const p = ctx.state.player;
+      const detected = new Set(p.magicDetectedItemIds ?? []);
+      const present = new Set<string>();
+      const consider = (id: string): void => {
+        const it = ctx.defs.equipment.find((i) => i.id === id) as { magic?: boolean } | undefined;
+        if (it?.magic) { present.add(id); detected.add(id); }
+      };
+      for (const id of new Set(p.inventoryIds ?? [])) consider(id);
+      for (const mi of ctx.state.mapItems ?? []) {
+        if (chebyshev(p.tileX, p.tileY, mi.tileX, mi.tileY) <= 6) consider(mi.defId);
+      }
+      p.magicDetectedItemIds = [...detected];
+      ctx.addLog({
+        left: `${ctx.playerDef.name} casts Detect Magic — ${present.size ? `senses magic on ${present.size} item${present.size > 1 ? 's' : ''} nearby` : 'senses no magic nearby'}`,
+        style: 'status',
+      });
       break;
+    }
+    case 'identify': {
+      // Identify the held unidentified items, revealing their true name and
+      // properties. (SRD targets one item; we resolve all held unidentified
+      // items per cast for simplicity — no per-item target picker.)
+      const p = ctx.state.player;
+      p.identifiedItemIds = p.identifiedItemIds ?? [];
+      const named: string[] = [];
+      for (const id of new Set(p.inventoryIds ?? [])) {
+        const it = ctx.defs.equipment.find((i) => i.id === id) as { id: string; name: string; startsUnidentified?: boolean } | undefined;
+        if (it?.startsUnidentified && !p.identifiedItemIds.includes(id)) {
+          p.identifiedItemIds.push(id);
+          named.push(it.name);
+        }
+      }
+      if (named.length) {
+        p.equippedSlotLabels = computeEquippedSlotLabels(ctx.playerDef, p.equippedSlots, ctx.defs.equipment);
+        ctx.addLog({ left: `${ctx.playerDef.name} casts Identify — learns the properties of ${named.join(', ')}.`, style: 'status' });
+      } else {
+        ctx.addLog({ left: `${ctx.playerDef.name} casts Identify — nothing carried is unidentified.`, style: 'status' });
+      }
+      break;
+    }
     case 'feather-fall':
       ctx.addLog({ left: `${ctx.playerDef.name} casts Feather Fall`, style: 'status' });
       break;

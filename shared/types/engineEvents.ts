@@ -15,6 +15,16 @@
 
 export type EngineEvent =
   | { type: 'player_moved'; x: number; y: number }
+  /** Published by the Study player-action when the player studies a feature
+   *  tile from within reach. Encounter authors hang a `study_feature` trigger
+   *  on the tile to resolve the deliberate examination (vs an auto-fire on
+   *  movement). The (x,y) is the studied feature's tile. */
+  | { type: 'study_feature'; x: number; y: number }
+  /** Published by the Magic player-action (the SRD Magic action) when the player
+   *  channels magic into a feature tile from within reach — e.g. performing the
+   *  binding rite at the keystone. Authors hang a `magic_feature` trigger on the
+   *  tile to resolve the rite. */
+  | { type: 'magic_feature'; x: number; y: number }
   | { type: 'npc_killed'; npcId: string; defId: string; killerId?: string }
   | { type: 'item_picked_up'; defId: string }
   | { type: 'turn_started'; combatantId: 'player' | string }

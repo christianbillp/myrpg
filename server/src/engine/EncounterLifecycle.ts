@@ -1,6 +1,15 @@
 import type { GameContext } from './GameContext.js';
 import { isHostileTo } from './FactionRelations.js';
 import { PLAYER_FACTION_ID } from '../../../shared/types.js';
+import type { GameState } from '../../../shared/types.js';
+
+/** True while the encounter still has an un-fired `magic_feature` rite point —
+ *  a rite the player must perform (the Magic action) before it can complete.
+ *  Combat-clear alone does not finish such an encounter. */
+export function hasPendingRite(s: GameState): boolean {
+  return s.triggers.some((t) => t.when.event === 'magic_feature'
+    && (t.once === false || !s.firedTriggerIds.includes(t.id)));
+}
 
 /**
  * EncounterLifecycle — publishes the two lifecycle EngineEvents that encounter
@@ -39,7 +48,9 @@ export function registerEncounterLifecycle(ctx: GameContext): void {
     const partyView = { factionId: PLAYER_FACTION_ID } as const;
     const enemiesAlive = s.npcs.some((n) => n.hp > 0
       && isHostileTo(s, partyView, { factionId: n.factionId, disposition: n.disposition }));
-    if (!enemiesAlive) fireCompleted();
+    // A pending rite (an un-fired `magic_feature` trigger) is the real objective
+    // — clearing the enemies isn't enough. Hold completion until it's performed.
+    if (!enemiesAlive && !hasPendingRite(s)) fireCompleted();
   }, /*priority*/ 30);
 
   ctx.bus.subscribe('flag_set', (e) => {

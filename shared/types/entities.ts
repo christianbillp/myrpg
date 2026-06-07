@@ -155,6 +155,9 @@ export interface PlayerDef {
   skills: Record<string, number>;
   savingThrowProficiencies: string[];
   savingThrows: Record<string, number>;
+  /** Flat bonus added to every saving throw from attuned protection items
+   *  (Cloak/Ring of Protection). Recomputed by `applyEquipment`; 0 when none. */
+  saveBonus?: number;
   /** Ids of class features this character knows (e.g. `["second-wind"]` for Fighter L1). Features grant resource pools, action buttons, and effect handlers — see `features/`. */
   defaultFeatureIds?: string[];
   hitDieType: number;

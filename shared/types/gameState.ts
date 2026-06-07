@@ -169,6 +169,12 @@ export interface PlayerState {
    *  has identified this session. Until an item's id is here, it displays as
    *  "Unidentified <category>". */
   identifiedItemIds?: string[];
+  /** Detect Magic: ids of magical items the player has SENSED as magical
+   *  (held or seen on the ground when cast). Surfaces a magic aura in the
+   *  inventory + on map items, even while the item is still unidentified.
+   *  Distinct from identification — knowing a thing is magical isn't knowing
+   *  what it does. */
+  magicDetectedItemIds?: string[];
   /** SRD See Invisibility — while true, the player sees creatures with the
    *  Invisible condition as if they were visible. Set by the See Invisibility
    *  cast, cleared after 1 hour (handled as a narrative timer for now —
@@ -243,6 +249,15 @@ export interface AvailableActions {
   /** Tiles holding a discovered, still-armed trap within reach (≤1 tile) that
    *  the player could attempt to Disarm right now. Drives the DISARM button. */
   disarmableTrapTiles: Array<{ x: number; y: number }>;
+  /** Tiles carrying an un-studied `study_feature` trigger (regardless of
+   *  current distance). Drives the STUDY action's tile picker: the client gates
+   *  the action to within 1 tile and prompts the player to move closer
+   *  otherwise. Empty ⇒ STUDY falls back to the GM-chat prompt. */
+  studyPointTiles: Array<{ x: number; y: number }>;
+  /** Tiles carrying an un-fired `magic_feature` trigger (a rite point). Drives
+   *  the MAGIC action's tile picker — gated to ≤1 tile, move-closer otherwise.
+   *  Empty ⇒ MAGIC falls back to the GM-chat prompt. */
+  magicPointTiles: Array<{ x: number; y: number }>;
   /** Inventory ids of area-denial gear (caltrops, ball bearings) the player
    *  could Deploy right now. Drives the SET TRAP / DEPLOY button. */
   deployableGearIds: string[];

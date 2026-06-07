@@ -8,9 +8,9 @@
   ],
   "allyIds": [],
   "enemyIds": [],
-  "customIntroduction": "The ruins open under a bruised sky: two fallen watchtowers, a collapsed hall, and at the far north a sanctum still half-roofed. A thin line of smoke rises from inside it. A lone figure sits there, wrapped against the wind, and does not rise as you pick your way across the rubble. When you are close enough she says, without turning: \"You walk like the archives. Vael walked like that, when he was new.\"",
-  "customContext": "The Sundered Circuit is a ruined Imperial ward-complex — two toppled watchtowers flanking a collapsed central hall, and at the far northern end a sanctum that has kept most of its roof through luck or stubbornness. The sanctum smells of old smoke and damp stone. Eryn Cault has been here long enough to know which walls still block the wind.\n\nCault is a struck-off Cape, decades older than Reed, living rough for years. She is not spooky. She is tired, guilty, and not unkind — a portrait of what the capital's indifference produces when it runs long enough. She tests whether Reed actually listens before she trusts her, releasing what she knows across the conversation in layers: the surface facts first, the weight of Vael's fate only once she believes Reed will carry it correctly. Deeper truths sit behind Insight and Persuasion checks (DC 12–14); patience and good questions matter as much as the roll.\n\nWhile the conversation unfolds, the ruins themselves reward searching. The dedication stone near the sanctum threshold names the ward-binding rite Reed will need at the keystone — the most valuable find in the scene, a mechanical gift from the past to the finale. Vael's half-buried licence-seal in the sanctum confirms he was here and did not leave the way he arrived. A small cache tucked into a collapsed wall holds a healing draught for whoever takes the time to look.\n\nThe scene ends with Cault giving Reed the way down and a plain warning: *no one will certify this for you.* She will be acting on her own authority for the first time.\n\nTriggers:\n1. (T0 — aigm, encounter_started) On encounter start, the AI GM is cued to set atmosphere: the ruins, the smoke, the figure who does not turn.\n2. (T1 — set_npc_hidden, encounter_started) Eryn is hidden until Reed's passive Perception spots her on approach — the discovery is part of the exploration. Greeting and lore land inside the conversation once it auto-opens.\n3. (T2 — perception DC 10) In the rubble field east of the central hall, a small cache holds a healing draught. Pass: the cache is visible; fail: the stones look undisturbed.\n4. (T3 — perception DC 10 log) Entering the sanctum area, the player notices the thin smoke trail — confirming someone has been here recently and is not hiding.\n5. (T4 — perception/history DC 12) Near the sanctum threshold, a weather-worn dedication stone is half-buried in collapsed masonry. Pass: Reed reads the ward-binding rite she will need at the keystone, easing the finale. Fail: the inscription is too eroded to parse.\n6. (T5 — start_conversation, player_moved) Stepping into the small zone in front of Eryn's fire auto-opens the conversation. The conversation owns the lore release, the XP, and the completion flag.\n7. (T6 — investigation DC 13) Inside the sanctum, Vael's licence-seal lies half-buried under ash and rubble. Pass: the seal confirms Senior Cape Edran Vael was here; fail: the debris looks undifferentiated.\n8. (T7 — xp) Finding and reading the dedication stone awards XP — this is the carrot, and it should feel earned.\n9. (T8 — xp) Recovering Vael's licence-seal awards XP — it is evidence as much as loot.\n10. (T9 — aigm, on flag_set sage_way_down_given) When the conversation's terminal node sets the completion flag, the AI GM echoes the close with a single quiet beat — the canvas falling back, the iron pull cold under Reed's hand, the fire still burning.",
-  "objective": "Speak with Eryn Cault. Learn what happened to Senior Cape Vael and what the wardstones truly need. Search the ruins for what the past left behind. Receive the way down.",
+  "customIntroduction": "The ruins open under a bruised sky: two fallen watchtowers, a collapsed hall, and at the far north a sanctum still half-roofed. A thin line of smoke rises from inside it — wood-smoke, and fresh. Someone has been here, and not long ago. You pick your way in across the rubble.",
+  "customContext": "The Sundered Circuit is a ruined Imperial ward-complex — toppled watchtowers, a collapsed hall, and a half-roofed sanctum at the north end where Eryn Cault keeps a fire. Cault is a struck-off Cape, decades older than Reed, living rough for years: tired, guilty, not unkind — what the capital's indifference makes when it runs long enough. The CONVERSATION tree owns her lore and releases it in layers (deeper truths behind Insight/Persuasion DC 12–14) — let patience and good questions matter as much as the roll, and don't pre-empt what she has to say.\n\nThe ruins reward searching as the talk unfolds. On the approach into the sanctum a dedication stone, half-buried in masonry, names the ward-binding rite Reed will need at the keystone — the scene's most valuable find, a gift from the past to the finale. By the fire, Vael's licence-seal lies in the ash, confirming he was here and did not leave the way he came. A cache in a collapsed wall holds a healing draught for whoever looks.\n\nThe scene closes with Cault giving Reed the way down and a plain warning: no one will certify this for her. For the first time, she acts on her own authority.",
+  "objective": "Search the ruined ward-complex — someone still keeps a fire here. Learn what became of Senior Cape Vael and what the wardstones truly need, and find the way down.",
   "completionFlag": "sage_way_down_given",
   "startingZones": {
     "width": 30,
@@ -702,7 +702,24 @@
       "then": [
         {
           "type": "send_aigm_message",
-          "message": "SCENE OPEN — SOCIAL + EXPLORATION, no combat unless the player starts it (do not). Set the atmosphere: collapsed watchtowers, a bruised sky, thin smoke rising from the half-roofed sanctum at the north end. The figure by the fire is Eryn Cault — struck-off Cape, decades older than Reed, living rough. Tired, guilty, enigmatic, not unkind. She does not turn when Reed arrives. Eryn is hidden at start; Reed must cross the rubble and rely on her passive Perception to notice her — do NOT describe Eryn's location or appearance until the engine reveals her. Reward careful listening and searching. WHAT SHE KNOWS (release gradually, deeper truths behind Insight/Persuasion DC 12–14): the wardstones must be re-SUNG by a living Cape, not stamped on paper, and the capital stopped sending anyone who could; the cracks are age and neglect, not sabotage; Senior Cape Edran Vael went down into the catacombs alone last autumn to hold the keystone by hand and never came out; the keystone is failing and what the Circuit kept down is stirring. End the scene with Cault giving Reed the way down and a plain warning: no one will certify this for her — she will be acting on her own authority for the first time."
+          "message": "SCENE — SOCIAL + EXPLORATION, no combat (don't start any). The intro is on screen: the ruined ward-complex, the thread of smoke from the half-roofed sanctum at the north end. Don't re-describe it. Eryn Cault sits by the fire in that sanctum but is HIDDEN at start — do NOT describe her, her location, or her appearance until Reed picks across the rubble into sight and the engine reveals her. She is a struck-off Cape, decades older than Reed — tired, guilty, not unkind. The CONVERSATION tree owns what she knows and releases it in layers (deeper truths behind Insight/Persuasion DC 12–14) — do NOT dump her lore in narration; let exploration and the conversation carry it. Reward careful listening and searching. The scene ends with her giving Reed the way down and a plain warning: no one will certify this for her."
+        }
+      ],
+      "once": true
+    },
+    {
+      "id": "eryn_hidden_until_seen",
+      "when": {
+        "event": "encounter_started"
+      },
+      "if": [],
+      "then": [
+        {
+          "type": "set_npc_hidden",
+          "defId": "eryn_cault",
+          "hidden": true,
+          "hideDC": 5,
+          "revealedBy": "perception"
         }
       ],
       "once": true
@@ -775,7 +792,7 @@
         "event": "player_moved",
         "in_area": {
           "x": 0,
-          "y": 3,
+          "y": 4,
           "w": 8,
           "h": 5
         }
@@ -796,7 +813,7 @@
           "onPass": [
             {
               "type": "show_log",
-              "message": "Half-buried in collapsed masonry near the sanctum threshold: a dedication stone, its face still legible. The inscription names the ward-binding rite — the Canticle of Sealed Thresholds — and gives the first three lines of the opening phrase. This is what a Cape must sing at the keystone to reseal it. You copy it carefully. (The finale's difficulty is reduced.)"
+              "message": "Half-buried in collapsed masonry near the sanctum threshold: a dedication stone, its face still legible. The inscription names the ward-binding rite — the Rite of Sealed Thresholds — and gives the first three lines of its opening formula. This is what a Cape must trace and seal at the keystone to renew the binding by hand. You copy it carefully. (The finale's difficulty is reduced.)"
             }
           ],
           "onFail": []
@@ -810,7 +827,7 @@
         "event": "player_moved",
         "in_area": {
           "x": 0,
-          "y": 3,
+          "y": 4,
           "w": 8,
           "h": 5
         }
@@ -839,8 +856,8 @@
         "in_area": {
           "x": 0,
           "y": 0,
-          "w": 7,
-          "h": 4
+          "w": 5,
+          "h": 3
         }
       },
       "if": [
@@ -874,8 +891,8 @@
         "in_area": {
           "x": 0,
           "y": 0,
-          "w": 7,
-          "h": 4
+          "w": 5,
+          "h": 3
         }
       },
       "if": [
@@ -905,7 +922,7 @@
       "then": [
         {
           "type": "send_aigm_message",
-          "message": "Cault has just given Reed the way down — a trapdoor at the rear of the sanctum, kept clear out of habit. She will not watch Reed go. Echo the close of the conversation with a single quiet beat of narration: the canvas falling back, the iron pull cold under Reed's hand, the fire still burning. Do not add new dialogue from Cault — the conversation has said what it needs to."
+          "message": "Cault has given Reed the way down — a trapdoor at the sanctum's rear, kept clear out of habit. She won't watch her go. Close on one quiet beat: the canvas falling back, the iron pull cold under Reed's hand, the fire still burning. No new dialogue from Cault — the conversation has said its piece."
         }
       ],
       "once": true

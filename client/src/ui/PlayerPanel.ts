@@ -106,12 +106,16 @@ export interface PlayerPanelCallbacks {
   onHelp: () => void;
   /** Ready an attack (US-057): strike an enemy that closes into reach. */
   onReady: () => void;
-  /** Study / Utilize / Influence (US-057): prime the GM chat for adjudication. */
-  onActionPrompt: (kind: 'study' | 'utilize' | 'influence') => void;
+  /** Study / Utilize / Influence / Magic (US-057): prime the GM chat for adjudication. */
+  onActionPrompt: (kind: 'study' | 'utilize' | 'influence' | 'magic') => void;
+  /** Study an authored feature tile: enters a tile picker gated to ≤1 tile,
+   *  prompting the player to move closer if they pick it from too far. */
+  onStudyFeature: () => void;
+  /** The Magic action on an authored rite tile (the keystone): same range-gated
+   *  picker as Study; performs the tile's rite. */
+  onMagicFeature: () => void;
   /** Attune to a magic item (US-124). */
   onAttune: (itemId: string) => void;
-  /** Identify a found magic item (US-124). */
-  onIdentify: (itemId: string) => void;
   onDetach: () => void;
   onHide: () => void;
   onDeathSave: () => void;
@@ -166,7 +170,7 @@ export interface PlayerPanelCallbacks {
 const ACTION_ICONS: Record<string, string> = {
   ATTACK: '⚔', THROW: '➶', DODGE: '❖', DASH: '»', DISENGAGE: '↩', DETACH: '⤴',
   GRAPPLE: '✊', SHOVE: '🤚', 'SHOVE PRONE': '⤓', ATTUNE: '✶', IDENTIFY: '🔎', 'KNOCK OUT': '☄', HELP: '🤝', READY: '⏳', STUDY: '📖', UTILIZE: '🛠', INFLUENCE: '💬',
-  HIDE: '◐', SEARCH: '⚲', MOVE: '⤧', TALK: '❝', CAST: '✦',
+  HIDE: '◐', SEARCH: '⚲', MOVE: '⤧', TALK: '❝', CAST: '✦', MAGIC: '🪄',
   'SHORT REST': '☕', 'ROLL DEATH SAVE': '☠',
 };
 
@@ -567,12 +571,22 @@ export class PlayerPanel {
     this.pushTrapButtons(state, out);                       // DISARM TRAP / SET <gear>
     if (state.concentratingOn) out.push(this.makeReleaseBtn(state));
 
-    add(this.makeBtn('STUDY', '#1a2a3a', () => this.callbacks.onActionPrompt('study')), false);
+    add(this.makeBtn('STUDY', '#1a2a3a', () => {
+      // With an authored study point in the encounter, STUDY targets a tile
+      // (move-closer gating); otherwise it primes the GM chat for free-form study.
+      if (aa.studyPointTiles && aa.studyPointTiles.length > 0) this.callbacks.onStudyFeature();
+      else this.callbacks.onActionPrompt('study');
+    }), false);
     add(this.makeBtn('UTILIZE', '#1a2a3a', () => this.callbacks.onActionPrompt('utilize')), false);
     add(this.makeBtn('INFLUENCE', '#1a2a3a', () => this.callbacks.onActionPrompt('influence')), false);
+    add(this.makeBtn('MAGIC', '#1a2a3a', () => {
+      // With an authored rite point (the keystone) in reach, MAGIC targets a tile
+      // (move-closer gating); otherwise it primes the GM chat for free-form magic.
+      if (aa.magicPointTiles && aa.magicPointTiles.length > 0) this.callbacks.onMagicFeature();
+      else this.callbacks.onActionPrompt('magic');
+    }), false);
     add(this.makeBtn('SHORT REST', '#1a2a3a', this.callbacks.onShortRest), !aa.canShortRest);
     add(this.makeBtn('ATTUNE', '#2a2a5a', () => { if (aa.attunableItemIds[0]) this.callbacks.onAttune(aa.attunableItemIds[0]); }), aa.attunableItemIds.length === 0);
-    add(this.makeBtn('IDENTIFY', '#2a2a5a', () => { if (aa.unidentifiedItemIds[0]) this.callbacks.onIdentify(aa.unidentifiedItemIds[0]); }), aa.unidentifiedItemIds.length === 0);
     add(this.makeBtn('★ LEVEL UP', '#3a2a5a', this.callbacks.onLevelUp), !aa.canLevelUp);
     add(this.makeBtn('☾ LONG REST', '#1a2a4a', this.callbacks.onLongRest), !aa.canLongRest);
     return out;

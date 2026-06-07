@@ -1,11 +1,12 @@
 /**
  * PanelSetupOverlay — configure the Player Panel. Renders as a panel filling the
  * screen to the RIGHT of the (resizable) Player Panel, so the panel stays
- * visible and updates live as settings change. Two sections:
+ * visible and updates live as settings change. Three sections:
  *
- *   1. **Actions** — one card per Action Button (`ACTION_BUTTON_CATALOG`) with a
- *      short description and a "Visible in panel" toggle.
- *   2. **Configuration** — panel-wide settings cards. Currently one: **Compact
+ *   1. **Basic Actions** — the SRD core actions (`BASIC_ACTION_IDS`), one card
+ *      each with a "Visible in panel" toggle.
+ *   2. **Other Actions** — the remaining game-/class-specific Action Buttons.
+ *   3. **Configuration** — panel-wide settings cards. Currently one: **Compact
  *      View** (icon-only square buttons).
  *
  * Every change persists immediately (localStorage) and fires `onChange` so the
@@ -13,7 +14,7 @@
  * Panel's right edge via a ResizeObserver.
  */
 import {
-  ACTION_BUTTON_CATALOG, readHiddenActions, writeHiddenActions, setActionHidden,
+  ACTION_BUTTON_CATALOG, BASIC_ACTION_IDS, readHiddenActions, writeHiddenActions, setActionHidden,
   readCompactView, writeCompactView,
 } from "./actionPanelPrefs";
 
@@ -21,7 +22,8 @@ const ACCENT = "#7aadcc";
 
 export class PanelSetupOverlay {
   private readonly root: HTMLDivElement;
-  private readonly actionsGrid: HTMLDivElement;
+  private readonly basicActionsGrid: HTMLDivElement;
+  private readonly otherActionsGrid: HTMLDivElement;
   private readonly resizeObserver: ResizeObserver;
   private readonly onKey: (e: KeyboardEvent) => void;
 
@@ -43,13 +45,18 @@ export class PanelSetupOverlay {
     const scroll = document.createElement("div");
     scroll.style.cssText = "flex: 1; overflow-y: auto; padding-right: 6px; margin-top: 10px;";
 
-    // ── Section 1: Actions ──────────────────────────────────────────────
-    scroll.appendChild(this.sectionHeader("Actions", "Choose which action buttons appear. Buttons stay greyed when you can't use them right now; hiding one removes it entirely. (Roll Death Save can't be hidden.)"));
-    this.actionsGrid = this.grid();
-    scroll.appendChild(this.actionsGrid);
+    // ── Section 1: Basic Actions (the SRD core action list) ─────────────
+    scroll.appendChild(this.sectionHeader("Basic Actions", "The SRD core actions every character can take (Attack, Dash, Magic, Study, …). Choose which appear in the panel; hidden ones are removed entirely. Buttons stay greyed when you can't use them right now. (Roll Death Save can't be hidden.)"));
+    this.basicActionsGrid = this.grid();
+    scroll.appendChild(this.basicActionsGrid);
+
+    // ── Section 2: Other Actions (game- and class-specific) ─────────────
+    scroll.appendChild(this.sectionHeader("Other Actions", "Game- and class-specific actions beyond the SRD core list — special attacks, item interactions, rests, movement, summons, and your class features."));
+    this.otherActionsGrid = this.grid();
+    scroll.appendChild(this.otherActionsGrid);
     this.rebuildActionCards();
 
-    // ── Section 2: Configuration ────────────────────────────────────────
+    // ── Section 3: Configuration ────────────────────────────────────────
     scroll.appendChild(this.sectionHeader("Configuration", "Panel-wide display settings."));
     const configGrid = this.grid();
     configGrid.appendChild(this.toggleCard(
@@ -109,15 +116,21 @@ export class PanelSetupOverlay {
   }
 
   private rebuildActionCards(): void {
-    this.actionsGrid.replaceChildren();
+    this.basicActionsGrid.replaceChildren();
+    this.otherActionsGrid.replaceChildren();
     const hidden = readHiddenActions();
-    for (const e of ACTION_BUTTON_CATALOG) {
-      this.actionsGrid.appendChild(this.toggleCard(
-        e.glyph, e.label, e.description, !hidden.has(e.id),
-        (on) => { setActionHidden(e.id, !on); this.onChange(); },
-        { on: "Visible in panel", off: "Hidden" },
-      ));
-    }
+    // Basic actions are sorted alphabetically by label; other actions keep
+    // their authored panel order.
+    const basic = ACTION_BUTTON_CATALOG.filter((e) => BASIC_ACTION_IDS.has(e.id))
+      .slice().sort((a, b) => a.label.localeCompare(b.label));
+    const other = ACTION_BUTTON_CATALOG.filter((e) => !BASIC_ACTION_IDS.has(e.id));
+    const card = (e: typeof ACTION_BUTTON_CATALOG[number]): HTMLElement => this.toggleCard(
+      e.glyph, e.label, e.description, !hidden.has(e.id),
+      (on) => { setActionHidden(e.id, !on); this.onChange(); },
+      { on: "Visible in panel", off: "Hidden" },
+    );
+    for (const e of basic) this.basicActionsGrid.appendChild(card(e));
+    for (const e of other) this.otherActionsGrid.appendChild(card(e));
   }
 
   /** A card with a glyph + name, a description, and a checkbox that reflects/sets

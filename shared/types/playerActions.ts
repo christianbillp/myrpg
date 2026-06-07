@@ -49,6 +49,16 @@ export type PlayerAction =
    *  and within reach). Rolls Dexterity (Sleight of Hand) vs the trap's
    *  `disarmDC`; Thieves' Tools grant Advantage. Failure by 5+ springs it. */
   | { type: 'disarmTrap'; tileX: number; tileY: number }
+  /** Study a `study_feature` tile from within reach (≤1 tile). Publishes a
+   *  `study_feature` event so the tile's authored trigger resolves its ability
+   *  check. Costs the Action in combat. Out-of-range is rejected (the client
+   *  prompts the player to move closer first). */
+  | { type: 'study'; tileX: number; tileY: number }
+  /** The SRD Magic action against a `magic_feature` tile within reach (≤1).
+   *  Publishes a `magic_feature` event so the tile's authored trigger resolves
+   *  the rite. Costs the Action in combat. Out-of-range is rejected (the client
+   *  prompts the player to move closer first). */
+  | { type: 'magic'; tileX: number; tileY: number }
   /** Deploy a piece of area-denial gear (caltrops, ball bearings) onto `tile`,
    *  creating an `ActiveZone`. Consumes one of the item from inventory. */
   | { type: 'deployGear'; itemId: string; tileX: number; tileY: number }

@@ -7,6 +7,7 @@ import { chebyshev } from './EnemyAI.js';
 import { isIncapacitated, isVisible, clearHide } from './ConditionSystem.js';
 import { d, d20, mod, applyHalflingLuck } from './Dice.js';
 import { runPerceptionSweep, runPassivePerceptionSweep } from './Vision.js';
+import { itemDisplayName } from '../../../shared/types.js';
 import { canShortRest as guardCanShortRest, canSearch as guardCanSearch } from './ActionGuards.js';
 import { tickZoneEnterSaves } from './SpellSystem.js';
 import { checkTrapTriggers, runPassiveTrapDetection, detectAdjacentTraps } from './TrapSystem.js';
@@ -241,6 +242,12 @@ export function doSearch(ctx: GameContext): void {
       left: `Search ${npc.revealedName ?? npc.name} (${roll} vs DC ${cs.dc}) — ${succeeded ? cs.successText : cs.failureText}`,
       style: succeeded ? 'hit' : 'miss',
     });
+    if (succeeded && cs.rewardItemId) {
+      s.player.inventoryIds.push(cs.rewardItemId);
+      const def = ctx.defs.equipment.find((i) => i.id === cs.rewardItemId);
+      const name = def ? itemDisplayName(def, s.player.identifiedItemIds) : cs.rewardItemId;
+      corpseLogs.push({ left: `You take ${name}.`, style: 'status' });
+    }
     npc.corpseSearch = undefined;
     npc.corpseSearched = true;
   }

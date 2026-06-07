@@ -2560,14 +2560,18 @@ server.post<{
 
   // Seed world-scope state into the new session via the same
   // `adventureSeed.seedWorldFlags` path the chapter-advance flow uses.
-  // No actual adventure context is set — this is a per-session cycle.
+  // The chapter id/title reflect the NEW encounter, but the chapter POSITION
+  // (index / total) is carried from the old session so a transition (mission
+  // cycle, or a dev encounter reload) doesn't collapse a multi-chapter
+  // adventure to "1 of 1" — which the persisted context would otherwise feed
+  // back into the wrap-up button as a premature "FINISH ADVENTURE".
   const seed: NonNullable<CreateSessionRequest['adventureSeed']> = {
     adventureId: oldState.adventureContext?.adventureId ?? '',
     adventureTitle: oldState.adventureContext?.adventureTitle ?? '',
     chapterId: encDef.id,
     chapterTitle: encDef.encounterTitle ?? encDef.id,
-    chapterIndex: 0,
-    totalChapters: 1,
+    chapterIndex: oldState.adventureContext?.chapterIndex ?? 0,
+    totalChapters: oldState.adventureContext?.totalChapters ?? 1,
     priorChapterSummaries: oldState.adventureContext?.priorChapterSummaries ?? [],
     seedWorldFlags: { ...oldState.worldFlags },
     seedQuests: carryForwardQuests(oldState).quests,

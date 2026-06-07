@@ -254,7 +254,16 @@ export function applyEquipment(
   const shield = slots.shieldId ? (byId[slots.shieldId] as ShieldDef | undefined) ?? null : null;
   const weapon = slots.weaponId ? (byId[slots.weaponId] as WeaponDef | undefined) ?? null : null;
 
-  playerDef.ac = computeAC(playerDef, armor, shield, mageArmor, shieldSpellActive, attunedItemIds, buffAcBonus);
+  // Cloak/Ring-of-Protection: each ATTUNED item with a `protectionBonus` adds a
+  // flat +N to AC and to every saving throw. AC rides the existing flat-bonus
+  // arg; the save bonus is stashed on the player for the save-roll site.
+  const protectionBonus = attunedItemIds.reduce((sum, id) => {
+    const it = byId[id] as { protectionBonus?: number } | undefined;
+    return sum + (it?.protectionBonus ?? 0);
+  }, 0);
+  playerDef.saveBonus = protectionBonus;
+
+  playerDef.ac = computeAC(playerDef, armor, shield, mageArmor, shieldSpellActive, attunedItemIds, buffAcBonus + protectionBonus);
   // SRD Versatile (US-111): two-handed grip when a versatile weapon is held
   // with no shield equipped → larger damage die.
   const twoHandedGrip = !!weapon?.versatile && !shield;

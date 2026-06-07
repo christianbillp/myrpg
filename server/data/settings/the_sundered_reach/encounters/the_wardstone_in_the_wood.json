@@ -5,15 +5,13 @@
   "mapId": "the_wardstone_in_the_wood",
   "npcIds": [
     "goblin_minion",
-    "goblin_minion",
-    "goblin_minion",
-    "bandit"
+    "goblin_minion"
   ],
   "allyIds": [],
   "enemyIds": [],
-  "customIntroduction": "The forest trail is older than the road that replaced it, and the trees lean close. Half a mile in you find the first wardstone exactly where Bram said it would be: a waist-high pillar of grey rock, carved with a binding-glyph you have only ever seen drawn in a book — and cracked clean through, the two halves leaning apart like a broken tooth. The air around it is cold and wrong. Something has been here recently; the leaf-litter is scuffed, and you are not alone among the trees.",
-  "customContext": "A woodland trail pushes through dense canopy, the old bark pressing in on both sides. The path opens into a ragged clearing — perhaps thirty feet across — where a waist-high wardstone pillar stands at its centre, split clean through along a diagonal fault. The binding-glyph carved into its face is ancient Cape-work, the kind that belonged to the Old Empire's circuit of perimeter stones; it glows with nothing now. The air in the clearing is a few degrees colder than it should be, and the leaf-litter around the base has been thoroughly scuffed by something that came here more than once.\n\nThe tree-line is thick on three sides. On the eastern edge the trail continues toward a gorge and a bridge. The player enters from the western trail.\n\nExploration phase comes first. Reed can approach and examine the stone freely before anything moves — the scavengers are hunkered in the scrub to the north-east, not yet aggressive. Two secrets reward careful searching: reading the glyph by Arcana or History (DC 12) tells her the crack is structural decay, not clean sabotage — the ward rotted from within; a Perception or Investigation check (DC 10) near the scuffed leaf-litter north of the stone picks up a trail of fresh boot- and claw-prints leading into the scrub, and at the stone's base a cached healing vial wrapped in oilcloth waits (Perception DC 12) for whoever left it — probably a Cape who never came back.\n\nWhen Reed follows the track-line or presses into the north-east scrub, she disturbs the nest. The skirmishers — three goblin scavengers drawn by the failing ward's silence, and one desperate human scrounger who fell in with them — break from cover and the fight begins. They are opportunists, not soldiers; they came for salvage, not slaughter. Keep the clearing's edge in mind: a player who picks her ground before disturbing the nest earns the advantage the scene was designed to reward.\n\nOn victory, the wardstone cannot be mended here — the binding rite needs the keystone, and Reed does not have it. She can note the crack, salvage what the scavengers carried, and follow the only dry road east toward the gorge bridge.\n\nTriggers:\n1. On encounter start (T0 announcement), the scene opens with the read-aloud: the trail, the clearing, the cracked stone, the cold air — Reed arrives.\n2. A DC 12 Arcana/History Perception check (T1) fires when Reed enters the stone's immediate tile — pass text confirms structural decay, not sabotage; fail text gives her only an uneasy sense the glyph is dead.\n3. A DC 10 Perception/Investigation check (T2) fires when Reed steps into the disturbed leaf-litter north of the stone — pass text reveals fresh tracks leading into the north-east scrub; fail text notes only that the ground is scuffed.\n4. A DC 12 Perception check (T3) fires at the stone's base — pass text uncovers a cached oilcloth-wrapped vial; fail text finds only cold mud.\n5. When Reed enters the north-east scrub (T4 combat), the nest is disturbed: all four skirmishers flip hostile and combat begins. The AI GM narrates the moment the undergrowth erupts.\n6. On encounter completion (T5 xp), Reed earns XP for both the exploration and the fight — enough to push her to level 2.",
-  "objective": "Examine the cracked wardstone, learn what you can, and deal with whatever the failing ward has drawn in from the moor. You cannot mend the stone here — that rite needs the keystone. Note it, survive, and follow the trail east to the gorge bridge.",
+  "customIntroduction": "The forest trail is older than the road that replaced it, and the trees lean close. Half a mile in, the first wardstone stands where Bram said it would: a waist-high pillar of grey rock, its binding-glyph cracked clean through, the two halves leaning apart like a broken tooth. You've only ever seen that glyph drawn in a book. The air around it is cold and wrong — and the scuffed leaf-litter says you are not the first here, nor the only one now.",
+  "customContext": "WOODLAND CLEARING — EXPLORATION then COMBAT. Reed enters from the western trail; the cracked wardstone stands at the clearing's centre, and the trail east continues toward the gorge bridge. Exploration comes FIRST — she examines the stone freely before anything moves. Three secrets reward searching (the engine runs the checks): Arcana/History DC 12 on the glyph reads the crack as structural decay, not sabotage — the ward rotted from within; Perception DC 10 on the scuffed litter finds fresh boot- and claw-tracks into the NE scrub; Perception DC 12 at the stone's base uncovers a healing vial cached by a Cape who never came back. Following the tracks into the NE scrub disturbs the nest: two goblin scavengers — opportunists after salvage, not soldiers. This is Reed's first real fight: keep it survivable but real, and reward a player who picks her ground before springing it. On victory the stone can't be mended here (the rite needs the keystone) — note it, salvage, and take the dry road east to the bridge.",
+  "objective": "Examine the cracked wardstone, deal with what it drew from the moor, then follow the trail east.",
   "completionFlag": "wardstone_one_cleared",
   "startingZones": {
     "width": 30,
@@ -685,8 +683,8 @@
   "placements": [
     {
       "role": "player",
-      "x": 4,
-      "y": 19
+      "x": 14,
+      "y": 21
     },
     {
       "role": "neutral",
@@ -699,37 +697,9 @@
       "index": 1,
       "x": 20,
       "y": 10
-    },
-    {
-      "role": "neutral",
-      "index": 2,
-      "x": 22,
-      "y": 9
-    },
-    {
-      "role": "neutral",
-      "index": 3,
-      "x": 19,
-      "y": 11
     }
   ],
   "triggers": [
-    {
-      "id": "scene_open",
-      "when": {
-        "event": "encounter_started"
-      },
-      "if": [],
-      "then": [
-        {
-          "type": "show_announcement",
-          "text": "The Wardstone in the Wood",
-          "durationMs": 3000,
-          "mode": "focused"
-        }
-      ],
-      "once": true
-    },
     {
       "id": "read_aloud_start",
       "when": {
@@ -739,7 +709,7 @@
       "then": [
         {
           "type": "send_aigm_message",
-          "message": "EXPLORATION PHASE. Reed arrives on the old forest trail. Describe the canopy closing in, the clearing opening, the cracked wardstone at its centre — the glyph dead, the air cold, the leaf-litter scuffed. Two or three sentences of atmosphere. Do NOT start combat yet. The scavengers are hunkered in the north-east scrub and have not yet shown themselves — do NOT describe them or their positions until the combat trigger fires. Invite her to look around."
+          "message": "The intro is on screen — the old trail, the clearing, the cracked wardstone, the wrong cold. EXPLORATION PHASE: don't re-describe it; just open the moment and invite Reed to look around. No combat yet. The scavengers are hidden in the NE scrub — do NOT mention them or their positions until the combat trigger fires."
         }
       ],
       "once": true
@@ -756,12 +726,6 @@
           "defId": "goblin_minion",
           "hidden": true,
           "revealedBy": "trigger"
-        },
-        {
-          "type": "set_npc_hidden",
-          "defId": "bandit",
-          "hidden": true,
-          "revealedBy": "trigger"
         }
       ],
       "once": true
@@ -769,22 +733,13 @@
     {
       "id": "wardstone_arcana",
       "when": {
-        "event": "player_moved",
-        "in_area": {
-          "x": 12,
-          "y": 14,
-          "w": 3,
-          "h": 3
+        "event": "study_feature",
+        "tile": {
+          "x": 21,
+          "y": 12
         }
       },
-      "if": [
-        {
-          "type": "phase",
-          "in": [
-            "exploring"
-          ]
-        }
-      ],
+      "if": [],
       "then": [
         {
           "type": "player_ability_check",
@@ -796,20 +751,25 @@
               "message": "You press your fingers to the fault-line and read the glyph carefully. This is not a clean break — no tool did this. The ward decayed from within, the binding-matrix unravelling over years, maybe decades. Whatever the Old Empire set here to keep the moor quiet, it simply… stopped. The crack is a symptom, not a wound. Whoever is responsible, it isn't sabotage."
             }
           ],
-          "onFail": []
+          "onFail": [
+            {
+              "type": "show_log",
+              "message": "The glyph's logic slips away from you — too worn, or too far beyond your training to read on the first pass. You could study it again."
+            }
+          ]
         }
       ],
-      "once": true
+      "once": false
     },
     {
       "id": "wardstone_tracks",
       "when": {
         "event": "player_moved",
         "in_area": {
-          "x": 12,
-          "y": 11,
-          "w": 5,
-          "h": 3
+          "x": 17,
+          "y": 12,
+          "w": 3,
+          "h": 2
         }
       },
       "if": [
@@ -828,7 +788,7 @@
           "onPass": [
             {
               "type": "show_log",
-              "message": "You crouch over the scuffed litter north of the stone. Boot-prints, and something smaller — clawed, three-toed, pressed deep as if carrying weight. Recent: the mud hasn't dried. Two sets, maybe three, all leading the same direction: into the scrub to the north-east. Whatever made these came here more than once."
+              "message": "You crouch over the scuffed litter near the stone. Small clawed prints, three-toed, pressed deep as if carrying weight. Recent: the mud hasn't dried. Two sets, both leading the same direction: into the scrub to the north-east. Whatever made these came here more than once."
             }
           ],
           "onFail": []
@@ -841,9 +801,9 @@
       "when": {
         "event": "player_moved",
         "in_area": {
-          "x": 13,
-          "y": 15,
-          "w": 3,
+          "x": 22,
+          "y": 12,
+          "w": 2,
           "h": 2
         }
       },
@@ -876,10 +836,10 @@
       "when": {
         "event": "player_moved",
         "in_area": {
-          "x": 17,
-          "y": 7,
-          "w": 7,
-          "h": 5
+          "x": 20,
+          "y": 11,
+          "w": 3,
+          "h": 3
         }
       },
       "if": [
@@ -903,22 +863,17 @@
           "hidden": false
         },
         {
-          "type": "set_npc_hidden",
-          "defId": "bandit",
-          "hidden": false
-        },
-        {
           "type": "set_disposition_by_def_id",
           "defId": "goblin_minion",
           "disposition": "enemy"
         },
         {
-          "type": "set_disposition_by_def_id",
-          "defId": "bandit",
-          "disposition": "enemy"
+          "type": "trigger_combat"
         },
         {
-          "type": "trigger_combat"
+          "type": "npc_speaks",
+          "entity": "enemy_A",
+          "text": "A Cape! Pockets full o' shinies — stick it, stick it!"
         }
       ],
       "once": true
@@ -928,10 +883,10 @@
       "when": {
         "event": "player_moved",
         "in_area": {
-          "x": 17,
-          "y": 7,
-          "w": 7,
-          "h": 5
+          "x": 20,
+          "y": 11,
+          "w": 3,
+          "h": 3
         }
       },
       "if": [
@@ -945,7 +900,7 @@
       "then": [
         {
           "type": "send_aigm_message",
-          "message": "COMBAT BEGINS. Three goblin scavengers and one desperate human scrounger (a bandit who fell in with them). Reed's first real fight. Narrate her nerves — the sudden noise, the tightening chest, the moment her hand finds her wand before her mind catches up. Keep the tone survivable but real. Let small successes feel large. If she casts, make it count in the narration."
+          "message": "COMBAT BEGINS — two goblin scavengers break shrieking from the scrub, yelping for the shinies on the Cape's belt. Reed's first real fight: narrate the nerves, the hand finding the wand a beat before the mind catches up. Survivable but real; let small successes feel large, and make any spell land in the telling."
         }
       ],
       "once": true
@@ -959,7 +914,7 @@
       "then": [
         {
           "type": "send_aigm_message",
-          "message": "ENCOUNTER COMPLETE. Reed has survived her first fight. Narrate the aftermath: the quiet returning to the clearing, the cold still hanging around the cracked stone. She cannot mend it — the rite needs the keystone. She can salvage whatever the scavengers carried. The only dry road forward runs east, toward the gorge bridge. Award the sense that something has changed in her — she has cast in anger now, and the door she knocked on did not answer. This time."
+          "message": "ENCOUNTER COMPLETE — Reed's first fight is over. Quiet returns to the clearing; the cold still hangs around the cracked stone she can't mend here. This is only the first stone on the Circuit, and the line of them runs east — over the Blackgorge gorge to the old ward-complex at the Circuit's heart, where the next stone stands and where Vael's trail leads. Make that the reason she goes on, not just the road: she salvages what the scavengers carried and takes the dry road east. She has cast in anger now, and the door she knocked on did not answer. Let that change sit on her."
         }
       ],
       "once": true

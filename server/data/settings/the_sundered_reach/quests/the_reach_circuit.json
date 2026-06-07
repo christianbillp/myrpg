@@ -5,20 +5,26 @@
   "scope": "adventure",
   "steps": [
     {
-      "id": "posting",
+      "id": "posting_talk",
       "text": "Speak with Bram Holdfast and the villager, and leave with a concrete lead.",
-      "completeWhen": [{ "type": "flag_equals", "name": "waystation_leads_gathered", "value": true }],
+      "completeWhen": [{ "type": "flag_equals", "name": "wardstone_lead_confirmed", "value": true }],
       "xpReward": 25
     },
     {
+      "id": "posting_leave",
+      "text": "Leave the waystation and set out for the north wood.",
+      "completeWhen": [{ "type": "flag_equals", "name": "waystation_leads_gathered", "value": true }],
+      "xpReward": 0
+    },
+    {
       "id": "wardstone",
-      "text": "Examine the cracked wardstone, deal with what the failing ward drew in, and follow the trail east.",
+      "text": "Examine the cracked wardstone, deal with what it drew from the moor, then follow the trail east.",
       "completeWhen": [{ "type": "flag_equals", "name": "wardstone_one_cleared", "value": true }],
       "xpReward": 300
     },
     {
       "id": "bridge",
-      "text": "Cross Blackgorge Bridge — pay, parley, or fight — and reach the ruins beyond.",
+      "text": "Cross Blackgorge Bridge — pay, parley, or fight — and reach the ward-complex beyond.",
       "completeWhen": [{ "type": "flag_equals", "name": "blackgorge_bridge_crossed", "value": true }],
       "xpReward": 50
     },
@@ -38,13 +44,13 @@
     },
     {
       "id": "way_down",
-      "text": "Find Eryn Cault, learn Vael's fate, and receive the way down.",
+      "text": "Search the ruins, learn Vael's fate, and find the way down.",
       "completeWhen": [{ "type": "flag_equals", "name": "sage_way_down_given", "value": true }],
       "xpReward": 0
     },
     {
       "id": "broken_ward",
-      "text": "Reach the keystone chamber, put down the risen dead, and perform the binding rite.",
+      "text": "Reach the keystone and renew its failing binding — trace the rite and set your own seal.",
       "completeWhen": [{ "type": "flag_equals", "name": "keystone_ward_sealed", "value": true }],
       "xpReward": 600
     }

@@ -167,6 +167,14 @@ function whenMatches(when: WhenClause, event: EngineEvent): boolean {
       if (when.in_zone && !when.in_zone.cells.includes(`${e.x},${e.y}`)) return false;
       return true;
     }
+    case 'study_feature': {
+      const e = event as Extract<EngineEvent, { type: 'study_feature' }>;
+      return when.tile.x === e.x && when.tile.y === e.y;
+    }
+    case 'magic_feature': {
+      const e = event as Extract<EngineEvent, { type: 'magic_feature' }>;
+      return when.tile.x === e.x && when.tile.y === e.y;
+    }
     case 'npc_killed': {
       const e = event as Extract<EngineEvent, { type: 'npc_killed' }>;
       return when.defId === undefined || when.defId === e.defId;
@@ -429,6 +437,10 @@ const TRIGGER_ACTIONS: TriggerRegistry = {
         npc.inventoryIds = [];
       }
       if (a.corpseSearch) npc.corpseSearch = { ...a.corpseSearch };
+      // Withhold the corpse from the client until the player has line of sight
+      // to it (the `hidden` condition is living-only and stripped above, so
+      // corpses need their own LOS gate). The passive sweep flips `seen`.
+      if (a.hiddenUntilSeen) { npc.hiddenUntilSeen = true; npc.seen = false; }
     }
   },
   set_npc_hidden: (ctx, a) => {

@@ -143,7 +143,15 @@ export interface NpcState {
    *  found". Attached at spawn time via the `set_npc_dead` trigger action,
    *  so any encounter can author corpse-bound clues / loot prompts without
    *  engine code changes. */
-  corpseSearch?: { dc: number; successText: string; failureText: string };
+  corpseSearch?: { dc: number; successText: string; failureText: string; rewardItemId?: string };
+  /** When true, this NPC (typically a corpse — the `hidden` condition is
+   *  living-only) is withheld from the client until the player has line of
+   *  sight to it. The passive-perception sweep flips `seen` true the first
+   *  time `canSee` reaches it; once seen it stays rendered. */
+  hiddenUntilSeen?: boolean;
+  /** Set true once the player has had line of sight to a `hiddenUntilSeen`
+   *  NPC. Sticky. The client renders the NPC only when this is true. */
+  seen?: boolean;
   /** Set true once the deterministic SEARCH action has resolved this
    *  corpse (regardless of pass/fail). The AIGM reads this flag in the
    *  CURRENT STATE corpses section: when true, the GM must NOT roll a

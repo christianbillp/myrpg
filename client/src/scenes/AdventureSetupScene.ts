@@ -155,6 +155,7 @@ export class AdventureSetupScene extends Phaser.Scene {
           gameClient.deleteSave(def.id).catch(() => {});
           gameClient.deleteAdventureSave(def.id).catch(() => {});
           this.characterDetail?.setSave(null);
+          this.characterDetail?.setHasAdventureProgress(false);
           this.refreshAdventureCards();
           this.refreshBeginButton();
         },
@@ -166,6 +167,7 @@ export class AdventureSetupScene extends Phaser.Scene {
         onResetAdventure: (def) => {
           this.adventureSaves.delete(def.id);
           gameClient.deleteAdventureSave(def.id).catch(() => {});
+          this.characterDetail?.setHasAdventureProgress(false);
           this.refreshAdventureCards();
           this.refreshBeginButton();
         },
@@ -207,6 +209,7 @@ export class AdventureSetupScene extends Phaser.Scene {
         if (!this.scene.isActive()) return;
         if (save) {
           this.adventureSaves.set(char.id, save);
+          if (this.selectedPlayer?.id === char.id) this.characterDetail?.setHasAdventureProgress(true);
           this.refreshAdventureCards();
         }
       }).catch(() => {});
@@ -329,6 +332,7 @@ export class AdventureSetupScene extends Phaser.Scene {
     this.deleteCharBtn?.setVisible(true);
     this.characterDetail?.setCharacter(def);
     this.characterDetail?.setSave(this.charSaves.get(def.id) ?? null);
+    this.characterDetail?.setHasAdventureProgress(this.adventureSaves.has(def.id));
     this.refreshAdventureCards();
     this.refreshBeginButton();
   }

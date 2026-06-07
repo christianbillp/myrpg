@@ -178,7 +178,7 @@ describe('QuestSystem', () => {
     expect(state.objective).toBe(reach.steps[0].text);   // first spine step drives the objective
 
     for (const f of [
-      'waystation_leads_gathered', 'wardstone_one_cleared', 'blackgorge_bridge_crossed',
+      'wardstone_lead_confirmed', 'waystation_leads_gathered', 'wardstone_one_cleared', 'blackgorge_bridge_crossed',
       'dedication_stone_examined', 'vael_seal_examined', 'sage_way_down_given', 'keystone_ward_sealed',
     ]) setFlag(ctx, state, f);
 

@@ -480,10 +480,11 @@ export class HUD {
    *  with the attitude modifier for Influence, US-092). The button primes the GM
    *  chat with a leading template so the player fills in the specifics and
    *  sends; the GM then adjudicates. */
-  primeActionPrompt(kind: 'study' | 'utilize' | 'influence'): void {
+  primeActionPrompt(kind: 'study' | 'utilize' | 'influence' | 'magic'): void {
     this.gmMode = 'gm';
     const prefix = kind === 'study' ? 'I study '
       : kind === 'utilize' ? 'I use the '
+      : kind === 'magic' ? 'I use magic to '
       : this.selectedNpcName ? `I try to convince ${this.selectedNpcName} to ` : 'I try to convince ';
     this.gmInputEl.value = prefix;
     this.gmInputEl.focus();

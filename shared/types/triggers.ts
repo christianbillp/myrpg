@@ -25,6 +25,16 @@ export type WhenClause =
        *  is the zone's `"x,y"` cell list, resolved from the map at authoring
        *  time so the runtime is self-contained; `name` is for display. */
       in_zone?: { name: string; cells: string[] } }
+  /** Fires when the player uses the Study action on this feature tile from
+   *  within reach (engine-gated, 1-tile). The deliberate-examination
+   *  counterpart to a `player_moved` auto-trigger. The tile also surfaces to
+   *  the client as a studyable target so STUDY enters a tile picker. */
+  | { event: 'study_feature'; tile: { x: number; y: number } }
+  /** Fires when the player uses the Magic action on this feature tile from
+   *  within reach (≤1) — channelling magic into it (e.g. the binding rite at the
+   *  keystone). Surfaces the tile to the client as a magic target so the MAGIC
+   *  button enters a tile picker. */
+  | { event: 'magic_feature'; tile: { x: number; y: number } }
   | { event: 'npc_killed'; defId?: string }
   | { event: 'item_picked_up'; defId?: string }
   | { event: 'turn_started'; combatantId?: 'player' | string }
@@ -177,7 +187,7 @@ export type TriggerAction =
    * `false` for found bodies whose gear should NOT scatter (Vael's
    * licence-seal stays on his person, surfaced via `corpseSearch`).
    */
-  | { type: 'set_npc_dead'; defId: string; corpseSearch?: { dc: number; successText: string; failureText: string }; dropInventory?: boolean }
+  | { type: 'set_npc_dead'; defId: string; corpseSearch?: { dc: number; successText: string; failureText: string; rewardItemId?: string }; dropInventory?: boolean; hiddenUntilSeen?: boolean }
   /**
    * Promote (or demote) every living NPC with matching `defId` to / from
    * COMPANION status — the NPC sim runner ticks them once per off-camera

@@ -31,7 +31,7 @@ import {
 } from "../constants";
 import { PlayerDef } from "../../../shared/types";
 import { MonsterDef, NPCDef } from "../../../shared/types";
-import type { FactionDef } from "../../../shared/types";
+import type { FactionDef, EncounterDef, CreateSessionRequest } from "../../../shared/types";
 import { ItemDef } from "../../../shared/types";
 import { gameClient } from "../net/GameClient";
 import { WorldPause } from "../net/WorldPause";
@@ -646,7 +646,7 @@ export class GameScene extends Phaser.Scene {
     // sweep on movement) are invisible to the player. They still exist in
     // `state.npcs` for combat/AI; the client just doesn't render them or
     // surface them in the Target Panel until the engine clears the flag.
-    const visibleNpcs = state.npcs.filter(n => !n.conditions.includes('hidden'));
+    const visibleNpcs = state.npcs.filter(n => !n.conditions.includes('hidden') && !(n.hiddenUntilSeen && !n.seen));
     const allIds = new Set(visibleNpcs.map(n => n.id));
     for (const [id, token] of this.npcTokens) {
       if (!allIds.has(id)) {
@@ -694,6 +694,7 @@ export class GameScene extends Phaser.Scene {
         this.itemTokens.delete(id);
       }
     }
+    const detectedMagic = state.player.magicDetectedItemIds ?? [];
     for (const iState of state.mapItems) {
       if (!this.itemTokens.has(iState.id)) {
         const def = this.findItemDef(iState.defId);
@@ -701,6 +702,8 @@ export class GameScene extends Phaser.Scene {
         this.itemTokens.set(iState.id, token);
         this.gridView.container.add(token.gameObject);
       }
+      // Detect Magic glow — on once the player has sensed this item as magical.
+      this.itemTokens.get(iState.id)?.setMagicAura(detectedMagic.includes(iState.defId));
     }
   }
 
@@ -1043,11 +1046,12 @@ export class GameScene extends Phaser.Scene {
       onGrapple:        () => gameClient.sendAction({ type: "grapple", targetId: this.gameState?.selectedTargetId ?? undefined }),
       onShove:          (effect) => gameClient.sendAction({ type: "shove", targetId: this.gameState?.selectedTargetId ?? undefined, effect }),
       onAttune:         (itemId) => gameClient.sendAction({ type: "attune", itemId }),
-      onIdentify:       (itemId) => gameClient.sendAction({ type: "identify", itemId }),
       onToggleNonLethal: (on) => gameClient.sendAction({ type: "setNonLethal", on }),
       onHelp:           () => gameClient.sendAction({ type: "help", targetId: this.gameState?.selectedTargetId ?? undefined }),
       onReady:          () => gameClient.sendAction({ type: "ready" }),
       onActionPrompt:   (kind) => this.hud.primeActionPrompt(kind),
+      onStudyFeature:   () => this.beginStudyFeature(),
+      onMagicFeature:   () => this.beginMagicFeature(),
       onDetach:         () => gameClient.sendAction({ type: "detach" }),
       onUseFeature:     (featureId) => this.beginUseFeature(featureId),
       onHide:           () => gameClient.sendAction({ type: "hide" }),
@@ -1316,11 +1320,14 @@ export class GameScene extends Phaser.Scene {
       if (!def) return [];
       return [{
         id: def.id, title: def.title, description: def.description, status: qs.status,
+        // Only surface goals the player has been made aware of: completed steps
+        // and the current one. Not-yet-reached spine steps and undiscovered
+        // optional side-goals stay hidden until they're reached/found.
         steps: def.steps.map((s) => ({
           id: s.id, text: s.text, optional: s.optional,
           done: qs.completedStepIds.includes(s.id),
           current: qs.status === 'active' && s.id === qs.currentStepId,
-        })),
+        })).filter((s) => s.done || s.current),
       }];
     });
     const journal = (state.adventureContext?.priorChapterSummaries ?? [])
@@ -1540,6 +1547,37 @@ export class GameScene extends Phaser.Scene {
     this.featureTargetMode = null;
     this.spellAoeLayer.clear();
     if (this.gameState) this.playerPanel.refreshActions(this.buildActionState(this.gameState));
+  }
+
+  /** STUDY pressed with authored study points present: resolve the NEAREST one
+   *  directly when the player is within reach (≤1 tile), else prompt them to
+   *  move closer. No separate tile-click step — the feature you're standing next
+   *  to is the obvious target, and the server re-checks range. */
+  private beginStudyFeature(): void {
+    const state = this.gameState;
+    if (!state) return;
+    const tiles = state.availableActions.studyPointTiles ?? [];
+    if (tiles.length === 0) return;
+    const ps = state.player;
+    const distTo = (t: { x: number; y: number }) => Math.max(Math.abs(t.x - ps.tileX), Math.abs(t.y - ps.tileY));
+    const target = tiles.slice().sort((a, b) => distTo(a) - distTo(b))[0];
+    if (distTo(target) <= 1) gameClient.sendAction({ type: "study", tileX: target.x, tileY: target.y });
+    else this.speechBubbles.spawn('player', 'Move closer to study it.');
+  }
+
+  /** MAGIC pressed with an authored rite point present: perform the rite on the
+   *  NEAREST one when within reach (≤1 tile), else prompt to move closer. Mirror
+   *  of `beginStudyFeature`. */
+  private beginMagicFeature(): void {
+    const state = this.gameState;
+    if (!state) return;
+    const tiles = state.availableActions.magicPointTiles ?? [];
+    if (tiles.length === 0) return;
+    const ps = state.player;
+    const distTo = (t: { x: number; y: number }) => Math.max(Math.abs(t.x - ps.tileX), Math.abs(t.y - ps.tileY));
+    const target = tiles.slice().sort((a, b) => distTo(a) - distTo(b))[0];
+    if (distTo(target) <= 1) gameClient.sendAction({ type: "magic", tileX: target.x, tileY: target.y });
+    else this.speechBubbles.spawn('player', 'Move closer to perform the rite.');
   }
 
   /** Tint the in-range teleport disc for an active feature-target mode and
@@ -2127,9 +2165,22 @@ export class GameScene extends Phaser.Scene {
    *  advance entries don't currently carry one). */
   private async reloadEncounter(): Promise<void> {
     // Path A — the scene was entered with the original create payload
-    // (Encounter Setup → BEGIN): recreate the exact session from it.
+    // (Encounter Setup → BEGIN): recreate the session from it. The captured
+    // payload is a frozen snapshot from BEGIN time, so first re-read the
+    // encounter from disk (the /encounters list reads fresh) and overlay its
+    // content — that's the whole point of the dev Reload button: pick up edits
+    // to the encounter JSON without re-entering through setup.
     if (this.lastCreateRequest) {
-      const request = this.lastCreateRequest;
+      let request = this.lastCreateRequest;
+      const encId = request.encounterId;
+      if (encId) {
+        try {
+          const fresh = (await gameClient.listEncounters() as EncounterDef[]).find((e) => e.id === encId);
+          if (fresh) request = { ...request, ...this.encounterContentFromDef(fresh) };
+        } catch (err) {
+          console.warn("[DevTools] Reload Encounter: could not refresh from disk, replaying snapshot.", err);
+        }
+      }
       // `disconnect` closes the current WS AND deletes the current session on
       // the server. We want both — there's no reason to keep the old session
       // around once we've decided to reload.
@@ -2152,18 +2203,46 @@ export class GameScene extends Phaser.Scene {
       }
       return;
     }
-    // Path B — no captured payload (entered via a mission-cycle transition or a
-    // resumed save). Rebuild the CURRENT encounter through the transition
-    // endpoint: it stands up a fresh session for the same encounter id while
-    // carrying world flags + player state across, so the encounter re-runs from
-    // the top. Skipped for authored adventures, whose multi-chapter context the
-    // transition path doesn't preserve.
+    // Path B — no captured payload (entered via a mission-cycle transition, a
+    // resumed save, or an authored-adventure chapter, none of which thread a
+    // create request). Rebuild the CURRENT encounter through the transition
+    // endpoint: it re-reads the encounter JSON from disk (so edits show) and
+    // carries world flags + quests + player state across, re-running the
+    // encounter from the top. NOTE for adventure chapters: the transition
+    // collapses multi-chapter context into a single-session cycle, so chapter
+    // tracking ("chapter N of M") and the next chapter-advance won't carry —
+    // acceptable for re-testing one encounter's content, which is this button's job.
     const here = this.gameState?.currentEncounterId;
-    if (here && !this.gameState?.adventureContext?.adventureId) {
+    if (here) {
       await this.transitionToEncounter(here);
       return;
     }
-    console.warn("[DevTools] Reload Encounter unavailable for this entry (authored-adventure chapter with no captured payload).");
+    console.warn("[DevTools] Reload Encounter unavailable — no current encounter id.");
+  }
+
+  /** Map a freshly-read `EncounterDef` to the create-request fields that carry
+   *  encounter content, so Reload Encounter picks up on-disk JSON edits. Mirrors
+   *  the field mapping in `EncounterSetupScene`'s BEGIN payload. Player/resume
+   *  fields are intentionally left untouched (they come from the live session). */
+  private encounterContentFromDef(def: EncounterDef): Partial<CreateSessionRequest> {
+    return {
+      encounterTitle: def.encounterTitle,
+      savedMapId: def.mapId,
+      npcIds: def.npcIds,
+      allyIds: def.allyIds,
+      enemyIds: def.enemyIds,
+      customIntroduction: def.customIntroduction,
+      customContext: def.customContext,
+      customObjective: def.objective,
+      allowsLongRest: def.allowsLongRest,
+      completionFlag: def.completionFlag,
+      tileProperties: def.tileProperties,
+      startingZones: def.startingZones,
+      placementMode: def.placementMode,
+      placements: def.placements,
+      triggers: def.triggers,
+      conversationOverrides: def.conversationOverrides,
+    };
   }
 
   private async advanceChapter(): Promise<void> {

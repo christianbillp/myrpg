@@ -37,6 +37,7 @@ export const ACTION_BUTTON_CATALOG: ReadonlyArray<ActionButtonCatalogEntry> = [
   { id: 'study', label: 'Study', glyph: '📖', description: 'Recall lore or analyse something — the GM adjudicates the check.' },
   { id: 'utilize', label: 'Utilize', glyph: '🛠', description: 'Use an object or interact with the environment — GM-adjudicated.' },
   { id: 'influence', label: 'Influence', glyph: '💬', description: 'Persuade, deceive, or intimidate a creature — GM-adjudicated.' },
+  { id: 'magic', label: 'Magic', glyph: '🪄', description: 'Channel magic into a feature within reach (perform a rite) — or, with nothing nearby, an improvised magical effect the GM adjudicates.' },
   { id: 'search', label: 'Search', glyph: '⚲', description: 'Look for hidden creatures, traps, or clues nearby.' },
   { id: 'hide', label: 'Hide', glyph: '◐', description: 'Attempt to become unseen with a Stealth check.' },
   { id: 'short-rest', label: 'Short Rest', glyph: '☕', description: 'Spend Hit Dice to recover HP over a short rest.' },
@@ -45,7 +46,6 @@ export const ACTION_BUTTON_CATALOG: ReadonlyArray<ActionButtonCatalogEntry> = [
   { id: 'disarm-trap', label: 'Disarm Trap', glyph: '⚠', description: 'Attempt to disarm a discovered, armed trap on an adjacent tile.' },
   { id: 'gear', label: 'Deploy Gear (Set)', glyph: '⬡', description: 'Deploy area-denial gear (caltrops, ball bearings) onto a tile.' },
   { id: 'attune', label: 'Attune', glyph: '✶', description: 'Attune to a held magic item that requires attunement (max 3).' },
-  { id: 'identify', label: 'Identify', glyph: '🔎', description: 'Examine an unidentified magic item to reveal what it is.' },
   { id: 'level-up', label: 'Level Up', glyph: '★', description: 'Spend earned XP to advance to the next level.' },
   { id: 'long-rest', label: 'Long Rest', glyph: '☾', description: 'Rest ~8 hours to recover HP, spell slots, and per-rest features.' },
   { id: 'move', label: 'Move', glyph: '⤧', description: 'Toggle move mode, then click a tile to walk there.' },
@@ -56,11 +56,21 @@ export const ACTION_BUTTON_CATALOG: ReadonlyArray<ActionButtonCatalogEntry> = [
   { id: 'feature', label: 'Class Feature Buttons', glyph: '✦', description: 'Your class-feature actions (Second Wind, Rage, Channel Divinity, …).' },
 ];
 
+/** The SRD 5.2.1 core actions that have a panel button — Attack, Dash,
+ *  Disengage, Dodge, Help, Hide, Influence, Ready, Search, Study, Utilize.
+ *  Panel Setup lists these under "Basic Actions" (sorted alphabetically);
+ *  everything else (game-specific or class actions, and `cast` — this game's
+ *  spell-casting button) goes under "Other Actions". */
+export const BASIC_ACTION_IDS: ReadonlySet<string> = new Set<string>([
+  'attack', 'dash', 'disengage', 'dodge', 'help', 'hide',
+  'influence', 'magic', 'ready', 'search', 'study', 'utilize',
+]);
+
 const LABEL_TO_ID: Readonly<Record<string, string>> = {
   ATTACK: 'attack', THROW: 'throw', DODGE: 'dodge', DASH: 'dash', DISENGAGE: 'disengage',
   GRAPPLE: 'grapple', SHOVE: 'shove', 'SHOVE PRONE': 'shove-prone', HELP: 'help', READY: 'ready',
   STUDY: 'study', UTILIZE: 'utilize', INFLUENCE: 'influence', SEARCH: 'search', HIDE: 'hide',
-  'SHORT REST': 'short-rest', 'KNOCK OUT': 'knock-out', DETACH: 'detach', ATTUNE: 'attune', IDENTIFY: 'identify',
+  'SHORT REST': 'short-rest', 'KNOCK OUT': 'knock-out', DETACH: 'detach', ATTUNE: 'attune',
   '★ LEVEL UP': 'level-up', '☾ LONG REST': 'long-rest', MOVE: 'move', TALK: 'talk', CAST: 'cast',
   'DISARM TRAP': 'disarm-trap',
 };

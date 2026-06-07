@@ -601,18 +601,31 @@ export class CharacterSheetOverlay extends BaseOverlay {
         </button>
       </div>`).join("");
 
-    const gGroups: Record<string, { name: string; count: number }> = {};
+    // Gear can be magical too (a Cloak of Protection posing as "Senior White
+    // Cape"), so mask the name until identified. A magic item keeps its mundane
+    // disguise — no aura tag — until Detect Magic senses it; only then does it
+    // read as "✦ magical". Identify reveals the true name.
+    const detectedMagic = state.magicDetectedItemIds ?? [];
+    const gGroups: Record<string, { name: string; count: number; identified: boolean; magicKnown: boolean }> = {};
     gear.forEach((g) => {
-      if (!gGroups[g.id]) gGroups[g.id] = { name: g.name, count: 0 };
+      if (!gGroups[g.id]) gGroups[g.id] = {
+        name: itemDisplayName(g, state.identifiedItemIds),
+        count: 0,
+        identified: isItemIdentified(g, state.identifiedItemIds),
+        magicKnown: detectedMagic.includes(g.id),
+      };
       gGroups[g.id].count++;
     });
-    const gRows = Object.entries(gGroups).map(([_id, { name, count }]) => `
+    const gRows = Object.entries(gGroups).map(([_id, { name, count, identified, magicKnown }]) => {
+      const aura = !identified && magicKnown;
+      return `
       <div style="display:flex;align-items:center;justify-content:space-between;height:24px;padding:0 2px;">
         <span style="font-size:11px;color:#778899;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;margin-right:8px;">
           ${escHtml(name)}${count > 1 ? " ×" + count : ""}
         </span>
-        <span style="font-size:9px;color:#445566;width:72px;text-align:center;">GEAR</span>
-      </div>`).join("");
+        <span style="font-size:9px;color:${aura ? "#a87adf" : "#445566"};width:72px;text-align:center;">${aura ? "✦ magical" : "GEAR"}</span>
+      </div>`;
+    }).join("");
 
     const emptyCarried = eqGroups.length === 0 && Object.keys(cGroups).length === 0 && Object.keys(aGroups).length === 0 && Object.keys(gGroups).length === 0 && scrolls.length === 0
       ? `<div style="font-size:11px;color:#334455;padding:8px 2px;">No items carried.</div>`

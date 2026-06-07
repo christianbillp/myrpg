@@ -429,6 +429,8 @@ export function buildSessionState(
       canLevelUp: false,
       canLongRest: false,
       disarmableTrapTiles: [],
+      studyPointTiles: [],
+      magicPointTiles: [],
       deployableGearIds: [],
       grappleableTargetIds: [],
       shoveableTargetIds: [],

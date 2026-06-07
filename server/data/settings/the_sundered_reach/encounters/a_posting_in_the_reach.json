@@ -9,8 +9,8 @@
   ],
   "allyIds": [],
   "enemyIds": [],
-  "customIntroduction": "Rain has followed you the whole way from the coach road. The waystation is warm, low-ceilinged, and full of the smell of tallow and wet wool. Behind the long bar a broad man polishes a cup he has already polished twice; at a corner table a local nurses a mug and watches you over the rim. Your cape is still stiff with road-dust. You are the only Cape these people have seen in a long while, and they all know it before you have said a word. Somewhere in your satchel is a sealed writ: walk the Reach Circuit, recertify its wardstones — routine work — and \"ascertain the standing\" of Senior Cape Edran Vael, who has not filed a report in three seasons.",
-  "customContext": "INTRODUCTORY SOCIAL ENCOUNTER — no combat. First scene; teach the dialogue mode and ability checks. Player is Junior Cape Reed, a freshly licensed mage (treat as a Wizard): bookish, painfully polite, asks many questions, knows theory but has almost no field experience. Two neutral NPCs are present and must NOT be made hostile. Give campaign basics freely; gate richer detail behind Persuasion/Insight/History/Arcana DC 10–13. The player must leave with ONE concrete lead: the nearest wardstone, in the wood north of here, has cracked \"like a struck bell.\" Use the roll/check flow for social checks and reveal NPC names when given. Reward roleplay and good questions; let the player ask freely.\n\nTriggers:\n1. On encounter start (T0 aigm, encounter_open_aigm): the AI GM sets the scene — the warm, close waystation, both NPCs already clocking Reed's white cape — and invites the player to act.\n2. When the player moves into the bar area (T1 start_conversation, bram_conversation_auto_open): the `tavern_keeper_chat` conversation tree auto-opens on `npc_tavern_keeper`. The tree owns Bram's dialogue — the AI GM does NOT roleplay him unless the player uses the conversation's `openAigm` free-talk choice.\n3. When the player moves into the corner seating area (T2 start_conversation, villager_conversation_auto_open): the `villager_chat` conversation tree auto-opens on `npc_villager`. The tree owns the villager's dialogue (wardstone ring, two riders, Vael looked worried). The AI GM does NOT roleplay them unless the player uses the conversation's `openAigm` choice.\n5. When the wardstone_lead_confirmed flag is set (T4 aigm, lead_gathered_wardstone): the AI GM narrates a quiet moment of consolidation as Reed notes the lead in their ledger, and invites the player to keep asking questions or move on.\n6. When the wardstone_lead_confirmed flag is set (T5 xp, wardstone_lead_flag): award 25 XP and log \"Lead confirmed: the wardstone in the north wood is cracked.\"\n7. When the wardstone_lead_confirmed flag is set (T6 set_flag, set_completion): sets the encounter completion flag waystation_leads_gathered.\n8. When the waystation_leads_gathered flag is set (T7 announcement, complete_and_depart): focused announcement — \"You step back out into the rain with a name in your notes and a cracked wardstone on your map. The Reach Circuit begins here.\"",
+  "customIntroduction": "Rain off the coach road, and then warmth: tallow, wet wool, a low ceiling. The big man behind the bar works a rag over a cup he's already polished twice. In the corner a local watches you over her mug. Your cape is still stiff with road-dust — and you're the first Cape these people have seen in a long while. They know it before you speak. Your writ is plain: walk the Circuit, recertify the wardstones. And learn why Senior Cape Edran Vael has sent no word in three seasons.",
+  "customContext": "INTRODUCTORY SOCIAL ENCOUNTER — no combat. First scene; teach dialogue and ability checks. Reed is a freshly licensed Cape-mage (treat as a Wizard): bookish, polite, theory-rich and field-green. Two neutral NPCs — Bram the keeper and a local villager — must NOT be made hostile. Give campaign basics freely; gate richer detail behind Persuasion/Insight/History/Arcana DC 10–13. Reed must leave with ONE concrete lead: the north-wood wardstone has cracked \"like a struck bell.\" The two conversation trees own their NPCs' dialogue — the villager carries the wardstone ring, the two riders, and that Vael \"looked worried\" — so only voice an NPC yourself if the player picks the tree's free-talk choice. Reward good questions and let her ask freely.",
   "objective": "Speak with Bram Holdfast the innkeeper and the local villager to learn what you can about Senior Cape Edran Vael and the state of the wardstones on the Reach Circuit. Leave with at least one concrete lead.",
   "startingZones": {
     "width": 14,
@@ -189,7 +189,7 @@
       "then": [
         {
           "type": "send_aigm_message",
-          "message": "Set the scene: Junior Cape Reed has just stepped in from the rain. The waystation is warm and close — tallow candles, wet wool, a bar-rag worked over the same cup. Bram Holdfast is behind the bar; a villager nurses a mug in the corner. Both noticed the white cape the moment the door opened. Narrate the room's quiet attention and invite the player to act."
+          "message": "The intro is on screen — the warm waystation, Bram at the bar, a villager in the corner, both clocking Reed's white cape. Don't re-describe it. Pick up from the room's quiet attention and invite Reed to make the first move."
         }
       ],
       "once": true
@@ -272,36 +272,45 @@
       "then": [
         {
           "type": "send_aigm_message",
-          "message": "The player has confirmed the key lead — the cracked wardstone in the north wood. Narrate a quiet moment of consolidation: Reed notes it in their satchel ledger, the way a new Cape does when theory becomes field reality. The room feels a little smaller than it did. Remind the player gently that they can keep asking questions or indicate they are ready to move on."
+          "message": "Reed has her lead: the north-wood wardstone, cracked \"like a struck bell.\" Let the weight land in a sentence or two — the villager's unease about Vael, the dawning sense that \"routine work\" is anything but. She can keep asking, but point her toward the door when she's ready. Do NOT narrate her stepping outside — that fires when she actually leaves."
+        },
+        {
+          "type": "show_log",
+          "message": "You have your lead. When you're ready, head south to the door and step out into the rain — the Circuit begins on the north road."
         }
       ],
       "once": true
     },
     {
-      "id": "complete_and_depart",
+      "id": "depart_outside",
       "when": {
-        "event": "flag_set",
-        "name": "wardstone_lead_confirmed"
+        "event": "player_moved",
+        "in_area": {
+          "x": 4,
+          "y": 7,
+          "w": 6,
+          "h": 3
+        }
       },
-      "if": [],
+      "if": [
+        {
+          "type": "phase",
+          "in": [
+            "exploring"
+          ]
+        },
+        {
+          "type": "flag_set",
+          "name": "wardstone_lead_confirmed"
+        }
+      ],
       "then": [
         {
           "type": "show_announcement",
           "text": "You step back out into the rain with a name in your notes and a cracked wardstone on your map. The Reach Circuit begins here.",
           "durationMs": 4000,
           "mode": "focused"
-        }
-      ],
-      "once": true
-    },
-    {
-      "id": "set_completion",
-      "when": {
-        "event": "flag_set",
-        "name": "wardstone_lead_confirmed"
-      },
-      "if": [],
-      "then": [
+        },
         {
           "type": "set_flag",
           "name": "waystation_leads_gathered",

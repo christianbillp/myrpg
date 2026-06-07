@@ -11,6 +11,12 @@
  */
 const BUBBLE_LIFETIME_MS = 6000;
 const FADE_MS = 600;
+/** How long a bubble waits for its speaker's token to exist before giving up.
+ *  A speaker revealed on the same tick it speaks (an enemy unhidden as combat
+ *  starts) has no token until the next `applyState`→`reconcileNpcs`, which can
+ *  be several frames out while a queued announcement drains. We park the bubble
+ *  invisibly until the token appears rather than culling it immediately. */
+const UNRESOLVED_GRACE_MS = 4000;
 const MAX_BUBBLE_WIDTH = 220;
 const BUBBLE_STACK_GAP = 6;
 const TOKEN_OFFSET_Y = 32;  // bubble base sits this many px above token centre
@@ -27,6 +33,10 @@ interface Bubble {
    *  player-said-to-target bubble never covers the target. */
   avoidEntityId?: string;
   bornAt: number;
+  /** Flips true the first frame the speaker's token resolves. Before that the
+   *  bubble is "pending" (token not yet created) and is held invisibly rather
+   *  than dropped; after that, an unresolved token means it genuinely despawned. */
+  resolvedOnce?: boolean;
 }
 
 export interface ScreenPos { x: number; y: number; }
@@ -109,8 +119,16 @@ export class SpeechBubbles {
     for (const [entityId, list] of grouped) {
       const pos = this.getPos(entityId);
       if (!pos) {
-        // Token despawned — drop every bubble for this entity.
         for (const b of list) {
+          // Pending speaker — token not created yet (e.g. an enemy revealed on
+          // the same tick it speaks). Hold the bubble invisibly until its token
+          // appears, dropping it only if it never resolves within the grace
+          // window. A bubble that HAD resolved and now can't means a genuine
+          // despawn → drop immediately (original behaviour).
+          if (!b.resolvedOnce && now - b.bornAt < UNRESOLVED_GRACE_MS) {
+            b.el.style.opacity = '0';
+            continue;
+          }
           b.el.remove();
           const idx = this.bubbles.indexOf(b);
           if (idx !== -1) this.bubbles.splice(idx, 1);
@@ -134,6 +152,10 @@ export class SpeechBubbles {
       let stackOffset = 0;
       for (let i = list.length - 1; i >= 0; i--) {
         const b = list[i];
+        // First frame the token exists: start the lifetime clock now (not at
+        // spawn) so a bubble that waited for a late token still shows its full
+        // span, and reveal it from any parked (invisible) state.
+        if (!b.resolvedOnce) { b.resolvedOnce = true; b.bornAt = now; }
         b.el.style.left = `${pos.x}px`;
         if (placeBelow) {
           // translate(-50%, 0) — anchor top of bubble to (left, top).
@@ -155,6 +177,10 @@ export class SpeechBubbles {
           if (idx !== -1) this.bubbles.splice(idx, 1);
         } else if (age >= BUBBLE_LIFETIME_MS) {
           b.el.style.opacity = '0';
+        } else {
+          // Visible window — restore opacity in case it was parked while the
+          // token was still pending (fades in over FADE_MS via the transition).
+          b.el.style.opacity = '1';
         }
       }
     }

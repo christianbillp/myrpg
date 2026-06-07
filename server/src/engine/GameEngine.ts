@@ -922,7 +922,7 @@ export class GameEngine {
     if ((ability === 'str' || ability === 'dex') && autoFailsStrDexSave(conditions)) {
       return { roll: 0, total: 0, success: false, autoFail: true };
     }
-    const saveMod = (this.playerDef.savingThrows[ability] ?? 0) - exhaustionLevel * 2;
+    const saveMod = (this.playerDef.savingThrows[ability] ?? 0) + (this.playerDef.saveBonus ?? 0) - exhaustionLevel * 2;
     // Bless adds a die to saves; Haste / Beacon of Hope grant save Advantage.
     const withAdvantage = (ability === 'dex' && conditions.includes('dodging')) || !!this.state.player.buffSaveAdvantage?.includes(ability);
     const withDisadvantage = ability === 'dex' && conditions.includes('restrained');
@@ -1253,6 +1253,22 @@ export class GameEngine {
           .filter((t) => t.armed && t.discovered && chebyshev(p.tileX, p.tileY, t.tileX, t.tileY) <= 1)
           .map((t) => ({ x: t.tileX, y: t.tileY }))
       : [];
+    // Study points: un-fired `study_feature` triggers, surfaced regardless of
+    // distance (the client gates to ≤1 tile and prompts "move closer"). Empty
+    // when an Action isn't available, so STUDY falls back to the GM-chat prompt.
+    const studyPointTiles = canActNow
+      ? s.triggers
+          .filter((t) => t.when.event === 'study_feature'
+            && (t.once === false || !s.firedTriggerIds.includes(t.id)))
+          .map((t) => (t.when as Extract<typeof t.when, { event: 'study_feature' }>).tile)
+      : [];
+    // Rite points: un-fired `magic_feature` triggers, surfaced for the MAGIC action.
+    const magicPointTiles = canActNow
+      ? s.triggers
+          .filter((t) => t.when.event === 'magic_feature'
+            && (t.once === false || !s.firedTriggerIds.includes(t.id)))
+          .map((t) => (t.when as Extract<typeof t.when, { event: 'magic_feature' }>).tile)
+      : [];
     let deployableGearIds: string[] = [];
     if (canActNow) {
       const seen = new Set<string>();
@@ -1333,6 +1349,8 @@ export class GameEngine {
       // `allowsLongRest`. Combat phases block it outright.
       canLongRest: phase === 'exploring' && s.allowsLongRest === true,
       disarmableTrapTiles,
+      studyPointTiles,
+      magicPointTiles,
       deployableGearIds,
       grappleableTargetIds,
       shoveableTargetIds,

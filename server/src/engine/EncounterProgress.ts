@@ -1,6 +1,7 @@
 import type { GameContext } from './GameContext.js';
 import { isHostileTo } from './FactionRelations.js';
 import { PLAYER_FACTION_ID } from '../../../shared/types.js';
+import { hasPendingRite } from './EncounterLifecycle.js';
 
 /**
  * EncounterProgress — subscribes to the engine event bus and flips
@@ -31,6 +32,17 @@ export function registerEncounterProgress(ctx: GameContext): void {
   // overlay + RETURN TO MENU button.
   ctx.bus.subscribe('encounter_completed', () => {
     ctx.state.encounterComplete = true;
+    // Make the declared completion flag a reliable signal: when the encounter
+    // resolves by ANY path (combat-clear included), set its `completionFlag` if
+    // content hasn't already. Downstream consumers — notably quest steps keyed
+    // on the flag via `completeWhen` — depend on the flag being WRITTEN, not just
+    // on `encounterComplete`. Idempotent: skipped when content set it first
+    // (a_posting / bridge / sage), so no duplicate `flag_set`.
+    const flag = ctx.state.encounterCompletionFlag ?? ctx.state.adventureContext?.completionFlag;
+    if (flag && ctx.state.worldFlags[flag] !== true) {
+      ctx.state.worldFlags[flag] = true;
+      ctx.bus.publish({ type: 'flag_set', name: flag, value: true });
+    }
   }, /*priority*/ 40);
 
   ctx.bus.subscribe('combat_ended', () => {
@@ -38,7 +50,8 @@ export function registerEncounterProgress(ctx: GameContext): void {
     const partyView = { factionId: PLAYER_FACTION_ID } as const;
     const enemiesAlive = s.npcs.some((n) => n.hp > 0
       && isHostileTo(s, partyView, { factionId: n.factionId, disposition: n.disposition }));
-    if (!enemiesAlive) s.encounterComplete = true;
+    // Hold completion while a rite is still pending (see EncounterLifecycle).
+    if (!enemiesAlive && !hasPendingRite(s)) s.encounterComplete = true;
   }, /*priority*/ 40);
 
   const completionFlag = ctx.state.adventureContext?.completionFlag;

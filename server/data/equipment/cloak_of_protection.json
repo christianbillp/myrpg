@@ -1,0 +1,13 @@
+{
+  "id": "cloak_of_protection",
+  "name": "Cloak of Protection",
+  "type": "gear",
+  "description": "A White Cape's mantle, woven with old binding-thread. While you wear it (attuned), you gain a +1 bonus to AC and to all saving throws. Requires attunement.",
+  "magic": true,
+  "rarity": "uncommon",
+  "requiresAttunement": true,
+  "protectionBonus": 1,
+  "startsUnidentified": true,
+  "unidentifiedName": "Senior White Cape",
+  "costCp": 0
+}
