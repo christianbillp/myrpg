@@ -10,6 +10,7 @@ import {
   rollSkillCheck, rollSavingThrow,
   rollPlayerAttackVsAc, rollNpcAttackVsAc,
 } from './CombatSystem.js';
+import { rollDiceBonus } from './Dice.js';
 import { applyEquipment, computeEquippedSlotLabels } from './EquipmentSystem.js';
 import { hasRelentlessEndurance, RELENTLESS_ENDURANCE_ID } from './SpeciesAbilities.js';
 import { applyStoneEndurance } from './GiantGifts.js';
@@ -876,7 +877,12 @@ export class GameEngine {
       withAdvantage = true;
       enhanceNote = `[Enhance Ability ${enhancedAbility.toUpperCase()}: Adv]`;
     }
-    const result = rollSkillCheck(skillMod, dc, withAdvantage, withDisadvantage, this.playerDef.halflingLuck);
+    const base = rollSkillCheck(skillMod, dc, withAdvantage, withDisadvantage, this.playerDef.halflingLuck);
+    // Guidance and kin add a die to ability checks.
+    const checkBonus = rollDiceBonus(this.state.player.checkDiceBonus);
+    const result = checkBonus > 0
+      ? { roll: base.roll, total: base.total + checkBonus, success: base.total + checkBonus >= dc }
+      : base;
     Logger.log('check.ability_check', {
       skill, dc, skillMod, exhaustionPenalty: exhaustionLevel * 2,
       adv: withAdvantage, dis: withDisadvantage,
@@ -894,9 +900,13 @@ export class GameEngine {
       return { roll: 0, total: 0, success: false, autoFail: true };
     }
     const saveMod = (this.playerDef.savingThrows[ability] ?? 0) - exhaustionLevel * 2;
-    const withAdvantage = ability === 'dex' && conditions.includes('dodging');
+    // Bless adds a die to saves; Haste / Beacon of Hope grant save Advantage.
+    const withAdvantage = (ability === 'dex' && conditions.includes('dodging')) || !!this.state.player.buffSaveAdvantage?.includes(ability);
     const withDisadvantage = ability === 'dex' && conditions.includes('restrained');
-    return { ...rollSavingThrow(saveMod, dc, withAdvantage, withDisadvantage, this.playerDef.halflingLuck), autoFail: false };
+    const base = rollSavingThrow(saveMod, dc, withAdvantage, withDisadvantage, this.playerDef.halflingLuck);
+    const saveBonus = rollDiceBonus(this.state.player.saveDiceBonus);
+    const total = base.total + saveBonus;
+    return { roll: base.roll, total, success: total >= dc, autoFail: false };
   }
 
   rollAttackRoll(attacker: string, targetAc: number): { roll: number; total: number; isHit: boolean; isCrit: boolean; damage: number; rollStr: string } {
@@ -1031,7 +1041,7 @@ export class GameEngine {
       this.addLog({ left: `${name} is immune to ${damageType} — ${damage}→0`, right: '×0', style: 'status' });
       return 0;
     }
-    if (def.resistances?.includes(damageType)) {
+    if (def.resistances?.includes(damageType) || this.state.player.buffResistances?.includes(damageType)) {
       const fd = Math.floor(damage / 2);
       this.addLog({ left: `${name} resists ${damageType} — ${damage}→${fd}`, right: '×½', style: 'status' });
       return fd;

@@ -12,5 +12,5 @@
   "durationRounds": 100,
   "concentration": true,
   "ritual": false,
-  "description": "A shimmering field surrounds a creature of your choice within range, granting it a +2 bonus to AC for the duration. Engine: the +2 AC is descriptive only until a flat-AC buff modifier lands."
+  "description": "A shimmering field surrounds a creature of your choice within range, granting it a +2 bonus to AC for the duration. Engine: cast on self, the +2 AC applies via the buff layer (Concentration); targeting an ally is descriptive."
 }

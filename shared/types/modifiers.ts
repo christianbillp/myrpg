@@ -29,7 +29,19 @@ export type Modifier =
   | { type: 'size'; size: 'tiny' | 'small' | 'medium' | 'large' | 'huge' | 'gargantuan' }
   /** Advantage on ability checks of one ability score (Enhance Ability — the
    *  chosen ability). Projected onto `PlayerState.enhancedAbility`. */
-  | { type: 'enhanced-ability'; ability: 'str' | 'dex' | 'con' | 'int' | 'wis' | 'cha' };
+  | { type: 'enhanced-ability'; ability: 'str' | 'dex' | 'con' | 'int' | 'wis' | 'cha' }
+  /** Flat bonus to Armor Class (Shield of Faith +2, Haste +2). Derived into
+   *  `PlayerState.acBonus` by `recomputeBuffs` and added by `computeAC`. */
+  | { type: 'ac-bonus'; value: number }
+  /** An extra die rolled and added to a category of d20 Test (Bless → +1d4 on
+   *  attack rolls + saves; Guidance → +1d4 on ability checks). Derived per
+   *  category into `PlayerState.attackDiceBonus` / `saveDiceBonus` /
+   *  `checkDiceBonus` and added at the player's d20 roll sites. */
+  | { type: 'dice-bonus'; on: 'attack' | 'save' | 'check'; count: number; sides: number }
+  /** Resistance to a damage type for the buff's duration (Protection from
+   *  Energy). Derived into `PlayerState.buffResistances`, merged by the player
+   *  damage path alongside species resistances. */
+  | { type: 'resistance'; damageType: string };
 
 /**
  * Shared contract for anything that contributes typed `Modifier`s to a

@@ -78,9 +78,29 @@ export function recomputeBuffs(ctx: GameContext): void {
   const sizeMods = mods.filter((m): m is Extract<typeof m, { type: 'size' }> => m.type === 'size');
   p.buffSize = sizeMods.length ? sizeMods.map((m) => m.size).reduce((a, b) => (sizeRank(b) > sizeRank(a) ? b : a)) : undefined;
   p.mirrorImages = buffs.find((b) => b.spellId === 'mirror-image')?.charges ?? 0;
+
+  // Flat AC bonuses (Shield of Faith, Haste) stack additively.
+  p.acBonus = mods.reduce((sum, m) => (m.type === 'ac-bonus' ? sum + m.value : sum), 0);
+  // Per-category d20 dice bonuses (Bless attack+save, Guidance check). Same-
+  // category buffs don't stack — keep the largest die (count × sides).
+  const bestDie = (on: 'attack' | 'save' | 'check'): { count: number; sides: number } | undefined => {
+    const ds = mods.filter((m): m is Extract<typeof m, { type: 'dice-bonus' }> => m.type === 'dice-bonus' && m.on === on);
+    if (!ds.length) return undefined;
+    return ds.reduce((best, m) => (m.count * m.sides > best.count * best.sides ? { count: m.count, sides: m.sides } : best), { count: 0, sides: 0 });
+  };
+  p.attackDiceBonus = bestDie('attack');
+  p.saveDiceBonus = bestDie('save');
+  p.checkDiceBonus = bestDie('check');
+  // Save advantages granted by buffs (Haste → dex, Beacon of Hope → wis).
+  const saveAdv = mods.filter((m): m is Extract<typeof m, { type: 'advantage' }> => m.type === 'advantage' && m.on === 'save').map((m) => m.key).filter((k): k is string => !!k);
+  p.buffSaveAdvantage = saveAdv.length ? [...new Set(saveAdv)] : undefined;
+  // Damage resistances granted by buffs (Protection from Energy).
+  const resist = mods.filter((m): m is Extract<typeof m, { type: 'resistance' }> => m.type === 'resistance').map((m) => m.damageType);
+  p.buffResistances = resist.length ? [...new Set(resist)] : undefined;
+
   // shieldActive is owned outside the buff list (Shield is a reaction) — pass
   // it through unchanged; mageArmor now comes from the derived flag above.
-  applyEquipment(ctx.playerDef, p.equippedSlots, ctx.defs.equipment, p.mageArmor, p.shieldActive, p.magicWeaponBonus, p.attunedItemIds ?? []);
+  applyEquipment(ctx.playerDef, p.equippedSlots, ctx.defs.equipment, p.mageArmor, p.shieldActive, p.magicWeaponBonus, p.attunedItemIds ?? [], p.acBonus);
   p.ac = ctx.playerDef.ac;
 }
 

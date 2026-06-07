@@ -12,5 +12,5 @@
   "durationRounds": 10,
   "concentration": true,
   "ritual": false,
-  "description": "Choose any number of creatures within range. For the duration, each target has Advantage on Wisdom saving throws and Death Saving Throws, and regains the maximum number of Hit Points possible from any healing. Engine: the advantage/max-healing buff is descriptive only until an ally-buff resolver lands."
+  "description": "Choose any number of creatures within range. For the duration, each target has Advantage on Wisdom saving throws and Death Saving Throws, and regains the maximum number of Hit Points possible from any healing. Engine: cast on self, the Advantage on Wisdom saves applies via the buff layer; the death-save advantage and max-healing riders are descriptive."
 }

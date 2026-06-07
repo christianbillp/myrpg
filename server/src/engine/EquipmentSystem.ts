@@ -19,6 +19,8 @@ export function computeAC(
   mageArmor = false,
   shieldSpellActive = false,
   attunedItemIds: string[] = [],
+  /** Flat AC bonus from active self-buffs (Shield of Faith, Haste). */
+  buffAcBonus = 0,
 ): number {
   const dexMod = mod(playerDef.dex);
   let ac: number;
@@ -37,7 +39,7 @@ export function computeAC(
   // including against the triggering attack roll. Stacks on top of armor /
   // mundane shield / Mage Armor.
   if (shieldSpellActive) ac += 5;
-  return ac;
+  return ac + buffAcBonus;
 }
 
 /**
@@ -245,13 +247,14 @@ export function applyEquipment(
   shieldSpellActive = false,
   magicWeaponBonus = 0,
   attunedItemIds: string[] = [],
+  buffAcBonus = 0,
 ): void {
   const byId = Object.fromEntries(allItems.map((i) => [i.id, i]));
   const armor = slots.armorId ? (byId[slots.armorId] as ArmorDef | undefined) ?? null : null;
   const shield = slots.shieldId ? (byId[slots.shieldId] as ShieldDef | undefined) ?? null : null;
   const weapon = slots.weaponId ? (byId[slots.weaponId] as WeaponDef | undefined) ?? null : null;
 
-  playerDef.ac = computeAC(playerDef, armor, shield, mageArmor, shieldSpellActive, attunedItemIds);
+  playerDef.ac = computeAC(playerDef, armor, shield, mageArmor, shieldSpellActive, attunedItemIds, buffAcBonus);
   // SRD Versatile (US-111): two-handed grip when a versatile weapon is held
   // with no shield equipped → larger damage die.
   const twoHandedGrip = !!weapon?.versatile && !shield;

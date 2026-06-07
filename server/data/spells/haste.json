@@ -12,5 +12,5 @@
   "durationRounds": 10,
   "concentration": true,
   "ritual": false,
-  "description": "A willing creature within range has its Speed doubled, gains +2 AC, has Advantage on Dexterity saving throws, and gains one extra action each turn (Attack [one attack], Dash, Disengage, Hide, or Utilize). When the spell ends the target is Incapacitated with Speed 0 until the end of its next turn. Engine: the speed/AC/extra-action buff is descriptive only until an ally-buff resolver lands."
+  "description": "A willing creature within range has its Speed doubled, gains +2 AC, has Advantage on Dexterity saving throws, and gains one extra action each turn (Attack [one attack], Dash, Disengage, Hide, or Utilize). When the spell ends the target is Incapacitated with Speed 0 until the end of its next turn. Engine: cast on self, the +2 AC, doubled Speed, and DEX-save Advantage apply via the buff layer; the extra action and end-of-spell lethargy are descriptive."
 }

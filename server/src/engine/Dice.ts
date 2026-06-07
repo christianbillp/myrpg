@@ -35,3 +35,12 @@ export function applyHalflingLuck(
   const reroll = d20();
   return { natural: reroll, label: label !== undefined ? `${label}⟲luck(1→${reroll})` : '' };
 }
+
+/** Roll an extra die bonus added to a d20 Test (Bless / Guidance → +1d4).
+ *  Returns 0 when no such buff is active. */
+export function rollDiceBonus(bonus: { count: number; sides: number } | undefined): number {
+  if (!bonus) return 0;
+  let total = 0;
+  for (let i = 0; i < bonus.count; i++) total += d(bonus.sides);
+  return total;
+}

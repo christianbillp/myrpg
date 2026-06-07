@@ -22,7 +22,7 @@ import { applyGiantGiftOnHit } from './GiantGifts.js';
 import { canSee as visCanSee } from './Vision.js';
 import { endConcentration } from './ConcentrationSystem.js';
 import type { PlayerDef } from '../../../shared/types.js';
-import { d20, mod } from './Dice.js';
+import { d20, mod, rollDiceBonus } from './Dice.js';
 import { combatantDisplayName } from './CombatFlow.js';
 
 /** Number of weapon attacks the player makes per Attack action. Driven by
@@ -40,6 +40,13 @@ export function attacksPerAction(playerDef: PlayerDef): number {
  *  `GameEngine.rollAbilityCheck` / `rollSavingThrow`. */
 function exhaustionAttackMod(ctx: GameContext): number {
   return -((ctx.state.player.exhaustionLevel ?? 0) * 2);
+}
+
+/** Flat modifier added to a player attack roll from runtime state: the
+ *  Exhaustion penalty plus a fresh Bless-style `attackDiceBonus` roll (SRD: a
+ *  separate d4 per attack roll). */
+function attackRollMod(ctx: GameContext): number {
+  return exhaustionAttackMod(ctx) + rollDiceBonus(ctx.state.player.attackDiceBonus);
 }
 
 /**
@@ -271,7 +278,7 @@ export function doAttack(ctx: GameContext, targetId: string | undefined, events:
   const sneakAttackAllowed = sneakAttackEligible(ctx, atk, target, withAdvantage, withDisadvantage);
   const params = { withAdvantage, withDisadvantage, autoCrit, playerHidden, coverBonus, sneakAttackAllowed };
   const resolved = playerThrowAttack(
-    ctx.playerDef, atk, targetDef, withAdvantage, withDisadvantage, ctx.playerDef.proficiencyBonus, autoCrit, playerHidden, coverBonus, sneakAttackAllowed, exhaustionAttackMod(ctx),
+    ctx.playerDef, atk, targetDef, withAdvantage, withDisadvantage, ctx.playerDef.proficiencyBonus, autoCrit, playerHidden, coverBonus, sneakAttackAllowed, attackRollMod(ctx),
   );
 
   // US-109a — Heroic Inspiration: pause BEFORE any consequence and offer the
@@ -429,7 +436,7 @@ export function doResolveReroll(ctx: GameContext, accept: boolean, events: GameE
     resolved = playerThrowAttack(
       ctx.playerDef, atk, targetDef,
       p.params.withAdvantage, p.params.withDisadvantage, ctx.playerDef.proficiencyBonus,
-      p.params.autoCrit, p.params.playerHidden, p.params.coverBonus, p.params.sneakAttackAllowed, exhaustionAttackMod(ctx),
+      p.params.autoCrit, p.params.playerHidden, p.params.coverBonus, p.params.sneakAttackAllowed, attackRollMod(ctx),
     );
     ctx.addLog({ left: `${ctx.playerDef.name} expends Heroic Inspiration to reroll`, right: `d20 ${p.rolledNatural} → ${resolved.naturalRoll}`, style: 'header' });
   }
@@ -533,7 +540,7 @@ function executeThrowOnTarget(
   // gates as the melee path.
   const sneakAttackAllowed = sneakAttackEligible(ctx, attack, target, withAdvantage, withDisadvantage);
   const { damage, isHit, logs, vexApplied, slowApplied, bonusComponents, sneakAttackFired } = playerThrowAttack(
-    ctx.playerDef, attack, targetDef, withAdvantage, withDisadvantage, profBonus, autoCrit, playerHidden, coverBonus, sneakAttackAllowed,
+    ctx.playerDef, attack, targetDef, withAdvantage, withDisadvantage, profBonus, autoCrit, playerHidden, coverBonus, sneakAttackAllowed, attackRollMod(ctx),
   );
   if (sneakAttackFired) s.player.sneakAttackUsedThisTurn = true;
   clearHide(s.player);
@@ -855,7 +862,7 @@ export function doPlayerOpportunityAttack(ctx: GameContext, npc: NpcState): void
   // Advantage.
   const oaWithAdvantage = hasAttackAdvantage(s.player.conditions);
   const oaWithDisadvantage = hasAttackDisadvantage(s.player.conditions);
-  const { damage, isHit: oaIsHit, logs, vexApplied, slowApplied, bonusComponents } = playerMeleeAttack(ctx.playerDef, targetDef, oaWithAdvantage, oaWithDisadvantage, oaAutoCrit, false, oaCoverBonus, false, exhaustionAttackMod(ctx));
+  const { damage, isHit: oaIsHit, logs, vexApplied, slowApplied, bonusComponents } = playerMeleeAttack(ctx.playerDef, targetDef, oaWithAdvantage, oaWithDisadvantage, oaAutoCrit, false, oaCoverBonus, false, attackRollMod(ctx));
   ctx.addLogs([{ left: `⚡ ${ctx.playerDef.name} makes an Opportunity Attack!`, style: 'header' }, ...logs]);
   emitPhysicalAttackSound(ctx, oaIsHit);
   const { finalDamage, log: oaResistLog } = ctx.resistMod(damage, ctx.playerDef.mainAttack.damageType, targetDef, npc.name);

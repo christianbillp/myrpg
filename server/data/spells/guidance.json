@@ -12,5 +12,5 @@
   "durationRounds": 10,
   "concentration": true,
   "ritual": false,
-  "description": "You touch a willing creature and choose a skill. Until the spell ends, the creature adds 1d4 to any ability check using the chosen skill. Engine: the +1d4 ability-check rider is descriptive only until the d20-test buff primitive lands."
+  "description": "You touch a willing creature and choose a skill. Until the spell ends, the creature adds 1d4 to any ability check using the chosen skill. Engine: cast on self, this grants the caster +1d4 to ability checks via the buff layer (the per-skill restriction is relaxed to all checks)."
 }

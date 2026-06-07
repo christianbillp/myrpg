@@ -114,6 +114,24 @@ export interface PlayerState {
    *  derived from a buff `size` modifier. Overrides `PlayerDef.size` for the
    *  buff's duration. Absent when no size buff is active. */
   buffSize?: CreatureSize;
+  /** Flat AC bonus from active self-buffs (Shield of Faith +2, Haste +2),
+   *  derived from `ac-bonus` modifiers by `recomputeBuffs` and added in
+   *  `computeAC`. Absent/0 when no AC buff is active. */
+  acBonus?: number;
+  /** Extra dice added to the player's d20 Tests by active self-buffs (Bless →
+   *  attack + save; Guidance → check), derived per category from `dice-bonus`
+   *  modifiers. Absent when no such buff is active. */
+  attackDiceBonus?: { count: number; sides: number };
+  saveDiceBonus?: { count: number; sides: number };
+  checkDiceBonus?: { count: number; sides: number };
+  /** Ability keys whose saving throws have Advantage from active self-buffs
+   *  (Haste → dex; Beacon of Hope → wis), derived from save-scoped `advantage`
+   *  modifiers on buffs. */
+  buffSaveAdvantage?: string[];
+  /** Damage types resisted by active self-buffs (Protection from Energy),
+   *  derived from `resistance` modifiers and merged by the player damage path
+   *  alongside species resistances. */
+  buffResistances?: string[];
   /** Set true by Expeditious Retreat; while active, the player may take the
    *  Dash action as a bonus action and receives the upfront Dash on the
    *  casting turn. Cleared when concentration on the spell ends. */

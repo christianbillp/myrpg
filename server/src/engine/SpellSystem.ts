@@ -13,7 +13,7 @@
 
 import type { GameContext } from './GameContext.js';
 import type { GameEvent, NpcState, SpellDef, LogEntry, MonsterDef } from './types.js';
-import { d, d20, mod, rollAdvantage, applyHalflingLuck } from './Dice.js';
+import { d, d20, mod, rollAdvantage, applyHalflingLuck, rollDiceBonus } from './Dice.js';
 import { chebyshev } from './EnemyAI.js';
 import { canCastSpell } from './ActionGuards.js';
 import { startConcentration, endConcentration } from './ConcentrationSystem.js';
@@ -188,7 +188,7 @@ function resolveAttackRollSpell(
   const coverAcBonus = visionCover === 'three-quarters' ? 5 : visionCover === 'half' ? 2 : 0;
   const effectiveAc = def.ac + coverAcBonus;
 
-  const bonus = spellAttackBonus(ctx);
+  const bonus = spellAttackBonus(ctx) + rollDiceBonus(ctx.state.player.attackDiceBonus);
   // Shocking Grasp grants Advantage if the target wears metal armor. The
   // engine doesn't model armor material yet, so we surface this only when
   // explicitly enabled. Other callers may pass options.advantage too.
@@ -1425,6 +1425,34 @@ function resolveUtilitySpell(ctx: GameContext, spell: SpellDef, slotLevel: numbe
     return;
   }
   switch (spell.id) {
+    // ── Self-buff primitives (US-065 buff layer) ──────────────────────────────
+    // Bless: +1d4 to the caster's attack rolls and saving throws.
+    case 'bless':
+      applySelfBuff(ctx, { spellId: 'bless', modifiers: [{ type: 'dice-bonus', on: 'attack', count: 1, sides: 4 }, { type: 'dice-bonus', on: 'save', count: 1, sides: 4 }], concentration: true });
+      ctx.addLog({ left: `${ctx.playerDef.name} is blessed — +1d4 to attack rolls and saves`, style: 'status' });
+      return;
+    // Guidance: +1d4 to the caster's ability checks.
+    case 'guidance':
+      applySelfBuff(ctx, { spellId: 'guidance', modifiers: [{ type: 'dice-bonus', on: 'check', count: 1, sides: 4 }], concentration: true });
+      ctx.addLog({ left: `${ctx.playerDef.name} channels Guidance — +1d4 to ability checks`, style: 'status' });
+      return;
+    // Shield of Faith: +2 AC.
+    case 'shield-of-faith':
+      applySelfBuff(ctx, { spellId: 'shield-of-faith', modifiers: [{ type: 'ac-bonus', value: 2 }], concentration: true });
+      ctx.addLog({ left: `${ctx.playerDef.name} is warded — +2 AC (now ${ctx.state.player.ac})`, style: 'status' });
+      return;
+    // Haste: +2 AC, Advantage on DEX saves, doubled Speed (the extra action is
+    // descriptive). Speed doubling is modelled as a +base-speed bonus.
+    case 'haste':
+      applySelfBuff(ctx, { spellId: 'haste', modifiers: [{ type: 'ac-bonus', value: 2 }, { type: 'advantage', on: 'save', key: 'dex' }, { type: 'speed-bonus', value: ctx.playerDef.speed }], concentration: true });
+      ctx.addLog({ left: `${ctx.playerDef.name} is hasted — +2 AC, doubled Speed, Advantage on DEX saves`, style: 'status' });
+      return;
+    // Beacon of Hope: Advantage on WIS saves (the death-save advantage + max
+    // healing riders are descriptive until those paths consume buffs).
+    case 'beacon-of-hope':
+      applySelfBuff(ctx, { spellId: 'beacon-of-hope', modifiers: [{ type: 'advantage', on: 'save', key: 'wis' }], concentration: true });
+      ctx.addLog({ left: `${ctx.playerDef.name} radiates hope — Advantage on Wisdom saves`, style: 'status' });
+      return;
     case 'mage-armor':
       // Self/touch: target self (the only valid target without an ally system).
       if (s.player.equippedSlots.armorId) {
