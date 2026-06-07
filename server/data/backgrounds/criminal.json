@@ -9,11 +9,11 @@
     {
       "label": "A",
       "items": [
-        { "itemId": "dagger", "count": 2 },
-        { "name": "Thieves' Tools" },
-        { "name": "Crowbar" },
+        { "itemId": "dagger", "name": "Dagger", "count": 2 },
+        { "itemId": "thieves_tools", "name": "Thieves' Tools" },
+        { "itemId": "crowbar", "name": "Crowbar" },
         { "name": "Pouch", "count": 2 },
-        { "name": "Traveler's Clothes" }
+        { "itemId": "travelers_clothes", "name": "Traveler's Clothes" }
       ],
       "gold": 16
     },

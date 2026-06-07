@@ -14,8 +14,11 @@
   "weaponProficiencies": ["simple", "martial"],
   "armorTraining": ["light", "medium", "heavy", "shields"],
   "toolProficiencies": [],
-  "startingEquipment": { "armorId": "chain_mail", "weaponId": "longsword", "shieldId": "shield" },
-  "startingInventoryIds": ["javelin", "javelin"],
+  "equipmentOptions": [
+    { "label": "A", "armorId": "chain_mail", "weaponId": "greatsword", "shieldId": null, "items": [{ "itemId": "flail" }, { "itemId": "javelin", "count": 8 }, { "itemId": "dungeoneers_pack" }], "gold": 4 },
+    { "label": "B", "armorId": "studded_leather", "weaponId": "longbow", "shieldId": null, "items": [{ "itemId": "scimitar" }, { "itemId": "shortsword" }, { "itemId": "arrow", "count": 20 }, { "itemId": "quiver" }, { "itemId": "dungeoneers_pack" }], "gold": 11 },
+    { "label": "C", "armorId": null, "weaponId": null, "shieldId": null, "items": [], "gold": 155 }
+  ],
   "subclassLevels": [3, 7, 10, 15, 18],
 
   "tracksByLevel": {

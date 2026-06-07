@@ -1,0 +1,17 @@
+{
+  "id": "spear",
+  "name": "Spear",
+  "type": "weapon",
+  "statKey": "str",
+  "damageDice": 1,
+  "damageSides": 6,
+  "damageType": "piercing",
+  "mastery": "sap",
+  "finesse": false,
+  "twoHanded": false,
+  "thrown": true,
+  "throwNormal": 20,
+  "throwLong": 60,
+  "versatile": { "damageDice": 1, "damageSides": 8 },
+  "costCp": 100
+}

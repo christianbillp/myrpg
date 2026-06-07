@@ -9,11 +9,11 @@
     {
       "label": "A",
       "items": [
-        { "name": "Quarterstaff" },
-        { "name": "Calligrapher's Supplies" },
-        { "name": "Book (history)" },
-        { "name": "Parchment", "count": 8 },
-        { "name": "Robe" }
+        { "itemId": "quarterstaff", "name": "Quarterstaff" },
+        { "itemId": "calligraphers_supplies", "name": "Calligrapher's Supplies" },
+        { "itemId": "book", "name": "Book (history)" },
+        { "itemId": "parchment", "name": "Parchment", "count": 8 },
+        { "itemId": "robe", "name": "Robe" }
       ],
       "gold": 8
     },

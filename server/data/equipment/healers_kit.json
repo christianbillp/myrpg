@@ -1,0 +1,1 @@
+{ "id": "healers_kit", "name": "Healer's Kit", "type": "gear", "description": "A kit of bandages and salves with ten uses. As an action, expend one use to stabilise a creature at 0 Hit Points without a Wisdom (Medicine) check.", "costCp": 500 }

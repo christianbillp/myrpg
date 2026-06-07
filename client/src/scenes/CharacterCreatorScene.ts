@@ -59,6 +59,7 @@ interface CreatorState {
   cantripPicks: Set<string>;
   spellPicks: Set<string>;
   equipmentChoice: string;
+  classEquipmentChoice: string;
 }
 
 const STEPS = ["Concept", "Origin", "Abilities", "Skills", "Spells", "Review"] as const;
@@ -112,6 +113,7 @@ export class CharacterCreatorScene extends Phaser.Scene {
     skillPicks: new Set(), speciesSkillPicks: new Set(), speciesFeat: "", featSkillPicks: new Map(),
     languagePicks: new Set(), cantripPicks: new Set(), spellPicks: new Set(),
     equipmentChoice: "A",
+    classEquipmentChoice: "A",
   };
 
   constructor() { super("CharacterCreatorScene"); }
@@ -909,11 +911,26 @@ export class CharacterCreatorScene extends Phaser.Scene {
     ta.addEventListener("input", () => { this.state.description = ta.value; });
     c.appendChild(ta);
 
+    // SRD: class AND background each offer an A/B[/C] starting-equipment choice.
+    const clsEq = this.classOf(this.state.classId);
+    if (clsEq?.equipmentOptions && clsEq.equipmentOptions.length > 1) {
+      const eqRow = document.createElement("div");
+      eqRow.style.cssText = "display:flex;gap:8px;margin-top:10px;align-items:center;font-size:12px;flex-wrap:wrap;";
+      eqRow.innerHTML = `<span style="color:#88aacc;">Class gear:</span>`;
+      for (const opt of clsEq.equipmentOptions) {
+        const wpn = opt.weaponId ? `${opt.weaponId.replace(/_/g, " ")} ` : "";
+        eqRow.appendChild(this.button(`${opt.label} (${wpn}${opt.gold} gp)`, this.state.classEquipmentChoice === opt.label ? "#3a2a1a" : "#1a1a2a", () => {
+          this.state.classEquipmentChoice = opt.label; this.renderStep();
+        }));
+      }
+      c.appendChild(eqRow);
+    }
+
     const bg = this.backgrounds.find((b) => b.id === this.state.backgroundId);
     if (bg && bg.equipmentOptions.length > 1) {
       const eqRow = document.createElement("div");
-      eqRow.style.cssText = "display:flex;gap:8px;margin-top:10px;align-items:center;font-size:12px;";
-      eqRow.innerHTML = `<span style="color:#88aacc;">Starting gear:</span>`;
+      eqRow.style.cssText = "display:flex;gap:8px;margin-top:10px;align-items:center;font-size:12px;flex-wrap:wrap;";
+      eqRow.innerHTML = `<span style="color:#88aacc;">Background gear:</span>`;
       for (const opt of bg.equipmentOptions) {
         eqRow.appendChild(this.button(`${opt.label} (${opt.gold} gp)`, this.state.equipmentChoice === opt.label ? "#3a2a1a" : "#1a1a2a", () => {
           this.state.equipmentChoice = opt.label; this.renderStep();
@@ -958,6 +975,7 @@ export class CharacterCreatorScene extends Phaser.Scene {
         featSkills: [...this.state.featSkillPicks.values()].flatMap((s) => [...s]),
         languages: [...this.state.languagePicks],
         equipmentChoice: this.state.equipmentChoice,
+        classEquipmentChoice: this.state.classEquipmentChoice,
         cantripIds: cls?.spellcasting ? [...this.state.cantripPicks] : undefined,
         preparedSpellIds: cls?.spellcasting ? [...this.state.spellPicks] : undefined,
         shortDescription: this.state.shortDescription,

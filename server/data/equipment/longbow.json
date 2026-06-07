@@ -1,0 +1,21 @@
+{
+  "id": "longbow",
+  "name": "Longbow",
+  "type": "weapon",
+  "statKey": "dex",
+  "damageDice": 1,
+  "damageSides": 8,
+  "damageType": "piercing",
+  "mastery": "slow",
+  "finesse": false,
+  "twoHanded": true,
+  "thrown": false,
+  "throwNormal": 0,
+  "throwLong": 0,
+  "rangeNormal": 150,
+  "rangeLong": 600,
+  "ammunitionType": "arrow",
+  "loading": false,
+  "heavy": true,
+  "costCp": 5000
+}

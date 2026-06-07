@@ -1,0 +1,16 @@
+{
+  "id": "scimitar",
+  "name": "Scimitar",
+  "type": "weapon",
+  "statKey": "dex",
+  "damageDice": 1,
+  "damageSides": 6,
+  "damageType": "slashing",
+  "mastery": "nick",
+  "finesse": true,
+  "twoHanded": false,
+  "thrown": false,
+  "throwNormal": 0,
+  "throwLong": 0,
+  "costCp": 2500
+}

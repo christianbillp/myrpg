@@ -9,11 +9,11 @@
     {
       "label": "A",
       "items": [
-        { "name": "Calligrapher's Supplies" },
-        { "name": "Book (prayers)" },
-        { "name": "Holy Symbol" },
-        { "name": "Parchment", "count": 10 },
-        { "name": "Robe" }
+        { "itemId": "calligraphers_supplies", "name": "Calligrapher's Supplies" },
+        { "itemId": "book", "name": "Book (prayers)" },
+        { "itemId": "holy_symbol", "name": "Holy Symbol" },
+        { "itemId": "parchment", "name": "Parchment", "count": 10 },
+        { "itemId": "robe", "name": "Robe" }
       ],
       "gold": 8
     },

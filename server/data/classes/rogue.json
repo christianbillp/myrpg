@@ -14,8 +14,10 @@
   "weaponProficiencies": ["simple", "martial-finesse-or-light"],
   "armorTraining": ["light"],
   "toolProficiencies": ["thieves-tools"],
-  "startingEquipment": { "armorId": "leather_armor", "weaponId": "shortsword", "shieldId": null },
-  "startingInventoryIds": ["dagger", "dagger", "shortbow", "arrow", "thieves_tools"],
+  "equipmentOptions": [
+    { "label": "A", "armorId": "leather_armor", "weaponId": "shortsword", "shieldId": null, "items": [{ "itemId": "dagger", "count": 2 }, { "itemId": "shortbow" }, { "itemId": "arrow", "count": 20 }, { "itemId": "quiver" }, { "itemId": "thieves_tools" }, { "itemId": "burglars_pack" }], "gold": 8 },
+    { "label": "B", "armorId": null, "weaponId": null, "shieldId": null, "items": [], "gold": 100 }
+  ],
   "subclassLevels": [3, 9, 13, 17],
 
   "tracksByLevel": {

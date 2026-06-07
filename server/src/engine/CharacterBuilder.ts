@@ -74,8 +74,11 @@ export interface CharacterCreationChoices {
   /** Spellcasting ability for species-granted cantrips, when the species/lineage
    *  offers a choice (Elf/Tiefling: int/wis/cha). Used only for non-casters. */
   racialSpellAbility?: string;
-  /** Background equipment option label (e.g. "A" / "B") — sets starting gold. */
+  /** Background equipment option label (e.g. "A" / "B"). */
   equipmentChoice?: string;
+  /** Class starting-equipment option label (Fighter "A"/"B"/"C", others "A"/"B").
+   *  Defaults to the first option when omitted. */
+  classEquipmentChoice?: string;
   /** Caster cantrip picks (count = class cantrips-known at L1). */
   cantripIds?: string[];
   /** Caster prepared/known/spellbook picks (count = class prepared at L1). */
@@ -254,12 +257,20 @@ export function buildPlayerDef(choices: CharacterCreationChoices, defs: Characte
     };
   }
 
-  // ── Equipment + starting gold ───────────────────────────────────────────────
-  const eqOption = bg.equipmentOptions.find((o) => o.label === choices.equipmentChoice) ?? bg.equipmentOptions[0];
-  const defaultCp = (eqOption?.gold ?? 0) * 100;
-  const defaultEquipment = cls.startingEquipment
-    ? { ...cls.startingEquipment }
-    : { armorId: null, weaponId: null, shieldId: null };
+  // ── Equipment + starting gold (SRD: class AND background each grant an
+  //    A/B[/C] package — an armor/weapon/shield loadout, inventory items, and
+  //    GP; the gold-only option leaves the slots empty). Both contribute. ─────
+  const classOption = cls.equipmentOptions?.find((o) => o.label === choices.classEquipmentChoice) ?? cls.equipmentOptions?.[0];
+  const bgOption = bg.equipmentOptions.find((o) => o.label === choices.equipmentChoice) ?? bg.equipmentOptions[0];
+  const expandItems = (items?: Array<{ itemId?: string; count?: number }>): string[] =>
+    (items ?? []).flatMap((it) => (it.itemId ? Array<string>(Math.max(1, it.count ?? 1)).fill(it.itemId) : []));
+  const defaultCp = ((classOption?.gold ?? 0) + (bgOption?.gold ?? 0)) * 100;
+  const defaultEquipment = {
+    armorId: classOption?.armorId ?? null,
+    weaponId: classOption?.weaponId ?? null,
+    shieldId: classOption?.shieldId ?? null,
+  };
+  const packageInventoryIds = [...expandItems(classOption?.items), ...expandItems(bgOption?.items)];
 
   const sneakAttackDice = (trackAt(cls, 'sneak-attack-dice', 1) as number | undefined) ?? 0;
 
@@ -338,7 +349,7 @@ export function buildPlayerDef(choices: CharacterCreationChoices, defs: Characte
     savageAttacker: false,
     fightingStyleDefense: false,
     defaultEquipment,
-    defaultInventoryIds: [...(cls.startingInventoryIds ?? [])],
+    defaultInventoryIds: packageInventoryIds,
     defaultCp,
     mainAttack: { ...UNARMED },  // recomputed by applyEquipment below
     tokenAsset: normalizeToken(choices.tokenAsset) ?? '/tokens/player_human_wizard.svg',

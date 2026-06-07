@@ -9,13 +9,13 @@
     {
       "label": "A",
       "items": [
-        { "name": "Spear" },
-        { "itemId": "shortbow" },
-        { "name": "Arrows", "count": 20 },
-        { "name": "Gaming Set" },
-        { "name": "Healer's Kit" },
-        { "name": "Quiver" },
-        { "name": "Traveler's Clothes" }
+        { "itemId": "spear", "name": "Spear" },
+        { "itemId": "shortbow", "name": "Shortbow" },
+        { "itemId": "arrow", "name": "Arrows", "count": 20 },
+        { "itemId": "gaming_set", "name": "Gaming Set" },
+        { "itemId": "healers_kit", "name": "Healer's Kit" },
+        { "itemId": "quiver", "name": "Quiver" },
+        { "itemId": "travelers_clothes", "name": "Traveler's Clothes" }
       ],
       "gold": 14
     },

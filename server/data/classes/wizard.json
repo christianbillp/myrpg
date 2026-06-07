@@ -14,8 +14,10 @@
   "weaponProficiencies": ["simple"],
   "armorTraining": [],
   "toolProficiencies": [],
-  "startingEquipment": { "armorId": null, "weaponId": "quarterstaff", "shieldId": null },
-  "startingInventoryIds": ["dagger", "spellbook"],
+  "equipmentOptions": [
+    { "label": "A", "armorId": null, "weaponId": "quarterstaff", "shieldId": null, "items": [{ "itemId": "dagger", "count": 2 }, { "itemId": "spellbook" }, { "itemId": "robe" }, { "itemId": "scholars_pack" }], "gold": 5 },
+    { "label": "B", "armorId": null, "weaponId": null, "shieldId": null, "items": [], "gold": 55 }
+  ],
   "subclassLevels": [3, 6, 10, 14],
 
   "spellcasting": {

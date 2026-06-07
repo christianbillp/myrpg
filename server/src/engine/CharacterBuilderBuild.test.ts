@@ -60,10 +60,33 @@ describe('PlayerDef builder (US-122)', () => {
     expect(pd.savingThrows.dex).toBe(abilityModifier(13));  // not proficient
     expect(pd.skills.athletics).toBe(abilityModifier(17) + 2);
     expect(pd.skills.arcana).toBe(abilityModifier(8));      // not proficient
-    expect(pd.defaultEquipment.weaponId).toBe('longsword'); // class starting loadout
+    // Class option A (SRD Fighter A): chain mail + greatsword (no shield) + flail + 8 javelins + pack.
+    expect(pd.defaultEquipment).toEqual({ armorId: 'chain_mail', weaponId: 'greatsword', shieldId: null });
+    expect(pd.defaultInventoryIds.filter((i) => i === 'javelin')).toHaveLength(8);
+    expect(pd.defaultInventoryIds).toEqual(expect.arrayContaining(['flail', 'dungeoneers_pack']));
+    // Background (Soldier A) package items also land in inventory.
+    expect(pd.defaultInventoryIds).toEqual(expect.arrayContaining(['spear', 'healers_kit', 'quiver']));
+    // Starting GP = class option (4) + background option (14) = 18 GP → 1800 CP.
+    expect(pd.defaultCp).toBe(1800);
     expect(pd.defaultFeatureIds).toContain('second-wind');
     expect(pd.spellcastingAbility).toBeUndefined();         // non-caster
     expect(pd.tokenAsset.startsWith('/')).toBe(true);       // client builds `${API_URL}${tokenAsset}`
+  });
+
+  it('honours the class equipment choice (Fighter C = 155 GP, empty slots)', () => {
+    const r = buildPlayerDef({
+      name: 'Gold Fighter', speciesId: 'human', backgroundId: 'soldier', classId: 'fighter',
+      abilityMethod: 'standard-array', baseAbilityScores: arr(15, 13, 14, 8, 12, 10),
+      backgroundAbility: { kind: 'two-one', plusTwo: 'str', plusOne: 'con' },
+      skillProficiencies: ['athletics', 'perception'],
+      speciesSkills: ['intimidation'], speciesFeat: 'alert',
+      classEquipmentChoice: 'C', equipmentChoice: 'B',  // 155 GP + 50 GP, no items
+    }, defs);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.playerDef.defaultEquipment).toEqual({ armorId: null, weaponId: null, shieldId: null });
+    expect(r.playerDef.defaultInventoryIds).toEqual([]);
+    expect(r.playerDef.defaultCp).toBe((155 + 50) * 100);
   });
 
   it('builds a wizard: caster fields + INT save + a free hand for casting', () => {

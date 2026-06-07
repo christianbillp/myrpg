@@ -1,0 +1,12 @@
+{
+  "id": "chain_shirt",
+  "name": "Chain Shirt",
+  "type": "armor",
+  "category": "medium",
+  "baseAc": 13,
+  "addDex": true,
+  "maxDex": 2,
+  "stealthDisadv": false,
+  "minStr": null,
+  "costCp": 5000
+}
