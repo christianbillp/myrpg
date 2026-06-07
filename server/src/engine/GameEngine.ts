@@ -1059,6 +1059,16 @@ export class GameEngine {
     // SRD: resistance/vulnerability/immunity adjusts the typed damage first,
     // before Temporary HP absorbs and before the CON save sees it.
     let effective = damageType ? this.playerResistMod(damage, damageType) : damage;
+    // SRD Resistance cantrip: reduce damage of the warded type by 1d4. (The
+    // SRD "only once per turn" limit is not modelled — every matching instance
+    // is reduced.)
+    const dr = s.player.buffDamageReduction;
+    if (dr && effective > 0 && damageType === dr.damageType) {
+      const reduced = rollDiceBonus({ count: dr.count, sides: dr.sides });
+      const after = Math.max(0, effective - reduced);
+      this.addLog({ left: `Resistance wards ${dr.damageType} — ${effective}→${after} (−${reduced})`, style: 'status' });
+      effective = after;
+    }
     // SRD Goliath Stone's Endurance: a Reaction that reduces the damage taken
     // by 1d12 + CON before Temporary HP / real HP see it.
     effective = applyStoneEndurance(this.ctx, effective);

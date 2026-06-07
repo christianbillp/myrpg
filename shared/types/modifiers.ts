@@ -41,7 +41,11 @@ export type Modifier =
   /** Resistance to a damage type for the buff's duration (Protection from
    *  Energy). Derived into `PlayerState.buffResistances`, merged by the player
    *  damage path alongside species resistances. */
-  | { type: 'resistance'; damageType: string };
+  | { type: 'resistance'; damageType: string }
+  /** Flat dice reduction to incoming damage of one type (Resistance cantrip →
+   *  −1d4 of the chosen type). Derived into `PlayerState.buffDamageReduction`
+   *  and applied in `GameEngine.applyDamageToPlayer`. */
+  | { type: 'damage-reduction'; damageType: string; count: number; sides: number };
 
 /**
  * Shared contract for anything that contributes typed `Modifier`s to a

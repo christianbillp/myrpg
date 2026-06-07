@@ -1401,7 +1401,7 @@ function resolveHealSpell(ctx: GameContext, spell: SpellDef, targetIds: string[]
   return s.player.hp > before;
 }
 
-function resolveUtilitySpell(ctx: GameContext, spell: SpellDef, slotLevel: number, tile?: { x: number; y: number }, targetIds?: string[], abilityChoice?: 'str' | 'dex' | 'con' | 'int' | 'wis' | 'cha'): void {
+function resolveUtilitySpell(ctx: GameContext, spell: SpellDef, slotLevel: number, tile?: { x: number; y: number }, targetIds?: string[], abilityChoice?: 'str' | 'dex' | 'con' | 'int' | 'wis' | 'cha', damageTypeChoice?: string): void {
   // No roll; just narrate. Specific lasting effects (Mage Armor, Shield as
   // reaction) handled by spell-id switch — kept here, not as separate files,
   // since each is one-line semantic flag flips.
@@ -1453,6 +1453,21 @@ function resolveUtilitySpell(ctx: GameContext, spell: SpellDef, slotLevel: numbe
       applySelfBuff(ctx, { spellId: 'beacon-of-hope', modifiers: [{ type: 'advantage', on: 'save', key: 'wis' }], concentration: true });
       ctx.addLog({ left: `${ctx.playerDef.name} radiates hope — Advantage on Wisdom saves`, style: 'status' });
       return;
+    // Resistance (cantrip): reduce damage of one chosen type by 1d4.
+    case 'resistance': {
+      const dt = (spell.damageTypeChoices?.includes(damageTypeChoice ?? '') ? damageTypeChoice : spell.damageTypeChoices?.[0]) ?? 'fire';
+      applySelfBuff(ctx, { spellId: 'resistance', modifiers: [{ type: 'damage-reduction', damageType: dt, count: 1, sides: 4 }], concentration: true });
+      ctx.addLog({ left: `${ctx.playerDef.name} is warded against ${dt} — reduce that damage by 1d4`, style: 'status' });
+      return;
+    }
+    // Protection from Energy: Resistance to one chosen damage type for the
+    // duration. The damage-type picker rides on `damageTypeChoice`.
+    case 'protection-from-energy': {
+      const dt = (spell.damageTypeChoices?.includes(damageTypeChoice ?? '') ? damageTypeChoice : spell.damageTypeChoices?.[0]) ?? 'fire';
+      applySelfBuff(ctx, { spellId: 'protection-from-energy', modifiers: [{ type: 'resistance', damageType: dt }], concentration: true });
+      ctx.addLog({ left: `${ctx.playerDef.name} is warded against ${dt} — Resistance for the duration`, style: 'status' });
+      return;
+    }
     case 'mage-armor':
       // Self/touch: target self (the only valid target without an ally system).
       if (s.player.equippedSlots.armorId) {
@@ -1999,7 +2014,7 @@ export function doCastSpell(
     // Utility / self spells (Mage Armor, Detect Magic, …) always produce
     // their effect by definition — they don't roll for it. Tile is passed
     // through so AOE-shaped utility spells (Fog Cloud) can read it.
-    resolveUtilitySpell(ctx, spell, slotLevel, tile, targetIds, abilityChoice);
+    resolveUtilitySpell(ctx, spell, slotLevel, tile, targetIds, abilityChoice, damageTypeChoice);
     anyEffect = true;
   }
 

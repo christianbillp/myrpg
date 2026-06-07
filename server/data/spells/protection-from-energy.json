@@ -12,5 +12,6 @@
   "durationRounds": 600,
   "concentration": true,
   "ritual": false,
-  "description": "For the duration, the willing creature you touch has Resistance to one damage type of your choice: Acid, Cold, Fire, Lightning, or Thunder. Engine: the ally damage-resistance buff is descriptive only until an ally-buff resolver lands (the player damage path already supports resistances)."
+  "damageTypeChoices": ["acid", "cold", "fire", "lightning", "thunder"],
+  "description": "For the duration, the willing creature you touch has Resistance to one damage type of your choice: Acid, Cold, Fire, Lightning, or Thunder. Engine: cast on self, the chosen-type Resistance applies via the buff layer (pick the type when casting); targeting an ally is descriptive."
 }

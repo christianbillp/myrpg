@@ -132,6 +132,10 @@ export interface PlayerState {
    *  derived from `resistance` modifiers and merged by the player damage path
    *  alongside species resistances. */
   buffResistances?: string[];
+  /** Typed flat dice reduction to incoming damage from an active self-buff
+   *  (Resistance cantrip → −1d4 of the chosen type), derived from a
+   *  `damage-reduction` modifier and applied in `applyDamageToPlayer`. */
+  buffDamageReduction?: { damageType: string; count: number; sides: number };
   /** Set true by Expeditious Retreat; while active, the player may take the
    *  Dash action as a bonus action and receives the upfront Dash on the
    *  casting turn. Cleared when concentration on the spell ends. */

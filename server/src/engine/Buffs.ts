@@ -97,6 +97,9 @@ export function recomputeBuffs(ctx: GameContext): void {
   // Damage resistances granted by buffs (Protection from Energy).
   const resist = mods.filter((m): m is Extract<typeof m, { type: 'resistance' }> => m.type === 'resistance').map((m) => m.damageType);
   p.buffResistances = resist.length ? [...new Set(resist)] : undefined;
+  // Typed flat damage reduction (Resistance cantrip → −1d4 of the chosen type).
+  const dr = mods.find((m): m is Extract<typeof m, { type: 'damage-reduction' }> => m.type === 'damage-reduction');
+  p.buffDamageReduction = dr ? { damageType: dr.damageType, count: dr.count, sides: dr.sides } : undefined;
 
   // shieldActive is owned outside the buff list (Shield is a reaction) — pass
   // it through unchanged; mageArmor now comes from the derived flag above.

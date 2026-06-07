@@ -12,5 +12,6 @@
   "durationRounds": 10,
   "concentration": true,
   "ritual": false,
-  "description": "You touch a willing creature and choose a damage type: Acid, Bludgeoning, Cold, Fire, Lightning, Necrotic, Piercing, Poison, Radiant, Slashing, or Thunder. When the creature takes damage of the chosen type before the spell ends, the creature reduces the total damage taken by 1d4. A creature can benefit from this spell only once per turn. Engine: the 1d4 damage reduction is descriptive only until the d20-test/damage buff primitive lands."
+  "damageTypeChoices": ["acid", "bludgeoning", "cold", "fire", "lightning", "necrotic", "piercing", "poison", "radiant", "slashing", "thunder"],
+  "description": "You touch a willing creature and choose a damage type. When the creature takes damage of the chosen type before the spell ends, it reduces the total damage taken by 1d4 (once per turn). Engine: cast on self, the −1d4 reduction applies via the buff layer (pick the type when casting); the once-per-turn limit is not modelled — every matching instance is reduced."
 }

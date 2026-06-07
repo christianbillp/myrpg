@@ -21,7 +21,9 @@ describe('recomputeBuffs — buff layer derivation', () => {
     applySelfBuff(ctx, { spellId: 'guidance', modifiers: [{ type: 'dice-bonus', on: 'check', count: 1, sides: 4 }] });
     applySelfBuff(ctx, { spellId: 'haste', modifiers: [{ type: 'ac-bonus', value: 2 }, { type: 'advantage', on: 'save', key: 'dex' }] });
     applySelfBuff(ctx, { spellId: 'protection-from-energy', modifiers: [{ type: 'resistance', damageType: 'fire' }] });
+    applySelfBuff(ctx, { spellId: 'resistance', modifiers: [{ type: 'damage-reduction', damageType: 'cold', count: 1, sides: 4 }] });
 
+    expect(state.player.buffDamageReduction).toEqual({ damageType: 'cold', count: 1, sides: 4 });
     expect(state.player.acBonus).toBe(4);                                // Shield of Faith + Haste stack
     expect(state.player.attackDiceBonus).toEqual({ count: 1, sides: 4 });
     expect(state.player.saveDiceBonus).toEqual({ count: 1, sides: 4 });
