@@ -499,6 +499,13 @@ export interface GameState {
   pendingAigmEvents: string[];
   /** Authored world flags keyed by name. Written by `set_flag` trigger actions, read by `flag_set` / `flag_unset` / `flag_equals` guards. Persisted with the world save. */
   worldFlags: Record<string, WorldFlagValue>;
+  /** Active/completed/failed quests for this character (structured quest system).
+   *  Persisted with the world save; adventure/world-scope quests also carry across
+   *  chapters via `AdventureSave`. The `QuestSystem` advances these off bus events. */
+  quests: import('./quests.js').QuestState[];
+  /** Defs for quests the AIGM created at runtime (not loaded from JSON). Stored
+   *  here so a runtime quest's definition survives reload alongside its state. */
+  runtimeQuestDefs: import('./quests.js').QuestDef[];
   /** Last variant index picked per `narrationId`. Used by NarrationSystem to avoid back-to-back repeats. */
   narrationLastUsed: Record<string, number>;
   /** Monotonic counter incremented once per off-camera `WorldTick`. Used as

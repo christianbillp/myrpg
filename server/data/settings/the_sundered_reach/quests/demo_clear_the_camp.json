@@ -1,0 +1,21 @@
+{
+  "id": "demo_clear_the_camp",
+  "title": "Clear the Roadside Camp",
+  "description": "A demo quest: scout the bandit camp on the east road, then drive the bandits off. Auto-advances as you engage and win.",
+  "scope": "encounter",
+  "steps": [
+    {
+      "id": "scout",
+      "text": "Scout the bandit camp",
+      "completeWhen": [{ "type": "flag_equals", "name": "camp_scouted", "value": true }],
+      "xpReward": 25
+    },
+    {
+      "id": "defeat",
+      "text": "Defeat the bandits",
+      "completeWhen": [{ "type": "enemies_alive", "op": "eq", "count": 0 }],
+      "xpReward": 100
+    }
+  ],
+  "xpReward": 50
+}

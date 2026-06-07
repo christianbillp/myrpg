@@ -4,6 +4,9 @@ import type {
   EngineEvent, ComparisonOp, GameEvent,
 } from './types.js';
 import { pickNarrationVariant } from './NarrationSystem.js';
+// Runtime-only use (inside the start_quest action handler) — the QuestSystem ↔
+// TriggerSystem cycle is safe because neither calls the other at module eval.
+import { startQuest } from './QuestSystem.js';
 import { d20 as d20Local } from './Dice.js';
 import { setRelation, adjustRelation } from './FactionRelations.js';
 import { PLAYER_FACTION_ID } from '../../../shared/types.js';
@@ -308,6 +311,16 @@ const TRIGGER_ACTIONS: TriggerRegistry = {
     ctx.state.worldFlags[a.name] = a.value;
     // Publishing flag_set lets other triggers fan out off a flag change.
     ctx.publish({ type: 'flag_set', name: a.name, value: a.value });
+  },
+  set_objective: (ctx, a) => {
+    const text = a.text.trim();
+    if (!text || ctx.state.objective === text) return;
+    ctx.state.objective = text;
+    ctx.addLog({ left: `New objective: ${text}`, style: 'status' });
+  },
+  start_quest: (ctx, a) => {
+    const def = ctx.defs.quests.find((q) => q.id === a.questId);
+    if (def) startQuest(ctx, def);
   },
   pick_random_value: (ctx, a) => {
     if (!Array.isArray(a.values) || a.values.length === 0) return;

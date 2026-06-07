@@ -41,6 +41,7 @@ export class BootScene extends Phaser.Scene {
     this.load.json("species",            `${API_URL}/species`);
     this.load.json("spells",             `${API_URL}/spells`);
     this.load.json("features",           `${API_URL}/features`);
+    this.load.json("quests",             `${API_URL}/quests`);
     this.load.json("classes",            `${API_URL}/classes`);
     this.load.json("subclasses",         `${API_URL}/subclasses`);
     this.load.json("maps",               `${API_URL}/maps`);
@@ -75,6 +76,7 @@ export class BootScene extends Phaser.Scene {
       this.registry.set("species",            this.cache.json.get("species"));
       this.registry.set("spells",             this.cache.json.get("spells"));
       this.registry.set("features",           this.cache.json.get("features"));
+      this.registry.set("quests",             this.cache.json.get("quests") ?? []);
       this.registry.set("classes",            this.cache.json.get("classes") ?? []);
       this.registry.set("subclasses",         this.cache.json.get("subclasses") ?? []);
       this.registry.set("maps",               this.cache.json.get("maps"));

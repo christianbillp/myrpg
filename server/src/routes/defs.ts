@@ -73,6 +73,7 @@ export function registerDefsRoutes(server: FastifyInstance, ctx: AppCtx): void {
   server.get("/species",       async () => getDefs().species);
   server.get("/spells",        async () => getDefs().spells);
   server.get("/features",      async () => getDefs().features);
+  server.get("/quests",        async () => getDefs().quests);
   server.get("/classes",       async () => getDefs().classes);
   server.get("/subclasses",    async () => getDefs().subclasses);
   server.get("/maps",          async () => getDefs().maps);

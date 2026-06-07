@@ -15,6 +15,7 @@ import type { PlayerState, SpellDef, FeatureDef, ClassDef, SubclassDef } from ".
 import { featuresAt as cpFeaturesAt, subclassFeaturesAt, subclassGrantedSpellsAt, subclassGrantedCantripsAt } from "../../../shared/classProgression";
 import { buildPlayerStatusChips, STATUS_TONE_COLOR } from "./PlayerStatus";
 import { formatCoins } from "../../../shared/currency";
+import { readQuickcast, toggleQuickcast } from "./quickcastPrefs";
 
 function mod(score: number): number { return Math.floor((score - 10) / 2); }
 function signed(n: number): string { return n >= 0 ? `+${n}` : `${n}`; }
@@ -107,6 +108,8 @@ export interface CharacterSheetCallbacks {
   onCastSpell: (spellId: string) => void;
   /** Begin a ritual cast for the named spell (no slot, exploring-only). */
   onRitualCast: (spellId: string) => void;
+  /** The player added/removed a spell from the quickcast menu — refresh the panel. */
+  onQuickcastChanged: () => void;
   onClose: () => void;
 }
 
@@ -672,6 +675,7 @@ export class CharacterSheetOverlay extends BaseOverlay {
     const preparedSet = new Set(state.preparedSpellIds);
 
     const castableSet = new Set(this.inputs.castableSpellIds);
+    const quickcastSet = new Set(readQuickcast(playerDef.id));
     const isExploring = this.inputs.isExploring;
 
     // SRD Somatic/Material component gate (US-116): mirror the server's
@@ -757,12 +761,19 @@ export class CharacterSheetOverlay extends BaseOverlay {
       const ritualBtn = sp.ritual && isExploring
         ? `<button data-ritual="${escHtml(id)}" class="gui-btn-overlay" style="margin-left:6px;width:78px;height:20px;background:#1a1a2e;border:1px solid #6a5a8e;color:#a89dcc;font-size:9px;">RITUAL CAST</button>`
         : "";
+      // Quickcast toggle (✦) — only on prepared/cantrip rows (the castable ones).
+      // Filled accent when the spell is in the Player Panel's quickcast menu.
+      const inQuick = quickcastSet.has(id);
+      const quickBtn = opts.prepared
+        ? `<button data-quickcast="${escHtml(id)}" title="${inQuick ? "Remove from quickcast menu" : "Add to quickcast menu (CAST button)"}" class="gui-btn-overlay" style="margin-left:8px;width:22px;height:20px;background:#0a1520;border:1px solid ${inQuick ? ACCENT : "#2a3540"};color:${inQuick ? ACCENT : "#556677"};font-size:11px;">✦</button>`
+        : "";
 
       return `
         <div style="display:flex;align-items:center;justify-content:space-between;padding:3px 4px;border-bottom:1px solid #1a2030;">
           <span title="${escHtml(sp.description)}" style="font-size:11px;color:${opts.prepared ? "#c8dae8" : "#778899"};min-width:120px;cursor:help;">${escHtml(sp.name)}</span>
           <span style="font-size:9px;color:#556677;text-align:right;flex:1;margin-left:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escHtml(bits.join(" · "))}</span>
           <span style="font-size:9px;color:${tagColor};margin-left:10px;min-width:42px;text-align:right;">${escHtml(tag)}</span>
+          ${quickBtn}
           ${castBtn}
           ${ritualBtn}
         </div>`;
@@ -826,6 +837,15 @@ export class CharacterSheetOverlay extends BaseOverlay {
       btn.addEventListener("pointerdown", (e) => {
         e.stopPropagation();
         this.callbacks.onRitualCast(btn.dataset.ritual!);
+      });
+    });
+    // Quickcast add/remove — client-only pref; re-render the tab to update the ✦.
+    this.contentEl.querySelectorAll<HTMLButtonElement>("[data-quickcast]").forEach((btn) => {
+      btn.addEventListener("pointerdown", (e) => {
+        e.stopPropagation();
+        toggleQuickcast(playerDef.id, btn.dataset.quickcast!);
+        this.callbacks.onQuickcastChanged();
+        this.renderActiveTab();
       });
     });
   }

@@ -22,6 +22,10 @@ export interface OverlayCallbacks {
   onBeginSpellCast: (spellId: string) => void;
   /** Begin a ritual cast — exploring-only, no slot consumed. Caller handles target prompting. */
   onBeginRitualCast: (spellId: string) => void;
+  /** The player toggled a spell's quickcast membership in the Spells tab — the
+   *  host should rebuild the Player Panel so its CAST menu reflects the change
+   *  immediately (it's a client-only pref, so no server tick fires). */
+  onQuickcastChanged: () => void;
   /** Player accepted a pending reaction prompt — server should fire the deferred effect. */
   onAcceptReaction: () => void;
   /** Player declined / dismissed the reaction prompt — server should skip the deferred effect. */
@@ -169,6 +173,7 @@ export class OverlayManager {
       onCastScroll: (itemId)    => { this.closeCharacterSheet(); this.callbacks.onUseScroll(itemId); },
       onCastSpell:  (spellId)   => { this.closeCharacterSheet(); this.callbacks.onBeginSpellCast(spellId); },
       onRitualCast: (spellId)   => { this.closeCharacterSheet(); this.callbacks.onBeginRitualCast(spellId); },
+      onQuickcastChanged: ()    => this.callbacks.onQuickcastChanged(),
       onClose:   ()             => { this.characterSheet = null; WorldPause.release('overlay:character-sheet'); },
     }, initialTab);
   }

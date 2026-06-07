@@ -97,7 +97,7 @@ runLifecycleCheck('DevToolsPanel', () => {
   const scale = new UIScale(canvas, 800, 600);
   return new DevToolsPanel(
     scale,
-    { onReloadEncounter: () => {}, onCompleteObjective: () => {} },
+    { onReloadEncounter: () => {}, onCompleteObjective: () => {}, onLeaveEncounter: () => {} },
     { showCompleteObjective: true },
   );
 });

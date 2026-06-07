@@ -1,0 +1,26 @@
+{
+  "id": "bandit_bounty",
+  "title": "Bounty: The East-Road Bandits",
+  "description": "Vask posted a Bureau contract on the bandits raiding the east road. Track them down, clear the camp, and report back to collect.",
+  "scope": "encounter",
+  "steps": [
+    {
+      "id": "find",
+      "text": "Track the bandits to their camp",
+      "completeWhen": [{ "type": "flag_equals", "name": "bandit_camp_found", "value": true }],
+      "xpReward": 25
+    },
+    {
+      "id": "clear",
+      "text": "Defeat the bandits",
+      "completeWhen": [{ "type": "enemies_alive", "op": "eq", "count": 0 }],
+      "xpReward": 75
+    },
+    {
+      "id": "report",
+      "text": "Return to Vask to turn in the contract",
+      "completeWhen": [{ "type": "flag_equals", "name": "bounty_reported", "value": true }]
+    }
+  ],
+  "xpReward": 50
+}

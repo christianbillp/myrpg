@@ -61,6 +61,9 @@ export interface CreateSessionRequest {
     /** Cross-chapter discovered factions (Pass 1+). Empty when absent. */
     seedDiscoveredFactions?: string[];
     seedRumors?: Rumor[];
+    /** Cross-chapter quests (adventure/world scope) + their runtime defs. */
+    seedQuests?: import('./quests.js').QuestState[];
+    seedRuntimeQuestDefs?: import('./quests.js').QuestDef[];
   };
   resumeHp?: number;
   resumeXp?: number;
@@ -68,6 +71,10 @@ export interface CreateSessionRequest {
   resumeInventoryIds?: string[];
   resumeEquippedSlots?: EquipmentSlots;
   resumeResources?: Record<string, number>;
+  /** Resume the structured quest state + any runtime (AIGM-created) quest defs
+   *  from a world save so quests survive a reload mid-encounter. */
+  resumeQuests?: import('./quests.js').QuestState[];
+  resumeRuntimeQuestDefs?: import('./quests.js').QuestDef[];
   resumeSpellSlots?: number[];
   resumePreparedSpellIds?: string[];
   resumeConcentratingOn?: string | null;

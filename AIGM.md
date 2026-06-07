@@ -673,15 +673,59 @@ Writes a value to `GameState.worldFlags[name]`. Use when a narrative resolution 
 
 ---
 
-### Quests
+### Quests & objectives
+
+Quests are **structured** — an ordered list of steps, each with a player-facing objective line. The player's OBJECTIVE line and the Quest Log show the active quest's current step. Active quests appear in CURRENT STATE under **ACTIVE QUESTS** with their `id`, current step id/text, and the full step list — use those ids with the tools below. Authored quests (`quest_id`) may auto-advance via their own conditions; calling these tools is still safe. **Quests grant XP only** — never promise gold or items through a quest; hand tangible rewards over in the world/dialogue (a paymaster, a body, a chest) so the fiction stays intact.
+
+#### `set_objective`
+
+Replace the player-facing OBJECTIVE line. Use for one-off direction or when there is no active quest. If a quest is active, its current step drives the objective — prefer `advance_quest` for quest progress.
+
+| Parameter | Type   | Required |
+| --------- | ------ | -------- |
+| `text`    | string | yes      |
+| `reason`  | string | yes      |
+
+#### `start_quest`
+
+Start a quest and show it in the Quest Log. Either reference an authored quest by `quest_id`, **or** create one on the fly with `title`, `description`, and ordered `steps`. You drive a runtime quest: call `advance_quest` as steps are accomplished, then `complete_quest` / `fail_quest`.
+
+| Parameter     | Type     | Required | Notes                                                                 |
+| ------------- | -------- | -------- | --------------------------------------------------------------------- |
+| `quest_id`    | string   | no       | Authored quest id. Omit to create a runtime quest.                    |
+| `title`       | string   | no\*     | Runtime quest title (\*required when no `quest_id`).                  |
+| `description` | string   | no       | One or two sentences.                                                 |
+| `steps`       | string[] | no\*     | Ordered short objective lines (\*required when no `quest_id`).        |
+| `xp`          | integer  | no       | XP granted on completion. **XP only — no gold/items.**                |
+| `scope`       | string   | no       | `"world"` (default), `"adventure"`, or `"encounter"`.                 |
+| `reason`      | string   | yes      |                                                                       |
+
+#### `advance_quest`
+
+Mark the current step of an active quest done and move to the next — or finish the quest if it was the last step. Optionally jump straight to a specific `step_id`.
+
+| Parameter  | Type   | Required | Notes                                |
+| ---------- | ------ | -------- | ------------------------------------ |
+| `quest_id` | string | yes      | From ACTIVE QUESTS in CURRENT STATE. |
+| `step_id`  | string | no       | Jump straight to this step.          |
+| `reason`   | string | yes      |                                      |
 
 #### `complete_quest`
 
-Force-completes a quest and immediately awards its XP and GP rewards. The XP/GP grant is **automatic** — do NOT also call `award_xp` for the same outcome. To enforce this, the server tracks quests completed within a turn; a subsequent positive `award_xp` in the same turn is rejected with a clear explanation.
+Finish an active quest immediately on a narrative resolution. Grants the quest's completion XP (XP only).
 
 | Parameter  | Type   | Required |
-| ---------- | ------ | -------- | ----------------------------- |
-| `quest_id` | string | yes      | Quest `id` from CURRENT STATE |
+| ---------- | ------ | -------- |
+| `quest_id` | string | yes      |
+| `reason`   | string | yes      |
+
+#### `fail_quest`
+
+Mark an active quest failed — the player blew it, betrayed the giver, or a deadline passed. No XP.
+
+| Parameter  | Type   | Required |
+| ---------- | ------ | -------- |
+| `quest_id` | string | yes      |
 | `reason`   | string | yes      |
 
 ---

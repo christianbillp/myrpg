@@ -4,15 +4,21 @@ import { AvailableActions, CombatMode } from '../../../shared/types';
 import { UIScale } from './UIScale';
 import { STATUS_TONE_COLOR } from './PlayerStatus';
 import { DevMode } from '../devMode';
+import { actionIdForLabel, glyphForActionId, readHiddenActions, readCompactView } from './actionPanelPrefs';
+import { PanelSetupOverlay } from './PanelSetupOverlay';
 
 const GRID_H   = GRID_ROWS * TILE_SIZE;
 const PANEL_H  = GRID_H + HUD_HEIGHT;
 const MAX_PICKER_SLOTS = 6;
 const PANEL_MIN_WIDTH = 120;
 const PANEL_MAX_WIDTH = 480;
+/** Diameter (game units) of the floating round END TURN button. */
+const END_TURN_BTN = 64;
 const PANEL_WIDTH_KEY = 'myrpg_player_panel_width';
-/** Reserved height (px) for the fixed footer (END TURN + meta row). */
-const FOOTER_H = 104;
+/** Reserved height (px) for the footer — now just the centered Panel Setup
+ *  button. END TURN floats over the map, LEAVE ENCOUNTER moved to DevTools,
+ *  and CHARACTER SHEET lives in the top section. No divider above it. */
+const FOOTER_H = 48;
 
 /** Display info for a class feature button + resource chip. */
 export interface PlayerPanelFeature {
@@ -57,6 +63,11 @@ export interface PlayerPanelActionState {
    *  bearings) — resolved id→name from `availableActions.deployableGearIds`.
    *  The panel renders one SET button per entry. */
   deployableGear: Array<{ id: string; name: string }>;
+  /** Spells the player added to the quickcast menu (Character Sheet → Spells),
+   *  filtered to ones the character currently knows. `castable` mirrors the
+   *  engine's gate so the panel greys out spells that can't be cast right now.
+   *  The CAST button opens this menu. */
+  quickcastSpells: Array<{ id: string; name: string; castable: boolean }>;
   /** True when a creature is currently selected as the target. The TALK
    *  button needs a target so the line can be routed to a `sayto`. */
   hasSelectedTarget: boolean;
@@ -77,6 +88,8 @@ export interface PlayerPanelActionState {
 
 export interface PlayerPanelCallbacks {
   onOpenCharacterSheet: () => void;
+  /** Open the Quest Log overlay — wired to the OBJECTIVE line. */
+  onOpenQuestLog: () => void;
   onSearch: () => void;
   onAttack: () => void;
   onThrow: (itemId: string) => void;
@@ -114,14 +127,19 @@ export interface PlayerPanelCallbacks {
    *  governs the button's visibility. */
   onDevCompleteObjective: () => void;
   onCommandSummon: (summonNpcId: string) => void;
+  /** Toggle the DevTools overlay (only wired when `DevMode.showDevToolsPanel`).
+   *  Fired by the small dev button beside the Panel Setup ⚙ in the footer. */
+  onToggleDevTools: () => void;
   /** Open the inline TALK input near the player token so the player can
    *  type a line for the currently-selected target. No-op when no target
    *  is selected — the button greys out in that state. */
   onTalk: () => void;
-  /** Open the Character Sheet directly on the Spells tab — wired to the
-   *  CAST button above TALK so the player can pick a spell without first
-   *  having to open CHARACTER and switch tabs. */
+  /** Open the Character Sheet directly on the Spells tab — used by the
+   *  quickcast menu's "MANAGE SPELLS" button so the player can add spells. */
   onOpenSpells: () => void;
+  /** Begin casting a specific spell (enters the targeting flow) — wired to the
+   *  quickcast menu entries. Same path as the Character Sheet's CAST button. */
+  onCastSpell: (spellId: string) => void;
   /** Drop the spell currently in `PlayerState.concentratingOn`. Visible
    *  only when concentrating — wired to a small RELEASE button beside the
    *  CAST button. SRD: ending concentration is free, no action cost. */
@@ -141,10 +159,6 @@ export interface PlayerPanelCallbacks {
    *  scene paints a placement cursor and the next tile click deploys it. */
   onDeployGear: (itemId: string) => void;
 }
-
-/** Which economy bucket an Action Button belongs to. Drives the grouped,
- *  headed layout and what folds under the "⋯ More" expander. */
-type ActionGroup = 'action' | 'bonus' | 'move' | 'free' | 'more' | 'companion';
 
 /** Leading glyph per action so the button stack reads at a glance. Keyed by
  *  the full label or its first word. Labels that already begin with a glyph
@@ -182,16 +196,21 @@ export class PlayerPanel {
   private readonly resourcesEl: HTMLElement;
   private readonly objectiveEl: HTMLElement;
   private readonly actionArea: HTMLElement;
-  private readonly devCompleteBtn: HTMLButtonElement;
-  private readonly endTurnBtn: HTMLButtonElement;
-  private readonly leaveBtn: HTMLButtonElement;
+  /** Floating round END TURN button over the lower-left of the map (combat only). */
+  private readonly endTurnFloatBtn: HTMLButtonElement;
   private readonly offResize: () => void;
 
   private visible = true;
   private pickerOpen = false;
-  /** Whether the "⋯ More" group of situational actions is expanded. */
-  private moreOpen = false;
+  /** Whether the CAST quickcast menu is open (replaces the action stack). */
+  private quickcastOpen = false;
   private lastActionState: PlayerPanelActionState | null = null;
+  /** Action-button ids the player chose to hide (Panel Setup). Cached so
+   *  `appendVisible` doesn't re-read localStorage per button; refreshed when the
+   *  Panel Setup Overlay reports a change. */
+  private hiddenActions: Set<string> = readHiddenActions();
+  /** Compact View (Panel Setup → Configuration): icon-only square buttons. */
+  private compactView: boolean = readCompactView();
   private readonly callbacks: PlayerPanelCallbacks;
   private playerDef: PlayerDef;
   private readonly scale: UIScale;
@@ -219,7 +238,10 @@ export class PlayerPanel {
     `;
 
     this.el.innerHTML = `
-      <div style="padding:14px 12px 0;font-size:12px;color:${colorHex};">${def.name}</div>
+      <div style="display:flex;align-items:center;gap:8px;padding:14px 12px 0;">
+        <button class="gui-btn" data-charsheet title="Character Sheet" style="width:26px;height:26px;font-size:13px;padding:0;margin:0;flex:none;display:flex;align-items:center;justify-content:center;line-height:1;background:#11202e;color:#9bb3cc;">☰</button>
+        <div style="flex:1;min-width:0;font-size:12px;color:${colorHex};overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${def.name}</div>
+      </div>
       <div data-header-sub style="padding:2px 12px 4px;font-size:10px;color:#667788;">${def.speciesName} · ${def.className} ${def.level}</div>
       <div class="gui-sep"></div>
 
@@ -235,15 +257,15 @@ export class PlayerPanel {
       <div class="gui-label">OBJECTIVE</div>
       <div data-objective style="padding:2px 12px 6px;font-size:10px;color:#e2b96f;line-height:1.4;">—</div>
 
-      <div class="gui-sep" style="position:absolute;left:8px;right:0;bottom:${FOOTER_H}px;"></div>
       <div data-actions style="position:absolute;left:0;right:0;bottom:${FOOTER_H}px;display:flex;flex-direction:column;gap:3px;padding:0 8px 4px;"></div>
 
-      <div style="position:absolute;bottom:0;left:0;right:0;height:${FOOTER_H}px;display:flex;flex-direction:column;gap:4px;padding:8px;box-sizing:border-box;">
-        <button class="gui-btn" style="background:#3a3020;display:none;" data-end-turn>⏭ END TURN</button>
-        <button class="gui-btn" style="background:#11202e;color:#9bb3cc;font-size:10px;" data-charsheet>☰ CHARACTER</button>
-        <button class="gui-btn" style="background:#2a1616;color:#cc9b9b;font-size:10px;" data-leave-enc>⏏ LEAVE ENCOUNTER</button>
-        <button class="gui-btn" style="background:#1a3a1a;color:#bbeeaa;display:none;font-size:10px;" data-dev-complete>★ COMPLETE OBJECTIVE [DEV]</button>
+      <div class="gui-sep" style="position:absolute;left:8px;right:8px;bottom:${FOOTER_H}px;"></div>
+      <div style="position:absolute;bottom:0;left:0;right:0;height:${FOOTER_H}px;display:flex;justify-content:center;align-items:flex-end;padding:0 8px 8px;box-sizing:border-box;">
+        <button class="gui-btn" data-panel-setup title="Player Panel setup" style="background:#11202e;color:#9bb3cc;width:36px;height:36px;font-size:16px;padding:0;margin:0;display:flex;align-items:center;justify-content:center;line-height:1;">⚙</button>
       </div>
+      <!-- Dev-only toggle — absolutely positioned in the bottom-left corner so it
+           never shifts the centered Panel Setup ⚙ (see CLAUDE.md dev-button rule). -->
+      <button class="gui-btn" data-dev-toggle title="Toggle Dev Tools overlay" style="position:absolute;left:8px;bottom:8px;background:#1a1020;color:#cc88cc;border:1px solid #663366;width:30px;height:30px;font-size:13px;padding:0;margin:0;align-items:center;justify-content:center;line-height:1;display:none;">⚒</button>
     `;
 
     const ref = (attr: string) => this.el.querySelector(`[data-${attr}]`) as HTMLElement;
@@ -253,28 +275,61 @@ export class PlayerPanel {
     this.objectiveEl = ref('objective');
     this.actionArea = ref('actions');
     this.headerSubEl = ref('header-sub');
-    this.endTurnBtn = ref('end-turn') as HTMLButtonElement;
 
     (ref('charsheet') as HTMLButtonElement).onclick = () => callbacks.onOpenCharacterSheet();
-    this.leaveBtn = ref('leave-enc') as HTMLButtonElement;
-    this.leaveBtn.onclick = () => callbacks.onLeaveEncounter();
-    this.endTurnBtn.onclick = () => callbacks.onEndTurn();
-    this.devCompleteBtn = ref('dev-complete') as HTMLButtonElement;
-    this.devCompleteBtn.onclick = () => callbacks.onDevCompleteObjective();
-    // The ★ COMPLETE OBJECTIVE dev button lives in the DevTools panel now.
-    // Surface a fallback copy here only when DevTools is hidden, so the
-    // player still has a way to trigger it without first enabling the
-    // panel from the Configuration scene.
-    if (DevMode.completePrimaryObjective && !DevMode.showDevToolsPanel) {
-      this.devCompleteBtn.style.display = "block";
+    (ref('panel-setup') as HTMLButtonElement).onclick = () => this.openPanelSetup();
+    // The OBJECTIVE line opens the Quest Log.
+    this.objectiveEl.style.cursor = 'pointer';
+    this.objectiveEl.title = 'Open Quest Log';
+    this.objectiveEl.onclick = () => callbacks.onOpenQuestLog();
+    this.objectiveEl.addEventListener('mouseenter', () => { this.objectiveEl.style.textDecoration = 'underline'; });
+    this.objectiveEl.addEventListener('mouseleave', () => { this.objectiveEl.style.textDecoration = 'none'; });
+    // Dev-tools toggle — only shown when DevTools is enabled in the main config.
+    const devToggle = ref('dev-toggle') as HTMLButtonElement;
+    if (DevMode.showDevToolsPanel) {
+      devToggle.style.display = 'flex';
+      devToggle.onclick = () => callbacks.onToggleDevTools();
     }
+
+    // Floating round END TURN button — sits at the lower-left of the map, a
+    // fixed distance from the (resizable) Player Panel's right edge. Visible
+    // only on the player's combat turn; positioned by `placeEndTurn`.
+    this.endTurnFloatBtn = document.createElement('button');
+    this.endTurnFloatBtn.title = 'End your turn';
+    this.endTurnFloatBtn.innerHTML = 'END<br>TURN';
+    const etb = this.endTurnFloatBtn;
+    const ET_SHADOW = '0 2px 6px rgba(0,0,0,0.55)';
+    const ET_GLOW = '0 0 16px rgba(255,233,168,0.75)';
+    etb.style.cssText = `
+      position:absolute; transform-origin:top left; z-index:11; display:none;
+      width:${END_TURN_BTN}px; height:${END_TURN_BTN}px; border-radius:50%;
+      background:#3a3020; color:#ffe9a8; border:2px solid #6a5a30;
+      font-family:monospace; font-size:12px; line-height:1.15; text-align:center;
+      align-items:center; justify-content:center; cursor:pointer;
+      box-shadow:${ET_SHADOW}; transition:filter 0.08s, box-shadow 0.1s, background 0.1s, border-color 0.1s;`;
+    // Hover + press feedback so a click reads clearly (the button vanishes once
+    // the turn ends, so the cue has to be immediate).
+    const etReset = () => { etb.style.filter = ''; etb.style.boxShadow = ET_SHADOW; etb.style.background = '#3a3020'; etb.style.borderColor = '#6a5a30'; };
+    etb.addEventListener('mouseenter', () => { etb.style.filter = 'brightness(1.2)'; etb.style.boxShadow = ET_GLOW; etb.style.background = '#4a4028'; etb.style.borderColor = '#caa84a'; });
+    etb.addEventListener('mouseleave', etReset);
+    etb.addEventListener('pointerdown', () => { etb.style.filter = 'brightness(0.8)'; etb.style.boxShadow = `inset 0 0 10px rgba(0,0,0,0.6)`; });
+    etb.addEventListener('pointerup', () => { etb.style.filter = 'brightness(1.35)'; etb.style.boxShadow = ET_GLOW; });
+    etb.onclick = () => callbacks.onEndTurn();
+    document.body.appendChild(this.endTurnFloatBtn);
 
     this.el.appendChild(this.buildResizeHandle());
 
     document.body.appendChild(this.el);
-    const place = () => scale.placePanel(this.el, 0, 0);
+    const place = () => { scale.placePanel(this.el, 0, 0); this.placeEndTurn(); };
     place();
     this.offResize = scale.onChange(place);
+  }
+
+  /** Position the floating END TURN button at the bottom of the screen, a fixed
+   *  gap to the right of the Player Panel's current (resizable) right edge. */
+  private placeEndTurn(): void {
+    const w = parseInt(this.el.style.width) || PLAYER_PANEL_WIDTH;
+    this.scale.placePanel(this.endTurnFloatBtn, w + 16, PANEL_H - END_TURN_BTN - 16);
   }
 
 
@@ -360,6 +415,7 @@ export class PlayerPanel {
         dragStartW + (e.clientX - dragStartX) / this.scale.factor,
       ));
       this.el.style.width = `${newW}px`;
+      this.placeEndTurn();  // keep the floating END TURN button a fixed gap away
     });
 
     handle.addEventListener('pointerup', () => {
@@ -380,12 +436,6 @@ export class PlayerPanel {
     this.objectiveEl.textContent = objective || '—';
   }
 
-  /** Relabel the exit button to match context. Inside an authored adventure it
-   *  reads LEAVE ADVENTURE (and routes back to Adventure Setup); otherwise
-   *  LEAVE ENCOUNTER. Called each state tick from the scene's HUD refresh. */
-  setInAdventure(inAdventure: boolean): void {
-    this.leaveBtn.textContent = inAdventure ? '⏏ LEAVE ADVENTURE' : '⏏ LEAVE ENCOUNTER';
-  }
 
   /** Append DISARM / SET-gear buttons. The server only populates the source
    *  lists when the action is legal right now (reach + action economy), so a
@@ -402,7 +452,14 @@ export class PlayerPanel {
   refreshActions(state: PlayerPanelActionState): void {
     this.lastActionState = state;
     this.actionArea.innerHTML = '';
-    this.endTurnBtn.style.display = state.mode === 'player_turn' ? 'block' : 'none';
+    // Floating round END TURN button — shown only on the player's combat turn.
+    this.placeEndTurn();
+    this.endTurnFloatBtn.style.display = state.mode === 'player_turn' ? 'flex' : 'none';
+    // Compact View lays the buttons out as a wrapping row of icon-only squares;
+    // the throw picker and quickcast menu stay full-width (names must be readable).
+    const compact = this.compactView && !this.pickerOpen && !this.quickcastOpen;
+    this.actionArea.style.flexFlow = compact ? 'row wrap' : 'column nowrap';
+    this.actionArea.style.gap = compact ? '4px' : '3px';
 
     // Unified resource strip: spell slots + feature pools + status chips.
     this.renderResources(state);
@@ -426,148 +483,99 @@ export class PlayerPanel {
       return;
     }
 
-    // Buttons are collected into economy buckets and rendered grouped (with
-    // headers in combat). Situational utilities fold under a "⋯ More" expander;
-    // context-only buttons (TALK with no target, CAST for non-casters, RELEASE
-    // when not concentrating) are omitted rather than shown greyed.
-    const groups: Record<ActionGroup, HTMLButtonElement[]> = {
-      action: [], bonus: [], move: [], free: [], more: [], companion: [],
-    };
-    const { mode, actionUsed, movesLeft, moveMode, availableActions: aa } = state;
-
-    // Cunning Action (Rogue L2+): Dash / Disengage / Hide spend a Bonus Action,
-    // so they read BLUE and live in the BONUS group instead of ACTION.
-    const hasCunningAction = (this.playerDef.defaultFeatureIds ?? []).includes('cunning-action');
-    const BONUS_BLUE = '#1a3a5a';
-
-    if (mode === 'exploring') {
-      const GREEN = '#1a4a1e';
-      const atk = this.makeTwoLineBtn('ATTACK', state.mainAttackName, GREEN, aa.canAttack ? this.callbacks.onAttack : () => {});
-      atk.disabled = !aa.canAttack;
-      groups.action.push(atk);
-
-      if (state.throwableItems.length > 0) {
-        groups.action.push(this.makeBtn('THROW', GREEN, () => { this.pickerOpen = true; this.refreshActions(state); }));
-      }
-
-      // SRD core actions Study / Utilize / Influence (US-057) — prime a GM
-      // chat prompt the player completes; the GM adjudicates the check.
-      groups.more.push(this.makeBtn('STUDY', '#1a2a3a', () => this.callbacks.onActionPrompt('study')));
-      groups.more.push(this.makeBtn('UTILIZE', '#1a2a3a', () => this.callbacks.onActionPrompt('utilize')));
-      groups.more.push(this.makeBtn('INFLUENCE', '#1a2a3a', () => this.callbacks.onActionPrompt('influence')));
-
-      // Free utilities during exploration → tucked under More.
-      const search = this.makeBtn('SEARCH', GREEN, this.callbacks.onSearch);
-      search.disabled = !aa.canSearch;
-      groups.more.push(search);
-      if (aa.canHide) groups.more.push(this.makeBtn('HIDE', hasCunningAction ? BONUS_BLUE : '#1a3a1a', this.callbacks.onHide));
-      this.pushTrapButtons(state, groups.more);
-      if (aa.canShortRest) groups.more.push(this.makeBtn('SHORT REST', '#1a2a3a', this.callbacks.onShortRest));
-      for (const summon of state.summons) {
-        groups.more.push(this.makeBtn(`DIRECT ${summon.name.toUpperCase()}`, '#2a3a55', () => this.callbacks.onCommandSummon(summon.id)));
-      }
-      // Attune to a held magic item that requires attunement (US-124). Attunes
-      // the first eligible item; the server enforces the ≤3 cap.
-      if (aa.attunableItemIds.length > 0) {
-        groups.more.push(this.makeBtn('ATTUNE', '#2a2a5a', () => this.callbacks.onAttune(aa.attunableItemIds[0])));
-      }
-      // Identify a found magic item (US-124) — examines the first unidentified item.
-      if (aa.unidentifiedItemIds.length > 0) {
-        groups.more.push(this.makeBtn('IDENTIFY', '#2a2a5a', () => this.callbacks.onIdentify(aa.unidentifiedItemIds[0])));
-      }
-      if (aa.canLevelUp) groups.more.push(this.makeBtn('★ LEVEL UP', '#3a2a5a', this.callbacks.onLevelUp));
-      if (aa.canLongRest) groups.more.push(this.makeBtn('☾ LONG REST', '#1a2a4a', this.callbacks.onLongRest));
-
-      groups.move.push(this.makeBtn('MOVE', moveMode ? '#5a4800' : '#3a3000', this.callbacks.onToggleMoveMode));
-
-      if (state.hasSelectedTarget) groups.free.push(this.makeBtn('TALK', '#1a3a4a', this.callbacks.onTalk));
-      if (this.playerDef.spellcastingAbility) groups.free.push(this.makeBtn('CAST', '#1a3a4a', this.callbacks.onOpenSpells));
-      if (state.concentratingOn) groups.free.push(this.makeReleaseBtn(state));
-
-    } else if (mode === 'player_turn') {
-      const GREEN = '#1a4a1e';
-      const dashDisColor = hasCunningAction ? BONUS_BLUE : GREEN;
-      const econ = (): HTMLButtonElement[] => (hasCunningAction ? groups.bonus : groups.action);
-
-      const atk = this.makeTwoLineBtn('ATTACK', state.mainAttackName, GREEN, aa.canAttack ? this.callbacks.onAttack : () => {});
-      atk.disabled = !aa.canAttack;
-      groups.action.push(atk);
-
-      if (state.throwableItems.length > 0) {
-        const th = this.makeBtn('THROW', GREEN, !actionUsed ? () => { this.pickerOpen = true; this.refreshActions(state); } : () => {});
-        th.disabled = actionUsed;
-        groups.action.push(th);
-      }
-
-      const dod = this.makeBtn('DODGE', GREEN, this.callbacks.onDodge);
-      dod.disabled = actionUsed;
-      groups.action.push(dod);
-
-      const dash = this.makeBtn('DASH', dashDisColor, this.callbacks.onDash);
-      dash.disabled = !aa.canDash;
-      econ().push(dash);
-
-      const dis = this.makeBtn('DISENGAGE', dashDisColor, this.callbacks.onDisengage);
-      dis.disabled = !aa.canDisengage;
-      econ().push(dis);
-
-      // SRD Unarmed Strike options (US-110 Grapple / US-050 Shove). The server
-      // populates the target lists only when an adjacent, size-eligible enemy
-      // exists and the Action is free, so a rendered button is always usable.
-      if (aa.grappleableTargetIds.length > 0) {
-        groups.action.push(this.makeBtn('GRAPPLE', GREEN, this.callbacks.onGrapple));
-      }
-      if (aa.shoveableTargetIds.length > 0) {
-        groups.action.push(this.makeBtn('SHOVE', GREEN, () => this.callbacks.onShove('push')));
-        groups.action.push(this.makeBtn('SHOVE PRONE', GREEN, () => this.callbacks.onShove('prone')));
-      }
-      if (aa.canHelp) groups.action.push(this.makeBtn('HELP', GREEN, this.callbacks.onHelp));
-      if (aa.canReady) groups.action.push(this.makeBtn('READY', GREEN, this.callbacks.onReady));
-
-      // KNOCK OUT (US-052): toggle non-lethal melee. Highlighted amber when on.
-      groups.more.push(this.makeBtn('KNOCK OUT', state.nonLethal ? '#5a4800' : '#2a2a1a', () => this.callbacks.onToggleNonLethal(!state.nonLethal)));
-
-      if (aa.canDetach) groups.action.push(this.makeBtn('DETACH', GREEN, this.callbacks.onDetach));
-
-      // Class-specific features — the server's `usableFeatureIds` decides which
-      // are clickable; the rest grey out.
-      const usable = new Set(aa.usableFeatureIds);
-      for (const feat of state.features) {
-        if (!feat.buttonLabel) continue;
-        const f = this.makeBtn(feat.buttonLabel, feat.buttonColor, () => this.callbacks.onUseFeature(feat.id));
-        f.disabled = !usable.has(feat.id);
-        groups.action.push(f);
-      }
-
-      // Player-owned summons. Flaming Sphere costs a Bonus Action (→ bonus group).
-      for (const summon of state.summons) {
-        const s = this.makeBtn(`DIRECT ${summon.name.toUpperCase()}`, '#2a3a55', () => this.callbacks.onCommandSummon(summon.id));
-        s.disabled = summon.costsBonusAction ? state.bonusActionUsed : actionUsed;
-        (summon.costsBonusAction ? groups.bonus : groups.action).push(s);
-      }
-
-      if (aa.canHide) econ().push(this.makeBtn('HIDE', hasCunningAction ? BONUS_BLUE : '#1a3a1a', this.callbacks.onHide));
-
-      const search = this.makeBtn('SEARCH', GREEN, this.callbacks.onSearch);
-      search.disabled = !aa.canSearch;
-      groups.action.push(search);
-
-      this.pushTrapButtons(state, groups.action);
-
-      const move = this.makeBtn('MOVE', moveMode ? '#5a4800' : '#3a3000', this.callbacks.onToggleMoveMode);
-      move.disabled = movesLeft <= 0;
-      groups.move.push(move);
-
-      if (state.hasSelectedTarget) groups.free.push(this.makeBtn('TALK', '#1a3a4a', this.callbacks.onTalk));
-      if (this.playerDef.spellcastingAbility) groups.free.push(this.makeBtn('CAST', '#1a3a4a', this.callbacks.onOpenSpells));
-      if (state.concentratingOn) groups.free.push(this.makeReleaseBtn(state));
-
-    } else if (mode === 'death_saves') {
-      groups.action.push(this.makeBtn('ROLL DEATH SAVE', '#5a1a1a', this.callbacks.onDeathSave));
+    if (this.quickcastOpen) {
+      this.renderQuickcastMenu(state);
+      return;
     }
 
-    this.collectCompanionChips(state, groups.companion);
-    this.renderGroups(groups, mode === 'player_turn');
+    if (state.mode === 'death_saves') {
+      this.appendVisible([this.makeBtn('ROLL DEATH SAVE', '#5a1a1a', this.callbacks.onDeathSave)]);
+      return;
+    }
+
+    // Exploration and combat render the SAME buttons in the SAME order — each is
+    // simply enabled or greyed for the current mode + availability — so nothing
+    // shifts position between the two. Companion chips append last.
+    const buttons = this.buildActionButtons(state);
+    this.collectCompanionChips(state, buttons);
+    this.appendVisible(buttons);
+  }
+
+  /** Append buttons, dropping any the player hid via Panel Setup (by stable
+   *  `data-action-id`). Buttons without an id (e.g. ROLL DEATH SAVE, companion
+   *  chips) are never filtered. */
+  private appendVisible(btns: HTMLButtonElement[]): void {
+    for (const b of btns) {
+      const id = b.dataset.actionId;
+      if (id && this.hiddenActions.has(id)) continue;
+      this.actionArea.appendChild(b);
+    }
+  }
+
+  /** Build the unified, fixed-order Action Button list — identical in
+   *  exploration and combat so buttons keep their position; each is enabled or
+   *  greyed for the current mode + availability. Build-/state-gated buttons
+   *  (CAST for non-casters, RELEASE when not concentrating) and entity-driven
+   *  ones (summons, traps, gear) appear only when they apply, independent of
+   *  mode. */
+  private buildActionButtons(state: PlayerPanelActionState): HTMLButtonElement[] {
+    const { mode, actionUsed, movesLeft, moveMode, availableActions: aa } = state;
+    const combat = mode === 'player_turn';
+    const GREEN = '#1a4a1e', TEAL = '#1a3a4a';
+    // Cunning Action (Rogue L2+): Dash / Disengage / Hide read bonus-action blue.
+    const hasCunningAction = (this.playerDef.defaultFeatureIds ?? []).includes('cunning-action');
+    const BLUE = hasCunningAction ? '#1a3a5a' : GREEN;
+    const out: HTMLButtonElement[] = [];
+    const add = (b: HTMLButtonElement, disabled: boolean): void => { b.disabled = disabled; out.push(b); };
+
+    const atk = this.makeTwoLineBtn('ATTACK', state.mainAttackName, GREEN, aa.canAttack ? this.callbacks.onAttack : () => {});
+    add(atk, !aa.canAttack);
+    add(this.makeBtn('THROW', GREEN, () => { this.pickerOpen = true; this.refreshActions(state); }),
+      state.throwableItems.length === 0 || (combat && actionUsed));
+    add(this.makeBtn('DODGE', GREEN, this.callbacks.onDodge), !(combat && !actionUsed));
+    add(this.makeBtn('DASH', BLUE, this.callbacks.onDash), !aa.canDash);
+    add(this.makeBtn('DISENGAGE', BLUE, this.callbacks.onDisengage), !aa.canDisengage);
+    add(this.makeBtn('GRAPPLE', GREEN, this.callbacks.onGrapple), aa.grappleableTargetIds.length === 0);
+    add(this.makeBtn('SHOVE', GREEN, () => this.callbacks.onShove('push')), aa.shoveableTargetIds.length === 0);
+    add(this.makeBtn('SHOVE PRONE', GREEN, () => this.callbacks.onShove('prone')), aa.shoveableTargetIds.length === 0);
+    add(this.makeBtn('HELP', GREEN, this.callbacks.onHelp), !aa.canHelp);
+    add(this.makeBtn('READY', GREEN, this.callbacks.onReady), !aa.canReady);
+    add(this.makeBtn('DETACH', GREEN, this.callbacks.onDetach), !aa.canDetach);
+    add(this.makeBtn('KNOCK OUT', state.nonLethal ? '#5a4800' : '#2a2a1a', () => this.callbacks.onToggleNonLethal(!state.nonLethal)), !combat);
+    add(this.makeBtn('HIDE', BLUE, this.callbacks.onHide), !aa.canHide);
+    add(this.makeBtn('SEARCH', GREEN, this.callbacks.onSearch), !aa.canSearch);
+    add(this.makeBtn('MOVE', moveMode ? '#5a4800' : '#3a3000', this.callbacks.onToggleMoveMode), combat && movesLeft <= 0);
+    add(this.makeBtn('TALK', TEAL, this.callbacks.onTalk), !state.hasSelectedTarget);
+    // CAST opens the in-panel quickcast menu (the spells the player added from
+    // the Character Sheet), mirroring the throw picker.
+    if (this.playerDef.spellcastingAbility) add(this.makeBtn('CAST', TEAL, () => { this.quickcastOpen = true; this.refreshActions(state); }), false);
+
+    // Class features (character-specific) — greyed when not currently usable.
+    const usable = new Set(aa.usableFeatureIds);
+    for (const feat of state.features) {
+      if (!feat.buttonLabel) continue;
+      const f = this.makeBtn(feat.buttonLabel, feat.buttonColor, () => this.callbacks.onUseFeature(feat.id));
+      f.dataset.actionId = 'feature';  // all class-feature buttons share one Panel Setup toggle
+      add(f, !usable.has(feat.id));
+    }
+    // Player-owned summons (entity-driven). Bonus-action summons gate on the
+    // bonus action; the rest on the action (in combat only).
+    for (const summon of state.summons) {
+      add(this.makeBtn(`DIRECT ${summon.name.toUpperCase()}`, '#2a3a55', () => this.callbacks.onCommandSummon(summon.id)),
+        summon.costsBonusAction ? state.bonusActionUsed : (combat && actionUsed));
+    }
+    this.pushTrapButtons(state, out);                       // DISARM TRAP / SET <gear>
+    if (state.concentratingOn) out.push(this.makeReleaseBtn(state));
+
+    add(this.makeBtn('STUDY', '#1a2a3a', () => this.callbacks.onActionPrompt('study')), false);
+    add(this.makeBtn('UTILIZE', '#1a2a3a', () => this.callbacks.onActionPrompt('utilize')), false);
+    add(this.makeBtn('INFLUENCE', '#1a2a3a', () => this.callbacks.onActionPrompt('influence')), false);
+    add(this.makeBtn('SHORT REST', '#1a2a3a', this.callbacks.onShortRest), !aa.canShortRest);
+    add(this.makeBtn('ATTUNE', '#2a2a5a', () => { if (aa.attunableItemIds[0]) this.callbacks.onAttune(aa.attunableItemIds[0]); }), aa.attunableItemIds.length === 0);
+    add(this.makeBtn('IDENTIFY', '#2a2a5a', () => { if (aa.unidentifiedItemIds[0]) this.callbacks.onIdentify(aa.unidentifiedItemIds[0]); }), aa.unidentifiedItemIds.length === 0);
+    add(this.makeBtn('★ LEVEL UP', '#3a2a5a', this.callbacks.onLevelUp), !aa.canLevelUp);
+    add(this.makeBtn('☾ LONG REST', '#1a2a4a', this.callbacks.onLongRest), !aa.canLongRest);
+    return out;
   }
 
   /** RELEASE-concentration button (free action). */
@@ -625,44 +633,6 @@ export class PlayerPanel {
     }
   }
 
-  /** Lay the collected groups into the action area, top → bottom: ACTION,
-   *  BONUS, MOVE, FREE, the collapsible MORE, then COMPANION. Economy headers
-   *  only show in combat (`showEconomy`); exploration stays header-light. */
-  private renderGroups(groups: Record<ActionGroup, HTMLButtonElement[]>, showEconomy: boolean): void {
-    const header = (text: string): HTMLElement => {
-      const h = document.createElement('div');
-      h.textContent = text;
-      h.style.cssText = 'font-size:9px;letter-spacing:1.5px;color:#556677;padding:5px 2px 0;';
-      return h;
-    };
-
-    if (groups.action.length > 0) {
-      if (showEconomy && (groups.bonus.length > 0 || groups.action.length > 1)) this.actionArea.appendChild(header('ACTION'));
-      for (const el of groups.action) this.actionArea.appendChild(el);
-    }
-    if (groups.bonus.length > 0) {
-      if (showEconomy) this.actionArea.appendChild(header('BONUS ACTION'));
-      for (const el of groups.bonus) this.actionArea.appendChild(el);
-    }
-    for (const el of groups.move) this.actionArea.appendChild(el);
-    for (const el of groups.free) this.actionArea.appendChild(el);
-
-    if (groups.more.length > 0) {
-      const toggle = document.createElement('button');
-      toggle.className = 'gui-btn';
-      toggle.style.cssText = 'background:#15151f;color:#8899aa;font-size:10px;margin-bottom:0;';
-      toggle.textContent = this.moreOpen ? '⋯ LESS' : `⋯ MORE (${groups.more.length})`;
-      toggle.onclick = () => {
-        this.moreOpen = !this.moreOpen;
-        if (this.lastActionState) this.refreshActions(this.lastActionState);
-      };
-      this.actionArea.appendChild(toggle);
-      if (this.moreOpen) for (const el of groups.more) this.actionArea.appendChild(el);
-    }
-
-    for (const el of groups.companion) this.actionArea.appendChild(el);
-  }
-
   /** Build the unified resource strip: spell slots, feature pools, and status
    *  chips (conditions / buffs / concentration) on one wrap-flow row, each with
    *  a hover tooltip. Hidden when nothing applies. */
@@ -711,16 +681,63 @@ export class PlayerPanel {
     }));
   }
 
+  /** The CAST quickcast menu — the spells the player added (Character Sheet →
+   *  Spells). Each casts on click (greyed when not castable now); MANAGE SPELLS
+   *  opens the sheet to add more. Mirrors the throw picker. */
+  private renderQuickcastMenu(state: PlayerPanelActionState): void {
+    const spells = state.quickcastSpells;
+    if (spells.length === 0) {
+      const hint = document.createElement('div');
+      hint.style.cssText = 'font-size:10px;color:#778899;line-height:1.5;padding:6px 8px;text-align:center;';
+      hint.textContent = 'No quickcast spells yet. Add some from the Character Sheet → Spells (the ✦ button).';
+      this.actionArea.appendChild(hint);
+    }
+    for (const sp of spells) {
+      const b = this.makeBtn(`✦ ${sp.name}`, '#16243a', () => {
+        this.quickcastOpen = false;
+        this.callbacks.onCastSpell(sp.id);
+        if (this.lastActionState) this.refreshActions(this.lastActionState);
+      }, '10px');
+      b.disabled = !sp.castable;
+      this.actionArea.appendChild(b);
+    }
+    this.actionArea.appendChild(this.makeBtn('✚ MANAGE SPELLS', '#1a1a2a', () => {
+      this.quickcastOpen = false;
+      this.callbacks.onOpenSpells();
+      if (this.lastActionState) this.refreshActions(this.lastActionState);
+    }, '10px'));
+    this.actionArea.appendChild(this.makeBtn('↩ CANCEL', '#2a1a1a', () => {
+      this.quickcastOpen = false;
+      if (this.lastActionState) this.refreshActions(this.lastActionState);
+    }));
+  }
+
   private makeBtn(label: string, bg: string, onClick: () => void, fontSize = '11px'): HTMLButtonElement {
     const b = document.createElement('button');
     b.className = 'gui-btn';
-    const icon = iconFor(label);
-    b.textContent = icon ? `${icon}  ${label}` : label;
-    b.style.background = bg;
-    b.style.fontSize = fontSize;
-    b.style.marginBottom = '0';
     b.onclick = onClick;
+    const id = actionIdForLabel(label);
+    if (id) b.dataset.actionId = id;  // drives Panel Setup visibility filtering
+    if (this.compactView && !this.pickerOpen && !this.quickcastOpen) {
+      this.applyCompact(b, label, id, bg);
+    } else {
+      const icon = iconFor(label);
+      b.textContent = icon ? `${icon}  ${label}` : label;
+      b.style.background = bg;
+      b.style.fontSize = fontSize;
+      b.style.marginBottom = '0';
+    }
     return b;
+  }
+
+  /** Style a button as a compact icon-only square: the action's glyph, the full
+   *  label as a hover tooltip. Falls back to the catalog glyph, then a letter. */
+  private applyCompact(b: HTMLButtonElement, label: string, id: string, bg: string): void {
+    const glyph = iconFor(label) || glyphForActionId(id) || (label.replace(/[^A-Za-z]/g, '')[0] ?? '•');
+    b.textContent = glyph;
+    b.title = label;
+    b.style.cssText = `background:${bg};width:36px;height:36px;padding:0;margin:0;font-size:16px;`
+      + 'display:flex;align-items:center;justify-content:center;flex:none;line-height:1;';
   }
 
   /**
@@ -730,6 +747,13 @@ export class PlayerPanel {
   private makeTwoLineBtn(label: string, subtitle: string, bg: string, onClick: () => void): HTMLButtonElement {
     const b = document.createElement('button');
     b.className = 'gui-btn';
+    b.onclick = onClick;
+    const id = actionIdForLabel(label);
+    if (id) b.dataset.actionId = id;
+    if (this.compactView && !this.pickerOpen && !this.quickcastOpen) {
+      this.applyCompact(b, label, id, bg);  // drop the weapon subtitle in compact mode
+      return b;
+    }
     b.style.background = bg;
     b.style.fontSize = '11px';
     b.style.marginBottom = '0';
@@ -739,12 +763,22 @@ export class PlayerPanel {
     b.style.padding = '4px 0';
     const icon = iconFor(label);
     b.innerHTML = `${icon ? icon + ' ' : ''}${escHtml(label)}<br><span style="font-size:9px;color:#bbccdd;opacity:0.85;">(${escHtml(subtitle)})</span>`;
-    b.onclick = onClick;
     return b;
+  }
+
+  /** Open the Panel Setup overlay — toggling an action's "Visible in panel"
+   *  persists immediately and re-renders the action stack with the new set. */
+  private openPanelSetup(): void {
+    new PanelSetupOverlay(this.el, () => {
+      this.hiddenActions = readHiddenActions();
+      this.compactView = readCompactView();
+      if (this.lastActionState) this.refreshActions(this.lastActionState);
+    });
   }
 
   destroy(): void {
     this.offResize();
     this.el.remove();
+    this.endTurnFloatBtn.remove();
   }
 }

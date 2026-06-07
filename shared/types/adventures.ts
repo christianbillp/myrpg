@@ -71,6 +71,11 @@ export interface AdventureSave {
   completedChapterIds: string[];
   /** Cross-chapter world flags. Seeds `GameState.worldFlags` when each chapter session starts. */
   worldFlags: Record<string, WorldFlagValue>;
+  /** Cross-chapter quests (adventure/world scope) carried between chapters, plus
+   *  any runtime (AIGM-created) quest defs they reference. Encounter-scope quests
+   *  are dropped at the chapter boundary. Seeds `GameState.quests` at chapter boot. */
+  quests?: import('./quests.js').QuestState[];
+  runtimeQuestDefs?: import('./quests.js').QuestDef[];
   /**
    * Cross-chapter faction standings. **Kept for backward compatibility** —
    * stores the player's standing with each faction (`factionRelations.party.*`).

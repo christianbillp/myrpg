@@ -359,8 +359,22 @@ function buildStateMessage(engine: GameEngine): string {
     ? `\nADVENTURE: ${s.adventureContext.adventureTitle} — ${s.adventureContext.chapterTitle} (chapter ${s.adventureContext.chapterIndex + 1} of ${s.adventureContext.totalChapters})${s.adventureContext.completionFlag ? `\nCHAPTER COMPLETION FLAG: "${s.adventureContext.completionFlag}" — call set_world_flag with this name set to true at the moment the chapter's core business is resolved (see encounter CONTEXT for the resolution criteria). Combat encounters auto-complete on enemy defeat; non-combat chapters depend on this flag.${s.encounterComplete ? ' [ALREADY SET — do not call again.]' : ''}` : ''}${s.adventureContext.priorChapterSummaries.length > 0 ? `\nPRIOR CHAPTERS:\n${s.adventureContext.priorChapterSummaries.map((c) => `  • ${c.chapterTitle}: ${c.summary}`).join('\n')}` : ''}\n`
     : '';
 
+  // ACTIVE QUESTS — gives the GM the quest_id + step_id vocabulary so it can call
+  // advance_quest / complete_quest / fail_quest with valid ids. The current step
+  // is marked with a `*`. Completed/failed quests are omitted.
+  const activeQuests = s.quests.filter((q) => q.status === 'active');
+  const questsBlock = activeQuests.length > 0
+    ? '\nACTIVE QUESTS (advance/complete/fail by quest_id as the fiction resolves them):\n' + activeQuests.map((q) => {
+        const def = s.runtimeQuestDefs.find((d) => d.id === q.questId) ?? engine.getQuestDef(q.questId);
+        if (!def) return `  • [id ${q.questId}] (definition missing)`;
+        const cur = def.steps.find((st) => st.id === q.currentStepId);
+        const stepList = def.steps.map((st) => `${st.id}${st.id === q.currentStepId ? '*' : ''}`).join(', ');
+        return `  • ${def.title} [id ${q.questId}] — current step ${cur ? `${cur.id} "${cur.text}"` : '—'} (steps: ${stepList})`;
+      }).join('\n') + '\n'
+    : '';
+
   return `SETTING: ${s.mapName} | PHASE: ${s.phase}
-CONTEXT: ${s.encounterContext}${adventureBlock}${scriptedEvents}${factionsBlock}${rumorsBlock}${worldClockBlock}${alertnessBlock}
+CONTEXT: ${s.encounterContext}${adventureBlock}${questsBlock}${scriptedEvents}${factionsBlock}${rumorsBlock}${worldClockBlock}${alertnessBlock}
 
 PLAYER: tile (${p.tileX},${p.tileY}) · HP ${p.hp}/${playerDef.maxHp}${isBloodied(p.hp, playerDef.maxHp) ? ' (BLOODIED)' : ''} · ${formatCoins(p.balanceCp)} · ${flags || 'no flags'}
   ${classLine}

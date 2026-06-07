@@ -69,6 +69,14 @@ export type TriggerAction =
   | { type: 'spawn_enemy_near_player'; monsterId: string; minDist?: number; maxDist?: number }
   | { type: 'spawn_enemy_at'; monsterId: string; x: number; y: number }
   | { type: 'show_log'; message: string }
+  /** Replace the player-facing OBJECTIVE line (`GameState.objective`) — lets a
+   *  trigger advance the stated goal as the scene progresses, instead of the
+   *  objective being frozen at session start. */
+  | { type: 'set_objective'; text: string }
+  /** Start an authored quest (by id, from `defs.quests`) — e.g. on
+   *  `encounter_started`. The quest then auto-advances its steps via their
+   *  `completeWhen` guards. No-op if the id is unknown or already active. */
+  | { type: 'start_quest'; questId: string }
   | { type: 'send_aigm_message'; message: string }
   /** Picks a canned variant from `server/data/narration/{narrationId}.json` and pushes it into the Event Log. The picker avoids repeating the last-used variant per id. */
   | { type: 'narrate'; narrationId: string }

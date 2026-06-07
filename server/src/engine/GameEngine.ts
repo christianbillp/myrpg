@@ -60,6 +60,7 @@ import {
 import { registerDirector } from './Director.js';
 import { registerEncounterProgress } from './EncounterProgress.js';
 import { registerEncounterLifecycle, publishEncounterStarted } from './EncounterLifecycle.js';
+import { registerQuestSystem, startQuest as qStartQuest, advanceQuest as qAdvanceQuest, completeQuest as qCompleteQuest, failQuest as qFailQuest } from './QuestSystem.js';
 import { EventBus } from './EventBus.js';
 import { publishHpThresholdCrossings } from './ThresholdPublisher.js';
 import { WeaponDef } from './types.js';
@@ -87,6 +88,7 @@ const ENGINE_HOOKS: Array<(ctx: GameContext) => void> = [
   registerDirector,
   registerEncounterProgress,
   registerEncounterLifecycle,
+  registerQuestSystem,
   registerTriggers,
   registerSummonHooks,
   registerSoundHooks,
@@ -339,6 +341,8 @@ export class GameEngine {
     return runOffCameraTickImpl(this.ctx);
   }
   getSpellDef(spellId: string) { return this.defs.spells.find((sp) => sp.id === spellId); }
+  /** Look up an authored quest definition by id (for the AIGM `start_quest` tool). */
+  getQuestDef(questId: string) { return this.defs.quests.find((q) => q.id === questId); }
   getAIGMTools() { return buildAIGMTools(); }
   getItemIds(): string[] { return this.defs.equipment.map((i) => i.id); }
   getMonsterIds(): string[] { return this.defs.monsters.map((m) => m.id); }
@@ -695,6 +699,25 @@ export class GameEngine {
   setWorldFlag(name: string, value: number | string | boolean): void {
     this.state.worldFlags[name] = value;
     this.bus.publish({ type: 'flag_set', name, value });
+  }
+  /** Replace the player-facing OBJECTIVE line. Surfaced for the AIGM
+   *  `set_objective` tool so the GM can advance the goal as the story moves. */
+  setObjective(text: string): void {
+    this.state.objective = text;
+  }
+
+  // ── Quests (structured quest system) — surfaced for the AIGM quest tools ──────
+  startQuest(def: import('../../../shared/types.js').QuestDef): boolean {
+    return qStartQuest(this.ctx, def) !== null;
+  }
+  advanceQuest(questId: string, toStepId?: string): boolean {
+    return qAdvanceQuest(this.ctx, questId, toStepId);
+  }
+  completeQuest(questId: string): boolean {
+    return qCompleteQuest(this.ctx, questId);
+  }
+  failQuest(questId: string): boolean {
+    return qFailQuest(this.ctx, questId);
   }
   /** Lookup the effective relation between two factions (worse-direction). Surfaced for AIGM tool result strings. */
   getFactionRelation(a: string, b: string): number {

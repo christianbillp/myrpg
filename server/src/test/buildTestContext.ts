@@ -195,6 +195,7 @@ export function buildTestContext(overrides: TestContextOverrides = {}): TestCont
     narrationLastUsed: {},
     objective: '',
     quests: [],
+    runtimeQuestDefs: [],
     encounterComplete: false,
     selectedTargetId: null,
     pendingReaction: null,
@@ -216,6 +217,7 @@ export function buildTestContext(overrides: TestContextOverrides = {}): TestCont
     subclasses: [],
     conversations: [],
     narration: [],
+    quests: [],
   } as unknown as GameDefs;
 
   const events: GameEvent[] = [];

@@ -1,5 +1,6 @@
 import { GameEngine } from './GameEngine.js';
 import { GameEvent } from './types.js';
+import type { QuestDef, QuestScope } from '../../../shared/types.js';
 import { getActiveSetting, lookupSettingSection, lookupWorldbookEntry } from '../settings.js';
 import { purseToCp, formatCoins } from '../../../shared/currency.js';
 import { Logger } from '../Logger.js';
@@ -216,6 +217,39 @@ function buildToolList() { return [
     input_schema: { type: 'object' as const, properties: { name: { type: 'string' }, value: { }, reason: { type: 'string' } }, required: ['name', 'value', 'reason'] },
   },
   {
+    name: 'set_objective',
+    description: 'Replace the player-facing OBJECTIVE line shown in the Player Panel. Use to advance the stated goal as the scene develops — e.g. once the player learns the bandits work for the toll-keeper, change "Defeat the bandits" to "Confront the toll-keeper". Keep it to one short imperative line. The objective is otherwise fixed at session start, so call this whenever the story moves the goal forward. NOTE: if the player has an active quest, its current step drives the objective — use advance_quest instead of set_objective for quest progress.',
+    input_schema: { type: 'object' as const, properties: { text: { type: 'string' }, reason: { type: 'string' } }, required: ['text', 'reason'] },
+  },
+  {
+    name: 'start_quest',
+    description: 'Start a quest and show it in the player\'s Quest Log. Two ways: reference an authored quest by `quest_id`, OR create one on the fly with `title`, `description`, and an ordered list of short objective `steps`. Use when an NPC offers a job, the player commits to a goal, or the story opens a thread. YOU drive a runtime quest: call advance_quest as each step is accomplished in the fiction, then complete_quest / fail_quest. Optional `xp` is granted on completion — XP ONLY. Never promise gold or items through a quest; hand tangible rewards over in the world/dialogue (a paymaster, a body, a chest) so the fiction stays intact. Optional `scope`: "world" (default, persists for the character), "adventure", or "encounter".',
+    input_schema: { type: 'object' as const, properties: {
+      quest_id: { type: 'string' },
+      title: { type: 'string' },
+      description: { type: 'string' },
+      steps: { type: 'array', items: { type: 'string' } },
+      xp: { type: 'integer' },
+      scope: { type: 'string', enum: ['encounter', 'adventure', 'world'] },
+      reason: { type: 'string' },
+    }, required: ['reason'] },
+  },
+  {
+    name: 'advance_quest',
+    description: 'Mark the current step of an active quest done and move to the next — or finish the quest if it was the last step. Optionally jump straight to a specific `step_id`. Call when a step is accomplished in the fiction. (Authored quests may also auto-advance via their conditions; calling this is still safe.)',
+    input_schema: { type: 'object' as const, properties: { quest_id: { type: 'string' }, step_id: { type: 'string' }, reason: { type: 'string' } }, required: ['quest_id', 'reason'] },
+  },
+  {
+    name: 'complete_quest',
+    description: 'Finish an active quest immediately on a narrative resolution. Grants the quest\'s completion XP.',
+    input_schema: { type: 'object' as const, properties: { quest_id: { type: 'string' }, reason: { type: 'string' } }, required: ['quest_id', 'reason'] },
+  },
+  {
+    name: 'fail_quest',
+    description: 'Mark an active quest failed — the player blew it, betrayed the giver, or a deadline passed. No XP is granted.',
+    input_schema: { type: 'object' as const, properties: { quest_id: { type: 'string' }, reason: { type: 'string' } }, required: ['quest_id', 'reason'] },
+  },
+  {
     name: 'fade_screen',
     description: 'Fade the entire game screen (map + every UI panel) to or from black. Three modes — `"out"` fades to full black, `"in"` fades back to clear, `"dim"` fades to a 50% black overlay (atmospheric dim where the world is still visible underneath). Use for cinematic scene transitions — time-jumps, travel montages, dramatic reveals — and pair with show_supertitle / show_announcement between a fade-out and fade-in so the message lands against the black. The fade is sticky: a `mode: "out"` or `mode: "dim"` call leaves the overlay in place until a matching `mode: "in"` call (or the next chapter advance / long rest). `duration_ms` defaults to 1200 if omitted.',
     input_schema: { type: 'object' as const, properties: { mode: { type: 'string', enum: ['in', 'out', 'dim'] }, duration_ms: { type: 'integer' }, reason: { type: 'string' } }, required: ['mode', 'reason'] },
@@ -242,10 +276,33 @@ function buildToolList() { return [
   },
 ]; }
 
-/** No-op kept exported because aigm.ts calls it at turn start. The quest
- *  system was removed (no more per-turn quest reward bookkeeping); deleting
- *  the call site is a follow-up cleanup. */
+/** No-op kept exported because aigm.ts calls it at turn start. */
 export function resetTurnGuards(): void {}
+
+/** Build a validated runtime QuestDef from a `start_quest` tool call. Runtime
+ *  (GM-created) quests are intentionally text-only: title + description + ordered
+ *  step lines + an optional XP reward, advanced by the GM. They carry NO authored
+ *  guards or actions, so there's nothing untrusted to validate beyond bounds. */
+function buildRuntimeQuestDef(engine: GameEngine, input: Record<string, unknown>):
+  | { ok: true; def: QuestDef }
+  | { ok: false; error: string } {
+  const title = String(input['title'] ?? '').trim();
+  const description = String(input['description'] ?? '').trim();
+  const steps = (Array.isArray(input['steps']) ? input['steps'] : [])
+    .map((s) => String(s ?? '').trim()).filter(Boolean);
+  if (!title) return { ok: false, error: 'start_quest needs a `title` (or a `quest_id`).' };
+  if (steps.length === 0) return { ok: false, error: 'start_quest needs at least one `step` (or a `quest_id`).' };
+  if (steps.length > 12) return { ok: false, error: 'start_quest: too many steps (max 12).' };
+  const xp = Math.max(0, Math.min(2000, Math.floor(Number(input['xp'] ?? 0)) || 0));
+  const scopeRaw = String(input['scope'] ?? 'world');
+  const scope = (['encounter', 'adventure', 'world'].includes(scopeRaw) ? scopeRaw : 'world') as QuestScope;
+  const slug = title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 32) || 'quest';
+  const id = `q_rt_${slug}_${engine.getState().quests.length}`;
+  return {
+    ok: true,
+    def: { id, title, description, scope, runtime: true, xpReward: xp, steps: steps.map((text, i) => ({ id: `s${i + 1}`, text })) },
+  };
+}
 
 export function applyAIGMTool(
   engine: GameEngine,
@@ -697,6 +754,44 @@ export function applyAIGMTool(
       }
       engine.setWorldFlag(name, rawValue);
       toolResultContent = `World flag "${name}" set to ${JSON.stringify(rawValue)}.`;
+      break;
+    }
+    case 'set_objective': {
+      const text = String(input['text'] ?? '').trim();
+      if (!text) { toolResultContent = 'set_objective requires non-empty text.'; break; }
+      engine.setObjective(text);
+      toolResultContent = `Objective updated to: "${text}".`;
+      break;
+    }
+    case 'start_quest': {
+      const questId = String(input['quest_id'] ?? '').trim();
+      if (questId) {
+        const def = engine.getQuestDef(questId);
+        if (!def) { toolResultContent = `No authored quest with id "${questId}".`; break; }
+        toolResultContent = engine.startQuest(def) ? `Started quest "${def.title}".` : `Quest "${def.title}" is already active.`;
+        break;
+      }
+      const built = buildRuntimeQuestDef(engine, input);
+      if (!built.ok) { toolResultContent = built.error; break; }
+      toolResultContent = engine.startQuest(built.def)
+        ? `Started quest "${built.def.title}" (id ${built.def.id}). Advance it with advance_quest as steps are accomplished.`
+        : `Quest "${built.def.title}" is already active.`;
+      break;
+    }
+    case 'advance_quest': {
+      const id = String(input['quest_id'] ?? '').trim();
+      const stepId = input['step_id'] ? String(input['step_id']).trim() : undefined;
+      toolResultContent = engine.advanceQuest(id, stepId) ? `Advanced quest "${id}".` : `No active quest with id "${id}".`;
+      break;
+    }
+    case 'complete_quest': {
+      const id = String(input['quest_id'] ?? '').trim();
+      toolResultContent = engine.completeQuest(id) ? `Completed quest "${id}".` : `No active quest with id "${id}".`;
+      break;
+    }
+    case 'fail_quest': {
+      const id = String(input['quest_id'] ?? '').trim();
+      toolResultContent = engine.failQuest(id) ? `Failed quest "${id}".` : `No active quest with id "${id}".`;
       break;
     }
     case 'fade_screen': {

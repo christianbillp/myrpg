@@ -18,6 +18,9 @@ export interface GameDefs {
   spells: SpellDef[];
   features: FeatureDef[];
   narration: NarrationDef[];
+  /** Authored quest definitions loaded from `server/data/settings/<id>/quests/*.json`
+   *  (and the default set). Resolved by id when a quest is started. */
+  quests: import('../../../shared/types.js').QuestDef[];
   /**
    * Faction definitions loaded from `server/data/factions/*.json`. Each carries
    * an id, display name + colour, renown rating, and a default-relation table.

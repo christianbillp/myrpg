@@ -85,6 +85,8 @@ import type {
   PlayerAction,
   ServerWSMessage,
   GameState,
+  QuestState,
+  QuestDef,
   PlayerState,
   PlayerDef,
   EquipmentSlots,
@@ -157,6 +159,7 @@ const defs: GameDefs = {
   spells: [],
   features: [],
   narration: [],
+  quests: [],
   factions: [],
   settings: [],
   activeSetting: null,
@@ -196,6 +199,7 @@ async function loadDefs(): Promise<void> {
     conversations,
     classes,
     subclasses,
+    quests,
   ] = await Promise.all([
     readDirOrEmpty<GameDefs["playerDefs"][0]>(settingSub("characters")),
     readDir<GameDefs["monsters"][0]>(join(DATA_DIR, "monsters")),
@@ -212,11 +216,12 @@ async function loadDefs(): Promise<void> {
     readDirOrEmpty<GameDefs["conversations"][0]>(settingSub("conversations")),
     readDirOrEmpty<GameDefs["classes"][0]>(join(DATA_DIR, "classes")),
     readDirOrEmpty<GameDefs["subclasses"][0]>(join(DATA_DIR, "subclasses")),
+    readDirOrEmpty<GameDefs["quests"][0]>(settingSub("quests")).catch(() => []),
   ]) as [
     GameDefs["playerDefs"], GameDefs["monsters"], GameDefs["npcs"], GameDefs["equipment"],
     TiledMapFile[], GameDefs["feats"], GameDefs["backgrounds"], GameDefs["species"],
     GameDefs["spells"], GameDefs["features"], GameDefs["narration"], GameDefs["factions"],
-    GameDefs["conversations"], GameDefs["classes"], GameDefs["subclasses"],
+    GameDefs["conversations"], GameDefs["classes"], GameDefs["subclasses"], GameDefs["quests"],
   ];
   defs.playerDefs = playerDefs;
   defs.monsters = monsters;
@@ -236,6 +241,7 @@ async function loadDefs(): Promise<void> {
   defs.conversations = conversations;
   defs.classes = classes;
   defs.subclasses = subclasses;
+  defs.quests = quests;
   for (const p of defs.playerDefs) {
     applySpecies(p, defs.species);
     // Surface activated species abilities (Orc Adrenaline Rush, …) as known
@@ -907,6 +913,7 @@ server.post<{ Params: { characterId: string } }>(
     if (!found) return reply.send({ ok: false });
     const state = found.session.engine.getState();
     save.worldFlags = { ...state.worldFlags };
+    Object.assign(save, carryForwardQuests(state));
     save.factionStandings = { ...state.factionStandings };
     save.factionRelations = structuredClone(state.factionRelations);
     save.discoveredFactions = [...state.discoveredFactions];
@@ -968,6 +975,7 @@ server.post<{ Params: { characterId: string }; Body: { devFlags?: import("../../
     if (found) {
       const finishedState = found.session.engine.getState();
       save.worldFlags = { ...finishedState.worldFlags };
+      Object.assign(save, carryForwardQuests(finishedState));
       save.factionStandings = { ...finishedState.factionStandings };
       save.factionRelations = structuredClone(finishedState.factionRelations);
       save.discoveredFactions = [...finishedState.discoveredFactions];
@@ -1032,6 +1040,7 @@ server.post<{ Params: { characterId: string }; Body: { devFlags?: import("../../
     if (found) {
       const finishedState = found.session.engine.getState();
       save.worldFlags = { ...finishedState.worldFlags };
+      Object.assign(save, carryForwardQuests(finishedState));
       save.factionStandings = { ...finishedState.factionStandings };
       save.factionRelations = structuredClone(finishedState.factionRelations);
       save.discoveredFactions = [...finishedState.discoveredFactions];
@@ -1585,6 +1594,16 @@ interface CharSave {
   levelUps?: import("../../shared/types.js").LevelUpChoices[];
 }
 
+/** Quests that survive a chapter boundary: adventure/world scope only (encounter
+ *  scope dies with the encounter), plus the runtime defs they reference. */
+function carryForwardQuests(state: GameState): { quests: QuestState[]; runtimeQuestDefs: QuestDef[] } {
+  const scopeOf = (id: string): string | undefined =>
+    state.runtimeQuestDefs.find((d) => d.id === id)?.scope ?? defs.quests.find((d) => d.id === id)?.scope;
+  const quests = state.quests.filter((q) => { const sc = scopeOf(q.questId); return sc === 'adventure' || sc === 'world'; });
+  const keep = new Set(quests.map((q) => q.questId));
+  return { quests, runtimeQuestDefs: state.runtimeQuestDefs.filter((d) => keep.has(d.id)) };
+}
+
 async function saveWorldState(
   state: GameState,
   aigmHistory: AigmMessage[] = [],
@@ -1733,6 +1752,8 @@ async function loadWorldState(): Promise<{
     firedTriggerIds: worldSave.firedTriggerIds ?? [],
     pendingAigmEvents: worldSave.pendingAigmEvents ?? [],
     worldFlags: worldSave.worldFlags ?? {},
+    quests: worldSave.quests ?? [],
+    runtimeQuestDefs: worldSave.runtimeQuestDefs ?? [],
     narrationLastUsed: worldSave.narrationLastUsed ?? {},
     activeZones: worldSave.activeZones ?? [],
     traps: worldSave.traps ?? [],
@@ -1858,6 +1879,8 @@ function buildAdventureSeed(adv: AdventureDef, chapterIndex: number, save: Adven
   seedFactionRelations?: Record<string, Record<string, number>>;
   seedDiscoveredFactions?: string[];
   seedRumors?: Rumor[];
+  seedQuests?: QuestState[];
+  seedRuntimeQuestDefs?: QuestDef[];
 } {
   const chapter = adv.chapters[chapterIndex];
   // Mirror the rest-stop fields so the client can decide whether to surface
@@ -1876,6 +1899,8 @@ function buildAdventureSeed(adv: AdventureDef, chapterIndex: number, save: Adven
     priorChapterSummaries: save.priorChapterSummaries,
     restEncounterId: adv.restEncounterId,
     seedWorldFlags: { ...save.worldFlags },
+    seedQuests: save.quests ?? [],
+    seedRuntimeQuestDefs: save.runtimeQuestDefs ?? [],
     seedFactionStandings: { ...save.factionStandings },
     // Carry the full pair-wise faction matrix across chapters when present.
     // Older saves without this field fall back to seeding the `party` row
@@ -2545,6 +2570,8 @@ server.post<{
     totalChapters: 1,
     priorChapterSummaries: oldState.adventureContext?.priorChapterSummaries ?? [],
     seedWorldFlags: { ...oldState.worldFlags },
+    seedQuests: carryForwardQuests(oldState).quests,
+    seedRuntimeQuestDefs: carryForwardQuests(oldState).runtimeQuestDefs,
     seedFactionStandings: { ...oldState.factionStandings },
     seedFactionRelations: { ...oldState.factionRelations },
     seedDiscoveredFactions: [...oldState.discoveredFactions],

@@ -17,6 +17,7 @@ export * from "./types/triggers.js";
 export * from "./types/narration.js";
 export * from "./types/factions.js";
 export * from "./types/adventures.js";
+export * from "./types/quests.js";
 export * from "./types/combatLog.js";
 export * from "./types/gameState.js";
 export * from "./types/levelUp.js";

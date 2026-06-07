@@ -1,0 +1,38 @@
+{
+  "id": "demo_quest_camp",
+  "encounterTitle": "Demo — Clear the Roadside Camp",
+  "description": "Demonstrates the structured quest system end-to-end with no AIGM required. On start, a `start_quest` trigger begins the authored quest `demo_clear_the_camp` (OBJECTIVE → \"Scout the bandit camp\"). When the fight begins, a `set_flag camp_scouted` trigger completes the scout step (OBJECTIVE → \"Defeat the bandits\", +25 XP). Killing both bandits satisfies the `enemies_alive == 0` step condition, completing the quest (+100 step XP, +50 quest XP). Open the Quest Log from the OBJECTIVE line to watch the checklist tick over.",
+  "mapId": "the_open_road",
+  "npcIds": [],
+  "allyIds": [],
+  "enemyIds": ["bandit", "bandit"],
+  "customIntroduction": "Smoke threads up from a hollow beside the east road — a bandit camp, two figures on watch. They see you the same moment you see them.",
+  "customContext": "QUEST DEMO. The structured quest 'demo_clear_the_camp' is started by the encounter's start_quest trigger; its steps auto-advance via their conditions. Do not call start_quest/advance_quest yourself — the triggers and QuestSystem handle it. Two bandits, hostile from the start, no parley.",
+  "objective": "Clear the roadside camp.",
+  "allowsLongRest": false,
+  "placementMode": "exact",
+  "placements": [
+    { "role": "player", "x": 2, "y": 6 },
+    { "role": "enemy", "index": 0, "x": 17, "y": 5 },
+    { "role": "enemy", "index": 1, "x": 17, "y": 7 }
+  ],
+  "triggers": [
+    {
+      "id": "demo_start_quest",
+      "when": { "event": "encounter_started" },
+      "then": [
+        { "type": "start_quest", "questId": "demo_clear_the_camp" }
+      ],
+      "once": true
+    },
+    {
+      "id": "demo_scouted",
+      "when": { "event": "combat_started" },
+      "then": [
+        { "type": "set_flag", "name": "camp_scouted", "value": true },
+        { "type": "show_log", "message": "You have a clear view of the camp now." }
+      ],
+      "once": true
+    }
+  ]
+}

@@ -444,6 +444,8 @@ export function buildSessionState(
     firedTriggerIds: [],
     pendingAigmEvents: [],
     worldFlags: req.adventureSeed?.seedWorldFlags ?? {},
+    quests: req.resumeQuests ?? req.adventureSeed?.seedQuests ?? [],
+    runtimeQuestDefs: req.resumeRuntimeQuestDefs ?? req.adventureSeed?.seedRuntimeQuestDefs ?? [],
     narrationLastUsed: {},
     worldTickCount: 0,
     dayPhase: 'morning',

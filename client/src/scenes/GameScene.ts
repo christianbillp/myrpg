@@ -5,6 +5,7 @@ import { Player } from "../entities/Player";
 import { NpcToken } from "../entities/NpcToken";
 import { MapItem } from "../entities/MapItem";
 import { PlayerPanel, PlayerPanelActionState } from "../ui/PlayerPanel";
+import { readQuickcast } from "../ui/quickcastPrefs";
 import { buildPlayerStatusChips } from "../ui/PlayerStatus";
 import { TargetPanel, type TileDetails } from "../ui/TargetPanel";
 import { MissionTopBar } from "../ui/MissionTopBar";
@@ -34,6 +35,8 @@ import type { FactionDef } from "../../../shared/types";
 import { ItemDef } from "../../../shared/types";
 import { gameClient } from "../net/GameClient";
 import { WorldPause } from "../net/WorldPause";
+import { QuestLogOverlay, type QuestLogEntry } from "../ui/QuestLogOverlay";
+import type { QuestDef } from "../../../shared/types";
 import { DefRegistry } from "../data/defRegistry";
 import { AIGMController } from "./gameScene/aigmController";
 import type { GameState, GameEvent, GameMap, SpellDef, FeatureDef, ClassDef, SubclassDef } from "../../../shared/types";
@@ -303,6 +306,7 @@ export class GameScene extends Phaser.Scene {
       onUseScroll: (itemId) => gameClient.sendAction({ type: "useScroll", itemId }),
       onBeginSpellCast:  (spellId) => this.beginSpellCast(spellId, false),
       onBeginRitualCast: (spellId) => this.beginSpellCast(spellId, true),
+      onQuickcastChanged: () => { if (this.gameState) this.playerPanel.refreshActions(this.buildActionState(this.gameState)); },
       onAcceptReaction:  () => gameClient.sendAction({ type: "resolveReaction", accept: true }),
       onDeclineReaction: () => gameClient.sendAction({ type: "resolveReaction", accept: false }),
       onAcceptReroll:    () => gameClient.sendAction({ type: "resolveReroll", accept: true }),
@@ -1029,6 +1033,7 @@ export class GameScene extends Phaser.Scene {
   private buildHUD(): void {
     this.playerPanel = new PlayerPanel(this.uiScale, this.playerDef, {
       onOpenCharacterSheet: () => { if (this.gameState) this.overlays.openCharacterSheet(this.gameState); },
+      onOpenQuestLog: () => this.openQuestLog(),
       onSearch:         () => gameClient.sendAction({ type: "search" }),
       onAttack:         () => gameClient.sendAction({ type: "attack", targetId: this.gameState?.selectedTargetId ?? undefined }),
       onThrow:          (itemId) => gameClient.sendAction({ type: "throw", itemId, targetId: this.gameState?.selectedTargetId ?? undefined }),
@@ -1055,8 +1060,10 @@ export class GameScene extends Phaser.Scene {
       onCommandSummon:  (summonNpcId) => this.beginSummonDirect(summonNpcId),
       onTalk:           () => this.openSpeechInput(),
       onOpenSpells:     () => { if (this.gameState) this.overlays.openCharacterSheet(this.gameState, 'spells'); },
+      onCastSpell:      (spellId) => this.beginSpellCast(spellId, false),
       onReleaseConcentration: () => gameClient.sendAction({ type: "releaseConcentration" }),
       onDevCompleteObjective: () => gameClient.sendAction({ type: "devCompleteEncounter" }),
+      onToggleDevTools: () => this.devToolsPanel?.toggle(),
       onLeaveEncounter: () => this.leaveEncounter(),
       onCompanionCommand: (npcId, command) => gameClient.sendAction({ type: "companionCommand", npcId, command }),
       onCompanionPickTile: (npcId) => {
@@ -1078,6 +1085,7 @@ export class GameScene extends Phaser.Scene {
       this.devToolsPanel = new DevToolsPanel(this.uiScale, {
         onReloadEncounter:    () => void this.reloadEncounter(),
         onCompleteObjective:  () => gameClient.sendAction({ type: "devCompleteEncounter" }),
+        onLeaveEncounter:     () => this.leaveEncounter(),
       }, { showCompleteObjective: DevMode.completePrimaryObjective });
     }
     // AIGM streaming + speech-bubble surface — extracted into a controller
@@ -1205,6 +1213,20 @@ export class GameScene extends Phaser.Scene {
         };
       });
 
+    // Quickcast menu (CAST button) — the player-curated spell ids, kept to ones
+    // the character currently knows, with each gated by the engine's castable set.
+    const knownSpellIds = new Set<string>([
+      ...(this.playerDef.defaultCantripIds ?? []),
+      ...state.player.preparedSpellIds,
+      ...(this.playerDef.defaultSpellbookIds ?? []),
+    ]);
+    const castableSet = new Set(state.availableActions.castableSpellIds);
+    const quickcastSpells = readQuickcast(this.playerDef.id)
+      .filter((id) => knownSpellIds.has(id))
+      .map((id) => allSpells.find((s) => s.id === id))
+      .filter((s): s is SpellDef => !!s)
+      .map((s) => ({ id: s.id, name: s.name, castable: castableSet.has(s.id) }));
+
     return {
       mode:            state.phase,
       actionUsed:      state.player.actionUsed,
@@ -1244,6 +1266,7 @@ export class GameScene extends Phaser.Scene {
         .map((id) => allItems.find((i) => i.id === id))
         .filter((i): i is ItemDef => i !== undefined)
         .map((i) => ({ id: i.id, name: i.name })),
+      quickcastSpells,
       hasSelectedTarget: !!state.selectedTargetId,
       selectedTargetId: state.selectedTargetId,
       statusChips: buildPlayerStatusChips(state.player, concSpell?.name ?? null),
@@ -1280,6 +1303,32 @@ export class GameScene extends Phaser.Scene {
    * wait for the next creature click; otherwise the spell fires immediately
    * against the player tile.
    */
+  /** Build the Quest Log view-model from the live state + quest defs (authored
+   *  from the registry, runtime from the state) and open the overlay. */
+  private openQuestLog(): void {
+    const state = this.gameState;
+    if (!state) return;
+    const authored = (this.registry.get('quests') as QuestDef[] | undefined) ?? [];
+    const resolve = (id: string): QuestDef | undefined =>
+      state.runtimeQuestDefs.find((d) => d.id === id) ?? authored.find((d) => d.id === id);
+    const entries: QuestLogEntry[] = state.quests.flatMap((qs) => {
+      const def = resolve(qs.questId);
+      if (!def) return [];
+      return [{
+        id: def.id, title: def.title, description: def.description, status: qs.status,
+        steps: def.steps.map((s) => ({
+          id: s.id, text: s.text,
+          done: qs.completedStepIds.includes(s.id),
+          current: qs.status === 'active' && s.id === qs.currentStepId,
+        })),
+      }];
+    });
+    const journal = (state.adventureContext?.priorChapterSummaries ?? [])
+      .map((c) => ({ chapterTitle: c.chapterTitle, summary: c.summary }));
+    WorldPause.acquire('overlay:quest-log');
+    new QuestLogOverlay(this.uiScale, entries, journal, () => WorldPause.release('overlay:quest-log'));
+  }
+
   private beginSpellCast(spellId: string, asRitual: boolean): void {
     if (this.featureTargetMode) this.exitFeatureTargetMode();
     const allSpells = this.defs.spells();
@@ -2240,7 +2289,7 @@ export class GameScene extends Phaser.Scene {
     // Real authored adventure (non-empty adventureId, not the bureau cycle's
     // synthetic context) → the exit button reads LEAVE ADVENTURE and routes
     // back to Adventure Setup.
-    this.playerPanel.setInAdventure(!!state.adventureContext?.adventureId);
+    this.devToolsPanel?.setInAdventure(!!state.adventureContext?.adventureId);
 
     if (this.selectedEntityId) {
       const nState = state.npcs.find(n => n.id === this.selectedEntityId);
