@@ -8,7 +8,16 @@ import { isIncapacitated } from './ConditionSystem.js';
 import { armorSpeedPenaltyFt } from './EquipmentSystem.js';
 import { chebyshev } from './EnemyAI.js';
 import { isHostileTo } from './FactionRelations.js';
+import { isMagicInitiateSpell, magicInitiateResourceId } from './MagicInitiate.js';
 import { PLAYER_FACTION_ID } from '../../../shared/types.js';
+import type { GameState, PlayerDef } from '../../../shared/types.js';
+
+/** A Magic Initiate spell has a free cast available when it's one of the
+ *  character's MI spells and its once-per-Long-Rest resource is unspent. */
+function hasMagicInitiateFreeCast(state: GameState, playerDef: PlayerDef, spellId: string): boolean {
+  return isMagicInitiateSpell(playerDef, spellId)
+    && (state.player.resources[magicInitiateResourceId(spellId)] ?? 0) > 0;
+}
 
 /** Can the player spend their Action right now (any Action — Attack, Dash, etc.)? */
 export function canSpendAction(ctx: GameContext): boolean {
@@ -279,16 +288,18 @@ export function canCastSpell(ctx: GameContext, spellId: string): boolean {
   const spell = ctx.defs.spells.find((sp) => sp.id === spellId);
   if (!spell) return false;
 
-  // Spell must be known: a cantrip the character knows, or a currently-prepared L1+ spell.
+  // Spell must be known: a cantrip the character knows, a currently-prepared L1+
+  // spell, or a Magic Initiate spell (always prepared).
   const known = spell.level === 0
     ? ctx.playerDef.defaultCantripIds?.includes(spellId)
-    : s.player.preparedSpellIds.includes(spellId);
+    : (s.player.preparedSpellIds.includes(spellId) || isMagicInitiateSpell(ctx.playerDef, spellId));
   if (!known) return false;
 
-  // Slot pool — cantrips skip this entirely.
+  // Slot pool — cantrips skip this entirely. A Magic Initiate spell can also be
+  // cast once per Long Rest without a slot (its free-cast resource).
   if (spell.level > 0) {
     const slot = s.player.spellSlots[spell.level - 1] ?? 0;
-    if (slot <= 0) return false;
+    if (slot <= 0 && !hasMagicInitiateFreeCast(s, ctx.playerDef, spellId)) return false;
   }
 
   // SRD components (US-116): a spell with a Somatic or Material component needs
@@ -334,6 +345,11 @@ export function castableSpellIds(ctx: GameContext): string[] {
   }
   for (const id of ctx.state.player.preparedSpellIds) {
     if (canCastSpell(ctx, id)) ids.push(id);
+  }
+  // Magic Initiate spells are always prepared (tracked separately from the
+  // class prepared list); surface them too, de-duplicated.
+  for (const id of ctx.playerDef.magicInitiateSpellIds ?? []) {
+    if (!ids.includes(id) && canCastSpell(ctx, id)) ids.push(id);
   }
   return ids;
 }

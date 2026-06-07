@@ -16,6 +16,7 @@ import type { GameEvent, NpcState, SpellDef, LogEntry, MonsterDef } from './type
 import { d, d20, mod, rollAdvantage, applyHalflingLuck, rollDiceBonus } from './Dice.js';
 import { chebyshev } from './EnemyAI.js';
 import { canCastSpell } from './ActionGuards.js';
+import { isMagicInitiateSpell, magicInitiateResourceId } from './MagicInitiate.js';
 import { startConcentration, endConcentration } from './ConcentrationSystem.js';
 import { publishNpcDamage } from './ThresholdPublisher.js';
 import { applyDamageWithTempHp, npcBanePenalty } from './CombatSystem.js';
@@ -138,8 +139,19 @@ function consumeCastingResources(ctx: GameContext, spell: SpellDef, slotLevel: n
   if (spell.level > 0 && !fromScroll) {
     const slotIdx = slotLevel - 1;
     const before = s.player.spellSlots[slotIdx] ?? 0;
-    s.player.spellSlots[slotIdx] = Math.max(0, before - 1);
-    Logger.log('spell.slot_consumed', { spellId: spell.id, level: spell.level, slotLevel, before, after: s.player.spellSlots[slotIdx] });
+    if (before > 0) {
+      s.player.spellSlots[slotIdx] = before - 1;
+      Logger.log('spell.slot_consumed', { spellId: spell.id, level: spell.level, slotLevel, before, after: s.player.spellSlots[slotIdx] });
+    } else if (isMagicInitiateSpell(ctx.playerDef, spell.id)) {
+      // SRD Magic Initiate: with no slot available, spend the once-per-Long-Rest
+      // free cast instead.
+      const rid = magicInitiateResourceId(spell.id);
+      const had = s.player.resources[rid] ?? 0;
+      if (had > 0) {
+        s.player.resources[rid] = had - 1;
+        Logger.log('spell.magic_initiate_free_cast', { spellId: spell.id, before: had, after: s.player.resources[rid] });
+      }
+    }
   }
   if (s.phase === 'player_turn') {
     switch (spell.castingTime) {

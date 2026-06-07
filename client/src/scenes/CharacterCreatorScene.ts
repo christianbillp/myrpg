@@ -20,7 +20,7 @@ import {
   type AbilityScores, type AbilityScoreMethod, type AbilityKey, type BackgroundAbilityChoice,
 } from "../../../shared/abilityScores";
 import { STANDARD_LANGUAGES, STANDARD_LANGUAGE_CHOICES, COMMON } from "../../../shared/languages";
-import type { ClassDef, SpeciesDef, BackgroundDef, SpellDef, FeatDef } from "../../../shared/types";
+import type { ClassDef, SpeciesDef, BackgroundDef, SpellDef, FeatDef, ItemDef } from "../../../shared/types";
 
 const ACCENT = "#e2b96f";
 const ABILITY_LABEL: Record<AbilityKey, string> = {
@@ -58,6 +58,9 @@ interface CreatorState {
   languagePicks: Set<string>;
   cantripPicks: Set<string>;
   spellPicks: Set<string>;
+  /** SRD Magic Initiate picks per granting feat (background-pinned or Versatile),
+   *  keyed by feat id: the chosen spell list, two cantrips, one L1 spell, ability. */
+  magicInitiatePicks: Map<string, { spellList: string; cantripIds: Set<string>; spellId: string; ability: string }>;
   equipmentChoice: string;
   classEquipmentChoice: string;
 }
@@ -85,6 +88,27 @@ interface SubspeciesLevelBlock {
   speedBonus?: number;
 }
 
+/** Example character concepts for the Concept step — written to fit the active
+ *  setting (The Sundered Reach: a post-collapse authoritarian empire built on
+ *  keeping magic quiet, the White Capes who hunt illegal casters, the Quota on
+ *  elves, and the ruins of the Old Empire). Clicking a card copies its prompt
+ *  into the concept textarea for editing, mirroring the Generator scene's
+ *  example-prompt cards. */
+const CONCEPT_EXAMPLES: ReadonlyArray<{ title: string; prompt: string }> = [
+  { title: "The Licensed Battlemage",
+    prompt: "A human war-mage who holds one of the Empire's rare casting licences and dreads every spell she throws — each one a knock on the same door that ended the world the first time." },
+  { title: "Born Illegal",
+    prompt: "An elf whose magic is inborn and impossible to license, surviving one Adjustment at a time and always a step ahead of the White Capes." },
+  { title: "The Ruin-Engineer",
+    prompt: "A dwarf who delves the ruins of the Old Empire to salvage and safely disarm its broken spellwork, selling what the holdfasts will pay for and trusting no enchantment to hold." },
+  { title: "The Last Believer",
+    prompt: "A cleric who still hears a god that everyone agrees withdrew a century ago — unsure whether it's faith, madness, or something worse answering back." },
+  { title: "The Powers' Fixer",
+    prompt: "A halfling broker for one of the great trade Powers who settles debts across the holdfasts with a ledger in one hand and a knife in the other." },
+  { title: "Cape Deserter",
+    prompt: "A human wizard who deserted the White Capes — the Empire's human-only magical enforcers — after one Adjustment too many, now hunted by the same order she once cast for." },
+];
+
 /** The 18 SRD skill ids (for the species "any skill" pick). */
 const ALL_SKILLS: readonly string[] = [
   "acrobatics", "animalHandling", "arcana", "athletics", "deception", "history",
@@ -101,6 +125,7 @@ export class CharacterCreatorScene extends Phaser.Scene {
   private backgrounds: BackgroundDef[] = [];
   private spells: SpellDef[] = [];
   private feats: FeatDef[] = [];
+  private items: ItemDef[] = [];
   private busy = false;
 
   private state: CreatorState = {
@@ -112,11 +137,20 @@ export class CharacterCreatorScene extends Phaser.Scene {
     pool: [...STANDARD_ARRAY],
     skillPicks: new Set(), speciesSkillPicks: new Set(), speciesFeat: "", featSkillPicks: new Map(),
     languagePicks: new Set(), cantripPicks: new Set(), spellPicks: new Set(),
+    magicInitiatePicks: new Map(),
     equipmentChoice: "A",
     classEquipmentChoice: "A",
   };
 
+  /** The setup scene that launched the creator — we return there on CREATE or
+   *  CANCEL so the player lands back where they started (Encounter or Adventure). */
+  private returnScene = "EncounterSetupScene";
+
   constructor() { super("CharacterCreatorScene"); }
+
+  init(data?: { returnScene?: string }): void {
+    this.returnScene = data?.returnScene ?? "EncounterSetupScene";
+  }
 
   create(): void {
     this.input.keyboard?.disableGlobalCapture();
@@ -126,6 +160,7 @@ export class CharacterCreatorScene extends Phaser.Scene {
     this.backgrounds = (this.registry.get("backgrounds") as BackgroundDef[]) ?? [];
     this.spells = (this.registry.get("spells") as SpellDef[]) ?? [];
     this.feats = (this.registry.get("feats") as FeatDef[]) ?? [];
+    this.items = (this.registry.get("equipment") as ItemDef[]) ?? [];
     // Sensible defaults so a player can click straight through manually.
     this.state.speciesId ||= this.species[0]?.id ?? "";
     this.state.backgroundId ||= this.backgrounds[0]?.id ?? "";
@@ -168,8 +203,36 @@ export class CharacterCreatorScene extends Phaser.Scene {
     return !!this.classOf(this.state.classId)?.spellcasting;
   }
   private visibleSteps(): number[] {
-    // Hide the Spells step for non-casters.
-    return STEPS.map((_, i) => i).filter((i) => i !== 4 || this.isCaster());
+    // Show the Spells step for casters AND for non-casters who gained a
+    // spell-granting feat (Magic Initiate via background or Versatile).
+    const showSpells = this.isCaster() || this.featsGrantingSpells().length > 0;
+    return STEPS.map((_, i) => i).filter((i) => i !== 4 || showSpells);
+  }
+
+  /** Feats that grant spells (Magic Initiate). Each carries its allowed lists,
+   *  the list pinned by a background that fixes it, the cantrip count, and the
+   *  ability options. Mirrors `featsGrantingSkills`. */
+  private featsGrantingSpells(): Array<{ feat: FeatDef; pinnedList?: string; lists: string[]; cantripCount: number; abilityChoices: string[] }> {
+    const bg = this.backgrounds.find((b) => b.id === this.state.backgroundId);
+    return this.characterFeats().map((feat) => {
+      const e = feat.effects as { learnedCantrips?: { count: number; lists: string[] }; preparedSpell?: { lists: string[] }; spellcastingAbility?: { choices: string[] } };
+      if (!e.learnedCantrips || !e.preparedSpell) return null;
+      const pinnedList = feat.id === bg?.feat?.id ? (bg?.feat?.options as { spellList?: string } | null)?.spellList : undefined;
+      return { feat, pinnedList, lists: e.learnedCantrips.lists, cantripCount: e.learnedCantrips.count, abilityChoices: e.spellcastingAbility?.choices ?? ["int", "wis", "cha"] };
+    }).filter((x): x is NonNullable<typeof x> => !!x);
+  }
+
+  /** Get (or create) the Magic Initiate pick entry for a granting feat,
+   *  defaulting the list (pinned or first), ability, and empty spell picks. */
+  private miPick(g: { feat: FeatDef; pinnedList?: string; lists: string[]; abilityChoices: string[] }): { spellList: string; cantripIds: Set<string>; spellId: string; ability: string } {
+    let pick = this.state.magicInitiatePicks.get(g.feat.id);
+    const list = g.pinnedList ?? pick?.spellList ?? g.lists[0] ?? "";
+    if (!pick || pick.spellList !== list) {
+      // New feat, or the list changed (Versatile re-pick): reset the spell picks.
+      pick = { spellList: list, cantripIds: new Set(), spellId: "", ability: pick?.ability ?? g.abilityChoices[0] ?? "int" };
+      this.state.magicInitiatePicks.set(g.feat.id, pick);
+    }
+    return pick;
   }
   private classOf(id: string) { return this.classes.find((c) => c.id === id); }
 
@@ -216,6 +279,27 @@ export class CharacterCreatorScene extends Phaser.Scene {
     ta.placeholder = "e.g. A disgraced temple guard seeking redemption on the frontier…";
     ta.style.cssText = "width:100%;height:90px;background:#11111e;border:1px solid #334455;color:#c8dae8;font-family:monospace;font-size:12px;padding:8px;box-sizing:border-box;";
     ta.addEventListener("input", () => { this.state.prompt = ta.value; });
+
+    // Example concept cards — click to drop a setting-fitting concept into the
+    // textarea below, then edit it (or hand it straight to the AI).
+    const exHead = document.createElement("div");
+    exHead.style.cssText = "font-size:11px;color:#778899;margin-bottom:6px;";
+    exHead.textContent = "Need a starting point? Pick an example, then edit it:";
+    c.appendChild(exHead);
+    const grid = document.createElement("div");
+    grid.style.cssText = "display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px;";
+    for (const ex of CONCEPT_EXAMPLES) {
+      const card = document.createElement("button");
+      card.type = "button";
+      card.style.cssText = "display:block;text-align:left;background:#14141f;border:1px solid #334455;color:#c8dae8;font-family:monospace;padding:8px 10px;cursor:pointer;transition:border-color 0.08s,background 0.08s;";
+      card.innerHTML = `<div style="font-size:12px;color:${ACCENT};margin-bottom:3px;">${esc(ex.title)}</div><div style="font-size:10px;color:#9aabbc;line-height:1.4;">${esc(ex.prompt)}</div>`;
+      card.addEventListener("mouseenter", () => { card.style.borderColor = ACCENT; card.style.background = "#1b1b2a"; });
+      card.addEventListener("mouseleave", () => { card.style.borderColor = "#334455"; card.style.background = "#14141f"; });
+      card.addEventListener("click", () => { this.state.prompt = ex.prompt; ta.value = ex.prompt; ta.focus(); });
+      grid.appendChild(card);
+    }
+    c.appendChild(grid);
+
     c.appendChild(ta);
 
     const genBtn = this.button("✦ ASK THE AI", "#2a3a5a", async () => {
@@ -243,6 +327,7 @@ export class CharacterCreatorScene extends Phaser.Scene {
       if (this.classes.some((x) => x.id === s.classId)) this.state.classId = s.classId;
       if (this.species.some((x) => x.id === s.speciesId)) this.state.speciesId = s.speciesId;
       if (this.backgrounds.some((x) => x.id === s.backgroundId)) this.state.backgroundId = s.backgroundId;
+      this.resetSpeciesGrants();  // lineage + species Origin-feat defaults for the new species
       this.state.backgroundAbility = this.defaultBackgroundAbility();  // keep valid for the (possibly new) background
       this.state.rationale = s.rationale;
       // Auto-assign the Standard Array along the AI's ability priority.
@@ -252,7 +337,12 @@ export class CharacterCreatorScene extends Phaser.Scene {
       const next: AbilityScores = { str: 8, dex: 8, con: 8, int: 8, wis: 8, cha: 8 };
       priority.forEach((k, i) => { next[k] = STANDARD_ARRAY[i] ?? 8; });
       this.state.scores = next;
-      this.setStatus("Suggestion applied — review the steps and adjust as you like.");
+      // Apply the AI's thematic build picks (validated server-side against the
+      // chosen class/background), then top up anything short with deterministic
+      // defaults so the build is always complete and CREATE-able.
+      this.applyAiBuildPicks(s);
+      this.autoFillRequiredChoices();
+      this.setStatus("Suggestion applied — a complete build is ready. Review the steps or CREATE now.");
       this.renderStep();
     } catch (e) {
       this.setStatus(e instanceof Error ? e.message : "AI assist failed.", true);
@@ -591,11 +681,131 @@ export class CharacterCreatorScene extends Phaser.Scene {
     return `A Giant-ancestry benefit (uses = Proficiency Bonus per Long Rest).`;
   }
 
+  /** Seed the build with the AI's thematic picks (US-122). Resets every pick set
+   *  to a clean slate, then fills the AI-provided categories — class skills,
+   *  languages, and caster cantrips/spells — keeping only entries that validate
+   *  against the chosen class/background and the SRD counts. The species bonus
+   *  skill and feat skills (which the AI doesn't pick) are left empty for
+   *  `autoFillRequiredChoices` to top up. */
+  private applyAiBuildPicks(s: { skillProficiencies?: string[]; languages?: string[]; cantrips?: string[]; preparedSpells?: string[] }): void {
+    this.state.skillPicks = new Set();
+    this.state.speciesSkillPicks = new Set();
+    this.state.featSkillPicks = new Map();
+    this.state.languagePicks = new Set();
+    this.state.cantripPicks = new Set();
+    this.state.spellPicks = new Set();
+    this.state.magicInitiatePicks = new Map();
+
+    const cls = this.classOf(this.state.classId);
+    if (cls) {
+      const bgTaken = new Set(this.backgrounds.find((b) => b.id === this.state.backgroundId)?.skillProficiencies ?? []);
+      const options = new Set(cls.skillChoices.options.filter((sk) => !bgTaken.has(sk)));
+      this.seedFromValid(this.state.skillPicks, s.skillProficiencies, options, cls.skillChoices.count);
+    }
+    const langs = new Set(STANDARD_LANGUAGES.filter((l) => l !== COMMON));
+    this.seedFromValid(this.state.languagePicks, s.languages, langs, STANDARD_LANGUAGE_CHOICES);
+
+    const sc = cls?.spellcasting;
+    if (cls && sc) {
+      const cantrips = new Set(this.spells.filter((x) => x.level === 0 && x.classes.includes(cls.id)).map((x) => x.id));
+      const l1 = new Set(this.spells.filter((x) => x.level === 1 && x.classes.includes(cls.id)).map((x) => x.id));
+      this.seedFromValid(this.state.cantripPicks, s.cantrips, cantrips, sc.cantripsKnownByLevel?.[0] ?? 0);
+      this.seedFromValid(this.state.spellPicks, s.preparedSpells, l1, sc.preparedSpellsByLevel?.[0] ?? 0);
+    }
+  }
+
+  /** Add the valid, de-duplicated entries of `raw` into `target`, capped at `max`. */
+  private seedFromValid(target: Set<string>, raw: string[] | undefined, valid: Set<string>, max: number): void {
+    for (const id of raw ?? []) {
+      if (target.size >= max) break;
+      if (valid.has(id)) target.add(id);
+    }
+  }
+
+  /** Top every required creation choice up to its SRD count with deterministic
+   *  defaults, WITHOUT clearing existing picks — so it completes whatever the AI
+   *  (or the player) already chose. Covers class skills, the species bonus skill
+   *  (Skillful), feat skills (Skilled), languages, and caster cantrips/spells.
+   *  Honours the no-stacking rule; everything stays editable on its step. */
+  private autoFillRequiredChoices(): void {
+    const cls = this.classOf(this.state.classId);
+
+    // Class skills — first options not already granted by the background.
+    if (cls) {
+      const bgTaken = new Set(this.backgrounds.find((b) => b.id === this.state.backgroundId)?.skillProficiencies ?? []);
+      for (const sk of cls.skillChoices.options) {
+        if (this.state.skillPicks.size >= cls.skillChoices.count) break;
+        if (!bgTaken.has(sk) && !this.state.skillPicks.has(sk)) this.state.skillPicks.add(sk);
+      }
+    }
+
+    // Species bonus skill (Human "Skillful") — first choices not already taken.
+    const speciesCount = this.speciesSkillCount();
+    if (speciesCount > 0) {
+      const taken = this.takenSkills({ species: true });
+      for (const sk of this.speciesSkillChoices()) {
+        if (this.state.speciesSkillPicks.size >= speciesCount) break;
+        if (!taken.has(sk) && !this.state.speciesSkillPicks.has(sk)) this.state.speciesSkillPicks.add(sk);
+      }
+    }
+
+    // Feat-granted skills (e.g. Skilled → 3) — first skills not already taken.
+    // Set each feat's picks into state before the next feat so later feats see
+    // them via `takenSkills`.
+    for (const { feat, count } of this.featsGrantingSkills()) {
+      const picks = this.state.featSkillPicks.get(feat.id) ?? new Set<string>();
+      const taken = this.takenSkills({ featId: feat.id });
+      for (const sk of ALL_SKILLS) {
+        if (picks.size >= count) break;
+        if (!taken.has(sk) && !picks.has(sk)) picks.add(sk);
+      }
+      this.state.featSkillPicks.set(feat.id, picks);
+    }
+
+    // Languages — Common is implicit (and must be skipped, matching the picker),
+    // so choose the required number of extras from the rest.
+    for (const lang of STANDARD_LANGUAGES) {
+      if (this.state.languagePicks.size >= STANDARD_LANGUAGE_CHOICES) break;
+      if (lang === COMMON || this.state.languagePicks.has(lang)) continue;
+      this.state.languagePicks.add(lang);
+    }
+
+    // Caster cantrips + L1 spells — fill to the class's known/prepared counts.
+    const sc = cls?.spellcasting;
+    if (cls && sc) {
+      const cantripCount = sc.cantripsKnownByLevel?.[0] ?? 0;
+      const prepCount = sc.preparedSpellsByLevel?.[0] ?? 0;
+      for (const sp of this.spells.filter((x) => x.level === 0 && x.classes.includes(cls.id))) {
+        if (this.state.cantripPicks.size >= cantripCount) break;
+        if (!this.state.cantripPicks.has(sp.id)) this.state.cantripPicks.add(sp.id);
+      }
+      for (const sp of this.spells.filter((x) => x.level === 1 && x.classes.includes(cls.id))) {
+        if (this.state.spellPicks.size >= prepCount) break;
+        if (!this.state.spellPicks.has(sp.id)) this.state.spellPicks.add(sp.id);
+      }
+    }
+
+    // Magic Initiate feat picks — list (pinned/first), ability, cantrips + spell.
+    for (const g of this.featsGrantingSpells()) {
+      const p = this.miPick(g);
+      for (const sp of this.spells.filter((x) => x.level === 0 && x.classes.includes(p.spellList))) {
+        if (p.cantripIds.size >= g.cantripCount) break;
+        if (!p.cantripIds.has(sp.id)) p.cantripIds.add(sp.id);
+      }
+      if (!p.spellId) {
+        const l1 = this.spells.find((x) => x.level === 1 && x.classes.includes(p.spellList));
+        if (l1) p.spellId = l1.id;
+      }
+    }
+    // Equipment (`classEquipmentChoice` / `equipmentChoice`) already defaults to "A".
+  }
+
   /** Reset species-granted picks when the species changes (or on load). */
   private resetSpeciesGrants(): void {
     this.state.speciesSkillPicks = new Set();
     this.state.speciesFeat = this.speciesGrantsOriginFeat() ? (this.originFeats()[0]?.id ?? "") : "";
     this.state.featSkillPicks = new Map();  // granting feats changed
+    this.state.magicInitiatePicks = new Map();  // spell-granting feats changed
     this.state.speciesLineage = this.subspeciesChoice()?.options[0]?.value ?? null;
   }
 
@@ -617,16 +827,18 @@ export class CharacterCreatorScene extends Phaser.Scene {
   }
 
   /** Skills already proficient from every source (class picks, background,
-   *  species Skillful, feat picks) — optionally excluding one feat's own picks
-   *  so its picker still shows them checked. Used to stop redundant choices. */
-  private takenSkills(excludeFeatId?: string): Set<string> {
-    const t = new Set<string>([
-      ...this.state.skillPicks,
-      ...(this.backgrounds.find((b) => b.id === this.state.backgroundId)?.skillProficiencies ?? []),
-      ...this.state.speciesSkillPicks,
-    ]);
+   *  species Skillful, feat picks). SRD: a Proficiency Bonus is never added
+   *  twice (Playing the Game), so a skill granted by one source can't be picked
+   *  again by another — each picker greys out skills `taken` elsewhere. Pass the
+   *  picker's own source in `exclude` so it still shows its own picks as
+   *  togglable rather than locked. */
+  private takenSkills(exclude: { class?: boolean; species?: boolean; featId?: string } = {}): Set<string> {
+    const t = new Set<string>();
+    if (!exclude.class) for (const s of this.state.skillPicks) t.add(s);
+    for (const s of this.backgrounds.find((b) => b.id === this.state.backgroundId)?.skillProficiencies ?? []) t.add(s);
+    if (!exclude.species) for (const s of this.state.speciesSkillPicks) t.add(s);
     for (const [fid, picks] of this.state.featSkillPicks) {
-      if (fid !== excludeFeatId) for (const s of picks) t.add(s);
+      if (fid !== exclude.featId) for (const s of picks) t.add(s);
     }
     return t;
   }
@@ -791,8 +1003,12 @@ export class CharacterCreatorScene extends Phaser.Scene {
     head.style.cssText = "font-size:12px;color:#88aacc;margin-bottom:8px;";
     head.textContent = `Choose ${count} ${cls.name} skill proficiencies (${this.state.skillPicks.size}/${count}):`;
     c.appendChild(head);
+    // Skills already granted by the background/species/feats are shown but
+    // locked — SRD proficiencies don't stack, so they can't be chosen again.
+    const classTaken = this.takenSkills({ class: true });
     for (const sk of cls.skillChoices.options) {
-      c.appendChild(this.checkRow(sk, this.state.skillPicks.has(sk), (on) => {
+      const locked = classTaken.has(sk);
+      c.appendChild(this.skillRow(sk, locked || this.state.skillPicks.has(sk), locked, (on) => {
         if (on) {
           if (this.state.skillPicks.size >= count) return false;
           this.state.skillPicks.add(sk);
@@ -802,8 +1018,9 @@ export class CharacterCreatorScene extends Phaser.Scene {
       }));
     }
 
-    // Species skill grant (Human "Skillful") — an extra proficiency, clearly
-    // sourced, in a skill not already granted by another source.
+    // Species skill grant (Human "Skillful") — an extra proficiency in any skill
+    // not already granted by another source. The full list is shown; already-
+    // proficient skills are greyed so nothing looks missing.
     const speciesCount = this.speciesSkillCount();
     if (speciesCount > 0) {
       const sHead = document.createElement("div");
@@ -811,10 +1028,10 @@ export class CharacterCreatorScene extends Phaser.Scene {
       const label = () => `${this.currentSpecies()?.name ?? "Species"} bonus skill (Skillful) — choose ${speciesCount} (${this.state.speciesSkillPicks.size}/${speciesCount}):`;
       sHead.textContent = label();
       c.appendChild(sHead);
-      const taken = this.takenSkills();
+      const taken = this.takenSkills({ species: true });
       for (const sk of this.speciesSkillChoices()) {
-        if (taken.has(sk) && !this.state.speciesSkillPicks.has(sk)) continue;
-        c.appendChild(this.checkRow(prettify(sk), this.state.speciesSkillPicks.has(sk), (on) => {
+        const locked = taken.has(sk);
+        c.appendChild(this.skillRow(sk, locked || this.state.speciesSkillPicks.has(sk), locked, (on) => {
           if (on) { if (this.state.speciesSkillPicks.size >= speciesCount) return false; this.state.speciesSkillPicks.add(sk); }
           else this.state.speciesSkillPicks.delete(sk);
           sHead.textContent = label();
@@ -825,7 +1042,7 @@ export class CharacterCreatorScene extends Phaser.Scene {
 
     // Feat-granted skill proficiencies (e.g. the Skilled feat → 3). One labeled
     // section per granting feat so the player can see exactly why they have the
-    // extra picks.
+    // extra picks. Again the whole list is shown with locked skills greyed.
     for (const { feat, count } of this.featsGrantingSkills()) {
       let picks = this.state.featSkillPicks.get(feat.id);
       if (!picks) { picks = new Set(); this.state.featSkillPicks.set(feat.id, picks); }
@@ -834,10 +1051,10 @@ export class CharacterCreatorScene extends Phaser.Scene {
       const label = () => `${feat.name} feat — choose ${count} skill ${count === 1 ? "proficiency" : "proficiencies"} (${picks!.size}/${count}):`;
       fHead.textContent = label();
       c.appendChild(fHead);
-      const taken = this.takenSkills(feat.id);
+      const taken = this.takenSkills({ featId: feat.id });
       for (const sk of ALL_SKILLS) {
-        if (taken.has(sk) && !picks.has(sk)) continue;
-        c.appendChild(this.checkRow(prettify(sk), picks.has(sk), (on) => {
+        const locked = taken.has(sk);
+        c.appendChild(this.skillRow(sk, locked || picks.has(sk), locked, (on) => {
           if (on) { if (picks!.size >= count) return false; picks!.add(sk); }
           else picks!.delete(sk);
           fHead.textContent = label();
@@ -847,38 +1064,127 @@ export class CharacterCreatorScene extends Phaser.Scene {
     }
   }
 
+  /** A skill checkbox row that prettifies the skill id for display and supports
+   *  a `locked` state (already proficient from another source): rendered checked
+   *  + disabled + greyed with an "already proficient" note, per the SRD no-stack
+   *  rule. */
+  private skillRow(skillId: string, checked: boolean, locked: boolean, onToggle: (on: boolean) => boolean | void): HTMLElement {
+    const row = document.createElement("label");
+    row.style.cssText = `display:flex;align-items:center;gap:8px;margin:3px 0;font-size:12px;cursor:${locked ? "default" : "pointer"};color:${locked ? "#5d6b78" : "#c8dae8"};`;
+    const box = document.createElement("input");
+    box.type = "checkbox"; box.checked = checked; box.disabled = locked;
+    box.addEventListener("change", () => {
+      const res = onToggle(box.checked);
+      if (res === false) box.checked = false;  // pick rejected (limit reached)
+    });
+    const span = document.createElement("span");
+    span.textContent = prettify(skillId);
+    row.appendChild(box); row.appendChild(span);
+    if (locked) {
+      const note = document.createElement("span");
+      note.textContent = "— already proficient";
+      note.style.cssText = "color:#4f5d6a;font-style:italic;";
+      row.appendChild(note);
+    }
+    return row;
+  }
+
   // ── Step 4 — Spells (casters) ────────────────────────────────────────────
   private renderSpells(): void {
     const c = this.content!;
     const cls = this.classOf(this.state.classId);
     const sc = cls?.spellcasting;
-    if (!cls || !sc) { c.textContent = "This class has no spells to prepare."; return; }
-    const cantripCount = sc.cantripsKnownByLevel?.[0] ?? 0;
-    const prepCount = sc.preparedSpellsByLevel?.[0] ?? 0;
-    const classCantrips = this.spells.filter((s) => s.level === 0 && s.classes.includes(cls.id));
-    const classL1 = this.spells.filter((s) => s.level === 1 && s.classes.includes(cls.id));
+    const miFeats = this.featsGrantingSpells();
+    if (!cls || !sc) {
+      if (miFeats.length === 0) { c.textContent = "This class has no spells to prepare."; return; }
+    } else {
+      const cantripCount = sc.cantripsKnownByLevel?.[0] ?? 0;
+      const prepCount = sc.preparedSpellsByLevel?.[0] ?? 0;
+      const classCantrips = this.spells.filter((s) => s.level === 0 && s.classes.includes(cls.id));
+      const classL1 = this.spells.filter((s) => s.level === 1 && s.classes.includes(cls.id));
+
+      const ch = document.createElement("div");
+      ch.style.cssText = "font-size:12px;color:" + ACCENT + ";margin:6px 0;";
+      ch.textContent = `Cantrips (${this.state.cantripPicks.size}/${cantripCount}):`;
+      c.appendChild(ch);
+      for (const sp of classCantrips) {
+        c.appendChild(this.checkRow(sp.name, this.state.cantripPicks.has(sp.id), (on) => {
+          if (on) { if (this.state.cantripPicks.size >= cantripCount) return false; this.state.cantripPicks.add(sp.id); }
+          else this.state.cantripPicks.delete(sp.id);
+          ch.textContent = `Cantrips (${this.state.cantripPicks.size}/${cantripCount}):`;
+          return true;
+        }));
+      }
+      const ph = document.createElement("div");
+      ph.style.cssText = "font-size:12px;color:" + ACCENT + ";margin:10px 0 6px;";
+      ph.textContent = `Level-1 spells (${this.state.spellPicks.size}/${prepCount}):`;
+      c.appendChild(ph);
+      for (const sp of classL1) {
+        c.appendChild(this.checkRow(sp.name, this.state.spellPicks.has(sp.id), (on) => {
+          if (on) { if (this.state.spellPicks.size >= prepCount) return false; this.state.spellPicks.add(sp.id); }
+          else this.state.spellPicks.delete(sp.id);
+          ph.textContent = `Level-1 spells (${this.state.spellPicks.size}/${prepCount}):`;
+          return true;
+        }));
+      }
+    }
+
+    // Magic Initiate sections (background-pinned or Versatile-chosen feat): pick
+    // the spell list (if not pinned), an ability, two cantrips and one L1 spell.
+    for (const g of miFeats) this.renderMagicInitiateSection(c, g);
+  }
+
+  /** One Magic Initiate feat's picker — list (pinned or chosen), ability, two
+   *  cantrips, one always-prepared level-1 spell, all from the chosen list. */
+  private renderMagicInitiateSection(
+    c: HTMLElement,
+    g: { feat: FeatDef; pinnedList?: string; lists: string[]; cantripCount: number; abilityChoices: string[] },
+  ): void {
+    const pick = this.miPick(g);
+    const head = document.createElement("div");
+    head.style.cssText = "font-size:12px;color:#caa6e6;margin:16px 0 6px;border-top:1px solid #334455;padding-top:10px;";
+    head.textContent = `${g.feat.name} — choose ${g.cantripCount} cantrips + 1 level-1 spell:`;
+    c.appendChild(head);
+
+    // Spell list — fixed label when pinned by the background, else a dropdown.
+    if (g.pinnedList) {
+      const lbl = document.createElement("div");
+      lbl.style.cssText = "font-size:11px;color:#88aacc;margin:2px 0 6px;";
+      lbl.innerHTML = `Spell list: <b style="color:#c8dae8;">${prettify(g.pinnedList)}</b> (set by your background)`;
+      c.appendChild(lbl);
+    } else {
+      c.appendChild(this.selectRow("Spell list", g.lists.map((l) => ({ value: l, label: prettify(l) })), pick.spellList, (v) => {
+        pick.spellList = v; pick.cantripIds = new Set(); pick.spellId = ""; this.renderStep();
+      }));
+    }
+    c.appendChild(this.selectRow("Ability", g.abilityChoices.map((a) => ({ value: a, label: ABILITY_LABEL[a as AbilityKey] ?? a.toUpperCase() })), pick.ability, (v) => { pick.ability = v; }));
+
+    const list = pick.spellList;
+    const cantrips = this.spells.filter((s) => s.level === 0 && s.classes.includes(list));
+    const l1 = this.spells.filter((s) => s.level === 1 && s.classes.includes(list));
 
     const ch = document.createElement("div");
-    ch.style.cssText = "font-size:12px;color:" + ACCENT + ";margin:6px 0;";
-    ch.textContent = `Cantrips (${this.state.cantripPicks.size}/${cantripCount}):`;
+    ch.style.cssText = "font-size:11px;color:#9ac6a0;margin:8px 0 4px;";
+    const chLabel = () => `Cantrips (${pick.cantripIds.size}/${g.cantripCount}):`;
+    ch.textContent = chLabel();
     c.appendChild(ch);
-    for (const sp of classCantrips) {
-      c.appendChild(this.checkRow(sp.name, this.state.cantripPicks.has(sp.id), (on) => {
-        if (on) { if (this.state.cantripPicks.size >= cantripCount) return false; this.state.cantripPicks.add(sp.id); }
-        else this.state.cantripPicks.delete(sp.id);
-        ch.textContent = `Cantrips (${this.state.cantripPicks.size}/${cantripCount}):`;
+    for (const sp of cantrips) {
+      c.appendChild(this.checkRow(sp.name, pick.cantripIds.has(sp.id), (on) => {
+        if (on) { if (pick.cantripIds.size >= g.cantripCount) return false; pick.cantripIds.add(sp.id); }
+        else pick.cantripIds.delete(sp.id);
+        ch.textContent = chLabel();
         return true;
       }));
     }
     const ph = document.createElement("div");
-    ph.style.cssText = "font-size:12px;color:" + ACCENT + ";margin:10px 0 6px;";
-    ph.textContent = `Level-1 spells (${this.state.spellPicks.size}/${prepCount}):`;
+    ph.style.cssText = "font-size:11px;color:#9ac6a0;margin:8px 0 4px;";
+    ph.textContent = "Level-1 spell (always prepared, 1 free cast per long rest):";
     c.appendChild(ph);
-    for (const sp of classL1) {
-      c.appendChild(this.checkRow(sp.name, this.state.spellPicks.has(sp.id), (on) => {
-        if (on) { if (this.state.spellPicks.size >= prepCount) return false; this.state.spellPicks.add(sp.id); }
-        else this.state.spellPicks.delete(sp.id);
-        ph.textContent = `Level-1 spells (${this.state.spellPicks.size}/${prepCount}):`;
+    for (const sp of l1) {
+      // Single-select: choosing one replaces the prior pick (re-render to update).
+      c.appendChild(this.checkRow(sp.name, pick.spellId === sp.id, (on) => {
+        pick.spellId = on ? sp.id : "";
+        this.renderStep();
         return true;
       }));
     }
@@ -912,31 +1218,31 @@ export class CharacterCreatorScene extends Phaser.Scene {
     c.appendChild(ta);
 
     // SRD: class AND background each offer an A/B[/C] starting-equipment choice.
+    // Show every option's full contents + gold so the player sees what they
+    // start with and what the alternatives are, and a combined gold total.
     const clsEq = this.classOf(this.state.classId);
-    if (clsEq?.equipmentOptions && clsEq.equipmentOptions.length > 1) {
-      const eqRow = document.createElement("div");
-      eqRow.style.cssText = "display:flex;gap:8px;margin-top:10px;align-items:center;font-size:12px;flex-wrap:wrap;";
-      eqRow.innerHTML = `<span style="color:#88aacc;">Class gear:</span>`;
-      for (const opt of clsEq.equipmentOptions) {
-        const wpn = opt.weaponId ? `${opt.weaponId.replace(/_/g, " ")} ` : "";
-        eqRow.appendChild(this.button(`${opt.label} (${wpn}${opt.gold} gp)`, this.state.classEquipmentChoice === opt.label ? "#3a2a1a" : "#1a1a2a", () => {
-          this.state.classEquipmentChoice = opt.label; this.renderStep();
-        }));
-      }
-      c.appendChild(eqRow);
+    const bg = this.backgrounds.find((b) => b.id === this.state.backgroundId);
+    const classOpts = clsEq?.equipmentOptions ?? [];
+    if (classOpts.length > 0) {
+      this.renderEquipmentChooser(c, "Class equipment", classOpts.map((o) => ({
+        label: o.label, gold: o.gold, contents: this.describeClassOption(o),
+      })), this.state.classEquipmentChoice, (label) => { this.state.classEquipmentChoice = label; this.renderStep(); });
+    }
+    if (bg && bg.equipmentOptions.length > 0) {
+      this.renderEquipmentChooser(c, "Background equipment", bg.equipmentOptions.map((o) => ({
+        label: o.label, gold: o.gold, contents: this.describeBackgroundOption(o),
+      })), this.state.equipmentChoice, (label) => { this.state.equipmentChoice = label; this.renderStep(); });
     }
 
-    const bg = this.backgrounds.find((b) => b.id === this.state.backgroundId);
-    if (bg && bg.equipmentOptions.length > 1) {
-      const eqRow = document.createElement("div");
-      eqRow.style.cssText = "display:flex;gap:8px;margin-top:10px;align-items:center;font-size:12px;flex-wrap:wrap;";
-      eqRow.innerHTML = `<span style="color:#88aacc;">Background gear:</span>`;
-      for (const opt of bg.equipmentOptions) {
-        eqRow.appendChild(this.button(`${opt.label} (${opt.gold} gp)`, this.state.equipmentChoice === opt.label ? "#3a2a1a" : "#1a1a2a", () => {
-          this.state.equipmentChoice = opt.label; this.renderStep();
-        }));
-      }
-      c.appendChild(eqRow);
+    // Combined starting gold = the selected class option + the selected
+    // background option (matches the CharacterBuilder summing both).
+    const classGold = (classOpts.find((o) => o.label === this.state.classEquipmentChoice) ?? classOpts[0])?.gold ?? 0;
+    const bgGold = (bg?.equipmentOptions.find((o) => o.label === this.state.equipmentChoice) ?? bg?.equipmentOptions[0])?.gold ?? 0;
+    if (classOpts.length > 0 || (bg && bg.equipmentOptions.length > 0)) {
+      const goldLine = document.createElement("div");
+      goldLine.style.cssText = "margin-top:10px;font-size:12px;color:#caa86a;";
+      goldLine.innerHTML = `<b>Total starting gold:</b> ${classGold + bgGold} gp <span style="color:#7e8a96;">(${classGold} class + ${bgGold} background)</span>`;
+      c.appendChild(goldLine);
     }
 
     const summary = document.createElement("div");
@@ -952,6 +1258,59 @@ export class CharacterCreatorScene extends Phaser.Scene {
         return `${ABILITY_LABEL[k]} ${final} (${fmtMod(abilityModifier(final))})`;
       }).join(" · ");
     c.appendChild(summary);
+  }
+
+  /** Render a labelled starting-equipment chooser. Each option lists its full
+   *  contents + gold; the selected one is highlighted. A single fixed option is
+   *  shown as a non-interactive row (no choice to make). */
+  private renderEquipmentChooser(
+    c: HTMLElement, title: string,
+    options: Array<{ label: string; gold: number; contents: string[] }>,
+    selectedLabel: string, onSelect: (label: string) => void,
+  ): void {
+    const wrap = document.createElement("div");
+    wrap.style.cssText = "margin-top:12px;";
+    const h = document.createElement("div");
+    h.style.cssText = "font-size:12px;color:#88aacc;margin-bottom:4px;";
+    h.textContent = title;
+    wrap.appendChild(h);
+    const single = options.length === 1;
+    for (const opt of options) {
+      const selected = single || opt.label === selectedLabel;
+      const text = opt.contents.length ? opt.contents.map(esc).join(", ") : "—";
+      const row = document.createElement(single ? "div" : "button");
+      row.style.cssText = `display:block;width:100%;text-align:left;margin:3px 0;padding:6px 8px;box-sizing:border-box;font-family:monospace;font-size:11px;line-height:1.4;
+        background:${selected ? "#2a2416" : "#11111e"};border:1px solid ${selected ? ACCENT : "#334455"};color:#c8dae8;cursor:${single ? "default" : "pointer"};`;
+      const prefix = single ? "" : `<b style="color:${selected ? ACCENT : "#8899aa"};">${opt.label}</b> — `;
+      row.innerHTML = `${prefix}${text} <span style="color:#caa86a;">· ${opt.gold} gp</span>`;
+      if (!single) row.addEventListener("click", () => onSelect(opt.label));
+      wrap.appendChild(row);
+    }
+    c.appendChild(wrap);
+  }
+
+  /** Display name for an item id — the registry name, else a prettified id. */
+  private itemName(id: string): string {
+    return this.items.find((it) => it.id === id)?.name ?? prettify(id);
+  }
+  /** "<name> ×N" for a count > 1, else just the name. `name` overrides the
+   *  registry lookup (backgrounds carry their own display names). */
+  private itemLabel(id: string | undefined, count?: number, name?: string): string {
+    const base = name ?? (id ? this.itemName(id) : "");
+    return count && count > 1 ? `${base} ×${count}` : base;
+  }
+  /** Class option contents: the equipped armor/weapon/shield, then loose items. */
+  private describeClassOption(opt: NonNullable<ClassDef["equipmentOptions"]>[number]): string[] {
+    const parts: string[] = [];
+    if (opt.armorId) parts.push(this.itemName(opt.armorId));
+    if (opt.weaponId) parts.push(this.itemName(opt.weaponId));
+    if (opt.shieldId) parts.push(this.itemName(opt.shieldId));
+    for (const it of opt.items ?? []) parts.push(this.itemLabel(it.itemId, it.count));
+    return parts;
+  }
+  /** Background option contents — loose inventory items only (no equip slots). */
+  private describeBackgroundOption(opt: BackgroundDef["equipmentOptions"][number]): string[] {
+    return (opt.items ?? []).map((it) => this.itemLabel(it.itemId, it.count, it.name)).filter(Boolean);
   }
 
   private async submit(): Promise<void> {
@@ -978,14 +1337,21 @@ export class CharacterCreatorScene extends Phaser.Scene {
         classEquipmentChoice: this.state.classEquipmentChoice,
         cantripIds: cls?.spellcasting ? [...this.state.cantripPicks] : undefined,
         preparedSpellIds: cls?.spellcasting ? [...this.state.spellPicks] : undefined,
+        magicInitiate: this.featsGrantingSpells().map((g) => {
+          const p = this.miPick(g);
+          return { featId: g.feat.id, spellList: p.spellList, cantripIds: [...p.cantripIds], spellId: p.spellId, ability: p.ability };
+        }),
         shortDescription: this.state.shortDescription,
         description: this.state.description,
       };
-      await gameClient.createCharacter(choices);
-      // Refresh the roster so the new character appears in the carousel.
+      const created = await gameClient.createCharacter(choices);
+      // Refresh the roster so the new character appears in the carousel, and
+      // mark it as the last-selected character so the setup scene centres and
+      // selects it on return (no reload needed).
       const chars = await gameClient.fetchCharacters();
       this.registry.set("characters", chars);
-      this.scene.start("EncounterSetupScene");
+      localStorage.setItem("myrpg_last_character", created.id);
+      this.scene.start(this.returnScene);
     } catch (e) {
       this.setStatus(e instanceof Error ? e.message : "Create failed.", true);
       this.busy = false;
@@ -999,7 +1365,7 @@ export class CharacterCreatorScene extends Phaser.Scene {
   private renderBar(): void {
     const bar = this.root!.querySelector("[data-bar]") as HTMLDivElement;
     bar.innerHTML = "";
-    bar.appendChild(this.button("CANCEL", "#2a1a1a", () => this.scene.start("EncounterSetupScene")));
+    bar.appendChild(this.button("CANCEL", "#2a1a1a", () => this.scene.start(this.returnScene)));
     const steps = this.visibleSteps();
     const pos = steps.indexOf(this.state.step);
     if (pos > 0) bar.appendChild(this.button("‹ PREV", "#1a1a2a", () => { this.state.step = steps[pos - 1]; this.renderStep(); }));

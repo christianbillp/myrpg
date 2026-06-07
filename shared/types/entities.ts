@@ -223,6 +223,11 @@ export interface PlayerDef {
   defaultPreparedSpellIds?: string[];
   /** Starting spell slots, indexed by `spell.level − 1`. e.g. `[2]` = 2 × L1, no higher slots. */
   defaultSpellSlots?: number[];
+  /** SRD Magic Initiate: the level-1 spell(s) the feat grants as "always
+   *  prepared" and castable once per Long Rest without a spell slot (or with a
+   *  slot, if the character has any). Each id seeds a `magic-initiate:<id>`
+   *  free-cast resource; the feat's two cantrips fold into `defaultCantripIds`. */
+  magicInitiateSpellIds?: string[];
   mainAttack: PlayerAttack;
   /** One-line tagline shown on the character carousel selector card. */
   shortDescription?: string;

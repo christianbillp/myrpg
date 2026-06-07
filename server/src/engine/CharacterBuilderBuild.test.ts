@@ -33,6 +33,12 @@ function realDefs(): CharacterBuilderDefs {
 const arr = (str: number, dex: number, con: number, int: number, wis: number, cha: number): AbilityScores =>
   ({ str, dex, con, int, wis, cha });
 
+// SRD Magic Initiate picks for the backgrounds that grant it (Sage → wizard,
+// Acolyte → cleric). The list is pinned by the background; cantrips/spell are
+// chosen from it. Kept distinct from the class spell picks below.
+const wizardMI = { featId: 'magic-initiate', cantripIds: ['mage-hand', 'dancing-lights'], spellId: 'feather-fall', ability: 'int' };
+const clericMI = { featId: 'magic-initiate', cantripIds: ['guidance', 'resistance'], spellId: 'bless', ability: 'wis' };
+
 describe('PlayerDef builder (US-122)', () => {
   const defs = realDefs();
 
@@ -100,6 +106,7 @@ describe('PlayerDef builder (US-122)', () => {
       equipmentChoice: 'A',
       cantripIds: ['fire-bolt', 'light', 'ray-of-frost'],
       preparedSpellIds: ['magic-missile', 'shield', 'mage-armor', 'detect-magic'],
+      magicInitiate: [wizardMI],  // Sage background grants Magic Initiate (wizard)
     };
     const r = buildPlayerDef(choices, defs);
     expect(r.ok).toBe(true);
@@ -107,9 +114,10 @@ describe('PlayerDef builder (US-122)', () => {
     const pd = r.playerDef;
     expect(pd.int).toBe(17);  // 15 + 2
     expect(pd.spellcastingAbility).toBe('int');
-    expect(pd.defaultCantripIds).toHaveLength(3);
-    expect(pd.defaultPreparedSpellIds).toHaveLength(4);
-    expect(pd.defaultSpellbookIds).toEqual(pd.defaultPreparedSpellIds);  // spellbook caster
+    expect(pd.defaultCantripIds).toHaveLength(5);  // 3 class + 2 Magic Initiate
+    expect(pd.defaultPreparedSpellIds).toHaveLength(4);  // class prepared only
+    expect(pd.defaultSpellbookIds).toEqual(pd.defaultPreparedSpellIds);  // spellbook caster (MI spell is separate)
+    expect(pd.magicInitiateSpellIds).toEqual(['feather-fall']);  // always-prepared free-cast L1 spell
     expect(pd.defaultSpellSlots).toEqual([2]);
     expect(pd.defaultEquipment.weaponId).toBe('quarterstaff');
   });
@@ -124,6 +132,7 @@ describe('PlayerDef builder (US-122)', () => {
       equipmentChoice: 'A',
       cantripIds: ['sacred-flame', 'light', 'mending'],
       preparedSpellIds: ['cure-wounds', 'guiding-bolt', 'healing-word', 'detect-magic'],
+      magicInitiate: [clericMI],  // Acolyte background grants Magic Initiate (cleric)
     };
     const r = buildPlayerDef(choices, defs);
     expect(r.ok).toBe(true);
@@ -144,6 +153,7 @@ describe('PlayerDef builder (US-122)', () => {
       equipmentChoice: 'A',
       cantripIds: ['sacred-flame', 'light', 'mending'],
       preparedSpellIds: ['cure-wounds', 'guiding-bolt', 'healing-word', 'detect-magic'],
+      magicInitiate: [clericMI],  // Acolyte background grants Magic Initiate (cleric)
     };
     const dwarf = buildPlayerDef({ ...base, name: 'D', speciesId: 'dwarf' }, defs);
     const human = buildPlayerDef({ ...base, name: 'H', speciesId: 'human', speciesSkills: ['insight'], speciesFeat: 'alert' }, defs);
@@ -284,6 +294,7 @@ describe('PlayerDef builder (US-122)', () => {
       skillProficiencies: ['arcana', 'investigation'], speciesSkills: ['perception'],
       cantripIds: ['fire-bolt', 'light', 'ray-of-frost'],
       preparedSpellIds: ['magic-missile', 'shield', 'mage-armor', 'detect-magic'],
+      magicInitiate: [wizardMI],  // Sage background grants Magic Initiate (wizard)
     };
     const r = buildPlayerDef(choices, defs);
     expect(r.ok).toBe(true);

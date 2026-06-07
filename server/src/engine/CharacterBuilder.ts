@@ -83,6 +83,11 @@ export interface CharacterCreationChoices {
   cantripIds?: string[];
   /** Caster prepared/known/spellbook picks (count = class prepared at L1). */
   preparedSpellIds?: string[];
+  /** SRD Magic Initiate picks — one entry per feat the character has that grants
+   *  the feat (background-granted or Human "Versatile"). `spellList` is pinned by
+   *  a background that fixes it (`feat.options.spellList`); otherwise the player
+   *  chooses it from the feat's lists. */
+  magicInitiate?: Array<{ featId: string; spellList?: string; cantripIds: string[]; spellId: string; ability: string }>;
   tokenAsset?: string;
   color?: number;
   shortDescription?: string;
@@ -317,9 +322,17 @@ export function buildPlayerDef(choices: CharacterCreationChoices, defs: Characte
     ? choices.racialSpellAbility
     : (racialAbilityChoices?.[0] ?? 'cha');
 
-  const allCantrips = [...new Set([...(casterFields.defaultCantripIds ?? []), ...racialCantripIds])];
+  // ── Magic Initiate (SRD origin feat) ─────────────────────────────────────────
+  // Each granting feat (background-pinned list, or a Versatile pick) adds two
+  // cantrips + one always-prepared L1 spell castable once per Long Rest without
+  // a slot, and (for a non-caster) a chosen spellcasting ability.
+  const mi = applyMagicInitiate(choices, featIds, bg, defs);
+  if (!mi.ok) return mi;
+
+  const allCantrips = [...new Set([...(casterFields.defaultCantripIds ?? []), ...racialCantripIds, ...mi.cantripIds])];
   const spellcastingAbility = (casterFields.spellcastingAbility
-    ?? (racialCantripIds.length ? racialAbility as PlayerDef['spellcastingAbility'] : undefined));
+    ?? (racialCantripIds.length ? racialAbility as PlayerDef['spellcastingAbility'] : undefined)
+    ?? (mi.spellIds.length ? mi.ability as PlayerDef['spellcastingAbility'] : undefined));
 
   const playerDef: PlayerDef = {
     id: slugify(choices.name),
@@ -356,10 +369,14 @@ export function buildPlayerDef(choices: CharacterCreationChoices, defs: Characte
     shortDescription: choices.shortDescription,
     description: choices.description,
     ...casterFields,
-    // Merge racial cantrips into the known list + ensure a spellcasting ability
-    // exists for a non-caster who gained one (override the casterFields spread).
+    // Merge racial + Magic Initiate cantrips into the known list and ensure a
+    // spellcasting ability exists for a non-caster who gained one (override the
+    // casterFields spread). The Magic Initiate L1 spell is tracked separately in
+    // `magicInitiateSpellIds` (always prepared + free-cast), not in the class
+    // prepared/spellbook lists.
     ...(allCantrips.length ? { defaultCantripIds: allCantrips } : {}),
     ...(spellcastingAbility ? { spellcastingAbility } : {}),
+    ...(mi.spellIds.length ? { magicInitiateSpellIds: mi.spellIds } : {}),
   };
 
   // Run the same derivation passes the load path uses so the returned PlayerDef
@@ -375,4 +392,60 @@ export function buildPlayerDef(choices: CharacterCreationChoices, defs: Characte
   applyEquipment(playerDef, playerDef.defaultEquipment, defs.equipment);
 
   return { ok: true, playerDef };
+}
+
+type MagicInitiateResult =
+  | { ok: true; cantripIds: string[]; spellIds: string[]; ability: string }
+  | { ok: false; error: string };
+
+/** Resolve the SRD Magic Initiate picks for every feat the character has that
+ *  grants the feat. A feat is "Magic Initiate-style" when its effects carry both
+ *  `learnedCantrips` and `preparedSpell`. The spell list is pinned when the
+ *  granting background fixes it (`feat.options.spellList`); otherwise the player
+ *  chose it. Validates the cantrip/spell picks against that list and the SRD
+ *  counts. */
+function applyMagicInitiate(
+  choices: CharacterCreationChoices,
+  featIds: string[],
+  bg: BackgroundDef,
+  defs: CharacterBuilderDefs,
+): MagicInitiateResult {
+  const cantripIds: string[] = [];
+  const spellIds: string[] = [];
+  let ability = '';
+  const spellById = new Map(defs.spells.map((s) => [s.id, s]));
+
+  for (const fid of featIds) {
+    const feat = defs.feats.find((f) => f.id === fid);
+    const learned = feat?.effects.learnedCantrips;
+    const prepared = feat?.effects.preparedSpell;
+    if (!feat || !learned || !prepared) continue;  // not a Magic Initiate-style feat
+
+    const pinned = fid === bg.feat.id ? (bg.feat.options as { spellList?: string } | null)?.spellList : undefined;
+    const choice = choices.magicInitiate?.find((m) => m.featId === fid);
+    const list = pinned ?? choice?.spellList;
+    if (!list || !learned.lists.includes(list)) {
+      return { ok: false, error: `${feat.name}: choose a spell list (${learned.lists.join(', ')}).` };
+    }
+    if (!choice) return { ok: false, error: `${feat.name}: choose ${learned.count} cantrips and a level-${prepared.level} spell.` };
+
+    if (choice.cantripIds.length !== learned.count) {
+      return { ok: false, error: `${feat.name}: choose exactly ${learned.count} cantrips; got ${choice.cantripIds.length}.` };
+    }
+    for (const id of choice.cantripIds) {
+      const sp = spellById.get(id);
+      if (!sp || sp.level !== 0 || !sp.classes.includes(list)) return { ok: false, error: `${feat.name}: "${id}" isn't a ${list} cantrip.` };
+    }
+    const spell = spellById.get(choice.spellId);
+    if (!spell || spell.level !== prepared.level || !spell.classes.includes(list)) {
+      return { ok: false, error: `${feat.name}: "${choice.spellId}" isn't a level-${prepared.level} ${list} spell.` };
+    }
+
+    const abilityChoices = feat.effects.spellcastingAbility?.choices ?? ['int', 'wis', 'cha'];
+    cantripIds.push(...choice.cantripIds);
+    spellIds.push(choice.spellId);
+    ability = ability || (abilityChoices.includes(choice.ability) ? choice.ability : abilityChoices[0]);
+  }
+
+  return { ok: true, cantripIds, spellIds, ability };
 }

@@ -130,6 +130,14 @@ export class CharacterDetail {
     if (this.def) this.render();
   }
 
+  /** Drop the displayed character and show the empty placeholder. Used when the
+   *  carousel focuses the Create Character card (no character selected). */
+  clear(): void {
+    this.def = null;
+    this.save = null;
+    this.renderEmpty();
+  }
+
   destroy(): void {
     this.opts.scene.scale.off("resize", this.placeHandler);
     this.root.remove();

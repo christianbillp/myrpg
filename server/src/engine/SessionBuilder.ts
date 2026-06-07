@@ -12,6 +12,7 @@ import {
 } from './SpawnHelpers.js';
 import { buildFactionRelations, projectFactionStandings } from './FactionRelations.js';
 import { speciesAbilityResources } from './SpeciesAbilities.js';
+import { magicInitiateResources } from './MagicInitiate.js';
 import { stripTileFlipBits } from '../../../shared/tileGid.js';
 
 /** The shape stored in `defs.maps[i]` — pure geometry, no semantics.
@@ -245,6 +246,7 @@ export function buildSessionState(
           .map((f) => [f.id, f.resource!.max] as const),
       ),
       ...speciesAbilityResources(playerDef, defs.species),
+      ...magicInitiateResources(playerDef),
     },
     actionUsed: false,
     bonusActionUsed: false,

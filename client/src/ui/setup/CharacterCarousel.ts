@@ -41,8 +41,13 @@ export interface CharacterCarouselOptions {
   initialIndex?: number;
   /** Fires every time the selection moves, including the initial microtask
    *  fire so the host can synchronise the detail panel without an extra
-   *  `getCurrent` call after construction. */
-  onChange: (def: PlayerDef, index: number) => void;
+   *  `getCurrent` call after construction. `def` is null when the trailing
+   *  Create Character card is focused (no character is selected). */
+  onChange: (def: PlayerDef | null, index: number) => void;
+  /** Fires when the centred Create Character card is clicked. The carousel
+   *  always appends this card after the real characters, so the player can
+   *  start creation from an empty roster too. */
+  onCreate: () => void;
 }
 
 export class CharacterCarousel {
@@ -56,7 +61,9 @@ export class CharacterCarousel {
   constructor(opts: CharacterCarouselOptions) {
     this.opts = opts;
     this.characters = opts.characters;
-    this.currentIndex = Math.max(0, Math.min(opts.initialIndex ?? 0, Math.max(0, this.characters.length - 1)));
+    // The Create Character card sits at index `characters.length`, so the valid
+    // range is 0..length (inclusive). An empty roster leaves only that card.
+    this.currentIndex = Math.max(0, Math.min(opts.initialIndex ?? 0, this.characters.length));
 
     this.root = document.createElement("div");
     this.root.style.cssText = `
@@ -82,20 +89,25 @@ export class CharacterCarousel {
     this.renderCards();
     this.attachPlace();
     // Fire the initial selection on a microtask so the host can wire its
-    // callback synchronously in the constructor.
-    queueMicrotask(() => {
-      if (this.characters.length > 0) opts.onChange(this.characters[this.currentIndex], this.currentIndex);
-    });
+    // callback synchronously in the constructor. Fires even on an empty roster
+    // (Create card focused → null) so the host clears its detail panel.
+    queueMicrotask(() => opts.onChange(this.currentDef(), this.currentIndex));
   }
+
+  /** Total slots = real characters + the trailing Create Character card. */
+  private slotCount(): number { return this.characters.length + 1; }
+  /** Whether `index` addresses the Create Character card rather than a real one. */
+  private isCreateSlot(index: number): boolean { return index >= this.characters.length; }
+  /** The character at the current slot, or null when the Create card is focused. */
+  private currentDef(): PlayerDef | null { return this.characters[this.currentIndex] ?? null; }
 
   /** Move the carousel by a signed delta. Wraps so a single press at either
    *  end brings the user to the opposite side. */
   step(delta: number): void {
-    if (this.characters.length === 0) return;
-    const n = this.characters.length;
+    const n = this.slotCount();
     this.currentIndex = ((this.currentIndex + delta) % n + n) % n;
     this.renderCards();
-    this.opts.onChange(this.characters[this.currentIndex], this.currentIndex);
+    this.opts.onChange(this.currentDef(), this.currentIndex);
   }
 
   /** Snap directly to a character by id. No-op when the id is unknown.
@@ -105,10 +117,10 @@ export class CharacterCarousel {
     if (idx < 0 || idx === this.currentIndex) return;
     this.currentIndex = idx;
     this.renderCards();
-    this.opts.onChange(this.characters[this.currentIndex], this.currentIndex);
+    this.opts.onChange(this.currentDef(), this.currentIndex);
   }
 
-  getCurrent(): PlayerDef | null { return this.characters[this.currentIndex] ?? null; }
+  getCurrent(): PlayerDef | null { return this.currentDef(); }
   getIndex(): number { return this.currentIndex; }
 
   /** Update one character's effective level and re-render the cards. The
@@ -155,17 +167,91 @@ export class CharacterCarousel {
    *  two characters → prev and next reference the same other character. */
   private renderCards(): void {
     this.cardRow.replaceChildren();
-    const n = this.characters.length;
-    if (n === 0) return;
+    const n = this.slotCount();  // always >= 1 — the Create card is always present
     const prev = (this.currentIndex - 1 + n) % n;
     const next = (this.currentIndex + 1) % n;
     if (n === 1) {
-      this.cardRow.appendChild(this.buildCard(this.characters[this.currentIndex], "center"));
+      this.cardRow.appendChild(this.buildSlot(this.currentIndex, "center"));
       return;
     }
-    this.cardRow.appendChild(this.buildCard(this.characters[prev], "side-prev"));
-    this.cardRow.appendChild(this.buildCard(this.characters[this.currentIndex], "center"));
-    this.cardRow.appendChild(this.buildCard(this.characters[next], "side-next"));
+    this.cardRow.appendChild(this.buildSlot(prev, "side-prev"));
+    this.cardRow.appendChild(this.buildSlot(this.currentIndex, "center"));
+    this.cardRow.appendChild(this.buildSlot(next, "side-next"));
+  }
+
+  /** Build the card for a slot — a real character, or the trailing Create
+   *  Character card when the slot index is past the roster. */
+  private buildSlot(index: number, kind: "side-prev" | "center" | "side-next"): HTMLElement {
+    return this.isCreateSlot(index)
+      ? this.buildCreateCard(kind)
+      : this.buildCard(this.characters[index], kind);
+  }
+
+  /** The "empty" card that hosts the character-creation entry point. Centred:
+   *  a button that fires `onCreate`. As a side card: clicking snaps to it like
+   *  any other side card. */
+  private buildCreateCard(kind: "side-prev" | "center" | "side-next"): HTMLElement {
+    const isCenter = kind === "center";
+    const w = isCenter ? CENTER_CARD_W : SIDE_CARD_W;
+    const h = isCenter ? CENTER_CARD_H : SIDE_CARD_H;
+    const accent = "#7ab87a";
+
+    const card = document.createElement("button");
+    card.type = "button";
+    if (isCenter) {
+      card.addEventListener("click", () => this.opts.onCreate());
+    } else {
+      const direction = kind === "side-prev" ? -1 : +1;
+      card.addEventListener("click", () => this.step(direction));
+    }
+    card.style.cssText = `
+      width: ${w}px; height: ${h}px;
+      background: ${isCenter ? "#14201a" : "#0d160f"};
+      border: 2px dashed ${isCenter ? accent : "#33553f"};
+      opacity: ${isCenter ? 1 : 0.65};
+      display: flex; flex-direction: column;
+      align-items: center; justify-content: center;
+      padding: 12px 8px 10px;
+      box-sizing: border-box;
+      cursor: pointer;
+      flex-shrink: 0;
+      transition: opacity 0.1s ease-out, filter 0.08s ease-out;
+      color: #aabbcc;
+      font-family: monospace;
+    `;
+    card.addEventListener("mouseenter", () => {
+      if (isCenter) card.style.filter = "brightness(1.25)";
+      else card.style.opacity = "0.85";
+    });
+    card.addEventListener("mouseleave", () => {
+      if (isCenter) card.style.filter = "";
+      else card.style.opacity = "0.65";
+    });
+
+    const plus = document.createElement("div");
+    plus.textContent = "＋";
+    plus.style.cssText = `font-size: ${isCenter ? 40 : 30}px; color: ${accent}; line-height: 1;`;
+    card.appendChild(plus);
+
+    const label = document.createElement("div");
+    label.textContent = "CREATE CHARACTER";
+    label.style.cssText = `
+      margin-top: 10px;
+      font-size: ${isCenter ? 12 : 10}px;
+      color: ${isCenter ? "#cfe6cf" : "#8fae8f"};
+      letter-spacing: 1px;
+      text-align: center;
+      line-height: 1.3;
+    `;
+    card.appendChild(label);
+
+    if (isCenter) {
+      const hint = document.createElement("div");
+      hint.textContent = "(click to create)";
+      hint.style.cssText = "margin-top: 6px; font-size: 9px; color: #7e9a86; font-style: italic;";
+      card.appendChild(hint);
+    }
+    return card;
   }
 
   private buildCard(def: PlayerDef, kind: "side-prev" | "center" | "side-next"): HTMLElement {

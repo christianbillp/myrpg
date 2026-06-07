@@ -8,7 +8,7 @@
  * straight reads off `getDefs()`.
  */
 import type { FastifyInstance } from "fastify";
-import { readFile, readdir, writeFile, mkdir } from "fs/promises";
+import { readFile, readdir, writeFile, mkdir, unlink } from "fs/promises";
 import { existsSync } from "fs";
 import { join } from "path";
 import type { AppCtx } from "./ctx.js";
@@ -48,6 +48,20 @@ export function registerDefsRoutes(server: FastifyInstance, ctx: AppCtx): void {
     await writeFile(join(dir, `${id}.json`), JSON.stringify(playerDef, null, 2));
     await loadDefs();
     return { playerDef };
+  });
+
+  // Delete a character definition from the active setting's `characters/` dir.
+  // Only ids in the live roster are accepted, which keeps the id free of path
+  // traversal. The session save (and NPC memory) is wiped separately by the
+  // caller via `DELETE /save/:characterId`.
+  server.delete("/characters/:id", async (request, reply) => {
+    const id = (request.params as { id: string }).id;
+    const dir = settingSubDir("characters");
+    if (!dir) return reply.code(409).send({ error: "No active setting to delete the character from." });
+    if (!getDefs().playerDefs.some((p) => p.id === id)) return reply.code(404).send({ error: "Character not found." });
+    await unlink(join(dir, `${id}.json`)).catch(() => { /* already gone */ });
+    await loadDefs();
+    return { ok: true };
   });
   server.get("/monsters",      async () => getDefs().monsters);
   server.get("/npcs",          async () => getDefs().npcs);

@@ -40,6 +40,7 @@ const EXEMPT_FILES = new Set<string>([
   'SpellTargetSelector.ts',
   'NextChapterButton.ts',
   'RestPromptOverlay.ts',
+  'ConfirmModal.ts',             // function-style confirm dialog; local close() removes the backdrop
 ]);
 
 function walkTsFiles(dir: string): string[] {

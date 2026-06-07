@@ -12,6 +12,7 @@ import { StorylogOverlay } from "../ui/StorylogOverlay";
 import { createHtmlButton, createHtmlText, type HtmlButtonHandle, type HtmlTextHandle } from "../ui/htmlButtons";
 import { CharacterCarousel } from "../ui/setup/CharacterCarousel";
 import { CharacterDetail } from "../ui/setup/CharacterDetail";
+import { showConfirmModal } from "../ui/ConfirmModal";
 import {
   TILE_SIZE,
   GRID_COLS,
@@ -105,6 +106,7 @@ export class EncounterSetupScene extends Phaser.Scene {
   private htmlButtons: HtmlButtonHandle[] = [];
   private beginBtn!: HtmlButtonHandle;
   private promoteBtn!: HtmlButtonHandle;
+  private deleteCharBtn: HtmlButtonHandle | null = null;
   private characterCarousel: CharacterCarousel | null = null;
   private characterDetail: CharacterDetail | null = null;
 
@@ -258,19 +260,23 @@ export class EncounterSetupScene extends Phaser.Scene {
       characters: this.characters,
       effectiveLevels,
       onChange: (def) => this.selectChar(def),
+      // Character creation (US-122) — launch the multi-step creator from the
+      // carousel's trailing Create Character card. On return, the creator
+      // re-fetches the roster into the registry and restarts this scene.
+      onCreate: () => this.scene.start("CharacterCreatorScene", { returnScene: "EncounterSetupScene" }),
     });
 
-    // Character creation (US-122) — launch the multi-step creator. On return,
-    // the creator re-fetches the roster into the registry and restarts this
-    // scene, so a freshly-created character shows up in the carousel.
-    this.htmlButtons.push(createHtmlButton({
+    // Delete the selected character (definition + save). Occupies the slot under
+    // the carousel; hidden while the Create card is focused (nothing selected).
+    this.deleteCharBtn = createHtmlButton({
       scene: this, sceneWidth: W,
       x: CHAR_COL_X + CHAR_COL_W / 2 - 90, y: CAROUSEL_Y + CAROUSEL_H + 12, w: 180, h: 30,
-      label: "+ CREATE CHARACTER",
-      variant: "primary",
+      label: "DELETE CHARACTER",
+      variant: "danger",
       fontSize: 12,
-      onClick: () => this.scene.start("CharacterCreatorScene"),
-    }));
+      onClick: () => this.confirmDeleteCharacter(),
+    });
+    this.htmlButtons.push(this.deleteCharBtn);
 
     // Encounters are grouped into sections — GENERATED first, then one per
     // adventure, then OTHER (authored encounters in no adventure). Within each
@@ -360,11 +366,23 @@ export class EncounterSetupScene extends Phaser.Scene {
     );
   }
 
-  private selectChar(def: PlayerDef): void {
-    const changed = this.selectedPlayer?.id !== def.id;
+  private selectChar(def: PlayerDef | null): void {
+    const changed = this.selectedPlayer?.id !== (def?.id ?? null);
     this.selectedPlayer = def;
+    // The Create card is focused → no character selected: clear the detail
+    // panel, hide the delete control, and disable Begin.
+    if (!def) {
+      this.selectedSave = null;
+      this.deleteCharBtn?.setVisible(false);
+      this.characterDetail?.clear();
+      this.refreshBeginButton();
+      this.refreshPromoteButton();
+      if (changed) this.rebuildEncounterList();
+      return;
+    }
     this.selectedSave = this.allSaves.get(def.id) ?? null;
     localStorage.setItem(LAST_CHAR_KEY, def.id);
+    this.deleteCharBtn?.setVisible(true);
     this.characterDetail?.setCharacter(def);
     this.characterDetail?.setSave(this.selectedSave);
     this.refreshBeginButton();
@@ -372,6 +390,33 @@ export class EncounterSetupScene extends Phaser.Scene {
     // Difficulty + outcome chips depend on the selected character, so re-render
     // the encounter cards when the character changes.
     if (changed) this.rebuildEncounterList();
+  }
+
+  /** Confirm + permanently delete the selected character (definition + save),
+   *  then refresh the roster and rebuild the scene around it. */
+  private confirmDeleteCharacter(): void {
+    const def = this.selectedPlayer;
+    if (!def) return;
+    showConfirmModal({
+      title: "Delete Character",
+      message: `Permanently delete "${def.name}"? This removes the character and its saved progress and cannot be undone.`,
+      confirmLabel: "Delete",
+      danger: true,
+      onConfirm: () => {
+        localStorage.removeItem(saveKey(def.id));
+        localStorage.removeItem(LAST_CHAR_KEY);
+        this.allSaves.delete(def.id);
+        gameClient.deleteSave(def.id).catch(() => {});
+        void gameClient.deleteCharacter(def.id)
+          .catch(() => {})
+          .then(() => gameClient.fetchCharacters())
+          .then((chars) => {
+            if (!this.scene.isActive()) return;
+            this.registry.set("characters", chars);
+            this.scene.restart();
+          });
+      },
+    });
   }
 
   /** Tear down the current encounter cards/headers and rebuild from the

@@ -2,6 +2,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import type { GameDefs } from "./engine/types.js";
 import { settingPromptBlock } from "./settings.js";
 import { ABILITY_KEYS } from "../../shared/abilityScores.js";
+import { STANDARD_LANGUAGES, STANDARD_LANGUAGE_CHOICES, COMMON } from "../../shared/languages.js";
 import type { AbilityKey } from "../../shared/types.js";
 
 /**
@@ -34,6 +35,16 @@ export interface SuggestCharacterResponse {
   classId: string;
   /** Six ability keys ordered highest → lowest, guiding score assignment. */
   abilityPriority: AbilityKey[];
+  /** Class skill-proficiency picks (validated to the chosen class's options,
+   *  background overlaps removed, capped to the class's count). May be short of
+   *  the count — the client tops up deterministically. */
+  skillProficiencies: string[];
+  /** Standard languages (beyond Common), validated + capped. */
+  languages: string[];
+  /** Caster cantrip ids from the chosen class's list (empty for non-casters). */
+  cantrips: string[];
+  /** Caster level-1 spell ids from the chosen class's list (empty for non-casters). */
+  preparedSpells: string[];
   rationale: string;
 }
 
@@ -45,6 +56,10 @@ interface SuggesterPayload {
   backgroundId?: string;
   classId?: string;
   abilityPriority?: string[];
+  skillProficiencies?: string[];
+  languages?: string[];
+  cantrips?: string[];
+  preparedSpells?: string[];
   rationale?: string;
 }
 
@@ -81,14 +96,57 @@ export async function suggestCharacter(
   const speciesId = pick(req.speciesId, p.speciesId, validSpecies, species[0]?.id);
   const backgroundId = pick(req.backgroundId, p.backgroundId, validBg, backgrounds[0]?.id);
 
+  // Validate the build picks against the chosen class/background. Invalid or
+  // missing entries are dropped — the client tops the build up deterministically
+  // so the result is always complete and CREATE-able.
+  const cls = defs.classes.find((c) => c.id === classId);
+  const bg = defs.backgrounds.find((b) => b.id === backgroundId);
+  const bgSkills = new Set(bg?.skillProficiencies ?? []);
+  const skillProficiencies = takeValid(
+    p.skillProficiencies,
+    new Set((cls?.skillChoices.options ?? []).filter((s) => !bgSkills.has(s))),
+    cls?.skillChoices.count ?? 0,
+  );
+  const languages = takeValid(
+    p.languages,
+    new Set(STANDARD_LANGUAGES.filter((l) => l !== COMMON)),
+    STANDARD_LANGUAGE_CHOICES,
+  );
+  const sc = cls?.spellcasting;
+  const cantrips = sc
+    ? takeValid(p.cantrips, spellIdSet(defs, classId, 0), sc.cantripsKnownByLevel?.[0] ?? 0)
+    : [];
+  const preparedSpells = sc
+    ? takeValid(p.preparedSpells, spellIdSet(defs, classId, 1), sc.preparedSpellsByLevel?.[0] ?? 0)
+    : [];
+
   return {
     name: (p.name ?? "Adventurer").trim().slice(0, 40),
     shortDescription: (p.shortDescription ?? "").trim().slice(0, 120),
     description: (p.description ?? "").trim().slice(0, 600),
     speciesId, backgroundId, classId,
     abilityPriority: normaliseAbilityPriority(p.abilityPriority),
+    skillProficiencies, languages, cantrips, preparedSpells,
     rationale: (p.rationale ?? "").trim().slice(0, 300),
   };
+}
+
+/** Ids of the given class's spells at a spell level (cantrips = 0). */
+function spellIdSet(defs: GameDefs, classId: string, level: number): Set<string> {
+  return new Set(defs.spells.filter((s) => s.level === level && s.classes.includes(classId)).map((s) => s.id));
+}
+
+/** Keep only the model's entries that are in `valid`, de-duplicated and capped
+ *  at `max`. Returns [] when nothing is requested or valid. */
+function takeValid(raw: string[] | undefined, valid: Set<string>, max: number): string[] {
+  if (max <= 0) return [];
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const id of raw ?? []) {
+    if (out.length >= max) break;
+    if (valid.has(id) && !seen.has(id)) { out.push(id); seen.add(id); }
+  }
+  return out;
 }
 
 function pick(locked: string | undefined, proposed: string | undefined, valid: Set<string>, fallback: string | undefined): string {
@@ -126,9 +184,25 @@ const RESPONSE_TOOL: Anthropic.Tool = {
         type: "array", items: { type: "string", enum: [...ABILITY_KEYS] },
         description: "All six ability keys ordered highest → lowest for this class.",
       },
-      rationale: { type: "string", description: "1-2 sentences on why these choices fit the concept + setting." },
+      skillProficiencies: {
+        type: "array", items: { type: "string" },
+        description: "Skill ids for the chosen class's skill proficiencies — pick from that class's SKILLS list, exactly its 'choose N', favouring skills that fit the concept. Use the exact ids.",
+      },
+      languages: {
+        type: "array", items: { type: "string" },
+        description: "Two Standard languages (besides Common) from the LANGUAGES list that fit the character's origin/concept (e.g. Dwarvish for a dwarf).",
+      },
+      cantrips: {
+        type: "array", items: { type: "string" },
+        description: "If the chosen class is a spellcaster, its cantrip ids from that class's CANTRIPS list (exactly the 'choose N' for that class); otherwise []. Use the exact ids.",
+      },
+      preparedSpells: {
+        type: "array", items: { type: "string" },
+        description: "If the chosen class is a spellcaster, its level-1 spell ids from that class's L1 SPELLS list (exactly the 'choose N'); otherwise []. Use the exact ids.",
+      },
+      rationale: { type: "string", description: "1-2 sentences on why these choices — including the skills and spells — fit the concept + setting." },
     },
-    required: ["name", "shortDescription", "description", "speciesId", "backgroundId", "classId", "abilityPriority", "rationale"],
+    required: ["name", "shortDescription", "description", "speciesId", "backgroundId", "classId", "abilityPriority", "skillProficiencies", "languages", "cantrips", "preparedSpells", "rationale"],
   },
 };
 
@@ -142,6 +216,25 @@ function buildSystemPrompt(
   const setting = settingPromptBlock(defs.activeSetting ?? null, "full");
   const roster = (label: string, xs: Array<{ id: string; name: string }>) =>
     `${label}:\n${xs.map((x) => `  ${x.id}  ·  ${x.name}`).join("\n")}`;
+
+  // Per-class skill + (caster) spell lists so the model can pick build choices
+  // that fit the concept. Spell lists are bounded (L1 catalogue) and listed by id.
+  const spellList = (classId: string, level: number) =>
+    defs.spells.filter((s) => s.level === level && s.classes.includes(classId)).map((s) => `${s.id} (${s.name})`);
+  const classDetail = defs.classes.map((c) => {
+    const lines = [`  ${c.id} · ${c.name}`,
+      `    SKILLS (choose ${c.skillChoices.count}): ${c.skillChoices.options.join(", ")}`];
+    const sc = c.spellcasting;
+    if (sc) {
+      const cc = sc.cantripsKnownByLevel?.[0] ?? 0;
+      const pc = sc.preparedSpellsByLevel?.[0] ?? 0;
+      if (cc) lines.push(`    CANTRIPS (choose ${cc}): ${spellList(c.id, 0).join(", ")}`);
+      if (pc) lines.push(`    L1 SPELLS (choose ${pc}): ${spellList(c.id, 1).join(", ")}`);
+    }
+    return lines.join("\n");
+  }).join("\n");
+  const languageList = STANDARD_LANGUAGES.filter((l) => l !== COMMON).join(", ");
+
   const locked: string[] = [];
   if (req.classId) locked.push(`class = ${req.classId}`);
   if (req.speciesId) locked.push(`species = ${req.speciesId}`);
@@ -158,9 +251,15 @@ ${roster("SPECIES roster", species)}
 
 ${roster("BACKGROUND roster", backgrounds)}
 
+CLASS BUILD OPTIONS (skills, and spells for casters — pick from the entry matching your chosen class):
+${classDetail}
+
+STANDARD LANGUAGES (besides Common): ${languageList}
+
 GUIDELINES:
 - Choose a class whose role matches the concept; species + background that reinforce it.
 - \`abilityPriority\` lists ALL SIX ability keys (str, dex, con, int, wis, cha) ordered from the one this character should value most to least — put the class's spellcasting / attack ability first.
+- \`skillProficiencies\`: pick exactly the chosen class's "choose N" skills from ITS SKILLS list, favouring ones the concept implies. \`languages\`: two from the list that fit the character's origin. For a spellcaster, \`cantrips\` and \`preparedSpells\` pick exactly its "choose N" from ITS lists, fitting the concept; for a non-caster both are []. Use exact ids.
 - \`name\` is just the name (no class/title). \`shortDescription\` is a single evocative line. \`description\` is 2-3 sentences of backstory grounded in the setting.`;
 }
 

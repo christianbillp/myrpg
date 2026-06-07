@@ -25,6 +25,7 @@ import type {
 } from '../../../shared/types.js';
 import { preparedSpellsAt } from '../../../shared/classProgression.js';
 import { speciesAbilityResources } from './SpeciesAbilities.js';
+import { magicInitiateResources } from './MagicInitiate.js';
 
 export interface RestingInputs {
   playerDef: PlayerDef;
@@ -226,6 +227,12 @@ export function applyLongRest(
 
   // Active species abilities (Orc Relentless Endurance) refill on a Long Rest.
   for (const [id, max] of Object.entries(speciesAbilityResources(playerDef, inputs.species ?? []))) {
+    player.resources[id] = max;
+  }
+
+  // Magic Initiate free cast (cast the granted L1 spell once without a slot)
+  // refills on a Long Rest.
+  for (const [id, max] of Object.entries(magicInitiateResources(playerDef))) {
     player.resources[id] = max;
   }
 

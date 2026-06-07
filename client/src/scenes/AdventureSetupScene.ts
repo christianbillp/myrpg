@@ -7,6 +7,7 @@ import { StorylogOverlay } from "../ui/StorylogOverlay";
 import { createHtmlButton, createHtmlText, type HtmlButtonHandle, type HtmlTextHandle } from "../ui/htmlButtons";
 import { CharacterCarousel } from "../ui/setup/CharacterCarousel";
 import { CharacterDetail } from "../ui/setup/CharacterDetail";
+import { showConfirmModal } from "../ui/ConfirmModal";
 import {
   TILE_SIZE,
   GRID_COLS,
@@ -68,6 +69,7 @@ export class AdventureSetupScene extends Phaser.Scene {
   private htmlTexts: HtmlTextHandle[] = [];
   private htmlButtons: HtmlButtonHandle[] = [];
   private beginBtn!: HtmlButtonHandle;
+  private deleteCharBtn: HtmlButtonHandle | null = null;
 
   constructor() {
     super({ key: "AdventureSetupScene" });
@@ -174,7 +176,20 @@ export class AdventureSetupScene extends Phaser.Scene {
       x: CHAR_COL_X, y: CAROUSEL_Y, width: CHAR_COL_W, height: CAROUSEL_H,
       characters: this.characters,
       onChange: (def) => this.selectChar(def),
+      onCreate: () => this.scene.start("CharacterCreatorScene", { returnScene: "AdventureSetupScene" }),
     });
+
+    // Delete the selected character (definition + character/adventure saves).
+    // Sits under the carousel; hidden while the Create card is focused.
+    this.deleteCharBtn = createHtmlButton({
+      scene: this, sceneWidth: W,
+      x: CHAR_COL_X + CHAR_COL_W / 2 - 90, y: CAROUSEL_Y + CAROUSEL_H + 12, w: 180, h: 30,
+      label: "DELETE CHARACTER",
+      variant: "danger",
+      fontSize: 12,
+      onClick: () => this.confirmDeleteCharacter(),
+    });
+    this.htmlButtons.push(this.deleteCharBtn);
 
     this.adventures.forEach((adv, i) => {
       this.buildAdventureCard(adv, ADV_CARD_CX, ADV_FIRST_CY + i * (ADV_CARD_H + ADV_GAP));
@@ -280,7 +295,11 @@ export class AdventureSetupScene extends Phaser.Scene {
   }
 
   private refreshAdventureCards(): void {
-    if (!this.selectedPlayer) return;
+    if (!this.selectedPlayer) {
+      // No character selected (Create card focused) — clear per-character progress.
+      for (const elems of this.advCards.values()) elems.progressEl.textContent = "";
+      return;
+    }
     const save = this.adventureSaves.get(this.selectedPlayer.id);
     for (const adv of this.adventures) {
       const elems = this.advCards.get(adv.id);
@@ -296,13 +315,51 @@ export class AdventureSetupScene extends Phaser.Scene {
     this.refreshBeginButton();
   }
 
-  private selectChar(def: PlayerDef): void {
+  private selectChar(def: PlayerDef | null): void {
     this.selectedPlayer = def;
+    if (!def) {
+      // Create card focused → no character: clear detail, hide delete, disable Begin.
+      this.deleteCharBtn?.setVisible(false);
+      this.characterDetail?.clear();
+      this.refreshAdventureCards();
+      this.refreshBeginButton();
+      return;
+    }
     localStorage.setItem(LAST_CHAR_KEY, def.id);
+    this.deleteCharBtn?.setVisible(true);
     this.characterDetail?.setCharacter(def);
     this.characterDetail?.setSave(this.charSaves.get(def.id) ?? null);
     this.refreshAdventureCards();
     this.refreshBeginButton();
+  }
+
+  /** Confirm + permanently delete the selected character (definition +
+   *  character/adventure saves), then refresh the roster and rebuild. */
+  private confirmDeleteCharacter(): void {
+    const def = this.selectedPlayer;
+    if (!def) return;
+    showConfirmModal({
+      title: "Delete Character",
+      message: `Permanently delete "${def.name}"? This removes the character and its saved progress and cannot be undone.`,
+      confirmLabel: "Delete",
+      danger: true,
+      onConfirm: () => {
+        localStorage.removeItem(saveKey(def.id));
+        localStorage.removeItem(LAST_CHAR_KEY);
+        this.charSaves.delete(def.id);
+        this.adventureSaves.delete(def.id);
+        gameClient.deleteSave(def.id).catch(() => {});
+        gameClient.deleteAdventureSave(def.id).catch(() => {});
+        void gameClient.deleteCharacter(def.id)
+          .catch(() => {})
+          .then(() => gameClient.fetchCharacters())
+          .then((chars) => {
+            if (!this.scene.isActive()) return;
+            this.registry.set("characters", chars);
+            this.scene.restart();
+          });
+      },
+    });
   }
 
   private selectAdventure(adv: AdventureDef): void {

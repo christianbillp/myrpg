@@ -348,7 +348,9 @@ export class GameClient {
   async suggestCharacter(req: { prompt: string; classId?: string; speciesId?: string; backgroundId?: string }): Promise<{
     name: string; shortDescription: string; description: string;
     speciesId: string; backgroundId: string; classId: string;
-    abilityPriority: string[]; rationale: string;
+    abilityPriority: string[];
+    skillProficiencies?: string[]; languages?: string[]; cantrips?: string[]; preparedSpells?: string[];
+    rationale: string;
   }> {
     const res = await fetch(`${API_URL}/generate/character`, {
       method: 'POST',
@@ -575,6 +577,13 @@ export class GameClient {
 
   async deleteSave(characterId: string): Promise<void> {
     await fetch(`${API_URL}/save/${characterId}`, { method: 'DELETE' });
+  }
+
+  /** Permanently delete a character definition from the active setting's
+   *  roster. The session save is removed separately via `deleteSave`. */
+  async deleteCharacter(characterId: string): Promise<void> {
+    const res = await fetch(`${API_URL}/characters/${characterId}`, { method: 'DELETE' });
+    if (!res.ok) throw new Error(`Failed to delete character: ${res.status}`);
   }
 
   async loadAdventureSave(characterId: string): Promise<AdventureSave | null> {
