@@ -6,7 +6,7 @@
 import { describe, it, expect } from 'vitest';
 import { buildTestContext } from '../test/buildTestContext.js';
 import { registerQuestSystem, startQuest, advanceQuest, completeQuest, failQuest } from './QuestSystem.js';
-import { fireAction } from './TriggerSystem.js';
+import { fireAction, registerTriggers } from './TriggerSystem.js';
 import type { QuestDef } from '../../../shared/types.js';
 
 function quest(overrides: Partial<QuestDef> = {}): QuestDef {
@@ -102,6 +102,30 @@ describe('QuestSystem', () => {
     expect(state.objective).toBe('Scout the bandit camp');
 
     setFlag(ctx, state, 'camp_scouted');                   // scout done → defeat's guard already holds → cascade
+    expect(state.quests[0].status).toBe('completed');
+    expect(state.player.xp).toBe(xp0 + 25 + 100 + 50);
+  });
+
+  it('integration: an encounter_started trigger fires start_quest, then the quest auto-completes through the encounter', () => {
+    const { ctx, state } = buildTestContext();  // no npcs → enemies_alive == 0
+    ctx.defs.quests.push(quest({ id: 'demo_clear_the_camp', runtime: false, steps: [
+      { id: 'scout', text: 'Scout the bandit camp', completeWhen: [{ type: 'flag_equals', name: 'camp_scouted', value: true }], xpReward: 25 },
+      { id: 'defeat', text: 'Defeat the bandits', completeWhen: [{ type: 'enemies_alive', op: 'eq', count: 0 }], xpReward: 100 },
+    ], xpReward: 50 }));
+    // The demo encounter's two triggers, driven through the real trigger system.
+    state.triggers = [
+      { id: 'demo_start_quest', when: { event: 'encounter_started' }, then: [{ type: 'start_quest', questId: 'demo_clear_the_camp' }], once: true },
+      { id: 'demo_scouted', when: { event: 'combat_started' }, then: [{ type: 'set_flag', name: 'camp_scouted', value: true }], once: true },
+    ];
+    registerTriggers(ctx);
+    registerQuestSystem(ctx);
+    const xp0 = state.player.xp;
+
+    ctx.publish({ type: 'encounter_started' });
+    expect(state.quests[0]?.status).toBe('active');
+    expect(state.objective).toBe('Scout the bandit camp');   // started by the trigger
+
+    ctx.publish({ type: 'combat_started' });                 // camp_scouted set → cascades to completion
     expect(state.quests[0].status).toBe('completed');
     expect(state.player.xp).toBe(xp0 + 25 + 100 + 50);
   });
