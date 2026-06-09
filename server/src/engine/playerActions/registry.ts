@@ -28,6 +28,7 @@ import { doCastSpell as spDoCastSpell, doUseScroll as spDoUseScroll } from '../S
 import { doEquip as ivDoEquip, doUnequip as ivDoUnequip, doAttune as ivDoAttune, doUnattune as ivDoUnattune, doIdentify as ivDoIdentify } from '../InventoryActions.js';
 import { doCommandSummon, checkSummonTether } from '../SummonSystem.js';
 import { doResolveReaction as cfDoResolveReaction, endPlayerTurn as cfEndPlayerTurn, doRollDeathSave as cfDoRollDeathSave } from '../CombatFlow.js';
+import { doResolveCombatStart } from '../CombatStartPrompt.js';
 import { doUseFeature } from '../FeatureRegistry.js';
 import { endConcentration } from '../ConcentrationSystem.js';
 import { startConversation as cnStartConversation, advanceConversation as cnAdvanceConversation, endConversation as cnEndConversation } from '../ConversationSystem.js';
@@ -69,6 +70,7 @@ export const PLAYER_ACTIONS: Registry = {
   useFeature:           (ctx, a, events) => doUseFeature(ctx, a.featureId, { targetId: a.targetId, tile: a.tile }, events),
   resolveReaction:      (ctx, a, events) => cfDoResolveReaction(ctx, a.accept, events),
   resolveReroll:        (ctx, a, events) => caDoResolveReroll(ctx, a.accept, events),
+  resolveCombatStart:   (ctx, a, events) => doResolveCombatStart(ctx, a.accept, events),
   grapple:              (ctx, a)         => caDoGrapple(ctx, a.targetId),
   shove:                (ctx, a)         => caDoShove(ctx, a.targetId, a.effect ?? 'push'),
   help:                 (ctx, a)         => caDoHelp(ctx, a.targetId),

@@ -24,6 +24,7 @@ import { resolveSpiritualWeaponAttack } from './SummonSystem.js';
 import { publishNpcDamage } from './ThresholdPublisher.js';
 import { applyDamageWithTempHp, npcBanePenalty } from './CombatSystem.js';
 import { combatantDisplayName } from './CombatFlow.js';
+import { requestCombatStart } from './CombatStartPrompt.js';
 import { emitNoise, NOISE_SPELL_VERBAL } from './Sound.js';
 import { Logger } from '../Logger.js';
 import { canSee as visCanSee } from './Vision.js';
@@ -1899,17 +1900,16 @@ function isAggressiveSpell(spell: SpellDef): boolean {
 }
 
 /**
- * If we're in exploring phase and the cast is aggressive, promote any neutral
- * targets to enemy, aggro their faction, and start combat — mirroring the
- * behaviour of the ATTACK button. Returns the list of affected NPCs so the
- * caller doesn't have to recompute them.
+ * If we're in exploring phase and the cast is aggressive, return the non-ally
+ * NPCs the cast would affect (so casting at them would start combat). Pure —
+ * promotes / aggros nothing; the caller routes these through the combat-start
+ * confirmation prompt. Returns [] when the cast wouldn't start combat.
  */
-function maybeAggroOnCast(
+function castAggroTargets(
   ctx: GameContext,
   spell: SpellDef,
   targetIds: string[] | undefined,
   tile: { x: number; y: number } | undefined,
-  events: GameEvent[],
 ): NpcState[] {
   const s = ctx.state;
   if (s.phase !== 'exploring') return [];
@@ -1918,32 +1918,19 @@ function maybeAggroOnCast(
   // Identify the non-ally NPCs affected by the cast. Attack-roll and
   // single-target save spells (Hideous Laughter, Charm Person) key off the
   // selected creature; AOE save spells use the area sweep.
-  let affected: NpcState[] = [];
   if (spell.attack === 'ranged-spell' || spell.attack === 'melee-spell' || spell.attack === 'auto-hit'
     || (spell.save && !spell.area)) {
     const ids = targetIds && targetIds.length > 0 ? targetIds : (s.selectedTargetId ? [s.selectedTargetId] : []);
-    affected = ids
+    return ids
       .map((id) => s.npcs.find((n) => n.id === id))
       .filter((n): n is NpcState => !!n && n.hp > 0 && n.disposition !== 'ally');
-  } else if (spell.save) {
+  }
+  if (spell.save) {
     // For aggro-trigger purposes we still filter to non-allies — allies in the
     // area take damage in the resolver but don't influence faction aggro.
-    affected = creaturesInArea(ctx, spell, tile).filter((n) => n.disposition !== 'ally');
+    return creaturesInArea(ctx, spell, tile).filter((n) => n.disposition !== 'ally');
   }
-
-  if (affected.length === 0) return [];
-
-  // Promote any neutrals → enemy and assign combat labels.
-  for (const npc of affected) {
-    if (npc.disposition === 'neutral') {
-      npc.disposition = 'enemy';
-      if (!npc.combatLabel) ctx.assignCombatLabel(npc);
-    }
-  }
-  // Aggro shared-faction neutrals on the first promoted target (matches doAttack).
-  ctx.aggroFaction(affected[0]);
-  ctx.doStartCombat(events);
-  return affected;
+  return [];
 }
 
 /**
@@ -2177,10 +2164,15 @@ export function doCastSpell(
     }
   }
 
-  // Aggressive casts in exploring phase trigger combat first — same as the
-  // ATTACK button. Neutrals turn enemy before the spell resolves so attack
-  // rolls and area effects see them as valid hostiles.
-  maybeAggroOnCast(ctx, spell, targetIds, tile, events);
+  // An aggressive cast out of combat WOULD start it — pause for confirmation
+  // instead of casting. On accept the engine rolls initiative; the player then
+  // casts normally on their turn (this cast is NOT auto-performed, so no slot /
+  // resource is spent here). Same gate as the ATTACK button.
+  const aggroTargets = castAggroTargets(ctx, spell, targetIds, tile);
+  if (aggroTargets.length > 0) {
+    requestCombatStart(ctx, aggroTargets.map((n) => n.id), `Casting ${spell.name} will start combat.`);
+    return;
+  }
 
   // SRD Sanctuary ends the moment the warded creature casts a spell at a foe.
   // An aggressive cast strips the caster's own ward before the spell resolves.

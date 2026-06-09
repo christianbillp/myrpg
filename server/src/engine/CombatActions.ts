@@ -24,6 +24,7 @@ import { endConcentration } from './ConcentrationSystem.js';
 import type { PlayerDef } from '../../../shared/types.js';
 import { d20, mod, rollDiceBonus } from './Dice.js';
 import { combatantDisplayName } from './CombatFlow.js';
+import { requestCombatStart } from './CombatStartPrompt.js';
 
 /** Number of weapon attacks the player makes per Attack action. Driven by
  *  the class JSON's `extra-attacks` track (Fighter scales 1→4 at L1/5/11/20;
@@ -209,12 +210,11 @@ export function doAttack(ctx: GameContext, targetId: string | undefined, events:
   if (s.phase === 'exploring') {
     if (!canAttackTarget(ctx, targetId)) return;
     const target = s.npcs.find((n) => n.id === targetId && n.hp > 0 && n.disposition !== 'ally')!;
-    if (target.disposition === 'neutral') {
-      target.disposition = 'enemy';
-      if (!target.combatLabel) ctx.assignCombatLabel(target);
-    }
-    ctx.aggroFaction(target);
-    ctx.doStartCombat(events);
+    // Attacking out of combat WOULD start it — pause for confirmation instead
+    // of acting. On accept the engine rolls initiative; the player then attacks
+    // normally on their turn (this action is NOT auto-performed).
+    requestCombatStart(ctx, [target.id], `Attacking ${combatantDisplayName(target, s.npcs)} will start combat.`);
+    return;
   }
 
   // SRD Extra Attack (US-119): allow a follow-up attack from the reserved pool

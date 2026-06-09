@@ -16,7 +16,7 @@ import type { ActiveBuff } from "./gameState.js";
 import type { PLAYER_FACTION_ID, Rumor } from "./factions.js";
 import type { AvailableActions, CombatMode, Disposition, PlayerState } from "./gameState.js";
 import type { PlayerAction } from "./playerActions.js";
-import type { PendingReaction, PendingReroll } from "./reaction.js";
+import type { PendingReaction, PendingReroll, PendingCombatStart } from "./reaction.js";
 import type { CreateSessionRequest } from "./session.js";
 import type { EncounterTrigger } from "./triggers.js";
 
@@ -497,6 +497,10 @@ export interface GameState {
    *  (US-109a). The next player action must be `resolveReroll`. Cleared on
    *  resolution. */
   pendingReroll: PendingReroll | null;
+  /** Set when a player action in the exploring phase would start combat — the
+   *  engine pauses for confirmation. The next player action must be
+   *  `resolveCombatStart`. Cleared on resolution. */
+  pendingCombatStart: PendingCombatStart | null;
   /** Active conversation when one is open — `null` otherwise. The client
    *  renders the ConversationOverlay whenever this transitions non-null.
    *  Pauses world tick (`isWorldTickEligible` skips when set). */

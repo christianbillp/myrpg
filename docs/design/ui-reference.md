@@ -439,6 +439,20 @@ Defined in `client/src/ui/RerollPromptOverlay.ts`. Modal overlay surfaced when t
 
 ---
 
+### Combat Start Prompt Overlay
+
+Defined in `client/src/ui/CombatStartPromptOverlay.ts`. Modal overlay surfaced when an attack or aggressive spell cast in the exploring phase **would** start combat (US-055). Opened and closed by `OverlayManager.syncCombatStartPrompt(state)`, which mirrors `state.pendingCombatStart`. While open, the off-camera world tick is frozen on the server and no action / slot / resource has been spent — the next player action must be a `resolveCombatStart`.
+
+| Component | Description |
+| --------- | ----------- |
+| **Title** | `START COMBAT?`. |
+| **Body**  | The prompt label, e.g. "Attacking Bandit (A) will start combat." / "Casting Fire Bolt will start combat.", plus a reminder that Initiative will be rolled and the player then acts on their turn. |
+| **FIGHT** button | Accept. Server promotes the would-be combatants to enemy, aggros their faction, and rolls Initiative. The triggering action is **not** auto-performed — the player acts normally on their turn. |
+| **CANCEL** button | Decline. The action is discarded; nothing happens and no resources are spent. |
+| **Close (×) / Backdrop click** | Treated as "Cancel" — a stray click never drags the player into combat. |
+
+---
+
 ### Wrap Up Loose Ends Overlay
 
 Defined in `client/src/ui/ChapterCompleteOverlay.ts`. Opens once when `GameState.chapterComplete` flips true inside an adventure (combat-ended with no enemies remaining, or the chapter's `completionFlag` is set). The chapter is **resolved at this point** — the player can stay on the map indefinitely to search corpses, talk to NPCs through the GM tab, equip recovered gear, and so on. The modal carries the **encounter's title** (e.g. "Bridge Toll", "Dungeon Delve") so the player immediately recognises which chapter they're wrapping up.

@@ -313,6 +313,8 @@ export class GameScene extends Phaser.Scene {
       onDeclineReaction: () => gameClient.sendAction({ type: "resolveReaction", accept: false }),
       onAcceptReroll:    () => gameClient.sendAction({ type: "resolveReroll", accept: true }),
       onDeclineReroll:   () => gameClient.sendAction({ type: "resolveReroll", accept: false }),
+      onAcceptCombatStart:  () => gameClient.sendAction({ type: "resolveCombatStart", accept: true }),
+      onDeclineCombatStart: () => gameClient.sendAction({ type: "resolveCombatStart", accept: false }),
       onAdvanceChapter:  () => this.advanceChapter(),
       onLeaveEncounter:  () => this.leaveEncounter(),
       onIntroClosed:     (intro) => this.hud.addGmAssistantMessage(intro),
@@ -711,6 +713,7 @@ export class GameScene extends Phaser.Scene {
     this.overlays.refreshCharacterSheetIfOpen(state);
     this.overlays.syncReactionPrompt(state);
     this.overlays.syncRerollPrompt(state);
+    this.overlays.syncCombatStartPrompt(state);
     this.overlays.syncEncounterComplete(state);
     this.overlays.syncConversation(state);
 

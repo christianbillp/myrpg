@@ -1748,6 +1748,7 @@ async function loadWorldState(): Promise<{
     player: fullPlayer,
     pendingReaction: worldSave.pendingReaction ?? null,
     pendingReroll: worldSave.pendingReroll ?? null,
+    pendingCombatStart: worldSave.pendingCombatStart ?? null,
     triggers: worldSave.triggers ?? [],
     firedTriggerIds: worldSave.firedTriggerIds ?? [],
     pendingAigmEvents: worldSave.pendingAigmEvents ?? [],

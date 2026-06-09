@@ -4,10 +4,11 @@ import { CharacterSheetOverlay, CharacterSheetInputs } from "../ui/CharacterShee
 import { IntroductionOverlay } from "../ui/IntroductionOverlay";
 import { ReactionPromptOverlay } from "../ui/ReactionPromptOverlay";
 import { RerollPromptOverlay } from "../ui/RerollPromptOverlay";
+import { CombatStartPromptOverlay } from "../ui/CombatStartPromptOverlay";
 import { EncounterCompleteOverlay } from "../ui/EncounterCompleteOverlay";
 import { NextChapterButton } from "../ui/NextChapterButton";
 import { ConversationOverlay } from "../ui/ConversationOverlay";
-import type { GameState, SpellDef, PendingReaction, PendingReroll, ConversationDef, FeatureDef, ClassDef, SubclassDef } from "../../../shared/types";
+import type { GameState, SpellDef, PendingReaction, PendingReroll, PendingCombatStart, ConversationDef, FeatureDef, ClassDef, SubclassDef } from "../../../shared/types";
 import { UIScale } from "../ui/UIScale";
 import { WorldPause } from "../net/WorldPause";
 import { DevMode } from "../devMode";
@@ -34,6 +35,11 @@ export interface OverlayCallbacks {
   onAcceptReroll: () => void;
   /** Player declined / dismissed the reroll prompt — server applies the original roll. */
   onDeclineReroll: () => void;
+  /** Player confirmed the combat-start prompt — server rolls initiative (the
+   *  triggering action is NOT auto-performed). */
+  onAcceptCombatStart: () => void;
+  /** Player cancelled / dismissed the combat-start prompt — nothing happens. */
+  onDeclineCombatStart: () => void;
   /** Player pressed NEXT CHAPTER on the chapter-complete overlay. */
   onAdvanceChapter: () => void;
   /** Player pressed RETURN TO MENU on the single-encounter completion
@@ -76,6 +82,7 @@ export class OverlayManager {
   private characterSheet: CharacterSheetOverlay | null = null;
   private reactionPrompt: ReactionPromptOverlay | null = null;
   private rerollPrompt: RerollPromptOverlay | null = null;
+  private combatStartPrompt: CombatStartPromptOverlay | null = null;
   private encounterCompleteOverlay: EncounterCompleteOverlay | null = null;
   private conversation: ConversationOverlay | null = null;
   /** Tracks which conversation id the open overlay is for so a state change
@@ -87,6 +94,8 @@ export class OverlayManager {
   private reactionShownFor: PendingReaction | null = null;
   /** Tracks which pending-reroll the open prompt is for, so we don't rebuild on every state update. */
   private rerollShownFor: PendingReroll | null = null;
+  /** Tracks which pending-combat-start the open prompt is for, so we don't rebuild on every state update. */
+  private combatStartShownFor: PendingCombatStart | null = null;
   /** Tracks which dedup key the encounter-complete overlay was shown for,
    *  so reopening on every tick is suppressed. */
   private encounterCompleteShownFor: string | null = null;
@@ -99,7 +108,7 @@ export class OverlayManager {
   }
 
   get isAnyOpen(): boolean {
-    return !!(this.introOverlay || this.characterSheet || this.reactionPrompt || this.rerollPrompt || this.encounterCompleteOverlay || this.conversation);
+    return !!(this.introOverlay || this.characterSheet || this.reactionPrompt || this.rerollPrompt || this.combatStartPrompt || this.encounterCompleteOverlay || this.conversation);
   }
 
   reset(): void {
@@ -242,6 +251,32 @@ export class OverlayManager {
     this.rerollPrompt.destroy();
     this.rerollPrompt = null;
     this.rerollShownFor = null;
+  }
+
+  /**
+   * Mirror `state.pendingCombatStart` into an open CombatStartPromptOverlay.
+   * Opens when a new prompt appears, leaves it open while the same prompt is
+   * pending, and closes once the server clears the field.
+   */
+  syncCombatStartPrompt(state: GameState): void {
+    const pending = state.pendingCombatStart;
+    if (pending && this.combatStartShownFor !== pending) {
+      this.closeCombatStartPrompt();
+      this.combatStartShownFor = pending;
+      this.combatStartPrompt = new CombatStartPromptOverlay(this.scale, pending, {
+        onAccept:  () => { this.callbacks.onAcceptCombatStart();  this.combatStartPrompt = null; this.combatStartShownFor = null; },
+        onDecline: () => { this.callbacks.onDeclineCombatStart(); this.combatStartPrompt = null; this.combatStartShownFor = null; },
+      });
+    } else if (!pending && this.combatStartPrompt) {
+      this.closeCombatStartPrompt();
+    }
+  }
+
+  private closeCombatStartPrompt(): void {
+    if (!this.combatStartPrompt) return;
+    this.combatStartPrompt.destroy();
+    this.combatStartPrompt = null;
+    this.combatStartShownFor = null;
   }
 
   /**

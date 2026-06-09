@@ -100,6 +100,9 @@ export function isWorldTickEligible(sessionId: string): boolean {
   if (s.phase !== 'exploring') return false;
   // A pending reaction prompt suspends everything — don't tick under the user's feet.
   if (s.pendingReaction !== null) return false;
+  // A combat-start confirmation likewise freezes the world until the player
+  // decides whether to fight.
+  if (s.pendingCombatStart !== null) return false;
   return true;
 }
 

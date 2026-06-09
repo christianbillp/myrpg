@@ -441,6 +441,7 @@ export function buildSessionState(
     },
     pendingReaction: null,
     pendingReroll: null,
+    pendingCombatStart: null,
     activeConversation: null,
     triggers: req.triggers ?? [],
     firedTriggerIds: [],

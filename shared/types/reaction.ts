@@ -103,6 +103,20 @@ export interface RerollAttackParams {
   sneakAttackAllowed: boolean;
 }
 
+/**
+ * Set when a player action (attack / aggressive cast) in the exploring phase
+ * WOULD start combat. The engine pauses and surfaces this prompt instead of
+ * acting: declining cancels (nothing happens); accepting rolls initiative
+ * (`resolveCombatStart { accept: true }`) WITHOUT performing the original
+ * action — the player then acts normally on their turn.
+ */
+export interface PendingCombatStart {
+  /** NPCs to promote to enemy + faction-aggro when combat is confirmed. */
+  promoteIds: string[];
+  /** Prompt label, e.g. "Attacking Bandit (A) will start combat." */
+  label: string;
+}
+
 export interface PendingReroll {
   /** D20 site offering the reroll. Attack is the first wired site. */
   kind: 'attack';

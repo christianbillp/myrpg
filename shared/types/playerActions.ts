@@ -28,6 +28,7 @@ export type PlayerAction =
   | { type: 'commandSummon'; summonNpcId: string; tile: { x: number; y: number } }
   | { type: 'resolveReaction'; accept: boolean }
   | { type: 'resolveReroll'; accept: boolean }
+  | { type: 'resolveCombatStart'; accept: boolean }
   | { type: 'grapple'; targetId?: string }
   | { type: 'shove'; targetId?: string; effect?: 'push' | 'prone' }
   | { type: 'attune'; itemId: string }

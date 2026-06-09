@@ -29,7 +29,7 @@ locations — is in the linked design doc.
 - **US-051** As a developer, I want a formal conditions framework so that status effects are consistent, visible, and extensible.
 - **US-053** As a developer, I want monster Resistance, Vulnerability, and Immunity modeled so that damage is applied correctly per SRD stat blocks.
 - **US-054** As a player, I want NPCs to have a **combat disposition** (ally, neutral, or enemy) so that the same entity can shift sides during a fight without losing its identity.
-- **US-055** As a player, I can attack a neutral NPC outside of combat to start a fight, so that I have agency over when and against whom combat begins.
+- **US-055** As a player, I can attack a neutral NPC outside of combat to start a fight, so that I have agency over when and against whom combat begins. An attack or aggressive spell cast in the exploring phase that would start combat first raises a confirmation prompt: declining discards the action (nothing happens, no resources spent); confirming rolls Initiative but does **not** auto-perform the triggering action — the player acts normally on their turn. The off-camera world tick freezes while the prompt is open.
 - **US-060** As a developer, I want every combatant to roll Initiative independently so that turn order reflects each creature's roll, not a player-vs-enemy duel.
 - **US-061** As a player, I want Hide to follow SRD action economy.
 - **US-062** As a developer, I want SRD-faithful equip/unequip enforcement so that gear changes respect time and action economy.
