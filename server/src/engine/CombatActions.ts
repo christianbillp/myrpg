@@ -233,6 +233,13 @@ export function doAttack(ctx: GameContext, targetId: string | undefined, events:
   const targetDef = ctx.resolveMonsterDef(target.defId);
   if (!targetDef) return;
 
+  // SRD Sanctuary ends when the warded creature makes an attack roll. The
+  // attack is now committed (target + def resolved), so drop the ward.
+  if (s.player.conditions.includes('sanctuary')) {
+    s.player.conditions = s.player.conditions.filter((c) => c !== 'sanctuary');
+    ctx.addLog({ left: `${ctx.playerDef.name}'s Sanctuary fades — attacking breaks the ward.`, style: 'status' });
+  }
+
   const dist = chebyshev(s.player.tileX, s.player.tileY, target.tileX, target.tileY);
   const playerHidden = s.player.conditions.includes('hidden');
 

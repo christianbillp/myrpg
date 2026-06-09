@@ -248,6 +248,7 @@ export function applyEquipment(
   magicWeaponBonus = 0,
   attunedItemIds: string[] = [],
   buffAcBonus = 0,
+  weaponDamageDice?: { count: number; sides: number },
 ): void {
   const byId = Object.fromEntries(allItems.map((i) => [i.id, i]));
   const armor = slots.armorId ? (byId[slots.armorId] as ArmorDef | undefined) ?? null : null;
@@ -275,7 +276,11 @@ export function applyEquipment(
   // bonuses), so take the higher. The bonus rides on the PlayerAttack so the
   // existing CombatSystem resolver consumes it without a separate state lookup.
   const weaponBonus = Math.max(magicWeaponBonus, effectiveItemBonus(weapon, attunedItemIds));
-  playerDef.mainAttack = weaponBonus > 0
-    ? { ...base, magicWeaponBonus: weaponBonus }
+  // Enlarge's extra weapon-damage dice ride on the PlayerAttack the same way the
+  // flat magic bonus does, so the CombatSystem resolver consumes both without a
+  // separate state lookup.
+  const enlargeDice = weaponDamageDice && weaponDamageDice.count > 0 ? weaponDamageDice : undefined;
+  playerDef.mainAttack = weaponBonus > 0 || enlargeDice
+    ? { ...base, ...(weaponBonus > 0 ? { magicWeaponBonus: weaponBonus } : {}), ...(enlargeDice ? { damageDiceBonus: enlargeDice } : {}) }
     : base;
 }

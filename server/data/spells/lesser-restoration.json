@@ -5,11 +5,11 @@
   "school": "abjuration",
   "classes": ["bard", "cleric", "druid", "paladin", "ranger"],
   "castingTime": "bonus-action",
-  "range": "Touch",
+  "range": "touch",
   "rangeFeet": 5,
   "components": { "verbal": true, "somatic": true, "material": null },
   "duration": "Instantaneous",
   "concentration": false,
   "ritual": false,
-  "description": "You touch a creature and end one condition on it: Blinded, Deafened, Paralyzed, or Poisoned. Engine: condition removal on an ally is descriptive only until a cure-condition resolver lands."
+  "description": "You touch a creature and end one condition on it: Blinded, Deafened, Paralyzed, or Poisoned. Engine: click yourself or a creature to end the most debilitating of those four conditions present (priority Paralyzed > Poisoned > Blinded > Deafened, since no per-condition picker is plumbed)."
 }

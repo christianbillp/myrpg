@@ -172,10 +172,12 @@ function resolvePlayerAttack(
       sneakTot = s.total; sneakRolls = s.rolls;
       sneakAttackFired = true;
     }
-    damage = diceTot + statMod + magicWeaponBonus + sneakTot;
+    const enlargeTot = attack.damageDiceBonus ? rollDice(attack.damageDiceBonus.count * 2, attack.damageDiceBonus.sides).total : 0;
+    damage = diceTot + statMod + magicWeaponBonus + sneakTot + enlargeTot;
     const sneakPart = sneakTot > 0 ? ` + sneak[${sneakRolls.join(',')}]=${sneakTot}` : '';
     const mwPart = magicWeaponBonus > 0 ? ` +${magicWeaponBonus}(magic)` : '';
-    const dicePart = `2×${attack.damageDice}d${attack.damageSides}[${diceRolls.join(',')}]+${statMod}${mwPart}${sneakPart}`;
+    const enlPart = enlargeTot > 0 ? ` +${enlargeTot}(enlarge)` : '';
+    const dicePart = `2×${attack.damageDice}d${attack.damageSides}[${diceRolls.join(',')}]+${statMod}${mwPart}${enlPart}${sneakPart}`;
     logs.push({ left: `⚡ Critical hit with ${attack.name} — ${damage} ${attack.damageType}`, right: `${atkPart} · ${dicePart}`, style: 'crit' });
     vexApplied = attack.vex || attack.sap;
     slowApplied = attack.slow;
@@ -197,12 +199,14 @@ function resolvePlayerAttack(
       sneakTot = s.total; sneakRolls = s.rolls;
       sneakAttackFired = true;
     }
-    damage = diceTotal + statMod + magicWeaponBonus + sneakTot;
+    const enlargeTot = attack.damageDiceBonus ? rollDice(attack.damageDiceBonus.count, attack.damageDiceBonus.sides).total : 0;
+    damage = diceTotal + statMod + magicWeaponBonus + sneakTot + enlargeTot;
     const sneakSuffix = sneakTot > 0 ? ` (+${sneakTot} sneak)` : '';
     const sneakRightPart = sneakTot > 0 ? ` + sneak[${sneakRolls.join(',')}]=${sneakTot}` : '';
     const savPart = attack.savageAttacker ? ' Savage' : '';
     const mwHitPart = magicWeaponBonus > 0 ? ` +${magicWeaponBonus}(magic)` : '';
-    const dicePart = `${attack.damageDice}d${attack.damageSides}[${diceRolls.join(',')}]+${statMod}${mwHitPart}${savPart}${sneakRightPart}`;
+    const enlHitPart = enlargeTot > 0 ? ` +${enlargeTot}(enlarge)` : '';
+    const dicePart = `${attack.damageDice}d${attack.damageSides}[${diceRolls.join(',')}]+${statMod}${mwHitPart}${enlHitPart}${savPart}${sneakRightPart}`;
     logs.push({ left: `Hit with ${attack.name} — ${damage} ${attack.damageType}${sneakSuffix}`, right: `${atkPart} · ${dicePart}`, style: 'hit' });
     vexApplied = attack.vex || attack.sap;
     slowApplied = attack.slow;
@@ -300,6 +304,13 @@ export function npcBanePenalty(npc: NpcState): number {
   return (npc.activeBuffs ?? []).some((b) => b.spellId === 'bane') ? d(4) : 0;
 }
 
+/** SRD Enlarge/Reduce (Reduce): a reduced creature's weapon attacks deal 1d4
+ *  less damage on a hit (the engine clamps the hit to a minimum of 1). Returns
+ *  a fresh rolled penalty (≥0) for a `reduced` creature, else 0. */
+export function npcReducedPenalty(npc: NpcState): number {
+  return npc.conditions.includes('reduced') ? d(4) : 0;
+}
+
 export function enemyAttack(
   attack: MonsterAttack,
   playerAc: number,
@@ -310,6 +321,9 @@ export function enemyAttack(
   /** Flat modifier to the attacker's roll (SRD Bane → −1d4 when the attacker
    *  failed Bane's save; pass a negative value). */
   attackRollMod = 0,
+  /** SRD Enlarge/Reduce (Reduce) → 1d4 less weapon damage on a hit; pass the
+   *  rolled penalty (≥0). The hit is clamped to a minimum of 1 damage. */
+  damagePenalty = 0,
 ): { damage: number; isHit: boolean; isCrit: boolean; attackTotal: number; naturalRoll: number; logs: LogEntry[]; bonusComponents: RolledBonusDamage[] } {
   const logs: LogEntry[] = [];
   const effAdv = withAdvantage && !withDisadvantage;
@@ -338,8 +352,11 @@ export function enemyAttack(
     const diceCount = isCrit ? attack.damageDice * 2 : attack.damageDice;
     const { total: diceTot, rolls: diceRolls } = rollDice(diceCount, attack.damageSides);
     damage = diceTot + attack.damageBonus;
+    // SRD Reduce: shave 1d4 off the hit, never below 1.
+    if (damagePenalty > 0) damage = Math.max(1, damage - damagePenalty);
     const diceLabel = isCrit ? `2×${attack.damageDice}d${attack.damageSides}` : `${attack.damageDice}d${attack.damageSides}`;
-    const dicePart = `${diceLabel}[${diceRolls.join(',')}]+${attack.damageBonus}`;
+    const penPart = damagePenalty > 0 ? ` −${damagePenalty}(reduced)` : '';
+    const dicePart = `${diceLabel}[${diceRolls.join(',')}]+${attack.damageBonus}${penPart}`;
     logs.push(isCrit
       ? { left: `⚡ Critical hit with ${attack.name} — ${damage} ${attack.damageType}`, right: `${atkPart} · ${dicePart}`, style: 'crit' }
       : { left: `Hit with ${attack.name} — ${damage} ${attack.damageType}`, right: `${atkPart} · ${dicePart}`, style: 'hit' });

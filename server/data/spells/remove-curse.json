@@ -5,11 +5,11 @@
   "school": "abjuration",
   "classes": ["cleric", "paladin", "warlock", "wizard"],
   "castingTime": "action",
-  "range": "Touch",
+  "range": "touch",
   "rangeFeet": 5,
   "components": { "verbal": true, "somatic": true, "material": null },
   "duration": "Instantaneous",
   "concentration": false,
   "ritual": false,
-  "description": "At your touch, all curses on a creature or object end. You also break attunement to a cursed magic item you touch, allowing it to be removed. Engine: curse removal is descriptive only until curses are tracked on the board."
+  "description": "At your touch, all curses on a creature or object end. You also break attunement to a cursed magic item you touch, allowing it to be removed. Engine: click yourself or a creature to end the Cursed condition (e.g. from Bestow Curse) on it. The cursed-magic-item attunement break is descriptive."
 }

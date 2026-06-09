@@ -12,6 +12,8 @@
   "durationRounds": 10,
   "concentration": true,
   "ritual": false,
-  "description": "You create a floating, spectral weapon within range and immediately make one melee spell attack against a creature within 5 feet of it; on a hit the target takes 1d8 + your spellcasting modifier Force damage. As a Bonus Action on later turns you can move the weapon up to 20 feet and repeat the attack. Engine: the persistent bonus-action weapon is descriptive only until a directable-attacker summon (cf. Flaming Sphere) is authored for it.",
+  "summon": { "monsterId": "spiritual_weapon", "moveRangeFeet": 20 },
+  "damage": { "dice": 1, "sides": 8, "type": "force" },
+  "description": "You create a floating, spectral weapon within range and immediately make one melee spell attack against a creature within 5 feet of it; on a hit the target takes 1d8 + your spellcasting modifier Force damage. As a Bonus Action on later turns you can move the weapon up to 20 feet and repeat the attack. Engine: the weapon is a directable summon (cf. Flaming Sphere) — click it on the map and click an enemy within 20 ft to flit beside it and make the melee spell attack (a Bonus Action). The attack uses your spell attack bonus; on a hit it deals 1d8 + your spellcasting modifier Force, +1d8 per slot level above 2.",
   "scaling": "The damage increases by 1d8 for every slot level above 2."
 }

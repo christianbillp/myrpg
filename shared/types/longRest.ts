@@ -100,6 +100,10 @@ export interface NpcState {
   /** Player def id of the caster — used to enforce range tethers (Mage Hand
    *  ends when the caster ends a turn more than 30 ft from the hand). */
   summonOwnerId?: string;
+  /** Slot level the summon was cast at — carries upcast scaling to a
+   *  summon's recurring effect (Spiritual Weapon: +1d8 force per slot above
+   *  2). Absent for summons whose effect doesn't scale. */
+  summonSlotLevel?: number;
   hp: number;
   maxHp: number;
   /** Temporary HP pool (US-109) — a buffer that absorbs damage before real HP.
@@ -407,6 +411,10 @@ export interface ActiveZone {
    *  absent. Lets each spell pick its own atmosphere — fog grey, web white,
    *  darkness near-black. */
   tintHex?: string;
+  /** Slot level the zone was cast at — carries upcast scaling to the
+   *  recurring per-turn effect (Spirit Guardians: +1d8 radiant per slot
+   *  above 3). Absent for zones whose effect doesn't scale. */
+  castSlotLevel?: number;
 }
 
 /**

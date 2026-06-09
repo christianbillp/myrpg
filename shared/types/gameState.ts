@@ -124,6 +124,10 @@ export interface PlayerState {
   attackDiceBonus?: { count: number; sides: number };
   saveDiceBonus?: { count: number; sides: number };
   checkDiceBonus?: { count: number; sides: number };
+  /** Extra weapon-damage dice per hit from active self-buffs (Enlarge → +1d4),
+   *  derived from `weapon-damage-dice` modifiers (largest count×sides). Baked
+   *  onto `PlayerAttack.damageDiceBonus` by `applyEquipment`. Absent when none. */
+  weaponDamageDice?: { count: number; sides: number };
   /** Ability keys whose saving throws have Advantage from active self-buffs
    *  (Haste → dex; Beacon of Hope → wis), derived from save-scoped `advantage`
    *  modifiers on buffs. */

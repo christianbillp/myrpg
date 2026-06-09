@@ -11,6 +11,6 @@
   "duration": "Instantaneous",
   "concentration": false,
   "ritual": false,
-  "description": "Choose a creature within range that has 0 Hit Points and isn't dead. The creature becomes Stable. Engine: stabilising a downed ally is descriptive only until the companion death-save flow lands.",
+  "description": "Choose a creature within range that has 0 Hit Points and isn't dead. The creature becomes Stable. Engine: click a downed creature (0 HP) to apply the Stable condition so it stops sliding toward death.",
   "scaling": "The range doubles when you reach levels 5 (30 feet), 11 (60 feet), and 17 (120 feet)."
 }

@@ -10,6 +10,7 @@ import { runPerceptionSweep, runPassivePerceptionSweep } from './Vision.js';
 import { itemDisplayName } from '../../../shared/types.js';
 import { canShortRest as guardCanShortRest, canSearch as guardCanSearch } from './ActionGuards.js';
 import { tickZoneEnterSaves } from './SpellSystem.js';
+import { recenterSpiritGuardians } from './SpiritGuardiansSystem.js';
 import { checkTrapTriggers, runPassiveTrapDetection, detectAdjacentTraps } from './TrapSystem.js';
 import { formatCoins } from '../../../shared/currency.js';
 import type { GameState } from './types.js';
@@ -73,6 +74,9 @@ export function doMove(ctx: GameContext, dx: number, dy: number, events: GameEve
   // zone's condition, so re-entering the same zone after a successful
   // save does NOT re-roll on the same step.
   tickZoneEnterSaves(ctx, 'player');
+  // Spirit Guardians' emanation is centred on the caster — every step drags
+  // the aura along and re-evaluates which enemies are slowed by it.
+  recenterSpiritGuardians(ctx);
 
   // A concealed trap on the entered tile springs immediately. May down the
   // player (death_saves / defeat), so bail before further turn processing.

@@ -13,6 +13,7 @@
   "concentration": true,
   "ritual": false,
   "save": { "ability": "wis", "halfOnSuccess": false },
-  "description": "You touch a creature, which must succeed on a Wisdom saving throw or be cursed for the duration with one chosen effect: Disadvantage on checks/saves with one ability; Disadvantage on attack rolls against you; a start-of-turn Wisdom save or be forced to Dodge; or +1d8 Necrotic when you damage it. Engine: the WIS save is rolled; the specific curse rider is descriptive only.",
+  "effect": { "onFail": "cursed", "failNote": "is cursed" },
+  "description": "You touch a creature, which must succeed on a Wisdom saving throw or be cursed for the duration with one chosen effect: Disadvantage on checks/saves with one ability; Disadvantage on attack rolls against you; a start-of-turn Wisdom save or be forced to Dodge; or +1d8 Necrotic when you damage it. Engine: a failed WIS save applies the Cursed condition — the engine models the curse as Disadvantage on the target's attack rolls (the most universally useful of the four riders). Ends with Concentration, or via Remove Curse / Dispel Magic.",
   "scaling": "Higher-level slots extend the duration and may drop the Concentration requirement (level 4 → 10 minutes; 5-6 → 8 hours, no Concentration; 7-8 → 24 hours; 9 → until dispelled)."
 }

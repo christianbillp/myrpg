@@ -1,5 +1,5 @@
 import { NpcState, MonsterDef, GameEvent, LogEntry, AttackOnHitEffect, ExtraAttack } from './types.js';
-import { tryNimbleEscape, enemyAttack, npcBanePenalty, type RolledBonusDamage } from './CombatSystem.js';
+import { tryNimbleEscape, enemyAttack, npcBanePenalty, npcReducedPenalty, type RolledBonusDamage } from './CombatSystem.js';
 import { isIncapacitated, hasAttackDisadvantage, hasAttackAdvantage, hasSpeedZero, proneStandCost, grantsDisadvantageAgainst, grantsAdvantageAgainst } from './ConditionSystem.js';
 
 /**
@@ -179,7 +179,7 @@ export function runEnemyTurn(
   // one is a single edit in ConditionSystem, not every attack resolver.
   const targetGrantsDisadv = grantsDisadvantageAgainst(target.conditions, dist);
   const withDisadvantage = target.hidden || targetGrantsDisadv || hasAttackDisadvantage(enemy.conditions) || target.dodging || !!config.traitDisadvantage;
-  const { damage, isHit, isCrit, attackTotal, logs: attackLogs, bonusComponents } = enemyAttack(meleeAttack, target.ac, withAdvantage, withDisadvantage, 0, -npcBanePenalty(enemy));
+  const { damage, isHit, isCrit, attackTotal, logs: attackLogs, bonusComponents } = enemyAttack(meleeAttack, target.ac, withAdvantage, withDisadvantage, 0, -npcBanePenalty(enemy), npcReducedPenalty(enemy));
   logs.push(...attackLogs);
 
   // SRD Multiattack (US-112): roll the remaining attacks now, with the same
@@ -188,7 +188,7 @@ export function runEnemyTurn(
   const extraAttacks: ExtraAttack[] = [];
   const totalAttacks = Math.max(1, def.multiattack ?? 1);
   for (let i = 1; i < totalAttacks; i++) {
-    const ea = enemyAttack(meleeAttack, target.ac, withAdvantage, withDisadvantage, 0, -npcBanePenalty(enemy));
+    const ea = enemyAttack(meleeAttack, target.ac, withAdvantage, withDisadvantage, 0, -npcBanePenalty(enemy), npcReducedPenalty(enemy));
     logs.push(...ea.logs);
     extraAttacks.push({ damage: ea.damage, isHit: ea.isHit, isCrit: ea.isCrit, damageType: meleeAttack.damageType, bonusComponents: ea.bonusComponents });
   }

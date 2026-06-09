@@ -32,7 +32,8 @@ import { chooseNpcBehavior, fleeFromThreat, isMapEdge } from './NpcBrain.js';
 import { Logger } from '../Logger.js';
 import { endConcentration } from './ConcentrationSystem.js';
 import { applyTurnStartPeriodicDamage, isAttacker } from './OngoingEffectsSystem.js';
-import { tickZoneEnterSaves } from './SpellSystem.js';
+import { tickZoneEnterSaves, spellSaveDC } from './SpellSystem.js';
+import { d20, mod } from './Dice.js';
 
 /**
  * Sum the trait-derived attack-roll modifiers an enemy receives this turn.
@@ -155,7 +156,34 @@ function collectEnemyTraitModifiers(
  * The result is a generic snapshot — the caller routes damage by checking
  * `result.attackedTargetId === 'player'` vs an NPC id.
  */
-function pickEnemyAttackTarget(ctx: GameContext, attacker: NpcState): EnemyAttackTarget {
+/**
+ * SRD Sanctuary — a creature trying to target the warded creature first makes
+ * a Wisdom save vs the caster's spell save DC; on a failure it can't target
+ * them (must pick another target or lose the attack). Returns true when the
+ * ward blocks this attacker. Rolled once per target-pick (once per enemy turn),
+ * which approximates the SRD per-attempt save. The caster is always the player,
+ * so the DC comes from the player's spellcasting.
+ */
+function sanctuaryWardBlocks(ctx: GameContext, attacker: NpcState, targetConditions: string[], targetName: string): boolean {
+  if (!targetConditions.includes('sanctuary')) return false;
+  const def = ctx.resolveMonsterDef(attacker.defId);
+  if (!def) return false;
+  const dc = spellSaveDC(ctx);
+  const saveMod = (def.savingThrows && def.savingThrows.wis !== undefined) ? def.savingThrows.wis : mod(def.wis);
+  const roll = d20();
+  const total = roll + saveMod;
+  const success = total >= dc;
+  ctx.addLog({
+    left: success
+      ? `${combatantDisplayName(attacker, ctx.state.npcs)} pushes past ${targetName}'s Sanctuary`
+      : `${combatantDisplayName(attacker, ctx.state.npcs)} is turned aside by ${targetName}'s Sanctuary`,
+    right: `WIS d20(${roll})+${saveMod}=${total} vs DC ${dc}`,
+    style: success ? 'status' : 'miss',
+  });
+  return !success;
+}
+
+export function pickEnemyAttackTarget(ctx: GameContext, attacker: NpcState): EnemyAttackTarget {
   const s = ctx.state;
   const attackerView = { factionId: attacker.factionId, disposition: attacker.disposition };
   const playerView = { factionId: PLAYER_FACTION_ID };
@@ -167,8 +195,21 @@ function pickEnemyAttackTarget(ctx: GameContext, attacker: NpcState): EnemyAttac
   // attacker simply omits the player from its target list — it may still
   // attack other hostiles in the encounter, or fall through to the "no
   // hostile target" synthesised snapshot below if none remain.
+  // SRD Calm Emotions (Indifferent outcome): a becalmed creature is no longer
+  // hostile, so it makes no attacks this turn — it targets no one and falls
+  // through to the synthesised "no hostile target" snapshot below.
+  const calmed = attacker.conditions.includes('calmed');
+  if (calmed) {
+    ctx.addLog({ left: `${combatantDisplayName(attacker, s.npcs)} is too becalmed to attack.`, style: 'status' });
+  }
+
+  // SRD Blink: while phased to the Ethereal Plane the caster can't be targeted
+  // by attacks from material-plane creatures — omit the player entirely.
+  const playerEthereal = s.player.conditions.includes('ethereal');
+
   const charmedByPlayer = attacker.conditions.includes('charmed');
-  if (isHostileTo(s, attackerView, playerView) && !charmedByPlayer) {
+  if (!calmed && !playerEthereal && isHostileTo(s, attackerView, playerView) && !charmedByPlayer
+      && !sanctuaryWardBlocks(ctx, attacker, s.player.conditions, ctx.playerDef.name)) {
     candidates.push({
       target: {
         id: 'player',
@@ -188,9 +229,11 @@ function pickEnemyAttackTarget(ctx: GameContext, attacker: NpcState): EnemyAttac
     });
   }
   for (const other of s.npcs) {
+    if (calmed) break;  // becalmed: no targets at all
     if (other === attacker || other.hp <= 0) continue;
     const otherView = { factionId: other.factionId, disposition: other.disposition };
     if (!isHostileTo(s, attackerView, otherView)) continue;
+    if (sanctuaryWardBlocks(ctx, attacker, other.conditions, combatantDisplayName(other, s.npcs))) continue;
     candidates.push({
       target: {
         id: other.id,

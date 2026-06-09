@@ -50,7 +50,12 @@ export type Modifier =
    *  directly raising the session `PlayerDef.maxHp` at cast (every HP read site
    *  already consumes `maxHp`); the `value` is recorded so a Long Rest can
    *  reverse it exactly. */
-  | { type: 'max-hp'; value: number };
+  | { type: 'max-hp'; value: number }
+  /** Extra weapon-damage dice on each hit (Enlarge → +1d4). Derived into
+   *  `PlayerState.weaponDamageDice` and baked onto `PlayerAttack.damageDiceBonus`
+   *  by `applyEquipment`, then rolled (and doubled on a crit) in
+   *  `resolvePlayerAttack`. */
+  | { type: 'weapon-damage-dice'; count: number; sides: number };
 
 /**
  * Shared contract for anything that contributes typed `Modifier`s to a

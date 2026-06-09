@@ -28,7 +28,7 @@ export const ADVANTAGE_AGAINST_CONDITIONS = ['blinded', 'paralyzed', 'restrained
  *  the engine applies it as a blanket Disadvantage on all attack rolls
  *  because MonsterAttack does not carry a stat-key field (only PlayerAttack
  *  does). Future per-attack stat tagging would let us restrict to STR. */
-export const ATTACK_DISADVANTAGE_CONDITIONS = ['blinded', 'frightened', 'grappled', 'poisoned', 'restrained', 'prone', 'vexed', 'heavily-obscured', 'enfeebled'];
+export const ATTACK_DISADVANTAGE_CONDITIONS = ['blinded', 'frightened', 'grappled', 'poisoned', 'restrained', 'prone', 'vexed', 'heavily-obscured', 'enfeebled', 'cursed'];
 
 /** Conditions that reduce the creature's speed to 0. `hobbled` is the
  *  caltrops effect — Speed 0 until the start of the creature's next turn

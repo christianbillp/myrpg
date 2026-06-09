@@ -5,12 +5,12 @@
   "school": "abjuration",
   "classes": ["cleric", "druid", "paladin", "ranger"],
   "castingTime": "action",
-  "range": "Touch",
+  "range": "touch",
   "rangeFeet": 5,
   "components": { "verbal": true, "somatic": true, "material": null },
   "duration": "1 hour",
   "durationRounds": 600,
   "concentration": false,
   "ritual": false,
-  "description": "You touch a creature and end the Poisoned condition on it. For the duration, the target has Advantage on saving throws to avoid or end the Poisoned condition, and Resistance to Poison damage. Engine: the poison resistance / save-advantage buff is descriptive only until an ally-buff resolver lands."
+  "description": "You touch a creature and end the Poisoned condition on it. For the duration, the target has Advantage on saving throws to avoid or end the Poisoned condition, and Resistance to Poison damage. Engine: click yourself to end Poisoned and gain Resistance to Poison damage for the duration (the buff layer is caster-centred — an ally target has its Poisoned condition ended, with the resistance descriptive). The save-advantage rider is descriptive."
 }

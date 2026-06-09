@@ -56,7 +56,9 @@ export function doCommandSummon(
   // the turn (we model that as "no movement happens, but the save still
   // resolves" — the sphere stays put).
   const isFlamingSphere = spell.id === 'flaming-sphere';
-  if (isFlamingSphere) {
+  const isSpiritualWeapon = spell.id === 'spiritual-weapon';
+  const usesBonusAction = isFlamingSphere || isSpiritualWeapon;
+  if (usesBonusAction) {
     if (s.phase === 'player_turn' && s.player.bonusActionUsed) return;
   } else {
     if (s.phase === 'player_turn' && s.player.actionUsed) return;
@@ -92,14 +94,27 @@ export function doCommandSummon(
     ctx.addLog({ left: `${ctx.playerDef.name} rolls ${npc.name} into ${occupant.kind === 'player' ? ctx.playerDef.name : combatantDisplayName(occupant.npc, s.npcs)} — the sphere stops.`, style: 'status' });
     return;
   }
-  if (occupant) return; // Non-flaming-sphere summons silently refuse occupied tiles.
+  if (occupant && isSpiritualWeapon && occupant.kind === 'npc') {
+    // Move-and-strike: the weapon flits to an empty tile beside the target
+    // (best effort) and makes its melee spell attack. Bonus Action consumed.
+    const spot = emptyTileAdjacentTo(ctx, occupant.npc, npc.tileX, npc.tileY, moveRange);
+    if (spot) {
+      events.push({ type: 'entity_move', entityId: npc.id, toX: spot[0], toY: spot[1] });
+      npc.tileX = spot[0];
+      npc.tileY = spot[1];
+    }
+    resolveSpiritualWeaponAttack(ctx, npc, occupant.npc, events);
+    if (s.phase === 'player_turn') s.player.bonusActionUsed = true;
+    return;
+  }
+  if (occupant) return; // Other summons / the player's tile silently refuse.
 
   events.push({ type: 'entity_move', entityId: npc.id, toX: tile.x, toY: tile.y });
   npc.tileX = tile.x;
   npc.tileY = tile.y;
 
   if (s.phase === 'player_turn') {
-    if (isFlamingSphere) s.player.bonusActionUsed = true;
+    if (usesBonusAction) s.player.bonusActionUsed = true;
     else s.player.actionUsed = true;
   }
   ctx.addLog({ left: `${ctx.playerDef.name} directs ${npc.name}.`, style: 'status' });
@@ -169,6 +184,104 @@ function rollFlamingSphereSaveAgainst(
   if (finalDamage > 0 && npc.hp > 0) {
     npc.hp = Math.max(0, npc.hp - finalDamage);
     if (npc.hp <= 0) ctx.killWithReward(npc, def, `☠ ${combatantDisplayName(npc, s.npcs)} is incinerated!`);
+  }
+}
+
+/** Nearest empty tile adjacent to `target` that the weapon (at `fromX,fromY`)
+ *  can reach within `maxRange` tiles — where the Spiritual Weapon flits to
+ *  before striking. Null when the target is boxed in or out of reach. */
+function emptyTileAdjacentTo(
+  ctx: GameContext,
+  target: NpcState,
+  fromX: number,
+  fromY: number,
+  maxRange: number,
+): [number, number] | null {
+  const s = ctx.state;
+  const { cols, rows, blocksMovement } = s.map;
+  let best: [number, number] | null = null;
+  let bestDist = Infinity;
+  for (let dy = -1; dy <= 1; dy++) {
+    for (let dx = -1; dx <= 1; dx++) {
+      if (dx === 0 && dy === 0) continue;
+      const x = target.tileX + dx;
+      const y = target.tileY + dy;
+      if (x < 0 || x >= cols || y < 0 || y >= rows) continue;
+      if (blocksMovement[y][x]) continue;
+      if (s.player.tileX === x && s.player.tileY === y) continue;
+      if (s.npcs.some((n) => n.hp > 0 && n.tileX === x && n.tileY === y)) continue;
+      const dist = chebyshev(fromX, fromY, x, y);
+      if (dist > maxRange) continue;
+      if (dist < bestDist) { bestDist = dist; best = [x, y]; }
+    }
+  }
+  return best;
+}
+
+/**
+ * SRD Spiritual Weapon — the spectral weapon makes one melee spell attack
+ * against a creature: d20 + the caster's spell attack bonus vs the target's
+ * AC; on a hit it deals 1d8 (+1d8 per slot level above 2) + the caster's
+ * spellcasting modifier Force damage (crit doubles the dice). Routed through
+ * `resistMod` so Force resistance / immunity applies. Used both on cast and
+ * by the `commandSummon` move-and-strike path. Starts combat if the strike
+ * lands during exploration.
+ */
+export function resolveSpiritualWeaponAttack(
+  ctx: GameContext,
+  weapon: NpcState,
+  target: NpcState,
+  events: GameEvent[],
+): void {
+  const s = ctx.state;
+  const spell = ctx.defs.spells.find((sp) => sp.id === 'spiritual-weapon');
+  if (!spell?.damage || target.hp <= 0) return;
+  const def = ctx.resolveMonsterDef(target.defId);
+  if (!def) return;
+
+  // First strike in exploration promotes the target and opens combat.
+  if (s.phase === 'exploring') {
+    if (target.disposition === 'neutral') {
+      target.disposition = 'enemy';
+      if (!target.combatLabel) ctx.assignCombatLabel(target);
+    }
+    ctx.aggroFaction(target);
+    ctx.doStartCombat(events);
+  }
+
+  const ability = ctx.playerDef.spellcastingAbility;
+  const abilityMod = ability ? mod(ctx.playerDef[ability]) : 0;
+  const atkBonus = ctx.playerDef.proficiencyBonus + abilityMod;
+  const roll = d20();
+  const total = roll + atkBonus;
+  const crit = roll === 20;
+  const ac = def.ac;
+  const hit = crit || (roll !== 1 && total >= ac);
+  if (!hit) {
+    ctx.addLog({
+      left: `${weapon.name} swings at ${combatantDisplayName(target, s.npcs)} — miss`,
+      right: `d20(${roll})+${atkBonus}=${total} vs AC ${ac}`,
+      style: 'miss',
+    });
+    return;
+  }
+
+  const slotLevel = weapon.summonSlotLevel ?? spell.level;
+  const dice = spell.damage.dice + Math.max(0, slotLevel - spell.level);
+  const diceRolled = crit ? dice * 2 : dice;
+  const rolls: number[] = [];
+  for (let i = 0; i < diceRolled; i++) rolls.push(d(spell.damage.sides));
+  const raw = rolls.reduce((a, b) => a + b, 0) + abilityMod;
+  const { finalDamage, log: resistLog } = ctx.resistMod(raw, spell.damage.type, def, target.name);
+  if (resistLog) ctx.addLog(resistLog);
+  ctx.addLog({
+    left: `${weapon.name} ${crit ? 'critically strikes' : 'strikes'} ${combatantDisplayName(target, s.npcs)} — ${finalDamage} ${spell.damage.type}`,
+    right: `d20(${roll})+${atkBonus}=${total} vs AC ${ac} · ${diceRolled}d${spell.damage.sides}[${rolls.join(',')}]+${abilityMod}`,
+    style: 'hit',
+  });
+  if (finalDamage > 0 && target.hp > 0) {
+    target.hp = Math.max(0, target.hp - finalDamage);
+    if (target.hp <= 0) ctx.killWithReward(target, def, `☠ ${combatantDisplayName(target, s.npcs)} is struck down!`);
   }
 }
 

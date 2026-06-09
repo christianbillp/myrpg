@@ -130,6 +130,11 @@ export interface PlayerAttack {
    *  `PlayerState.magicWeaponBonus > 0`; read by `resolvePlayerAttack`.
    *  Absent when the spell is not active. */
   magicWeaponBonus?: number;
+  /** SRD Enlarge/Reduce (Enlarge) — extra weapon-damage dice on each hit
+   *  (+1d4). Written by `applyEquipment` from `PlayerState.weaponDamageDice`;
+   *  rolled (and doubled on a crit) by `resolvePlayerAttack`. Absent when no
+   *  such buff is active. */
+  damageDiceBonus?: { count: number; sides: number };
 }
 
 export interface EquipmentSlots {

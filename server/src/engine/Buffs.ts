@@ -91,6 +91,12 @@ export function recomputeBuffs(ctx: GameContext): void {
   p.attackDiceBonus = bestDie('attack');
   p.saveDiceBonus = bestDie('save');
   p.checkDiceBonus = bestDie('check');
+  // Extra weapon-damage dice (Enlarge → +1d4). Same as the d20 dice bonuses,
+  // non-stacking: keep the largest count×sides.
+  const wdd = mods.filter((m): m is Extract<typeof m, { type: 'weapon-damage-dice' }> => m.type === 'weapon-damage-dice');
+  p.weaponDamageDice = wdd.length
+    ? wdd.reduce((best, m) => (m.count * m.sides > best.count * best.sides ? { count: m.count, sides: m.sides } : best), { count: 0, sides: 0 })
+    : undefined;
   // Save advantages granted by buffs (Haste → dex, Beacon of Hope → wis).
   const saveAdv = mods.filter((m): m is Extract<typeof m, { type: 'advantage' }> => m.type === 'advantage' && m.on === 'save').map((m) => m.key).filter((k): k is string => !!k);
   p.buffSaveAdvantage = saveAdv.length ? [...new Set(saveAdv)] : undefined;
@@ -103,7 +109,7 @@ export function recomputeBuffs(ctx: GameContext): void {
 
   // shieldActive is owned outside the buff list (Shield is a reaction) — pass
   // it through unchanged; mageArmor now comes from the derived flag above.
-  applyEquipment(ctx.playerDef, p.equippedSlots, ctx.defs.equipment, p.mageArmor, p.shieldActive, p.magicWeaponBonus, p.attunedItemIds ?? [], p.acBonus);
+  applyEquipment(ctx.playerDef, p.equippedSlots, ctx.defs.equipment, p.mageArmor, p.shieldActive, p.magicWeaponBonus, p.attunedItemIds ?? [], p.acBonus, p.weaponDamageDice);
   p.ac = ctx.playerDef.ac;
 }
 

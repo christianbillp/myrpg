@@ -8,8 +8,9 @@ import { applyEquipment } from './EquipmentSystem.js';
 import { playerArmorSpeedPenaltyFt } from './ActionGuards.js';
 import { applyStormsThunder } from './GiantGifts.js';
 import { runFlamingSphereEndOfTurnSaves } from './SummonSystem.js';
+import { runSpiritGuardiansEndOfTurnSaves, recenterSpiritGuardians } from './SpiritGuardiansSystem.js';
 import { runPerceptionSweep } from './Vision.js';
-import { mod, d20 as d20Local } from './Dice.js';
+import { mod, d20 as d20Local, d } from './Dice.js';
 import { runSingleEnemyTurn, runSingleAllyTurn } from './NpcTurnRunners.js';
 import { applyMonsterAttachToPlayer } from './OngoingEffectsSystem.js';
 import { hasAdvantageOn } from './Modifiers.js';
@@ -322,6 +323,12 @@ export function enterPlayerTurn(ctx: GameContext): void {
   }
   if (!wasPlayerTurn && s.phase === 'player_turn') {
     Logger.log('combat.turn_started', { combatantId: 'player', hp: s.player.hp, movesLeft: s.player.movesLeft });
+    // SRD Blink: a phased-out caster returns to this plane at the start of
+    // their next turn (the chosen-space-within-10-ft return is descriptive).
+    if (s.player.conditions.includes('ethereal')) {
+      s.player.conditions = s.player.conditions.filter((c) => c !== 'ethereal');
+      ctx.addLog({ left: `${ctx.playerDef.name} blinks back to the material plane.`, style: 'status' });
+    }
     ctx.addLog({ left: `── ${ctx.playerDef.name}'s turn — Action & Bonus refreshed ──`, style: 'header' });
     ctx.publish({ type: 'turn_started', combatantId: 'player' });
     // Persistent AOE zones (Fog Cloud, Web, Darkness, Grease, …) age one
@@ -347,6 +354,19 @@ export function endPlayerTurn(ctx: GameContext, events: GameEvent[]): void {
   // the STR save and is pushed 15 ft away on failure. Same trigger
   // moment as Flaming Sphere.
   runGustOfWindEndOfTurnSaves(ctx, 'player', events);
+  // SRD Blink: roll 1d6 at the end of each of the caster's turns; on a 4-6 the
+  // caster phases to the Ethereal Plane (modelled as the `ethereal` condition →
+  // untargetable by enemy attacks) until the start of their next turn, when
+  // `startPlayerTurn` clears it. Duration is not separately tracked.
+  if ((ctx.state.player.activeBuffs ?? []).some((b) => b.spellId === 'blink')) {
+    const roll = d(6);
+    if (roll >= 4 && !ctx.state.player.conditions.includes('ethereal')) {
+      ctx.state.player.conditions.push('ethereal');
+      ctx.addLog({ left: `${ctx.playerDef.name} blinks out to the Ethereal Plane — untargetable until their next turn.`, right: `Blink d6=${roll}`, style: 'status' });
+    } else if (roll < 4) {
+      ctx.addLog({ left: `${ctx.playerDef.name} stays on this plane.`, right: `Blink d6=${roll}`, style: 'normal' });
+    }
+  }
   // Tick spell-imposed conditions whose duration is keyed to the caster's
   // own turns (Color Spray's Blinded, future "until the start/end of your
   // next turn" effects). Decrement `turnsRemaining`; when it hits 0 strip
@@ -552,6 +572,11 @@ export function finalizeNpcTurn(ctx: GameContext, npc: NpcState, events?: GameEv
   // sphere makes a DEX save vs the spell's damage. Resolve before the
   // hide/perception sweep so the log reads in narrative order.
   runFlamingSphereEndOfTurnSaves(ctx, npc.id);
+  // SRD Spirit Guardians — an enemy ending its turn in the caster's aura
+  // makes a WIS save for half. Then re-sync the slow membership in case this
+  // NPC moved into or out of the emanation on its turn.
+  runSpiritGuardiansEndOfTurnSaves(ctx, npc.id);
+  recenterSpiritGuardians(ctx);
   // SRD Gust of Wind end-of-turn save for this NPC. Same shape as
   // Flaming Sphere — a creature ending its turn on a zone tile rolls
   // STR vs the spell's DC and is pushed 15 ft away on failure.

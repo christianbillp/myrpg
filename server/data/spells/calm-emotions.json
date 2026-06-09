@@ -14,5 +14,6 @@
   "ritual": false,
   "save": { "ability": "cha", "halfOnSuccess": false },
   "area": { "shape": "sphere", "sizeFeet": 20 },
-  "description": "Each Humanoid in a 20-foot-radius Sphere makes a Charisma saving throw or is affected by one of: Immunity to (and suppression of) the Charmed and Frightened conditions; or becoming Indifferent toward chosen creatures it's Hostile to. Engine: the CHA save is rolled per target; the emotion-suppression/indifference outcome is descriptive only."
+  "effect": { "onFail": "calmed", "failNote": "is becalmed" },
+  "description": "Each Humanoid in a 20-foot-radius Sphere makes a Charisma saving throw or is affected by one of: Immunity to (and suppression of) the Charmed and Frightened conditions; or becoming Indifferent toward chosen creatures it's Hostile to. Engine: a failed CHA save applies the Calmed condition — the engine models the Indifferent outcome, so a becalmed creature makes no attacks for the duration. Ends with Concentration."
 }

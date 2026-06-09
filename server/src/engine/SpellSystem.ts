@@ -19,6 +19,8 @@ import { canCastSpell } from './ActionGuards.js';
 import { computeEquippedSlotLabels } from './EquipmentSystem.js';
 import { isMagicInitiateSpell, magicInitiateResourceId } from './MagicInitiate.js';
 import { startConcentration, endConcentration } from './ConcentrationSystem.js';
+import { castSpiritGuardians } from './SpiritGuardiansSystem.js';
+import { resolveSpiritualWeaponAttack } from './SummonSystem.js';
 import { publishNpcDamage } from './ThresholdPublisher.js';
 import { applyDamageWithTempHp, npcBanePenalty } from './CombatSystem.js';
 import { combatantDisplayName } from './CombatFlow.js';
@@ -26,7 +28,7 @@ import { emitNoise, NOISE_SPELL_VERBAL } from './Sound.js';
 import { Logger } from '../Logger.js';
 import { canSee as visCanSee } from './Vision.js';
 import { hasModifierFlag, hasAdvantageOn } from './Modifiers.js';
-import { applySelfBuff, applyBuffTo } from './Buffs.js';
+import { applySelfBuff, applyBuffTo, removeSpellBuffsFrom } from './Buffs.js';
 import { SPEED_ZERO_CONDITIONS, isIncapacitated } from './ConditionSystem.js';
 import {
   tilesInArea, playerInArea, creaturesInArea,
@@ -1349,6 +1351,17 @@ function resolveSingleTargetSaveSpell(
     for (const c of conds) {
       if (!target.conditions.includes(c)) target.conditions.push(c);
     }
+    // Single-turn save spells (Command → Incapacitated until the end of the
+    // target's next turn) schedule their own strip via the ongoingEffects
+    // pipeline — same mechanism Color Spray uses. Concentration spells
+    // (Suggestion, Levitate) instead rely on endConcentration's effect.onFail
+    // cleanup, so they're deliberately excluded here.
+    if (spell.durationRounds === 1 && !spell.concentration && conds.length > 0) {
+      target.ongoingEffects = target.ongoingEffects ?? [];
+      for (const c of conds) {
+        target.ongoingEffects.push({ id: ctx.uid(), kind: 'spell-condition', spellId: spell.id, condition: c, turnsRemaining: 2 });
+      }
+    }
     // SRD on-success rider (Ray of Enfeeblement: even on a save the target has
     // Disadvantage on its next attack roll — the engine's one-shot `vexed`).
     // Applied from `effect.onSuccess`; the failure return value is unchanged so
@@ -1558,6 +1571,130 @@ function resolveUtilitySpell(ctx: GameContext, spell: SpellDef, slotLevel: numbe
       }
       break;
     }
+    // ── Cure / restore / dispel (US — Bucket 4 utility resolvers) ─────────────
+    // Lesser Restoration: end one condition (Blinded, Deafened, Paralyzed, or
+    // Poisoned) on the caster or a touched creature. The SRD lets the caster
+    // pick; with no condition-picker plumbed we end the most debilitating one
+    // present, in priority order. `targetIds[0] === 'player'` is the self-cast.
+    case 'lesser-restoration': {
+      const LESSER_RESTORE_ORDER = ['paralyzed', 'poisoned', 'blinded', 'deafened'];
+      const targetId = targetIds?.[0] ?? s.selectedTargetId ?? 'player';
+      const onSelf = targetId === 'player';
+      const conds = onSelf ? s.player.conditions : (s.npcs.find((n) => n.id === targetId)?.conditions);
+      if (!conds) { ctx.addLog({ left: `Lesser Restoration: no valid target.`, style: 'miss' }); break; }
+      const who = onSelf ? ctx.playerDef.name : combatantDisplayName(s.npcs.find((n) => n.id === targetId)!, s.npcs);
+      const removed = LESSER_RESTORE_ORDER.find((c) => conds.includes(c));
+      if (removed) {
+        if (onSelf) s.player.conditions = conds.filter((c) => c !== removed);
+        else s.npcs.find((n) => n.id === targetId)!.conditions = conds.filter((c) => c !== removed);
+        ctx.addLog({ left: `${ctx.playerDef.name} casts Lesser Restoration — ${who}'s ${removed} condition ends.`, style: 'heal' });
+      } else {
+        ctx.addLog({ left: `Lesser Restoration finds no Blinded/Deafened/Paralyzed/Poisoned condition on ${who} to end.`, style: 'miss' });
+      }
+      break;
+    }
+    // Spare the Dying: stabilise a creature at 0 HP (cast on a downed ally, not
+    // the unconscious caster — the player can't act at 0 HP). Adds Stable so
+    // the creature stops sliding toward death.
+    case 'spare-the-dying': {
+      const targetId = targetIds?.[0] ?? s.selectedTargetId;
+      const npc = targetId && targetId !== 'player' ? s.npcs.find((n) => n.id === targetId) : undefined;
+      if (!npc) { ctx.addLog({ left: `Spare the Dying: choose a creature at 0 HP within range.`, style: 'miss' }); break; }
+      if (npc.hp > 0) { ctx.addLog({ left: `${combatantDisplayName(npc, s.npcs)} isn't dying.`, style: 'miss' }); break; }
+      if (!npc.conditions.includes('stable')) npc.conditions.push('stable');
+      ctx.addLog({ left: `${ctx.playerDef.name} casts Spare the Dying — ${combatantDisplayName(npc, s.npcs)} is stabilised.`, style: 'heal' });
+      break;
+    }
+    // Dispel Magic: end the spell effects on a creature. Strips the spell-layer
+    // magic the engine tracks — active buffs (Bless, Haste, …), and the
+    // duration-bound conditions recorded as `spell-condition` ongoing effects
+    // (Color Spray's Blinded, …). Level-gating (DC 10 + spell level for spells
+    // above 3rd) is descriptive — every on-board effect here is ≤ the slot
+    // level it's worth dispelling.
+    case 'dispel-magic': {
+      const targetId = targetIds?.[0] ?? s.selectedTargetId;
+      const npc = targetId && targetId !== 'player' ? s.npcs.find((n) => n.id === targetId) : undefined;
+      if (!npc) { ctx.addLog({ left: `Dispel Magic: choose a creature carrying a spell effect.`, style: 'miss' }); break; }
+      let dispelled = 0;
+      for (const sid of new Set((npc.activeBuffs ?? []).map((b) => b.spellId))) {
+        if (removeSpellBuffsFrom(npc, sid)) dispelled++;
+      }
+      const ongoing = (npc.ongoingEffects ?? []).filter((oe) => oe.kind === 'spell-condition');
+      for (const oe of ongoing) {
+        npc.conditions = npc.conditions.filter((c) => c !== oe.condition);
+        dispelled++;
+      }
+      npc.ongoingEffects = (npc.ongoingEffects ?? []).filter((oe) => oe.kind !== 'spell-condition');
+      ctx.addLog({
+        left: dispelled > 0
+          ? `${ctx.playerDef.name} casts Dispel Magic — ${dispelled} effect${dispelled > 1 ? 's' : ''} on ${combatantDisplayName(npc, s.npcs)} ${dispelled > 1 ? 'end' : 'ends'}.`
+          : `${ctx.playerDef.name} casts Dispel Magic — no dispellable magic on ${combatantDisplayName(npc, s.npcs)}.`,
+        style: dispelled > 0 ? 'status' : 'miss',
+      });
+      break;
+    }
+    // Protection from Poison: end Poisoned on the target and (for the caster)
+    // grant Resistance to Poison damage for the duration. Routed through the
+    // self-buff layer like Protection from Energy; an ally target gets the
+    // Poisoned cure (the buff layer is caster-centred, so ally resistance is
+    // descriptive).
+    case 'protection-from-poison': {
+      const targetId = targetIds?.[0] ?? s.selectedTargetId ?? 'player';
+      const onSelf = targetId === 'player';
+      if (onSelf) {
+        s.player.conditions = s.player.conditions.filter((c) => c !== 'poisoned');
+        applySelfBuff(ctx, { spellId: 'protection-from-poison', modifiers: [{ type: 'resistance', damageType: 'poison' }] });
+        ctx.addLog({ left: `${ctx.playerDef.name} casts Protection from Poison — Poisoned ends, Resistance to poison for the duration.`, style: 'status' });
+      } else {
+        const npc = s.npcs.find((n) => n.id === targetId);
+        if (!npc) { ctx.addLog({ left: `Protection from Poison: no valid target.`, style: 'miss' }); break; }
+        npc.conditions = npc.conditions.filter((c) => c !== 'poisoned');
+        ctx.addLog({ left: `${ctx.playerDef.name} casts Protection from Poison on ${combatantDisplayName(npc, s.npcs)} — Poisoned ends.`, style: 'status' });
+      }
+      break;
+    }
+    // Sanctuary: ward a creature (self or ally). Recorded as a `sanctuary`
+    // condition the enemy target-picker reads — an attacker must make a Wis
+    // save to target the warded creature. The ward ends when the warded
+    // creature attacks or casts at a foe (stripped in `doAttack` / the
+    // aggressive-cast path); the 1-minute duration expiry is descriptive.
+    case 'sanctuary': {
+      const targetId = targetIds?.[0] ?? s.selectedTargetId ?? 'player';
+      if (targetId === 'player') {
+        if (!s.player.conditions.includes('sanctuary')) s.player.conditions.push('sanctuary');
+        ctx.addLog({ left: `${ctx.playerDef.name} casts Sanctuary — warded until they strike or cast at a foe.`, style: 'status' });
+      } else {
+        const npc = s.npcs.find((n) => n.id === targetId);
+        if (!npc) { ctx.addLog({ left: `Sanctuary: no valid target.`, style: 'miss' }); break; }
+        if (!npc.conditions.includes('sanctuary')) npc.conditions.push('sanctuary');
+        ctx.addLog({ left: `${ctx.playerDef.name} casts Sanctuary on ${combatantDisplayName(npc, s.npcs)} — warded against attacks.`, style: 'status' });
+      }
+      break;
+    }
+    // Remove Curse: end the Cursed condition (Bestow Curse, cursed items) on
+    // the caster or a touched creature.
+    case 'remove-curse': {
+      const targetId = targetIds?.[0] ?? s.selectedTargetId ?? 'player';
+      const onSelf = targetId === 'player';
+      const conds = onSelf ? s.player.conditions : s.npcs.find((n) => n.id === targetId)?.conditions;
+      if (!conds) { ctx.addLog({ left: `Remove Curse: no valid target.`, style: 'miss' }); break; }
+      const who = onSelf ? ctx.playerDef.name : combatantDisplayName(s.npcs.find((n) => n.id === targetId)!, s.npcs);
+      if (conds.includes('cursed')) {
+        if (onSelf) s.player.conditions = conds.filter((c) => c !== 'cursed');
+        else s.npcs.find((n) => n.id === targetId)!.conditions = conds.filter((c) => c !== 'cursed');
+        ctx.addLog({ left: `${ctx.playerDef.name} casts Remove Curse — the curse on ${who} lifts.`, style: 'status' });
+      } else {
+        ctx.addLog({ left: `Remove Curse finds no curse on ${who} to lift.`, style: 'miss' });
+      }
+      break;
+    }
+    // Blink: self-buff flag. At the end of each of the caster's turns
+    // (`endPlayerTurn`) a 1d6 roll of 4-6 phases them to the Ethereal Plane
+    // (`ethereal` condition → untargetable) until the start of their next turn.
+    case 'blink':
+      applySelfBuff(ctx, { spellId: 'blink', modifiers: [{ type: 'flag', name: 'blink' }] });
+      ctx.addLog({ left: `${ctx.playerDef.name} casts Blink — flickering half-here, half-away.`, style: 'status' });
+      break;
     case 'feather-fall':
       ctx.addLog({ left: `${ctx.playerDef.name} casts Feather Fall`, style: 'status' });
       break;
@@ -1818,6 +1955,71 @@ function maybeAggroOnCast(
  * self / utility spells need none. (AOE-tile scrolls that need a chosen tile
  * are not yet supported by this no-prompt path.)
  */
+/**
+ * SRD Enlarge/Reduce — dual-mode. The target's disposition picks the mode:
+ *   • self or ally → ENLARGE: grow to Large, Advantage on STR checks (via
+ *     `enhanced-ability`) and STR saves, +1d4 weapon damage (`weapon-damage-dice`).
+ *     Applied as a self-buff for the caster; an ally target is marked `enlarged`
+ *     (the +1d4 only flows through the player's own attacks, so the ally case is
+ *     largely descriptive).
+ *   • enemy → REDUCE: unwilling, so a CON save negates; on a fail the creature
+ *     gains the `reduced` condition → its weapon hits deal 1d4 less
+ *     (`npcReducedPenalty`). STR-save Disadvantage is descriptive.
+ * Concentration is started only when the spell actually lands. The `reduced` /
+ * `enlarged` conditions are stripped on Concentration-end via the spell's
+ * `effect.onFail` cleanup list; the caster's self-buff is dropped by the
+ * generic buff cleanup.
+ */
+function castEnlargeReduce(ctx: GameContext, spell: SpellDef, targetIds: string[] | undefined): void {
+  const s = ctx.state;
+  const targetId = targetIds?.[0] ?? s.selectedTargetId ?? 'player';
+  const onSelf = targetId === 'player';
+  const npc = !onSelf ? s.npcs.find((n) => n.id === targetId && n.hp > 0) : undefined;
+  if (!onSelf && !npc) { ctx.addLog({ left: `Enlarge/Reduce: no valid target.`, style: 'miss' }); return; }
+
+  const tx = onSelf ? s.player.tileX : npc!.tileX;
+  const ty = onSelf ? s.player.tileY : npc!.tileY;
+  if (chebyshev(s.player.tileX, s.player.tileY, tx, ty) > Math.max(1, Math.ceil(spell.rangeFeet / 5))) {
+    ctx.addLog({ left: `Enlarge/Reduce: target out of range.`, style: 'miss' });
+    return;
+  }
+
+  const enlarge = onSelf || npc!.disposition === 'ally';
+  if (enlarge && onSelf) {
+    applySelfBuff(ctx, {
+      spellId: 'enlarge-reduce', concentration: true, modifiers: [
+        { type: 'size', size: 'large' },
+        { type: 'enhanced-ability', ability: 'str' },
+        { type: 'advantage', on: 'save', key: 'str' },
+        { type: 'weapon-damage-dice', count: 1, sides: 4 },
+      ],
+    });
+    ctx.addLog({ left: `${ctx.playerDef.name} casts Enlarge — grows to Large: Advantage on STR checks & saves, +1d4 weapon damage.`, style: 'status' });
+    startConcentration(ctx, 'enlarge-reduce');
+  } else if (enlarge) {
+    if (!npc!.conditions.includes('enlarged')) npc!.conditions.push('enlarged');
+    ctx.addLog({ left: `${ctx.playerDef.name} casts Enlarge on ${combatantDisplayName(npc!, s.npcs)} — it grows to Large.`, style: 'status' });
+    startConcentration(ctx, 'enlarge-reduce');
+  } else {
+    const def = ctx.resolveMonsterDef(npc!.defId);
+    if (!def) return;
+    const dc = spellSaveDC(ctx);
+    const saveMod = (def.savingThrows && def.savingThrows.con !== undefined) ? def.savingThrows.con : mod(def.con);
+    const roll = d20();
+    const total = roll + saveMod;
+    const success = total >= dc;
+    ctx.addLog({
+      left: `${combatantDisplayName(npc!, s.npcs)} ${success ? 'resists Reduce' : 'is reduced — weapons hit for 1d4 less'}`,
+      right: `CON d20(${roll})+${saveMod}=${total} vs DC ${dc}`,
+      style: success ? 'normal' : 'status',
+    });
+    if (!success) {
+      if (!npc!.conditions.includes('reduced')) npc!.conditions.push('reduced');
+      startConcentration(ctx, 'enlarge-reduce');
+    }
+  }
+}
+
 export function doUseScroll(ctx: GameContext, scrollItemId: string, events: GameEvent[]): void {
   if (!ctx.state.player.inventoryIds.includes(scrollItemId)) return;
   const scroll = ctx.defs.equipment.find((i) => i.id === scrollItemId);
@@ -1941,10 +2143,11 @@ export function doCastSpell(
     const target = tid ? ctx.state.npcs.find((n) => n.id === tid && n.hp > 0 && n.disposition !== 'ally') : null;
     if (!target) { ctx.addLog({ left: `${spell.name}: no target`, style: 'miss' }); return; }
     preResolvedTarget = target;
-  } else if (spell.save && !spell.area) {
+  } else if (spell.save && !spell.area && spell.id !== 'enlarge-reduce') {
     // Single-target save spell (Hideous Laughter, Charm Person, …).
     // Validate target + range up front so we don't consume a slot / action on
-    // a no-target cast or an out-of-range pick.
+    // a no-target cast or an out-of-range pick. Enlarge/Reduce is excluded: it
+    // can self-target (no NPC), so its own handler does the range/target check.
     const tid = targetIds?.[0] ?? ctx.state.selectedTargetId;
     const target = tid ? ctx.state.npcs.find((n) => n.id === tid && n.hp > 0 && n.disposition !== 'ally') : null;
     if (!target) { ctx.addLog({ left: `${spell.name}: no target`, style: 'miss' }); return; }
@@ -1976,6 +2179,13 @@ export function doCastSpell(
   // ATTACK button. Neutrals turn enemy before the spell resolves so attack
   // rolls and area effects see them as valid hostiles.
   maybeAggroOnCast(ctx, spell, targetIds, tile, events);
+
+  // SRD Sanctuary ends the moment the warded creature casts a spell at a foe.
+  // An aggressive cast strips the caster's own ward before the spell resolves.
+  if (isAggressiveSpell(spell) && ctx.state.player.conditions.includes('sanctuary')) {
+    ctx.state.player.conditions = ctx.state.player.conditions.filter((c) => c !== 'sanctuary');
+    ctx.addLog({ left: `${ctx.playerDef.name}'s Sanctuary fades — casting at a foe breaks the ward.`, style: 'status' });
+  }
 
   consumeCastingResources(ctx, spell, slotLevel, asRitual, scrollItemId !== undefined);
 
@@ -2013,10 +2223,35 @@ export function doCastSpell(
       return;
     }
     ctx.addLog({ left: `${ctx.playerDef.name} casts ${spell.name} — ${summoned.name} appears`, style: 'status' });
+    // SRD Spiritual Weapon: the spell carries its cast slot level so the
+    // recurring strike scales, and immediately makes one melee spell attack
+    // against a creature within 5 ft of where it appeared.
+    if (spell.id === 'spiritual-weapon') {
+      summoned.summonSlotLevel = slotLevel;
+      const adj = ctx.state.npcs.find((n) => n.hp > 0 && n.disposition === 'enemy'
+        && chebyshev(summoned.tileX, summoned.tileY, n.tileX, n.tileY) <= 1);
+      if (adj) resolveSpiritualWeaponAttack(ctx, summoned, adj, events);
+    }
     // Concentration-bound summons (Flaming Sphere) need to start
     // concentration here — the bottom-of-function check is skipped
     // because the summon branch returns early.
     if (spell.concentration) startConcentration(ctx, spell.id);
+    return;
+  }
+
+  // Spirit Guardians — a caster-anchored damaging aura, not a thrown AOE.
+  // Handled before the generic save/area branch so the persistent emanation
+  // (slow + recurring per-turn save) is raised instead of a one-shot blast.
+  if (spell.id === 'spirit-guardians') {
+    castSpiritGuardians(ctx, slotLevel);
+    return;
+  }
+
+  // Enlarge/Reduce — a dual-mode buff/debuff, not a plain condition-save.
+  // Mode is driven by the target: self / ally → Enlarge (buff); enemy →
+  // Reduce (unwilling, CON save). Handled before the generic save branch.
+  if (spell.id === 'enlarge-reduce') {
+    castEnlargeReduce(ctx, spell, targetIds);
     return;
   }
 

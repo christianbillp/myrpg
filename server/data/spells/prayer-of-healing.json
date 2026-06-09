@@ -11,6 +11,7 @@
   "duration": "Instantaneous",
   "concentration": false,
   "ritual": false,
-  "description": "Up to five creatures of your choice who remain within range for the entire casting gain the benefits of a Short Rest and regain 2d8 Hit Points. A creature can't be affected again until it finishes a Long Rest. Engine: the 10-minute multi-target heal is out-of-combat utility narrated by the AIGM (the single-target heal resolver doesn't cover the group rest benefit).",
+  "heal": { "dice": 2, "sides": 8, "perLevel": 1 },
+  "description": "Up to five creatures of your choice who remain within range for the entire casting gain the benefits of a Short Rest and regain 2d8 Hit Points. A creature can't be affected again until it finishes a Long Rest. Engine: each chosen target regains 2d8 (+1d8 per slot level above 2) via the heal resolver; the Short Rest benefit is narrated by the AIGM. Target selection is bounded by the cast UI.",
   "scaling": "The healing increases by 1d8 for each spell slot level above 2."
 }

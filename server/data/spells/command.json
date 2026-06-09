@@ -12,6 +12,8 @@
   "concentration": false,
   "ritual": false,
   "save": { "ability": "wis", "halfOnSuccess": false },
-  "description": "You speak a one-word command to a creature you can see within range. The target must succeed on a Wisdom saving throw or follow the command on its next turn. Choose the command from these options: Approach, Drop, Flee, Grovel (Prone), or Halt. Engine: the forced behaviour is descriptive only — the save is rolled, but the AI compulsion isn't modelled.",
+  "durationRounds": 1,
+  "effect": { "onFail": "incapacitated", "failNote": "is compelled to halt" },
+  "description": "You speak a one-word command to a creature you can see within range. The target must succeed on a Wisdom saving throw or follow the command on its next turn. Choose the command from these options: Approach, Drop, Flee, Grovel (Prone), or Halt. Engine: a failed WIS save applies the Incapacitated condition until the end of the target's next turn — a faithful model of Halt / Grovel (the target loses its turn). The AIGM may narrate the other one-word commands (Approach, Drop, Flee).",
   "scaling": "You can affect one additional creature for each spell slot level above 1."
 }

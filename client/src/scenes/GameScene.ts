@@ -850,7 +850,10 @@ export class GameScene extends Phaser.Scene {
         // while in spell-target mode so clicking yourself never silently
         // closes the panel.
         const isSelfClick = tileX === ps.tileX && tileY === ps.tileY;
-        const validTarget = isSelfClick ? 'player' : (nState && nState.hp > 0 ? nState.id : null);
+        // Spare the Dying targets a creature at 0 HP, so it accepts a downed
+        // (hp === 0) click; every other creature-target spell needs a living one.
+        const allowDowned = this.spellTargetMode.spellId === 'spare-the-dying';
+        const validTarget = isSelfClick ? 'player' : (nState && (nState.hp > 0 || allowDowned) ? nState.id : null);
         this.finishSpellTargetClick(validTarget, tileX, tileY);
       } else {
         this.finishSpellTargetClick(null, tileX, tileY);
@@ -1261,10 +1264,11 @@ export class GameScene extends Phaser.Scene {
           id: n.id,
           name: n.name,
           spellName: (allSpells.find((sp) => sp.id === n.summonSpellId)?.name) ?? n.name,
-          // SRD Flaming Sphere is moved as a Bonus Action (its summon
-          // command consumes `bonusActionUsed` server-side). Other
-          // shipped summons (Mage Hand, Unseen Servant) cost an Action.
-          costsBonusAction: n.summonSpellId === 'flaming-sphere',
+          // SRD Flaming Sphere and Spiritual Weapon are moved/directed as a
+          // Bonus Action (their summon command consumes `bonusActionUsed`
+          // server-side). Other shipped summons (Mage Hand, Unseen Servant)
+          // cost an Action.
+          costsBonusAction: n.summonSpellId === 'flaming-sphere' || n.summonSpellId === 'spiritual-weapon',
         })),
       deployableGear: state.availableActions.deployableGearIds
         .map((id) => allItems.find((i) => i.id === id))
@@ -1468,7 +1472,13 @@ export class GameScene extends Phaser.Scene {
     const needsCreatureTarget =
       spell.attack === 'ranged-spell' || spell.attack === 'melee-spell' || spell.attack === 'auto-hit'
       || !!spell.weaponAttack
-      || (!!spell.save && !spell.area);
+      || (!!spell.save && !spell.area)
+      // Targeted utility spells that act on a chosen creature (Bucket 4):
+      // Spare the Dying stabilises a downed creature; Dispel Magic strips a
+      // creature's spell effects; Sanctuary wards a chosen creature (self or
+      // ally). Lesser Restoration / Protection from Poison are touch buffs and
+      // route via `isTouchBuff` below.
+      || spell.id === 'spare-the-dying' || spell.id === 'dispel-magic' || spell.id === 'sanctuary';
     // Touch buffs with an actual reach (rangeFeet > 0 — e.g. Longstrider on
     // an ally) prompt for a target. Touch buffs whose reach is 0 are
     // self-only (Mage Armor's `rangeFeet: 0`) — those skip the picker and
@@ -1867,7 +1877,11 @@ export class GameScene extends Phaser.Scene {
       if (targetNpcId === 'player') {
         const isTouchBuff = spell.range === 'touch' &&
           !spell.attack && !spell.save && !spell.area && !spell.summon && !spell.darts;
-        if (!isTouchBuff) { this.exitSpellTargetMode(); return; }
+        // Ranged self-targetable utility (Sanctuary wards, Enlarge/Reduce in
+        // its Enlarge mode buffs the caster) also accepts a self-click; a
+        // Charm Person / Chill Touch self-click cancels.
+        const selfTargetable = isTouchBuff || stm.spellId === 'sanctuary' || stm.spellId === 'enlarge-reduce';
+        if (!selfTargetable) { this.exitSpellTargetMode(); return; }
         gameClient.sendAction({ type: "castSpell", spellId: stm.spellId, slotLevel, asRitual: stm.asRitual, damageTypeChoice: stm.damageTypeChoice, abilityChoice: stm.abilityChoice });
         this.exitSpellTargetMode();
         return;
