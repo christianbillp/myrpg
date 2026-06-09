@@ -3,7 +3,7 @@
 This file tells Claude Code how to work in this project.
 
 ## Project Summary
-Browser-based 2D single-player RPG. See `requirements.md` for the full feature list and tech stack.
+Browser-based 2D single-player D&D 5e SRD 5.2.1 RPG with an AI Game Master. **Full documentation is in [`docs/`](docs/README.md)** — start at the index; `docs/overview.md` for the goal, `docs/product/requirements.md` for the feature list, `docs/design/` for the spec.
 
 ## Architecture
 
@@ -47,7 +47,7 @@ npm run build
 
 ## UI Naming Conventions
 
-All UI regions and components have canonical names defined in `ui.md`. Read that file before implementing or discussing any UI feature. Use the names there consistently in code (variable names, class names) and in prompts — e.g. "Player Panel", "Combat Log", "Action Buttons", "Phase Text".
+All UI regions and components have canonical names defined in `docs/design/ui-reference.md` (and the [glossary](docs/glossary.md)). Read that file before implementing or discussing any UI feature. Use the names there consistently in code (variable names, class names) and in prompts — e.g. "Player Panel", "Combat Log", "Action Buttons", "Phase Text".
 
 ## Conventions
 
@@ -75,7 +75,7 @@ All gameplay mechanics must follow the **D&D 5e SRD 5.2.1** rules, available as 
 Refactoring should optimise for **scalability, agility, and maintainability** — the codebase must be easy to extend and easy to shrink. Specifically:
 
 - **Modularity** — encapsulate each concern in its own class or file so features can be added or removed without rippling changes across the codebase.
-- **Naming consistency** — variable names, class names, and method names must match the terminology in `ui.md`, `requirements.md`, and other reference documents. A reader should be able to find the code for a named concept by searching for its documented name.
+- **Naming consistency** — variable names, class names, and method names must match the terminology in `docs/glossary.md`, `docs/design/ui-reference.md`, `docs/product/requirements.md`, and other reference documents. A reader should be able to find the code for a named concept by searching for its documented name.
 - **Readability for humans and AI agents** — code should be self-explanatory from names and structure alone. Avoid clever abbreviations; prefer the full canonical term.
 - **Low coupling** — components communicate through clear interfaces. Avoid reaching into the internals of another class or scene.
 
@@ -90,7 +90,7 @@ Dev buttons are gated behind `DevMode.enabled` from `client/src/devMode.ts`. Whe
 
 ## Reviewing
 
-A review checks whether the codebase needs refactoring. It considers three things together: the code as written, the reference documentation (`ui.md`, `requirements.md`, and any other docs), and the outstanding requirements. Specifically look for:
+A review checks whether the codebase needs refactoring. It considers three things together: the code as written, the reference documentation (`docs/` — especially `design/ui-reference.md`, `product/requirements.md`, and the design spec), and the outstanding requirements. Specifically look for:
 
 - Naming inconsistencies between code and documentation.
 - Components or methods that have grown too large or taken on multiple responsibilities.
@@ -102,9 +102,9 @@ A review checks whether the codebase needs refactoring. It considers three thing
 ## Working with Claude
 
 - Keep changes focused — one feature or fix per session where possible.
-- "Update documentation" means updating `ui.md`, `requirements.md`, `data_structure.md`, and `AIGM.md`.
-- Before creating a commit, ensure `ui.md`, `requirements.md`, `data_structure.md`, and `AIGM.md` are up to date with any changes made.
-- Update `requirements.md` as features are completed.
+- "Update documentation" means keeping the docs in `docs/` in sync — the user-facing *what* in `docs/product/requirements.md`, the detailed *how* in `docs/design/systems/`, data shapes in `docs/design/data-model.md`, UI regions in `docs/design/ui-reference.md`, and AIGM behaviour/tools in `docs/design/aigm.md` / `aigm-tools.md`. See `docs/design/conventions.md`.
+- Before creating a commit, ensure the relevant `docs/` files are up to date with any changes made.
+- Update `docs/product/requirements.md` (status + the user-facing capability) as features are completed.
 - When adding a new system (combat, inventory, etc.), discuss the design in a few sentences before implementing.
 - Prefer editing existing files over creating new ones.
 - Do not add error handling for scenarios that cannot happen.

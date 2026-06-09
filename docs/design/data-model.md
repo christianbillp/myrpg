@@ -21,6 +21,34 @@ server/data/
 
 ---
 
+## settings/
+
+Game content is split into **setting-agnostic rules content** (shared across all
+settings, served from the top-level `server/data/` directories) and
+**per-setting world content** (under `server/data/settings/<setting>/`).
+
+```
+server/data/
+  monsters/ spells/ equipment/ feats/ backgrounds/ species/        # shared rules content
+  classes/ subclasses/ features/ tilesets/ tokens/ narration/      # (setting-agnostic)
+  settings/
+    default/              # the baseline demo setting
+    the_sundered_reach/   # the default campaign fiction
+    _template/            # scaffold for a new setting
+      characters/   # one file per playable character
+      npcs/         # named NPCs (identity + persona over a monster stat block)
+      factions/     # faction definitions + the relationship matrix
+      encounters/   # encounter definitions
+      adventures/   # multi-chapter adventures
+      maps/         # tilemap-based maps
+      saves/        # per-character save state
+```
+
+The dir-keyed sections below (`characters/`, `npcs/`, `factions/`, `encounters/`,
+`adventures/`, `maps/`, `saves/`) document those JSON shapes; under the current
+layout they are resolved **per active setting** from `settings/<setting>/`.
+`encounters/` and `maps/` also exist at the top level for shared/demo content.
+
 ## characters/
 
 One file per playable character. Defines identity, ability scores, class features, and default loadout. Several fields are **not stored in the JSON** — they are computed at runtime in this order:
@@ -1000,7 +1028,7 @@ The server loads every `*_legend.json` file at startup into two structures on `d
 
 **Using a new tileset in the AI map generator** *does* require code: add it to `AI_PALETTE_TILESETS` in `shared.ts` (name + firstgid). The generator then builds its prompt palette and validation sets from a *global-GID* legend ([`globalTileLegend`](../server/src/encounterGenerator.ts) — `firstgid + localId − 1` per tileset, so all tilesets coexist without the local-id collisions of `defs.tileLegend`), and `tilesetsForGids` computes the `tilesets[]` a generated map declares from the GIDs it actually used. `ownerTilesetName` routes a GID to its tileset using the same greatest-firstgid-≤-gid rule as `SessionBuilder.ownerTileset`, and gids a tileset does not own (e.g. scribble's high void sentinel) are excluded from the AI palette so they can never mis-route.
 
-The **Tile Creator** page (see `ui.md`) edits these entries through `PUT /tilesets/:tileset/tiles/:gid` (body = a `TileLegendEntry`). The handler validates the entry, writes it into `<tileset>_legend.json` (preserving the `notes` block and every other tile), and reloads defs. `GET /tilesets/legends` returns one block per tileset (`{ tileset, image, notes, tiles }`) for rendering, and `GET /tilesets` returns the image-slicing metadata (`tilewidth`, `tileheight`, `columns`, `margin`, `spacing`) the Creator uses to crop each frame.
+The **Tile Creator** page (see [ui-reference.md](./ui-reference.md)) edits these entries through `PUT /tilesets/:tileset/tiles/:gid` (body = a `TileLegendEntry`). The handler validates the entry, writes it into `<tileset>_legend.json` (preserving the `notes` block and every other tile), and reloads defs. `GET /tilesets/legends` returns one block per tileset (`{ tileset, image, notes, tiles }`) for rendering, and `GET /tilesets` returns the image-slicing metadata (`tilewidth`, `tileheight`, `columns`, `margin`, `spacing`) the Creator uses to crop each frame.
 
 The current scribble legend also reserves **GID 65534 (`void`)** as a sentinel: the renderer paints solid black instead of sampling a frame, and the cell is impassable. Used for chasms / abysses on tilesets that have no flat-black tile of their own (see `shared/tileGid.ts`).
 
@@ -1647,7 +1675,7 @@ Key runtime fields of note:
 | `npcs[].hideDC` | *(optional)* SRD Stealth roll total recorded when the creature took the Hide action — opposed by every subsequent Perception attempt (passive sweep or active SEARCH). Also set by `set_npc_hidden` for authored hidden NPCs (defaults to `10 + monsterDef.stealthBonus`). |
 | `npcs[].revealedByTrigger` | *(optional)* When true, the passive Perception movement-sweep skips this NPC — only an explicit `set_npc_hidden { hidden: false }` reveal surfaces them. Used for narrative reveals (the dead rising, a wall sliding open). Movement walks through their tile silently; on reveal the engine bumps the NPC to the nearest free tile if the player happens to share their cell. Set via `set_npc_hidden` with `revealedBy: 'trigger'`. |
 | `npcs[].corpseSearch` | *(optional)* `{ dc, successText, failureText }`. One-shot payload picked up by `ExplorationActions.doSearch` when the player presses SEARCH adjacent to the corpse; resolves against the same Perception roll as secrets and is cleared after first attempt. Attached at spawn time via the `set_npc_dead` trigger action. |
-| `npcs[].corpseSearched` | *(optional)* Set true once the deterministic SEARCH action has resolved this corpse. Read by the AIGM CURRENT STATE corpses section, which tags the body `[SEARCHED]` so the GM doesn't roll a second Perception check on the same body (see the [Searching corpses rule](../AIGM.md#searching-corpses-rule) in `AIGM.md`). |
+| `npcs[].corpseSearched` | *(optional)* Set true once the deterministic SEARCH action has resolved this corpse. Read by the AIGM CURRENT STATE corpses section, which tags the body `[SEARCHED]` so the GM doesn't roll a second Perception check on the same body (see the [Searching corpses rule](./aigm.md#searching-corpses-rule) in [aigm.md](./aigm.md)). |
 | `npcs[].initiativeRoll` | *(optional)* The combatant's d20 + initiativeBonus total for the current combat. Set at `doStartCombat` (with Disadvantage if Surprised, Advantage if Invisible). Cleared on `endCombat`. Used as the sort key for `turnOrderIds`. |
 | `npcs[].reactionUsed` | Per-creature Reaction tracker. Set `true` when the NPC spends its Reaction (e.g. an Opportunity Attack against the player or another NPC). Reset to `false` at the *start of that NPC's own turn* (in `runSingleEnemyTurn` / `runSingleAllyTurn`) — never on the player's turn. Mirrors `player.reactionUsed` for the player. Surfaced to the AIGM CURRENT STATE as `Reaction: AVAILABLE`/`USED` on each combatant line while combat is active. |
 | `player.initiativeRoll` | Same idea for the player: d20 + DEX mod, set at combat start, cleared at combat end. |
