@@ -99,54 +99,8 @@
     {
       "id": "contract_offered",
       "lines": [
-        "Vask sets the pen down. Pulls a slip off the contract pile, runs a thumb along the seal, and slides it across the desk."
-      ],
-      "choices": [
-        {
-          "label": "(Read the slip — bandits on the east road.)",
-          "visibleIf": [{ "type": "flag_equals", "name": "mission_offer_flavour", "value": "bandit" }],
-          "next": "offer_bandit"
-        },
-        {
-          "label": "(Read the slip — goblins in the wardstone wood.)",
-          "visibleIf": [{ "type": "flag_equals", "name": "mission_offer_flavour", "value": "goblin" }],
-          "next": "offer_goblin"
-        },
-        {
-          "label": "(Read the slip — risen at the broken ward.)",
-          "visibleIf": [{ "type": "flag_equals", "name": "mission_offer_flavour", "value": "skeleton" }],
-          "next": "offer_skeleton"
-        }
-      ]
-    },
-
-    {
-      "id": "offer_bandit",
-      "lines": [
-        "\"Bandit raid on the east road. Wagon-track ambush — we lost a courier last week. Drop them and bring me the proof.\"",
-        "She taps the bottom of the slip where the rate is inked. \"Hired-Blade rate. Per the contract terms.\""
-      ],
-      "choices": [
-        { "label": "Understood. I'll take it.", "next": "contract_taken" },
-        { "label": "(Hand the slip back.)", "next": "decline_contract" }
-      ]
-    },
-    {
-      "id": "offer_goblin",
-      "lines": [
-        "\"Goblin sighting in the wardstone wood. Came down hungry and they're not leaving on their own. Skirmishers — they'll harry, then run.\"",
-        "She taps the rate. \"Hired-Blade rate. Per the contract terms.\""
-      ],
-      "choices": [
-        { "label": "Understood. I'll take it.", "next": "contract_taken" },
-        { "label": "(Hand the slip back.)", "next": "decline_contract" }
-      ]
-    },
-    {
-      "id": "offer_skeleton",
-      "lines": [
-        "\"Risen at the broken ward. Two, maybe more — patrol couldn't get close enough to count. Bring bludgeon, they shrug off a blade.\"",
-        "She taps the rate. \"Hired-Blade rate plus a hazard line, since they don't tire and they don't talk.\""
+        "Vask sets the pen down. Pulls a slip off the contract pile, runs a thumb along the seal, and slides it across the desk.",
+        "\"Job's on the slip — bandits, beasts, a recovery, a body to find, whatever's come in. Details up top once you take it. Hired-Blade rate, per the contract terms.\""
       ],
       "choices": [
         { "label": "Understood. I'll take it.", "next": "contract_taken" },
@@ -172,8 +126,8 @@
       ],
       "onEnter": [
         { "type": "set_flag", "name": "mission_pending", "value": false },
-        { "type": "set_flag", "name": "mission_offer_flavour", "value": false },
-        { "type": "set_flag", "name": "mission_offer_count", "value": 0 },
+        { "type": "set_flag", "name": "mission_offer_type", "value": false },
+        { "type": "set_flag", "name": "mission_offer_objective", "value": false },
         { "type": "set_flag", "name": "mission_offer_reward_cp", "value": 0 },
         { "type": "set_flag", "name": "mission_offer_reward_xp", "value": 0 }
       ],

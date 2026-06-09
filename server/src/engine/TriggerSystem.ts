@@ -13,13 +13,16 @@ import { setIndividualRelation, adjustIndividualRelation, reprojectAllDispositio
 import { PLAYER_FACTION_ID, PLAYER_ID } from '../../../shared/types.js';
 import { formatCoins as formatCoinsTrigger } from '../../../shared/currency.js';
 import { Logger } from '../Logger.js';
-import { generateMission } from '../mission/missionGenerator.js';
+import { generateQuest } from '../quest/questGenerator.js';
+import type { QuestTypeId } from '../quest/questGenTypes.js';
 import {
-  recordMission,
-  dropMission,
-  isGeneratedMissionId,
+  recordQuest,
+  dropQuest,
+  getQuest,
+  isGeneratedEncounterId,
   getGeneratedMapTilesets,
-} from '../mission/missionRegistry.js';
+} from '../quest/questRegistry.js';
+import { parseStageEncounterId } from '../quest/questIds.js';
 import {
   startConversation, endConversation, setConversationNode,
   applyNpcRemember, applyNpcForget, applyNpcAdjustRelationship,
@@ -340,8 +343,10 @@ const TRIGGER_ACTIONS: TriggerRegistry = {
     ctx.publish({ type: 'flag_set', name: a.name, value: pick });
   },
   award_mission_reward: (ctx) => {
+    // Coin only. XP is granted by the generated quest's steps (the quest system
+    // owns XP), so paying it here too would double-count — the offer's XP line
+    // is the sum of those step rewards.
     const cp = ctx.state.worldFlags['mission_offer_reward_cp'];
-    const xp = ctx.state.worldFlags['mission_offer_reward_xp'];
     if (typeof cp === 'number' && cp > 0) {
       ctx.state.player.balanceCp += cp;
       ctx.addLog({
@@ -349,42 +354,47 @@ const TRIGGER_ACTIONS: TriggerRegistry = {
         style: 'heal',
       });
     }
-    if (typeof xp === 'number' && xp > 0) {
-      ctx.state.player.xp += xp;
-      ctx.addLog({ left: `+${xp} XP`, style: 'status' });
-    }
     // Reward paid — the procedurally-generated mission has done its
     // job. Drop it from the registry so a long Bureau-office session
     // doesn't accumulate stale entries. `pending` is the LAST one
     // that was rolled (still set until the conversation's "Got
     // another?" branch generates the next).
     const pending = ctx.state.worldFlags['mission_pending'];
-    if (typeof pending === 'string' && isGeneratedMissionId(pending)) {
-      dropMission(pending);
+    if (typeof pending === 'string' && isGeneratedEncounterId(pending)) {
+      dropQuest(pending);
     }
   },
   generate_mission_contract: (ctx) => {
-    // Lazy import to avoid pulling fs / map composer into every code
-    // path that imports TriggerSystem (especially the test harness).
-    const last = ctx.state.worldFlags['mission_last_flavour'];
-    const excludeFlavour = (last === 'bandit' || last === 'goblin' || last === 'skeleton') ? last : undefined;
-    const tilesets = getGeneratedMapTilesets();
-    const mission = generateMission({ tilesets, excludeFlavour });
-    recordMission(mission);
-    // Set every flag the conversation prose / TO MISSION button read.
+    const last = ctx.state.worldFlags['mission_last_type'];
+    const quest = generateQuest({
+      playerLevel: ctx.playerDef.level ?? 1,
+      monsters: ctx.defs.monsters,
+      tilesets: getGeneratedMapTilesets(),
+      rng: Math.random,
+      lastType: typeof last === 'string' ? (last as QuestTypeId) : undefined,
+    });
+    recordQuest(quest);
+    // Set the flags the conversation offer / TO MISSION button read.
     const setFlag = (name: string, value: number | string | boolean): void => {
       ctx.state.worldFlags[name] = value;
       ctx.publish({ type: 'flag_set', name, value });
     };
-    setFlag('mission_pending', mission.missionId);
-    // Remember which hub issued this contract so LEAVE MISSION returns the
-    // player there (the bureau cycle now has more than one hub encounter).
+    setFlag('mission_pending', quest.baseEncounterId);
     if (ctx.state.currentEncounterId) setFlag('mission_hub_id', ctx.state.currentEncounterId);
-    setFlag('mission_offer_flavour', mission.flavour);
-    setFlag('mission_offer_count', mission.enemyCount);
-    setFlag('mission_offer_reward_cp', mission.reward.cpDelta);
-    setFlag('mission_offer_reward_xp', mission.reward.xp);
-    setFlag('mission_last_flavour', mission.flavour);
+    setFlag('mission_offer_type', quest.type);
+    setFlag('mission_offer_objective', quest.offer.objective);
+    setFlag('mission_offer_reward_cp', quest.reward.cpDelta);
+    setFlag('mission_offer_reward_xp', quest.reward.xp);
+    setFlag('mission_last_type', quest.type);
+  },
+  begin_generated_quest: (ctx) => {
+    const here = ctx.state.currentEncounterId;
+    if (!here) return;
+    const quest = getQuest(parseStageEncounterId(here).baseId);
+    if (!quest) return;
+    // Already active (a later stage of a multi-encounter quest)? Don't restart.
+    if (ctx.state.quests.some((q) => q.questId === quest.questId && q.status === 'active')) return;
+    startQuest(ctx, quest.questDef);
   },
   apply_condition_to_player: (ctx, a) => {
     if (!ctx.state.player.conditions.includes(a.condition)) {

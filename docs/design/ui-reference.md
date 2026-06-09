@@ -472,11 +472,11 @@ Defined in `client/src/ui/MissionTopBar.ts`. Persistent floating button position
 
 | Mode | Visible when | Label | Click behaviour |
 | ---- | ------------ | ----- | --------------- |
-| `to-mission` | `state.currentEncounterId === 'bureau_office'` AND `state.worldFlags.mission_pending` is a non-empty string | **▶ TO MISSION** in cool blue (`#88aacc`) | POSTs `/game/session/:id/transition` with `{ encounterId: <pending mission id> }`, swaps the session via `gameClient.resumeSession`, restarts the scene against the new session. |
-| `leave-mission` | `state.currentEncounterId` starts with `mission_` | **◀ LEAVE MISSION** in warm amber (`#cc8866`) | Same transition flow targeting `bureau_office`. Visible regardless of whether the mission is complete — pressing it before defeating the enemies just walks the player away from an unfinished contract (the `mission_pending` flag stays set so they can come back to it). |
+| `to-mission` | At a hub encounter (`EncounterDef.missionHub` — `signing_on`) AND `state.worldFlags.mission_pending` is a non-empty string | **▶ TO MISSION** in cool blue (`#88aacc`) | POSTs `/game/session/:id/transition` with `{ encounterId: <pending stage id> }`, swaps the session via `gameClient.resumeSession`, restarts the scene against the new session. **Also shown inside a mission** when `mission_pending` points at a *different* stage id than the current one — the "next stage" affordance for a multi-encounter quest. |
+| `leave-mission` | `state.currentEncounterId` starts with `mission_` | **◀ LEAVE MISSION** in warm amber (`#cc8866`) | Same transition flow targeting the issuing hub (`worldFlags.mission_hub_id`, falling back to `signing_on`). Visible regardless of completion — pressing it before finishing just walks the player away from an unfinished contract (`mission_pending` stays set so they can return). |
 | `hidden` | Anywhere else | — | — |
 
-Drives the Bureau-office mission cycle authored in `the_sundered_reach`: take a contract from Vask → press TO MISSION → defeat the enemies → press LEAVE MISSION → return to Vask for the payout.
+Drives the Bureau mission cycle: take a contract from Vask at the `signing_on` hub → the quest generator (`server/src/quest/`) rolls a typed quest (bounty / hunt / rescue / retrieve / investigate / two-stage strike) + its generated encounter(s) → press TO MISSION → play (a multi-stage quest surfaces a TO MISSION "next stage" button between encounters) → the quest's steps drive the objective + grant XP → press LEAVE MISSION → return to Vask for the coin payout.
 
 ---
 

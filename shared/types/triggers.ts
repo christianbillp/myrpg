@@ -109,24 +109,31 @@ export type TriggerAction =
    */
   | { type: 'pick_random_value'; name: string; values: WorldFlagValue[] }
   /**
-   * Roll a fresh procedural mission, register it server-side, and set
-   * five world flags the Bureau-office conversation reads to quote
-   * the contract terms BEFORE the player accepts:
+   * Roll a fresh procedural **quest** (a typed quest + its generated
+   * encounter(s) — see `server/src/quest/`), register it server-side, and set
+   * the world flags the Bureau-office conversation reads to quote the contract
+   * BEFORE the player accepts:
    *
-   *   • `mission_pending`         — the mission id (`mission_gen_<uuid>`)
-   *   • `mission_offer_flavour`   — `"bandit" | "goblin" | "skeleton"`
-   *   • `mission_offer_count`     — 1 or 2
+   *   • `mission_pending`         — the stage-0 encounter id (`mission_gen_<uuid>`)
+   *   • `mission_offer_type`      — the quest type id (bounty / hunt / rescue / …)
+   *   • `mission_offer_objective` — the quest's opening objective line
    *   • `mission_offer_reward_cp` — total cp paid out on completion
    *   • `mission_offer_reward_xp` — total xp awarded on completion
    *
-   * The transition endpoint serves the generated encounter + map from
-   * the in-memory MissionRegistry when the id starts with `mission_gen_`.
-   * Reads `worldFlags.mission_last_flavour` automatically to avoid
-   * re-rolling the same flavour twice in a row.
-   *
-   * Authored in `bureau_office_chat.json`. Not surfaced in the editor.
+   * The transition endpoint serves the generated encounter + map from the
+   * in-memory quest registry when the id starts with `mission_gen_`. Reads
+   * `worldFlags.mission_last_type` to avoid re-rolling the same type twice in a
+   * row. Authored in `bureau_office_chat.json`; not surfaced in the editor.
    */
   | { type: 'generate_mission_contract' }
+  /**
+   * Start the generated quest attached to the current encounter — fired by the
+   * `encounter_started` trigger of every generated quest stage. Looks the quest
+   * up in the registry by the current encounter id, registers its `QuestDef` as
+   * a trusted runtime def, and starts it (no-op if already active, e.g. on a
+   * later stage of a multi-encounter quest). No payload.
+   */
+  | { type: 'begin_generated_quest' }
   /**
    * Pay out the procedurally-generated mission reward stored in
    * `worldFlags.mission_offer_reward_cp` and `mission_offer_reward_xp`.

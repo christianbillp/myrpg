@@ -22,15 +22,13 @@ import { randomUUID } from "crypto";
 import { buildEncounter } from "./encounterService.js";
 import { generateEncounter } from "./encounterGenerator.js";
 import { generateTile, GENERATED_TILE_SIZE, GENERATED_TILE_COLUMNS } from "./tileGenerator.js";
-import { generateMission } from "./mission/missionGenerator.js";
 import {
-  getMission, recordMission, isGeneratedMissionId,
+  getQuestEncounter, isGeneratedEncounterId,
   setGeneratedMapTilesets,
-  getGeneratedMapTilesets,
-  serialiseForSave as serialiseMissionsForSave,
-  restoreFromSave as restoreMissionsFromSave,
-  dropMission,
-} from "./mission/missionRegistry.js";
+  serialiseForSave as serialiseQuestsForSave,
+  restoreFromSave as restoreQuestsFromSave,
+} from "./quest/questRegistry.js";
+import type { GeneratedQuest } from "./quest/questGenTypes.js";
 import { registerGenerateRoutes } from "./routes/generate.js";
 import { safeId, asString, asArray, InvalidPathSegmentError } from "./util/requestValidation.js";
 import { processAIGMChat, AIGMChatRequest } from "./aigm.js";
@@ -1570,11 +1568,11 @@ type WorldSave = Omit<GameState, "player"> & {
    *  in `loadWorldSave` so saves written before the rename still resume. */
   chapterComplete?: boolean;
   aigmHistory?: AigmMessage[];
-  /** Procedurally-generated missions live for the duration of one Vask
+  /** Procedurally-generated quests live for the duration of one Vask
    *  contract cycle. Without this they'd evaporate on cold reload —
    *  the registry is in-memory only. Persisted as opaque blobs; the
-   *  loader hands them straight back to `restoreMissionsFromSave`. */
-  inFlightMissions?: import("./mission/missionGenerator.js").GeneratedMission[];
+   *  loader hands them straight back to `restoreQuestsFromSave`. */
+  inFlightMissions?: GeneratedQuest[];
 };
 
 interface CharSave {
@@ -1627,7 +1625,7 @@ async function saveWorldState(
     ...state,
     player: sessionPlayer,
     aigmHistory,
-    inFlightMissions: serialiseMissionsForSave(),
+    inFlightMissions: serialiseQuestsForSave(),
   };
   await mkdir(savesDir(), { recursive: true });
   const path = worldSavePath();
@@ -2308,8 +2306,8 @@ server.get("/world", async (_req, reply) => {
   // Restore the procedural-mission registry from the saved snapshot.
   // A player who quit mid-mission will find Vask's contract + the
   // generated map intact when they reload.
-  const savedMissions = (state as unknown as WorldSave).inFlightMissions;
-  restoreMissionsFromSave(savedMissions);
+  const savedQuests = (state as unknown as WorldSave).inFlightMissions;
+  restoreQuestsFromSave(savedQuests);
   // Re-derive per-NPC conversationId from the encounter def on load.
   // World saves written before `conversationOverrides` was wired (or
   // saved against an encounter whose overrides were later edited)
@@ -2503,11 +2501,11 @@ server.post<{
   // EncounterDef shape so downstream code is unchanged.
   let encDef: EncounterDefJson;
   let savedMap: GameDefs['maps'][number] | undefined;
-  if (isGeneratedMissionId(encounterId)) {
-    const m = getMission(encounterId);
-    if (!m) return reply.code(404).send({ error: `Generated mission "${encounterId}" not in registry (expired or never rolled)` });
-    encDef = m.encounterDef as unknown as EncounterDefJson;
-    savedMap = m.savedMap;
+  if (isGeneratedEncounterId(encounterId)) {
+    const resolved = getQuestEncounter(encounterId);
+    if (!resolved) return reply.code(404).send({ error: `Generated quest encounter "${encounterId}" not in registry (expired or never rolled)` });
+    encDef = resolved.encounter.encounterDef as unknown as EncounterDefJson;
+    savedMap = resolved.encounter.savedMap;
   } else {
     const loaded = await loadEncounterDef(encounterId);
     if (!loaded) return reply.code(404).send({ error: `Unknown encounterId "${encounterId}"` });

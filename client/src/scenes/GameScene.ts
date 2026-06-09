@@ -1754,7 +1754,14 @@ export class GameScene extends Phaser.Scene {
       // whichever encounter issued the contract). `signing_on` is the sole
       // station hub, so it's the fallback when the flag is somehow unset.
       const hub = flags['mission_hub_id'];
-      this.missionTopBar.setButtons({ leaveMission: typeof hub === 'string' && hub.length > 0 ? hub : 'signing_on' });
+      // Multi-stage quest: a completed stage points `mission_pending` at the
+      // NEXT stage's encounter id (different from the one we're in). Surface it
+      // as TO MISSION so the player advances without returning to the hub.
+      const nextStage = typeof pending === 'string' && pending.length > 0 && pending !== here ? pending : undefined;
+      this.missionTopBar.setButtons({
+        toMission: nextStage,
+        leaveMission: typeof hub === 'string' && hub.length > 0 ? hub : 'signing_on',
+      });
     } else {
       this.missionTopBar.setButtons({});
     }
