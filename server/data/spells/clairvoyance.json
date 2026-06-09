@@ -3,6 +3,7 @@
   "name": "Clairvoyance",
   "level": 3,
   "school": "divination",
+  "vfx": { "style": "self-glow", "palette": "light" },
   "classes": ["bard", "cleric", "sorcerer", "wizard"],
   "castingTime": "10 minutes",
   "range": "1 mile",

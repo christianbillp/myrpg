@@ -3,6 +3,7 @@
   "name": "Ray of Enfeeblement",
   "level": 2,
   "school": "necromancy",
+  "vfx": { "style": "projectile", "palette": "necrotic" },
   "classes": ["warlock", "wizard"],
   "castingTime": "action",
   "range": "60 feet",

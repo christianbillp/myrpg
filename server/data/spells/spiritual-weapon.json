@@ -3,6 +3,7 @@
   "name": "Spiritual Weapon",
   "level": 2,
   "school": "evocation",
+  "vfx": { "style": "summon-appear", "palette": "force" },
   "classes": ["cleric"],
   "castingTime": "bonus-action",
   "range": "60 feet",

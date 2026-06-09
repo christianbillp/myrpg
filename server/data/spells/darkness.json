@@ -3,6 +3,7 @@
   "name": "Darkness",
   "level": 2,
   "school": "evocation",
+  "vfx": { "style": "zone-spawn", "palette": "arcane", "shape": "sphere", "radiusFeet": 15 },
   "classes": ["sorcerer", "warlock", "wizard"],
   "castingTime": "action",
   "range": "60 feet",

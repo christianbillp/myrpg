@@ -3,6 +3,7 @@
   "name": "Disguise Self",
   "level": 1,
   "school": "illusion",
+  "vfx": { "style": "self-glow", "palette": "illusion" },
   "classes": ["bard", "sorcerer", "wizard"],
   "castingTime": "action",
   "range": "self",

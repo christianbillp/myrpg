@@ -3,6 +3,7 @@
   "name": "Shatter",
   "level": 2,
   "school": "evocation",
+  "vfx": { "style": "area-burst", "palette": "thunder", "shape": "sphere", "radiusFeet": 10 },
   "classes": ["bard", "sorcerer", "wizard"],
   "castingTime": "action",
   "range": "60 feet",

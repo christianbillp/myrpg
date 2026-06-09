@@ -3,6 +3,7 @@
   "name": "Jump",
   "level": 1,
   "school": "transmutation",
+  "vfx": { "style": "self-glow", "palette": "nature" },
   "classes": ["druid", "ranger", "sorcerer", "wizard"],
   "castingTime": "bonus-action",
   "range": "touch",

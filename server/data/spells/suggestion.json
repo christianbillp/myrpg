@@ -3,6 +3,7 @@
   "name": "Suggestion",
   "level": 2,
   "school": "enchantment",
+  "vfx": { "style": "projectile", "palette": "psychic" },
   "classes": ["bard", "sorcerer", "warlock", "wizard"],
   "castingTime": "action",
   "range": "30 feet",

@@ -1425,6 +1425,7 @@ function resolveHealSpell(ctx: GameContext, spell: SpellDef, targetIds: string[]
       ally.conditions = ally.conditions.filter((c) => c !== 'unconscious' && c !== 'stable');
     }
     ctx.addLog({ left: `${ctx.playerDef.name} casts ${spell.name} — ${combatantDisplayName(ally, s.npcs)} regains ${ally.hp - before} HP`, style: 'heal' });
+    if (ally.hp > before) ctx.eventSink?.push({ type: 'heal', entityId: ally.id, amount: ally.hp - before, newHp: ally.hp });
     return ally.hp > before;
   }
 
@@ -1432,6 +1433,7 @@ function resolveHealSpell(ctx: GameContext, spell: SpellDef, targetIds: string[]
   const before = s.player.hp;
   s.player.hp = Math.min(ctx.playerDef.maxHp, s.player.hp + amount);
   ctx.addLog({ left: `${ctx.playerDef.name} casts ${spell.name} — regains ${s.player.hp - before} HP`, style: 'heal' });
+  if (s.player.hp > before) ctx.eventSink?.push({ type: 'heal', entityId: 'player', amount: s.player.hp - before, newHp: s.player.hp });
   return s.player.hp > before;
 }
 
@@ -2188,6 +2190,25 @@ export function doCastSpell(
   }
 
   consumeCastingResources(ctx, spell, slotLevel, asRitual, scrollItemId !== undefined);
+
+  // Cast VFX — the projectile / beam / burst / glow that plays BEFORE the
+  // damage / heal / condition beats (which the resolvers and the
+  // PresentationHooks bridge emit during resolution). Pushed here so the
+  // timeline order is cast → impact. Data-driven from `spell.vfx`.
+  if (spell.vfx) {
+    const targetNpc = preResolvedTarget
+      ?? (targetIds && targetIds[0] && targetIds[0] !== 'player'
+        ? ctx.state.npcs.find((n) => n.id === targetIds[0])
+        : undefined);
+    const toTile = tile ?? (targetNpc ? { x: targetNpc.tileX, y: targetNpc.tileY } : undefined);
+    events.push({
+      type: 'spell_vfx', style: spell.vfx.style, palette: spell.vfx.palette,
+      fromId: 'player',
+      toId: targetNpc?.id,
+      toX: toTile?.x, toY: toTile?.y,
+      shape: spell.vfx.shape, radiusFeet: spell.vfx.radiusFeet, count: spell.vfx.count,
+    });
+  }
 
   // US-124: the scroll is expended on casting (regardless of hit/miss).
   if (scrollItemId !== undefined) {

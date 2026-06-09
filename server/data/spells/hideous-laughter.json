@@ -3,6 +3,7 @@
   "name": "Hideous Laughter",
   "level": 1,
   "school": "enchantment",
+  "vfx": { "style": "projectile", "palette": "psychic" },
   "classes": ["bard", "warlock", "wizard"],
   "castingTime": "action",
   "range": "30 feet",

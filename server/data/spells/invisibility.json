@@ -3,6 +3,7 @@
   "name": "Invisibility",
   "level": 2,
   "school": "illusion",
+  "vfx": { "style": "vanish", "palette": "illusion" },
   "classes": ["bard", "sorcerer", "warlock", "wizard"],
   "castingTime": "action",
   "range": "touch",

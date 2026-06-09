@@ -3,6 +3,7 @@
   "name": "Water Walk",
   "level": 3,
   "school": "transmutation",
+  "vfx": { "style": "self-glow", "palette": "nature" },
   "classes": ["cleric", "druid", "ranger", "sorcerer"],
   "castingTime": "action",
   "range": "30 feet",

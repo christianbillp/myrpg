@@ -3,6 +3,7 @@
   "name": "Augury",
   "level": 2,
   "school": "divination",
+  "vfx": { "style": "self-glow", "palette": "light" },
   "classes": ["cleric", "druid", "wizard"],
   "castingTime": "1 minute",
   "range": "self",

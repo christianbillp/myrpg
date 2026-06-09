@@ -3,6 +3,7 @@
   "name": "Message",
   "level": 0,
   "school": "transmutation",
+  "vfx": { "style": "self-glow", "palette": "nature" },
   "classes": ["bard", "sorcerer", "wizard"],
   "castingTime": "action",
   "range": "120 feet",

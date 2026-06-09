@@ -11,6 +11,39 @@ import type { EngineEvent } from "./engineEvents.js";
 export type GameEvent =
   | { type: 'entity_move'; entityId: string; toX: number; toY: number }
   | { type: 'log'; lines: string[] }
+  // ── Combat beats (the ordered animation timeline) ────────────────────────
+  // These make the visible sequence of an action first-class and ordered, so
+  // the client renders move → swing → hit → damage → death in the exact order
+  // the engine resolved them, applying the matching state slice at each beat
+  // instead of snapping the final GameState at the end.
+  /** An attack swing/cast directed at a target. Drives a brief lunge of the
+   *  attacker toward the target; `outcome` lets the client pick the flavour
+   *  (whiff vs. impact). Emitted just before the damage beat (if any). */
+  | { type: 'attack'; attackerId: string; targetId: string; kind: 'melee' | 'ranged' | 'spell'; outcome: 'hit' | 'miss' | 'crit' }
+  /** A creature took `amount` damage, leaving it at `newHp`. The client
+   *  animates that token's HP bar down to `newHp`, flashes it, and floats a
+   *  damage number — at this beat, not at queue end. */
+  | { type: 'damage'; entityId: string; amount: number; newHp: number; damageType?: string }
+  /** A creature regained HP, leaving it at `newHp`. Mirror of `damage`. */
+  | { type: 'heal'; entityId: string; amount: number; newHp: number }
+  /** A creature dropped to 0 HP. The client runs its death fade at this beat
+   *  and frees the tile, rather than the token snapping to 40% alpha at end. */
+  | { type: 'death'; entityId: string }
+  /** A condition was applied to / removed from a creature — drives a condition
+   *  pip toggle at this beat. */
+  | { type: 'condition_changed'; entityId: string; condition: string; change: 'applied' | 'removed' }
+  /** Turn-order boundaries surfaced to the client so the Turn Order Bar
+   *  highlight tracks the animation timeline rather than the final state. */
+  | { type: 'turn_started'; combatantId: string }
+  | { type: 'turn_ended'; combatantId: string }
+  /** A spell cast visual — the projectile / beam / burst / glow that plays
+   *  *before* the damage / heal / condition beats it precedes. Data-driven
+   *  from `SpellDef.vfx`; the client dispatches on `style` and tints by
+   *  `palette`. `fromId` is the caster; the target is a creature (`toId`)
+   *  and/or a tile (`toX`,`toY`). See `client/src/ui/SpellVfx.ts`. */
+  | { type: 'spell_vfx'; style: VfxStyle; palette: string;
+      fromId: string; toId?: string; toX?: number; toY?: number;
+      shape?: 'sphere' | 'cone' | 'cube' | 'line'; radiusFeet?: number; count?: number }
   /** Show a speech-bubble above the named entity for a few seconds. Pushed by
    *  the AIGM `npc_speaks` tool (and future trigger actions); the client
    *  resolves the entity ref (`player` / `enemy_A` / `npc_<id>`) to a token
@@ -54,3 +87,17 @@ export type GameEvent =
    *    - `unfocused`: borderless card with a soft edge-fade gradient. The UI
    *      stays visible, the world keeps ticking, the player can keep playing. */
   | { type: 'announcement'; text: string; durationMs?: number; mode?: 'focused' | 'unfocused' };
+
+/** The reusable visual primitives every spell maps onto. */
+export type VfxStyle =
+  | 'projectile'    // a travelling mote (Fire Bolt, Magic Missile×N, hex bolts)
+  | 'beam'          // an instant line (Ray of Frost, Lightning Bolt)
+  | 'touch-burst'   // a melee-spell crackle/grasp at an adjacent target
+  | 'target-burst'  // a burst that appears on the target with no travel
+  | 'area-burst'    // an AoE flash at a centre tile (Fireball, Thunderwave)
+  | 'zone-spawn'    // a one-shot settle over a persistent zone's tiles
+  | 'self-glow'     // a buff aura on the caster
+  | 'target-glow'   // a buff/utility glow on a chosen creature
+  | 'summon-appear' // a spawn shimmer on a new summon token
+  | 'vanish'        // a teleport/phase fade (Misty Step, Blink, Invisibility)
+  | 'ambient';      // a faint cast acknowledgement for pure-utility spells

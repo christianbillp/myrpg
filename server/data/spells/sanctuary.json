@@ -3,6 +3,7 @@
   "name": "Sanctuary",
   "level": 1,
   "school": "abjuration",
+  "vfx": { "style": "self-glow", "palette": "light" },
   "classes": ["cleric"],
   "castingTime": "bonus-action",
   "range": "30 feet",

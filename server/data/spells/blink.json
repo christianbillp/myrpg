@@ -3,6 +3,7 @@
   "name": "Blink",
   "level": 3,
   "school": "transmutation",
+  "vfx": { "style": "vanish", "palette": "nature" },
   "classes": ["sorcerer", "wizard"],
   "castingTime": "action",
   "range": "Self",

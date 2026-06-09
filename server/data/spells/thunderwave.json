@@ -3,6 +3,7 @@
   "name": "Thunderwave",
   "level": 1,
   "school": "evocation",
+  "vfx": { "style": "area-burst", "palette": "thunder", "shape": "cube", "radiusFeet": 15 },
   "classes": ["bard", "druid", "sorcerer", "wizard"],
   "castingTime": "action",
   "range": "self",

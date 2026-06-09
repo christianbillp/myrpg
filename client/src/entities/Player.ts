@@ -69,4 +69,29 @@ export class Player {
     this.tileY = ty;
     this.container.setPosition(tx * TILE_SIZE + TILE_SIZE / 2, ty * TILE_SIZE + TILE_SIZE / 2);
   }
+
+  /** Brief lunge toward (tx,ty) and back — the attack "swing" beat. */
+  lungeToward(tx: number, ty: number, onComplete: () => void): void {
+    const cx = this.tileX * TILE_SIZE + TILE_SIZE / 2;
+    const cy = this.tileY * TILE_SIZE + TILE_SIZE / 2;
+    const dx = tx - this.tileX;
+    const dy = ty - this.tileY;
+    const len = Math.hypot(dx, dy) || 1;
+    this.scene.tweens.add({
+      targets: this.container,
+      x: cx + (dx / len) * TILE_SIZE * 0.35,
+      y: cy + (dy / len) * TILE_SIZE * 0.35,
+      duration: 90, yoyo: true, ease: 'Quad.easeOut',
+      onComplete: () => { this.container.setPosition(cx, cy); onComplete(); },
+    });
+  }
+
+  /** Drop the HP bar to `newHp` and pop the token — the damage-impact beat. */
+  flashHit(newHp: number, maxHp: number, onComplete: () => void): void {
+    this.setHp(newHp, maxHp);
+    this.scene.tweens.add({
+      targets: this.container, scaleX: 1.18, scaleY: 1.18,
+      duration: 90, yoyo: true, ease: 'Quad.easeOut', onComplete,
+    });
+  }
 }

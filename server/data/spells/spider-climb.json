@@ -3,6 +3,7 @@
   "name": "Spider Climb",
   "level": 2,
   "school": "transmutation",
+  "vfx": { "style": "self-glow", "palette": "nature" },
   "classes": ["sorcerer", "warlock", "wizard"],
   "castingTime": "action",
   "range": "touch",

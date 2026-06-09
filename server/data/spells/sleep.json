@@ -3,6 +3,7 @@
   "name": "Sleep",
   "level": 1,
   "school": "enchantment",
+  "vfx": { "style": "area-burst", "palette": "psychic", "shape": "sphere", "radiusFeet": 5 },
   "classes": ["bard", "sorcerer", "wizard"],
   "castingTime": "action",
   "range": "60 feet",

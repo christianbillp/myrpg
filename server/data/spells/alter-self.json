@@ -3,6 +3,7 @@
   "name": "Alter Self",
   "level": 2,
   "school": "transmutation",
+  "vfx": { "style": "self-glow", "palette": "nature" },
   "classes": ["sorcerer", "wizard"],
   "castingTime": "action",
   "range": "self",

@@ -3,6 +3,7 @@
   "name": "Fly",
   "level": 3,
   "school": "transmutation",
+  "vfx": { "style": "self-glow", "palette": "nature" },
   "classes": ["sorcerer", "warlock", "wizard"],
   "castingTime": "action",
   "range": "Touch",

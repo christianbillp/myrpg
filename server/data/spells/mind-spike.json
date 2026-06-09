@@ -3,6 +3,7 @@
   "name": "Mind Spike",
   "level": 2,
   "school": "divination",
+  "vfx": { "style": "target-burst", "palette": "psychic" },
   "classes": ["sorcerer", "warlock", "wizard"],
   "castingTime": "action",
   "range": "120 feet",

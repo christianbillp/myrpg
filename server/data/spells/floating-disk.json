@@ -3,6 +3,7 @@
   "name": "Floating Disk",
   "level": 1,
   "school": "conjuration",
+  "vfx": { "style": "self-glow", "palette": "arcane" },
   "classes": ["wizard"],
   "castingTime": "action",
   "range": "30 feet",

@@ -3,6 +3,7 @@
   "name": "Daylight",
   "level": 3,
   "school": "evocation",
+  "vfx": { "style": "self-glow", "palette": "arcane" },
   "classes": ["cleric", "druid", "paladin", "ranger", "sorcerer"],
   "castingTime": "action",
   "range": "60 feet",

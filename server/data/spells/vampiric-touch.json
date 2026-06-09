@@ -3,6 +3,7 @@
   "name": "Vampiric Touch",
   "level": 3,
   "school": "necromancy",
+  "vfx": { "style": "touch-burst", "palette": "necrotic" },
   "classes": ["sorcerer", "warlock", "wizard"],
   "castingTime": "action",
   "range": "Self",

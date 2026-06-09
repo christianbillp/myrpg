@@ -3,6 +3,7 @@
   "name": "Revivify",
   "level": 3,
   "school": "necromancy",
+  "vfx": { "style": "self-glow", "palette": "necrotic" },
   "classes": ["cleric", "druid", "paladin", "ranger"],
   "castingTime": "action",
   "range": "Touch",

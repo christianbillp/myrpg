@@ -3,6 +3,7 @@
   "name": "Zone of Truth",
   "level": 2,
   "school": "enchantment",
+  "vfx": { "style": "self-glow", "palette": "psychic" },
   "classes": ["bard", "cleric", "paladin"],
   "castingTime": "action",
   "range": "60 feet",

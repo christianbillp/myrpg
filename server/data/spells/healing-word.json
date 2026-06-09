@@ -3,6 +3,7 @@
   "name": "Healing Word",
   "level": 1,
   "school": "abjuration",
+  "vfx": { "style": "target-glow", "palette": "light" },
   "classes": ["cleric"],
   "castingTime": "bonus-action",
   "range": "60 feet",

@@ -8,6 +8,7 @@
 // Cross-domain imports — keep these explicit so the dependency graph is visible.
 import type { MonsterDef } from "./entities.js";
 import type { PlayerState } from "./gameState.js";
+import type { VfxStyle } from "./animation.js";
 
 export type SpellSchool = 'abjuration' | 'conjuration' | 'divination' | 'enchantment'
                         | 'evocation' | 'illusion' | 'necromancy' | 'transmutation';
@@ -111,6 +112,10 @@ export interface SpellDef {
   area?: SpellArea;
   zone?: SpellZone;                // persistent-zone descriptor (Fog Cloud, Web, Grease, …)
   darts?: number;                  // Magic Missile: guaranteed-hit projectile count
+  /** Cast-animation descriptor (presentation only — the client renders it).
+   *  `style` picks the visual primitive; `palette` tints it. See
+   *  `plans/spell-animations-plan.md`. */
+  vfx?: { style: VfxStyle; palette: string; shape?: 'sphere' | 'cone' | 'cube' | 'line'; radiusFeet?: number; count?: number };
   rider?: string;                  // narrative one-line secondary effect on hit
   effect?: SpellEffect;            // condition outcomes (Sleep)
   /** SRD "your choice" between multiple onFail conditions (Blindness/

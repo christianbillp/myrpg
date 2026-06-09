@@ -3,6 +3,7 @@
   "name": "Bane",
   "level": 1,
   "school": "enchantment",
+  "vfx": { "style": "projectile", "palette": "psychic" },
   "classes": ["bard", "cleric", "warlock"],
   "castingTime": "action",
   "range": "30 feet",

@@ -3,6 +3,7 @@
   "name": "Stinking Cloud",
   "level": 3,
   "school": "conjuration",
+  "vfx": { "style": "zone-spawn", "palette": "arcane", "shape": "sphere", "radiusFeet": 20 },
   "classes": ["bard", "sorcerer", "wizard"],
   "castingTime": "action",
   "range": "90 feet",

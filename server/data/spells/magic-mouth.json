@@ -3,6 +3,7 @@
   "name": "Magic Mouth",
   "level": 2,
   "school": "illusion",
+  "vfx": { "style": "self-glow", "palette": "illusion" },
   "classes": ["bard", "wizard"],
   "castingTime": "1 minute",
   "range": "30 feet",

@@ -3,6 +3,7 @@
   "name": "Speak with Dead",
   "level": 3,
   "school": "necromancy",
+  "vfx": { "style": "self-glow", "palette": "necrotic" },
   "classes": ["bard", "cleric", "wizard"],
   "castingTime": "action",
   "range": "10 feet",

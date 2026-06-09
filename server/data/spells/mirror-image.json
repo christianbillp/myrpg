@@ -3,6 +3,7 @@
   "name": "Mirror Image",
   "level": 2,
   "school": "illusion",
+  "vfx": { "style": "self-glow", "palette": "illusion" },
   "classes": ["bard", "sorcerer", "warlock", "wizard"],
   "castingTime": "action",
   "range": "self",

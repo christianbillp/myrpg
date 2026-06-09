@@ -3,6 +3,7 @@
   "name": "Levitate",
   "level": 2,
   "school": "transmutation",
+  "vfx": { "style": "projectile", "palette": "nature" },
   "classes": ["sorcerer", "wizard"],
   "castingTime": "action",
   "range": "60 feet",

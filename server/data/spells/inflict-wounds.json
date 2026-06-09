@@ -3,6 +3,7 @@
   "name": "Inflict Wounds",
   "level": 1,
   "school": "necromancy",
+  "vfx": { "style": "target-burst", "palette": "necrotic" },
   "classes": ["cleric"],
   "castingTime": "action",
   "range": "Touch",

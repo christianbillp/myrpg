@@ -3,6 +3,7 @@
   "name": "Purify Food and Drink",
   "level": 1,
   "school": "transmutation",
+  "vfx": { "style": "self-glow", "palette": "nature" },
   "classes": ["cleric", "druid", "paladin"],
   "castingTime": "action",
   "range": "10 feet",

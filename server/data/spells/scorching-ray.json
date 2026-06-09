@@ -3,6 +3,7 @@
   "name": "Scorching Ray",
   "level": 2,
   "school": "evocation",
+  "vfx": { "style": "projectile", "palette": "fire", "count": 3 },
   "classes": ["sorcerer", "wizard"],
   "castingTime": "action",
   "range": "120 feet",

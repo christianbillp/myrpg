@@ -3,6 +3,7 @@
   "name": "Light",
   "level": 0,
   "school": "evocation",
+  "vfx": { "style": "self-glow", "palette": "arcane" },
   "classes": ["bard", "cleric", "sorcerer", "wizard"],
   "castingTime": "action",
   "range": "touch",

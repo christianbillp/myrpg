@@ -3,6 +3,7 @@
   "name": "Minor Illusion",
   "level": 0,
   "school": "illusion",
+  "vfx": { "style": "zone-spawn", "palette": "illusion", "shape": "cube", "radiusFeet": 5 },
   "classes": ["bard", "sorcerer", "warlock", "wizard"],
   "castingTime": "action",
   "range": "30 feet",

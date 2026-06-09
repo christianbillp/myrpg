@@ -3,6 +3,7 @@
   "name": "Gentle Repose",
   "level": 2,
   "school": "necromancy",
+  "vfx": { "style": "self-glow", "palette": "necrotic" },
   "classes": ["cleric", "paladin", "wizard"],
   "castingTime": "action",
   "range": "touch",

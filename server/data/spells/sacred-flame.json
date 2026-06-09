@@ -3,6 +3,7 @@
   "name": "Sacred Flame",
   "level": 0,
   "school": "evocation",
+  "vfx": { "style": "target-burst", "palette": "radiant" },
   "classes": ["cleric"],
   "castingTime": "action",
   "range": "60 feet",

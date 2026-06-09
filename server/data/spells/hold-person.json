@@ -3,6 +3,7 @@
   "name": "Hold Person",
   "level": 2,
   "school": "enchantment",
+  "vfx": { "style": "projectile", "palette": "psychic" },
   "classes": ["bard", "cleric", "druid", "sorcerer", "warlock", "wizard"],
   "castingTime": "action",
   "range": "60 feet",

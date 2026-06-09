@@ -3,6 +3,7 @@
   "name": "Ray of Frost",
   "level": 0,
   "school": "evocation",
+  "vfx": { "style": "beam", "palette": "frost" },
   "classes": ["sorcerer", "wizard"],
   "castingTime": "action",
   "range": "60 feet",

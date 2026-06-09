@@ -3,6 +3,7 @@
   "name": "Water Breathing",
   "level": 3,
   "school": "transmutation",
+  "vfx": { "style": "self-glow", "palette": "nature" },
   "classes": ["druid", "ranger", "sorcerer", "wizard"],
   "castingTime": "action",
   "range": "30 feet",

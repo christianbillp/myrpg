@@ -17,6 +17,7 @@ import { RestPromptOverlay } from "../ui/RestPromptOverlay";
 import { SpellOptionPicker } from "../ui/SpellOptionPicker";
 import { SpellTargetSelector, type SpellTargetCandidate } from "../ui/SpellTargetSelector";
 import { SpeechBubbles } from "../ui/SpeechBubbles";
+import { SpellVfx } from "../ui/SpellVfx";
 import { SpeechInputBubble } from "../ui/SpeechInputBubble";
 import { ScreenEffects } from "../ui/ScreenEffects";
 import { Cinematic } from "../ui/Cinematic";
@@ -100,6 +101,7 @@ export class GameScene extends Phaser.Scene {
    *  payload (the reload button is disabled in that case). */
   private lastCreateRequest: import("../../../shared/types").CreateSessionRequest | null = null;
   private speechBubbles!: SpeechBubbles;
+  private spellVfx!: SpellVfx;
   private screenEffects!: ScreenEffects;
   private cinematic!: Cinematic;
   private uiDestroyed = false;
@@ -334,6 +336,7 @@ export class GameScene extends Phaser.Scene {
     if (this.pendingIsResume) this.overlays.markResumed();
 
     this.speechBubbles = new SpeechBubbles();
+    this.spellVfx = new SpellVfx(this, this.gridView.container);
     this.speechBubbles.setEntityResolver((entityId) => this.resolveEntityScreenPos(entityId));
     this.screenEffects = new ScreenEffects();
     this.cinematic = new Cinematic({
@@ -470,6 +473,14 @@ export class GameScene extends Phaser.Scene {
       else if (ev.type === "screen_fade" || ev.type === "supertitle" || ev.type === "announcement") {
         this.eventQueue.push(ev);
       }
+      // Combat beats — the ordered animation timeline (attack swing, damage
+      // impact, death fade, …). Queued so they play in resolution order
+      // interleaved with movement, each applying its state slice at its beat.
+      else if (ev.type === "spell_vfx" || ev.type === "attack" || ev.type === "damage" || ev.type === "heal"
+        || ev.type === "death" || ev.type === "condition_changed"
+        || ev.type === "turn_started" || ev.type === "turn_ended") {
+        this.eventQueue.push(ev);
+      }
     }
     // First state_update arrived. We parked at full black in `create()` so
     // panels wouldn't flash before any encounter-start cinematic runs. If the
@@ -592,9 +603,77 @@ export class GameScene extends Phaser.Scene {
       playSound(event.sound);
     } else if (event.type === "sound_ring") {
       this.visionMask?.pushSoundRing(event.x, event.y, event.intensity);
+    } else if (event.type === "spell_vfx") {
+      // Spell cast visual — projectile / beam / burst / glow, played before the
+      // damage/heal beat that follows it in the queue. Blocks until it lands.
+      const fromTile = this.tileOf(event.fromId);
+      const toTile = event.toId ? this.tileOf(event.toId)
+        : (event.toX !== undefined && event.toY !== undefined ? { x: event.toX, y: event.toY } : null);
+      this.spellVfx.play(event, fromTile, toTile, () => { this.animating = false; this.processNextEvent(); });
+      return;
+    } else if (event.type === "attack") {
+      // Attack swing — lunge the attacker toward the target, then continue.
+      const tgt = this.tileOf(event.targetId);
+      const atk = event.attackerId === 'player' ? this.player : this.npcTokens.get(event.attackerId);
+      if (atk && tgt) {
+        atk.lungeToward(tgt.x, tgt.y, () => { this.animating = false; this.processNextEvent(); });
+        return;
+      }
+    } else if (event.type === "damage") {
+      // Damage impact — float the number, drop the HP bar to `newHp`, pop.
+      const tile = this.tileOf(event.entityId);
+      if (tile) this.spawnFloatingNumber(tile.x, tile.y, `-${event.amount}`, '#ff5a5a');
+      if (event.entityId === 'player' && this.player) {
+        this.player.flashHit(event.newHp, this.playerDef.maxHp, () => { this.animating = false; this.processNextEvent(); });
+        return;
+      }
+      const dmgToken = this.npcTokens.get(event.entityId);
+      if (dmgToken) {
+        dmgToken.flashHit(event.newHp, () => { this.animating = false; this.processNextEvent(); });
+        return;
+      }
+    } else if (event.type === "heal") {
+      const tile = this.tileOf(event.entityId);
+      if (tile) this.spawnFloatingNumber(tile.x, tile.y, `+${event.amount}`, '#5aff8c');
+      if (event.entityId === 'player' && this.player) this.player.setHp(event.newHp, this.playerDef.maxHp);
+      else this.npcTokens.get(event.entityId)?.setHp(event.newHp);
+      this.time.delayedCall(180, () => { this.animating = false; this.processNextEvent(); });
+      return;
+    } else if (event.type === "death") {
+      const deadToken = this.npcTokens.get(event.entityId);
+      if (deadToken) {
+        deadToken.fadeToDead(() => { this.animating = false; this.processNextEvent(); });
+        return;
+      }
     }
+    // condition_changed / turn_started / turn_ended carry no blocking visual yet
+    // — they fall through here, advancing the timeline without a pause.
     this.animating = false;
     this.processNextEvent();
+  }
+
+  /** Current tile of an entity ('player' or an npc id), from its live token. */
+  private tileOf(entityId: string): { x: number; y: number } | null {
+    if (entityId === 'player') return this.player ? { x: this.player.tileX, y: this.player.tileY } : null;
+    const t = this.npcTokens.get(entityId);
+    return t ? { x: t.tileX, y: t.tileY } : null;
+  }
+
+  /** A short damage/heal number that floats up from a tile and fades. */
+  private spawnFloatingNumber(tileX: number, tileY: number, text: string, color: string): void {
+    const x = tileX * TILE_SIZE + TILE_SIZE / 2;
+    const y = tileY * TILE_SIZE + TILE_SIZE / 2 - TILE_SIZE / 2;
+    const label = this.add.text(x, y, text, {
+      fontSize: '14px', color, fontFamily: 'monospace', fontStyle: 'bold',
+      resolution: window.devicePixelRatio,
+    }).setOrigin(0.5).setDepth(50);
+    // Parent to the GridView container so the number sits over the tile under
+    // the same offset/zoom/scroll as the tokens (not the unscaled scene root).
+    this.gridView.container.add(label);
+    this.tweens.add({
+      targets: label, y: y - 22, alpha: 0, duration: 650, ease: 'Quad.easeOut',
+      onComplete: () => label.destroy(),
+    });
   }
 
   private applyState(state: GameState): void {
@@ -856,7 +935,16 @@ export class GameScene extends Phaser.Scene {
         const validTarget = isSelfClick ? 'player' : (nState && (nState.hp > 0 || allowDowned) ? nState.id : null);
         this.finishSpellTargetClick(validTarget, tileX, tileY);
       } else {
-        this.finishSpellTargetClick(null, tileX, tileY);
+        // Placed sphere: the AoE centres on a grid-line intersection — snap to
+        // the one nearest the cursor so the centre tracks the pointer (matches
+        // the preview + `placedSphereTiles`).
+        const stm = this.spellTargetMode;
+        if (stm.kind === "aoe" && stm.shape === "sphere" && !stm.selfAnchored && stm.sideTiles > 0) {
+          const c = this.gridView.toIntersectionTile(pointer);
+          this.finishSpellTargetClick(null, c.tileX, c.tileY);
+        } else {
+          this.finishSpellTargetClick(null, tileX, tileY);
+        }
       }
       return;
     }
@@ -2761,10 +2849,13 @@ export class GameScene extends Phaser.Scene {
           for (let dx = -r; dx <= r; dx++) paintTile(cx + dx, cy + dy);
         }
       } else {
+        // Placed sphere centres on the grid intersection NEAREST the cursor
+        // (round, not floor) so the highlight tracks the pointer.
+        const c = this.gridView.toIntersectionTile(pointer);
         const sideTiles = 2 * r;
         const halfLow = r;
         for (let dy = -halfLow; dy < sideTiles - halfLow; dy++) {
-          for (let dx = -halfLow; dx < sideTiles - halfLow; dx++) paintTile(tileX + dx, tileY + dy);
+          for (let dx = -halfLow; dx < sideTiles - halfLow; dx++) paintTile(c.tileX + dx, c.tileY + dy);
         }
       }
     } else {

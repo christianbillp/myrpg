@@ -3,6 +3,7 @@
   "name": "Web",
   "level": 2,
   "school": "conjuration",
+  "vfx": { "style": "zone-spawn", "palette": "arcane", "shape": "cube", "radiusFeet": 20 },
   "classes": ["sorcerer", "wizard"],
   "castingTime": "action",
   "range": "60 feet",

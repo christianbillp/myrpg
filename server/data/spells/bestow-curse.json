@@ -3,6 +3,7 @@
   "name": "Bestow Curse",
   "level": 3,
   "school": "necromancy",
+  "vfx": { "style": "projectile", "palette": "necrotic" },
   "classes": ["bard", "cleric", "wizard"],
   "castingTime": "action",
   "range": "Touch",

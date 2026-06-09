@@ -3,6 +3,7 @@
   "name": "Sending",
   "level": 3,
   "school": "divination",
+  "vfx": { "style": "self-glow", "palette": "light" },
   "classes": ["bard", "cleric", "wizard"],
   "castingTime": "action",
   "range": "Unlimited",

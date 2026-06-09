@@ -3,6 +3,7 @@
   "name": "Phantasmal Force",
   "level": 2,
   "school": "illusion",
+  "vfx": { "style": "projectile", "palette": "illusion" },
   "classes": ["bard", "sorcerer", "wizard"],
   "castingTime": "action",
   "range": "60 feet",

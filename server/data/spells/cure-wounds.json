@@ -3,6 +3,7 @@
   "name": "Cure Wounds",
   "level": 1,
   "school": "abjuration",
+  "vfx": { "style": "target-glow", "palette": "light" },
   "classes": ["cleric"],
   "castingTime": "action",
   "range": "Touch",

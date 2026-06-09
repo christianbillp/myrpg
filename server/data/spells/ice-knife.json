@@ -3,6 +3,7 @@
   "name": "Ice Knife",
   "level": 1,
   "school": "conjuration",
+  "vfx": { "style": "projectile", "palette": "arcane" },
   "classes": ["druid", "sorcerer", "wizard"],
   "castingTime": "action",
   "range": "60 feet",

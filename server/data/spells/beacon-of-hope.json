@@ -3,6 +3,7 @@
   "name": "Beacon of Hope",
   "level": 3,
   "school": "abjuration",
+  "vfx": { "style": "self-glow", "palette": "light" },
   "classes": ["cleric"],
   "castingTime": "action",
   "range": "30 feet",

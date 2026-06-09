@@ -3,6 +3,7 @@
   "name": "Comprehend Languages",
   "level": 1,
   "school": "divination",
+  "vfx": { "style": "self-glow", "palette": "light" },
   "classes": ["bard", "sorcerer", "warlock", "wizard"],
   "castingTime": "action",
   "range": "self",

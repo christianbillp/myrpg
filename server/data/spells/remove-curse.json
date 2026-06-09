@@ -3,6 +3,7 @@
   "name": "Remove Curse",
   "level": 3,
   "school": "abjuration",
+  "vfx": { "style": "self-glow", "palette": "light" },
   "classes": ["cleric", "paladin", "warlock", "wizard"],
   "castingTime": "action",
   "range": "touch",

@@ -3,6 +3,7 @@
   "name": "Flaming Sphere",
   "level": 2,
   "school": "conjuration",
+  "vfx": { "style": "summon-appear", "palette": "fire" },
   "classes": ["druid", "sorcerer", "wizard"],
   "castingTime": "action",
   "range": "60 feet",

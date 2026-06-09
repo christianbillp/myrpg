@@ -3,6 +3,7 @@
   "name": "Charm Person",
   "level": 1,
   "school": "enchantment",
+  "vfx": { "style": "projectile", "palette": "psychic" },
   "classes": ["bard", "druid", "sorcerer", "warlock", "wizard"],
   "castingTime": "action",
   "range": "30 feet",

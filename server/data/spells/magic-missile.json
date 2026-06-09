@@ -3,6 +3,7 @@
   "name": "Magic Missile",
   "level": 1,
   "school": "evocation",
+  "vfx": { "style": "projectile", "palette": "force", "count": 3 },
   "classes": ["sorcerer", "wizard"],
   "castingTime": "action",
   "range": "120 feet",

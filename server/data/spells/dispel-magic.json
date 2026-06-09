@@ -3,6 +3,7 @@
   "name": "Dispel Magic",
   "level": 3,
   "school": "abjuration",
+  "vfx": { "style": "self-glow", "palette": "light" },
   "classes": ["bard", "cleric", "druid", "paladin", "ranger", "sorcerer", "warlock", "wizard"],
   "castingTime": "action",
   "range": "120 feet",

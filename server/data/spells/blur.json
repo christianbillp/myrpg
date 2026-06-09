@@ -3,6 +3,7 @@
   "name": "Blur",
   "level": 2,
   "school": "illusion",
+  "vfx": { "style": "self-glow", "palette": "illusion" },
   "classes": ["sorcerer", "wizard"],
   "castingTime": "action",
   "range": "self",

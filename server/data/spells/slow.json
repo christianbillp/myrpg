@@ -3,6 +3,7 @@
   "name": "Slow",
   "level": 3,
   "school": "transmutation",
+  "vfx": { "style": "area-burst", "palette": "nature", "shape": "cube", "radiusFeet": 40 },
   "classes": ["bard", "sorcerer", "wizard"],
   "castingTime": "action",
   "range": "120 feet",

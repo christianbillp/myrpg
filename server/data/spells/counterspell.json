@@ -3,6 +3,7 @@
   "name": "Counterspell",
   "level": 3,
   "school": "abjuration",
+  "vfx": { "style": "projectile", "palette": "light" },
   "classes": ["sorcerer", "warlock", "wizard"],
   "castingTime": "reaction",
   "castingTimeTrigger": "when you see a creature within 60 feet casting a spell with Verbal, Somatic, or Material components",

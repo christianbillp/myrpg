@@ -3,6 +3,7 @@
   "name": "Darkvision",
   "level": 2,
   "school": "transmutation",
+  "vfx": { "style": "self-glow", "palette": "nature" },
   "classes": ["druid", "ranger", "sorcerer", "wizard"],
   "castingTime": "action",
   "range": "touch",

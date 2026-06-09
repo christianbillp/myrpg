@@ -3,6 +3,7 @@
   "name": "Aid",
   "level": 2,
   "school": "abjuration",
+  "vfx": { "style": "self-glow", "palette": "light" },
   "classes": ["bard", "cleric", "druid", "paladin", "ranger"],
   "castingTime": "action",
   "range": "30 feet",

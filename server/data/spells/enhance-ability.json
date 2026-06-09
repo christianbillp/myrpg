@@ -3,6 +3,7 @@
   "name": "Enhance Ability",
   "level": 2,
   "school": "transmutation",
+  "vfx": { "style": "self-glow", "palette": "nature" },
   "classes": ["bard", "cleric", "druid", "ranger", "sorcerer", "wizard"],
   "castingTime": "action",
   "range": "touch",

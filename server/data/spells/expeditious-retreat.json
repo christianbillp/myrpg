@@ -3,6 +3,7 @@
   "name": "Expeditious Retreat",
   "level": 1,
   "school": "transmutation",
+  "vfx": { "style": "self-glow", "palette": "nature" },
   "classes": ["sorcerer", "warlock", "wizard"],
   "castingTime": "bonus-action",
   "range": "self",

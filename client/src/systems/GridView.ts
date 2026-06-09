@@ -60,6 +60,19 @@ export class GridView {
     };
   }
 
+  /** The nearest grid-line INTERSECTION to the cursor, expressed as the tile
+   *  whose top-left corner is that intersection (i.e. the `placedSphereTiles`
+   *  cursor tile). Rounding — not flooring — keeps a placed-sphere centre glued
+   *  to the cursor as it crosses tile midpoints. */
+  toIntersectionTile(pointer: Phaser.Input.Pointer): { tileX: number; tileY: number } {
+    const localX = (pointer.x - this.container.x) / this.zoom;
+    const localY = (pointer.y - this.container.y) / this.zoom;
+    return {
+      tileX: Math.round(localX / TILE_SIZE),
+      tileY: Math.round(localY / TILE_SIZE),
+    };
+  }
+
   handleWheel(pointer: Phaser.Input.Pointer, dy: number): void {
     const newZoom = Phaser.Math.Clamp(this.zoom * (dy < 0 ? 1.15 : 1 / 1.15), 0.5, 3);
     const pivotX = pointer.x - this.container.x;

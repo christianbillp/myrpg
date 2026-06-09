@@ -3,6 +3,7 @@
   "name": "Elementalism",
   "level": 0,
   "school": "transmutation",
+  "vfx": { "style": "self-glow", "palette": "nature" },
   "classes": ["druid", "sorcerer", "wizard"],
   "castingTime": "action",
   "range": "30 feet",

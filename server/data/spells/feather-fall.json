@@ -3,6 +3,7 @@
   "name": "Feather Fall",
   "level": 1,
   "school": "transmutation",
+  "vfx": { "style": "self-glow", "palette": "nature" },
   "classes": ["bard", "sorcerer", "wizard"],
   "castingTime": "reaction",
   "castingTimeTrigger": "when you or a creature you can see within 60 feet of you falls",

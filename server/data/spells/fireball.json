@@ -3,6 +3,7 @@
   "name": "Fireball",
   "level": 3,
   "school": "evocation",
+  "vfx": { "style": "area-burst", "palette": "fire", "shape": "sphere", "radiusFeet": 20 },
   "classes": ["sorcerer", "wizard"],
   "castingTime": "action",
   "range": "150 feet",

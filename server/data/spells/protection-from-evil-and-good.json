@@ -3,6 +3,7 @@
   "name": "Protection from Evil and Good",
   "level": 1,
   "school": "abjuration",
+  "vfx": { "style": "self-glow", "palette": "light" },
   "classes": ["cleric", "druid", "paladin", "warlock", "wizard"],
   "castingTime": "action",
   "range": "touch",

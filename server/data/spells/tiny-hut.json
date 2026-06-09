@@ -3,6 +3,7 @@
   "name": "Tiny Hut",
   "level": 3,
   "school": "evocation",
+  "vfx": { "style": "self-glow", "palette": "arcane" },
   "classes": ["bard", "wizard"],
   "castingTime": "1 minute",
   "range": "Self",

@@ -3,6 +3,7 @@
   "name": "Hypnotic Pattern",
   "level": 3,
   "school": "illusion",
+  "vfx": { "style": "area-burst", "palette": "illusion", "shape": "cube", "radiusFeet": 30 },
   "classes": ["bard", "sorcerer", "warlock", "wizard"],
   "castingTime": "action",
   "range": "120 feet",

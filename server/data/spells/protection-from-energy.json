@@ -3,6 +3,7 @@
   "name": "Protection from Energy",
   "level": 3,
   "school": "abjuration",
+  "vfx": { "style": "self-glow", "palette": "light" },
   "classes": ["cleric", "druid", "ranger", "sorcerer", "wizard"],
   "castingTime": "action",
   "range": "Touch",

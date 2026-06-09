@@ -3,6 +3,7 @@
   "name": "Alarm",
   "level": 1,
   "school": "abjuration",
+  "vfx": { "style": "self-glow", "palette": "light" },
   "classes": ["ranger", "wizard"],
   "castingTime": "minute",
   "range": "30 feet",

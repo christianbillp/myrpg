@@ -3,6 +3,7 @@
   "name": "True Strike",
   "level": 0,
   "school": "divination",
+  "vfx": { "style": "self-glow", "palette": "light" },
   "classes": ["bard", "sorcerer", "warlock", "wizard"],
   "castingTime": "action",
   "range": "self",

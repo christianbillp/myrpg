@@ -3,6 +3,7 @@
   "name": "Color Spray",
   "level": 1,
   "school": "illusion",
+  "vfx": { "style": "area-burst", "palette": "illusion", "shape": "cone", "radiusFeet": 15 },
   "classes": ["bard", "sorcerer", "wizard"],
   "castingTime": "action",
   "range": "self",

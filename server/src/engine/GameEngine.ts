@@ -48,6 +48,7 @@ import { isDeployableGear } from './TrapSystem.js';
 import { doCommandSummon, checkSummonTether, registerSummonHooks } from './SummonSystem.js';
 import { registerSoundHooks } from './Sound.js';
 import { registerAwarenessHooks, registerCompanionFollowHooks } from './npcSim/index.js';
+import { registerPresentationHooks } from './PresentationHooks.js';
 import { maybeBreakConcentration, endConcentration } from './ConcentrationSystem.js';
 import { doUseFeature } from './FeatureRegistry.js';
 import { buildSessionState, SavedMapRecord } from './SessionBuilder.js';
@@ -94,6 +95,7 @@ const ENGINE_HOOKS: Array<(ctx: GameContext) => void> = [
   registerSoundHooks,
   registerAwarenessHooks,
   registerCompanionFollowHooks,
+  registerPresentationHooks,
 ];
 
 let uidCounter = 0;

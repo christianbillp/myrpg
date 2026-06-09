@@ -3,6 +3,7 @@
   "name": "Enlarge/Reduce",
   "level": 2,
   "school": "transmutation",
+  "vfx": { "style": "projectile", "palette": "nature" },
   "classes": ["bard", "druid", "sorcerer", "wizard"],
   "castingTime": "action",
   "range": "30 feet",

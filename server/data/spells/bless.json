@@ -3,6 +3,7 @@
   "name": "Bless",
   "level": 1,
   "school": "enchantment",
+  "vfx": { "style": "self-glow", "palette": "psychic" },
   "classes": ["cleric", "paladin"],
   "castingTime": "action",
   "range": "30 feet",

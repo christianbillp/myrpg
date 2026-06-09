@@ -3,6 +3,7 @@
   "name": "Nondetection",
   "level": 3,
   "school": "abjuration",
+  "vfx": { "style": "self-glow", "palette": "light" },
   "classes": ["bard", "ranger", "wizard"],
   "castingTime": "action",
   "range": "Touch",

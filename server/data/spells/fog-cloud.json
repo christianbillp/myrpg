@@ -3,6 +3,7 @@
   "name": "Fog Cloud",
   "level": 1,
   "school": "conjuration",
+  "vfx": { "style": "zone-spawn", "palette": "arcane", "shape": "sphere", "radiusFeet": 20 },
   "classes": ["druid", "ranger", "sorcerer", "wizard"],
   "castingTime": "action",
   "range": "120 feet",

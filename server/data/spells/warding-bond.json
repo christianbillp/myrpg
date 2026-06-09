@@ -3,6 +3,7 @@
   "name": "Warding Bond",
   "level": 2,
   "school": "abjuration",
+  "vfx": { "style": "self-glow", "palette": "light" },
   "classes": ["cleric", "paladin"],
   "castingTime": "action",
   "range": "Touch",

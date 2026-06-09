@@ -3,6 +3,7 @@
   "name": "Thaumaturgy",
   "level": 0,
   "school": "transmutation",
+  "vfx": { "style": "self-glow", "palette": "nature" },
   "classes": ["cleric"],
   "castingTime": "action",
   "range": "30 feet",

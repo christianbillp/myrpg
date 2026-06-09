@@ -3,6 +3,7 @@
   "name": "Prayer of Healing",
   "level": 2,
   "school": "abjuration",
+  "vfx": { "style": "target-glow", "palette": "light" },
   "classes": ["cleric", "paladin"],
   "castingTime": "10 minutes",
   "range": "30 feet",

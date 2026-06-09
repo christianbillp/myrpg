@@ -3,6 +3,7 @@
   "name": "Resistance",
   "level": 0,
   "school": "abjuration",
+  "vfx": { "style": "self-glow", "palette": "light" },
   "classes": ["cleric", "druid"],
   "castingTime": "action",
   "range": "Touch",

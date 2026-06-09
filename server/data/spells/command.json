@@ -3,6 +3,7 @@
   "name": "Command",
   "level": 1,
   "school": "enchantment",
+  "vfx": { "style": "projectile", "palette": "psychic" },
   "classes": ["bard", "cleric", "paladin"],
   "castingTime": "action",
   "range": "60 feet",

@@ -3,6 +3,7 @@
   "name": "Guidance",
   "level": 0,
   "school": "divination",
+  "vfx": { "style": "self-glow", "palette": "light" },
   "classes": ["cleric", "druid"],
   "castingTime": "action",
   "range": "Touch",

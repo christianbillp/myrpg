@@ -3,6 +3,7 @@
   "name": "Sleet Storm",
   "level": 3,
   "school": "conjuration",
+  "vfx": { "style": "zone-spawn", "palette": "arcane", "shape": "sphere", "radiusFeet": 20 },
   "classes": ["druid", "sorcerer", "wizard"],
   "castingTime": "action",
   "range": "150 feet",

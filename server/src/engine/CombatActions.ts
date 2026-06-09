@@ -349,6 +349,9 @@ function applyAttackOutcome(
   // means the rider didn't fire, so the rogue can still trigger it later.
   if (sneakAttackFired) s.player.sneakAttackUsedThisTurn = true;
   ctx.addLogs(logs);
+  // Ordered attack beat — drives the attacker's lunge before the damage beat
+  // the PresentationHooks bridge emits from `damage_dealt`.
+  ctx.eventSink?.push({ type: 'attack', attackerId: 'player', targetId: target.id, kind: isRangedWeapon ? 'ranged' : 'melee', outcome: resolved.isCrit ? 'crit' : isHit ? 'hit' : 'miss' });
   emitPhysicalAttackSound(ctx, isHit);
 
   if (!isHit) {

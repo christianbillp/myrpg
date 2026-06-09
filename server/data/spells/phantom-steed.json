@@ -3,6 +3,7 @@
   "name": "Phantom Steed",
   "level": 3,
   "school": "illusion",
+  "vfx": { "style": "self-glow", "palette": "illusion" },
   "classes": ["wizard"],
   "castingTime": "1 minute",
   "range": "30 feet",

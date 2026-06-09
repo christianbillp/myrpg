@@ -490,11 +490,17 @@ export function runSingleEnemyTurn(ctx: GameContext, npc: NpcState, events: Game
     return;
   }
 
-  if (result.attacked && targetedPlayer) {
-    // Player-facing physical-attack sound (hit thump or swing whoosh). NPC vs
-    // NPC attacks would also be physical but we leave them silent for now —
-    // the player's audio attention belongs on attacks involving them.
-    events.push({ type: 'play_sound', sound: result.isHit ? 'physical_hit' : 'physical_miss' });
+  if (result.attacked) {
+    // Ordered attack beat — drives the attacker's lunge before the damage beat
+    // (emitted by the PresentationHooks bridge). Allies/enemies attacking each
+    // other lunge too; the hit/whiff SOUND stays player-facing only.
+    const beatTargetId = targetedPlayer ? 'player' : result.attackedTargetId;
+    if (beatTargetId) {
+      events.push({ type: 'attack', attackerId: npc.id, targetId: beatTargetId, kind: 'melee', outcome: result.isCrit ? 'crit' : result.isHit ? 'hit' : 'miss' });
+    }
+    if (targetedPlayer) {
+      events.push({ type: 'play_sound', sound: result.isHit ? 'physical_hit' : 'physical_miss' });
+    }
   }
   if (result.attacked && result.isHit) {
     if (targetedPlayer) {

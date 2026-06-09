@@ -3,6 +3,7 @@
   "name": "Acid Splash",
   "level": 0,
   "school": "evocation",
+  "vfx": { "style": "area-burst", "palette": "acid", "shape": "sphere", "radiusFeet": 5 },
   "classes": ["sorcerer", "wizard"],
   "castingTime": "action",
   "range": "60 feet",

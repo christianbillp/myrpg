@@ -3,6 +3,7 @@
   "name": "Chill Touch",
   "level": 0,
   "school": "necromancy",
+  "vfx": { "style": "touch-burst", "palette": "necrotic" },
   "classes": ["sorcerer", "warlock", "wizard"],
   "castingTime": "action",
   "range": "touch",

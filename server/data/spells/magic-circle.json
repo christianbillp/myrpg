@@ -3,6 +3,7 @@
   "name": "Magic Circle",
   "level": 3,
   "school": "abjuration",
+  "vfx": { "style": "self-glow", "palette": "light" },
   "classes": ["cleric", "paladin", "warlock", "wizard"],
   "castingTime": "1 minute",
   "range": "10 feet",

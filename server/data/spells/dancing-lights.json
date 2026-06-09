@@ -3,6 +3,7 @@
   "name": "Dancing Lights",
   "level": 0,
   "school": "illusion",
+  "vfx": { "style": "self-glow", "palette": "illusion" },
   "classes": ["bard", "sorcerer", "wizard"],
   "castingTime": "action",
   "range": "120 feet",

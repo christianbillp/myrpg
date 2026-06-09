@@ -3,6 +3,7 @@
   "name": "Lightning Bolt",
   "level": 3,
   "school": "evocation",
+  "vfx": { "style": "beam", "palette": "lightning" },
   "classes": ["sorcerer", "wizard"],
   "castingTime": "action",
   "range": "Self (100-foot Line)",

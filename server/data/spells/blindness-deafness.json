@@ -3,6 +3,7 @@
   "name": "Blindness/Deafness",
   "level": 2,
   "school": "transmutation",
+  "vfx": { "style": "projectile", "palette": "nature" },
   "classes": ["bard", "cleric", "sorcerer", "wizard"],
   "castingTime": "action",
   "range": "120 feet",

@@ -3,6 +3,7 @@
   "name": "Gust of Wind",
   "level": 2,
   "school": "evocation",
+  "vfx": { "style": "zone-spawn", "palette": "arcane", "shape": "line", "radiusFeet": 60 },
   "classes": ["druid", "ranger", "sorcerer", "wizard"],
   "castingTime": "action",
   "range": "self",

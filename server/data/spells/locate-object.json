@@ -3,6 +3,7 @@
   "name": "Locate Object",
   "level": 2,
   "school": "divination",
+  "vfx": { "style": "self-glow", "palette": "light" },
   "classes": ["bard", "cleric", "druid", "paladin", "ranger", "wizard"],
   "castingTime": "action",
   "range": "self",

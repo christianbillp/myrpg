@@ -3,6 +3,7 @@
   "name": "Mending",
   "level": 0,
   "school": "transmutation",
+  "vfx": { "style": "self-glow", "palette": "nature" },
   "classes": ["bard", "cleric", "druid", "sorcerer", "wizard"],
   "castingTime": "minute",
   "range": "touch",

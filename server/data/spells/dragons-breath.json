@@ -3,6 +3,7 @@
   "name": "Dragon's Breath",
   "level": 2,
   "school": "transmutation",
+  "vfx": { "style": "self-glow", "palette": "nature" },
   "classes": ["sorcerer", "wizard"],
   "castingTime": "bonus-action",
   "range": "touch",

@@ -3,6 +3,7 @@
   "name": "Spirit Guardians",
   "level": 3,
   "school": "conjuration",
+  "vfx": { "style": "area-burst", "palette": "radiant", "shape": "sphere", "radiusFeet": 15 },
   "classes": ["cleric"],
   "castingTime": "action",
   "range": "Self (15-foot Emanation)",

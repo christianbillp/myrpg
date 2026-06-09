@@ -3,6 +3,7 @@
   "name": "Fire Bolt",
   "level": 0,
   "school": "evocation",
+  "vfx": { "style": "projectile", "palette": "fire" },
   "classes": ["sorcerer", "wizard"],
   "castingTime": "action",
   "range": "120 feet",

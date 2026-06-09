@@ -3,6 +3,7 @@
   "name": "Rope Trick",
   "level": 2,
   "school": "transmutation",
+  "vfx": { "style": "self-glow", "palette": "nature" },
   "classes": ["wizard"],
   "castingTime": "action",
   "range": "touch",

@@ -3,6 +3,7 @@
   "name": "Poison Spray",
   "level": 0,
   "school": "necromancy",
+  "vfx": { "style": "projectile", "palette": "poison" },
   "classes": ["druid", "sorcerer", "warlock", "wizard"],
   "castingTime": "action",
   "range": "30 feet",

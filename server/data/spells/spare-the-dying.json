@@ -3,6 +3,7 @@
   "name": "Spare the Dying",
   "level": 0,
   "school": "necromancy",
+  "vfx": { "style": "self-glow", "palette": "necrotic" },
   "classes": ["cleric", "druid"],
   "castingTime": "action",
   "range": "15 feet",

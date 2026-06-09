@@ -3,6 +3,7 @@
   "name": "Acid Arrow",
   "level": 2,
   "school": "evocation",
+  "vfx": { "style": "projectile", "palette": "acid" },
   "classes": ["wizard"],
   "castingTime": "action",
   "range": "90 feet",

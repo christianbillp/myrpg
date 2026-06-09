@@ -3,6 +3,7 @@
   "name": "Detect Magic",
   "level": 1,
   "school": "divination",
+  "vfx": { "style": "self-glow", "palette": "light" },
   "classes": ["bard", "cleric", "druid", "paladin", "ranger", "sorcerer", "warlock", "wizard"],
   "castingTime": "action",
   "range": "self",

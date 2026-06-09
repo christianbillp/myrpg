@@ -3,6 +3,7 @@
   "name": "See Invisibility",
   "level": 2,
   "school": "divination",
+  "vfx": { "style": "self-glow", "palette": "light" },
   "classes": ["bard", "sorcerer", "wizard"],
   "castingTime": "action",
   "range": "self",

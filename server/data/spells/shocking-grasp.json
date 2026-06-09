@@ -3,6 +3,7 @@
   "name": "Shocking Grasp",
   "level": 0,
   "school": "evocation",
+  "vfx": { "style": "touch-burst", "palette": "lightning" },
   "classes": ["sorcerer", "wizard"],
   "castingTime": "action",
   "range": "touch",

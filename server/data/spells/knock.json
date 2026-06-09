@@ -3,6 +3,7 @@
   "name": "Knock",
   "level": 2,
   "school": "transmutation",
+  "vfx": { "style": "self-glow", "palette": "nature" },
   "classes": ["bard", "sorcerer", "wizard"],
   "castingTime": "action",
   "range": "60 feet",

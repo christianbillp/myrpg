@@ -3,6 +3,7 @@
   "name": "Haste",
   "level": 3,
   "school": "transmutation",
+  "vfx": { "style": "self-glow", "palette": "nature" },
   "classes": ["sorcerer", "wizard"],
   "castingTime": "action",
   "range": "30 feet",

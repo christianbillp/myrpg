@@ -3,6 +3,7 @@
   "name": "Illusory Script",
   "level": 1,
   "school": "illusion",
+  "vfx": { "style": "self-glow", "palette": "illusion" },
   "classes": ["bard", "warlock", "wizard"],
   "castingTime": "minute",
   "range": "touch",

@@ -3,6 +3,7 @@
   "name": "Continual Flame",
   "level": 2,
   "school": "evocation",
+  "vfx": { "style": "self-glow", "palette": "arcane" },
   "classes": ["cleric", "druid", "wizard"],
   "castingTime": "action",
   "range": "touch",

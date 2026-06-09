@@ -3,6 +3,7 @@
   "name": "Magic Weapon",
   "level": 2,
   "school": "transmutation",
+  "vfx": { "style": "self-glow", "palette": "nature" },
   "classes": ["paladin", "ranger", "sorcerer", "wizard"],
   "castingTime": "bonus-action",
   "range": "touch",

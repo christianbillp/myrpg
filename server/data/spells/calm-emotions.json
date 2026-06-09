@@ -3,6 +3,7 @@
   "name": "Calm Emotions",
   "level": 2,
   "school": "enchantment",
+  "vfx": { "style": "area-burst", "palette": "psychic", "shape": "sphere", "radiusFeet": 20 },
   "classes": ["bard", "cleric"],
   "castingTime": "action",
   "range": "60 feet",

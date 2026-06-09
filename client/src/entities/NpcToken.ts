@@ -150,6 +150,40 @@ export class NpcToken {
     this.labelText.setText('');
   }
 
+  /** Brief lunge a fraction of a tile toward (tx,ty) and back — the attack
+   *  "swing" beat. Returns to the resting tile centre on completion. */
+  lungeToward(tx: number, ty: number, onComplete: () => void): void {
+    const cx = this.tileX * TILE_SIZE + TILE_SIZE / 2;
+    const cy = this.tileY * TILE_SIZE + TILE_SIZE / 2;
+    const dx = tx - this.tileX;
+    const dy = ty - this.tileY;
+    const len = Math.hypot(dx, dy) || 1;
+    this.scene.tweens.add({
+      targets: this.container,
+      x: cx + (dx / len) * TILE_SIZE * 0.35,
+      y: cy + (dy / len) * TILE_SIZE * 0.35,
+      duration: 90, yoyo: true, ease: 'Quad.easeOut',
+      onComplete: () => { this.container.setPosition(cx, cy); onComplete(); },
+    });
+  }
+
+  /** Drop the HP bar to `newHp` and pop the token — the damage-impact beat. */
+  flashHit(newHp: number, onComplete: () => void): void {
+    this.setHp(newHp);
+    this.scene.tweens.add({
+      targets: this.container, scaleX: 1.18, scaleY: 1.18,
+      duration: 90, yoyo: true, ease: 'Quad.easeOut', onComplete,
+    });
+  }
+
+  /** Fade to the dead/corpse state — the death beat. */
+  fadeToDead(onComplete: () => void): void {
+    this.scene.tweens.add({
+      targets: this.container, alpha: 0.4, duration: 280, ease: 'Quad.easeOut',
+      onComplete: () => { this.setDead(); onComplete(); },
+    });
+  }
+
   destroy(): void { this.container.destroy(); }
 
   private refreshHpBar(): void {

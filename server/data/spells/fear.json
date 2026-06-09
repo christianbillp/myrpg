@@ -3,6 +3,7 @@
   "name": "Fear",
   "level": 3,
   "school": "illusion",
+  "vfx": { "style": "area-burst", "palette": "illusion", "shape": "cone", "radiusFeet": 30 },
   "classes": ["bard", "sorcerer", "warlock", "wizard"],
   "castingTime": "action",
   "range": "Self (30-foot Cone)",

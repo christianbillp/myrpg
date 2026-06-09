@@ -3,6 +3,7 @@
   "name": "Meld into Stone",
   "level": 3,
   "school": "transmutation",
+  "vfx": { "style": "self-glow", "palette": "nature" },
   "classes": ["cleric", "druid", "ranger"],
   "castingTime": "action",
   "range": "Touch",

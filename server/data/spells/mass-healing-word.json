@@ -3,6 +3,7 @@
   "name": "Mass Healing Word",
   "level": 3,
   "school": "abjuration",
+  "vfx": { "style": "target-glow", "palette": "light" },
   "classes": ["bard", "cleric"],
   "castingTime": "bonus-action",
   "range": "60 feet",
