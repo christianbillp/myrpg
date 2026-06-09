@@ -1,6 +1,6 @@
 import type { GameContext } from './GameContext.js';
 import { isHostileTo } from './FactionRelations.js';
-import { PLAYER_FACTION_ID } from '../../../shared/types.js';
+import { PLAYER_FACTION_ID, PLAYER_ID } from '../../../shared/types.js';
 import { hasPendingRite } from './EncounterLifecycle.js';
 
 /**
@@ -47,9 +47,9 @@ export function registerEncounterProgress(ctx: GameContext): void {
 
   ctx.bus.subscribe('combat_ended', () => {
     const s = ctx.state;
-    const partyView = { factionId: PLAYER_FACTION_ID } as const;
+    const partyView = { id: PLAYER_ID, factionId: PLAYER_FACTION_ID } as const;
     const enemiesAlive = s.npcs.some((n) => n.hp > 0
-      && isHostileTo(s, partyView, { factionId: n.factionId, disposition: n.disposition }));
+      && isHostileTo(s, partyView, { id: n.id, factionId: n.factionId }));
     // Hold completion while a rite is still pending (see EncounterLifecycle).
     if (!enemiesAlive && !hasPendingRite(s)) s.encounterComplete = true;
   }, /*priority*/ 40);

@@ -202,6 +202,16 @@ function buildToolList() { return [
     input_schema: { type: 'object' as const, properties: { faction_a: { type: 'string' }, faction_b: { type: 'string' }, value: { type: 'integer' }, mirror: { type: 'boolean' }, reason: { type: 'string' } }, required: ['faction_a', 'faction_b', 'value', 'reason'] },
   },
   {
+    name: 'set_individual_relation',
+    description: 'Set how one individual regards another to an absolute value (clamped [-100, +100]). `a` and `b` are individual ids — an NPC id (e.g. "npc_42" → use the bare id you see in state), or "player" for the player character. This is the per-individual override layer that sits IN FRONT OF faction relations: use it when a specific creature feels differently from its faction — a bandit who is loyal to a particular guard (+80) despite the bandits/guards feud, or a soldier who betrays his own captain (-100). Mirrors to both directions by default; pass mirror=false for one-sided. Negative makes them fight; positive makes them allies. Reprojects combat disposition immediately.',
+    input_schema: { type: 'object' as const, properties: { a: { type: 'string' }, b: { type: 'string' }, value: { type: 'integer' }, mirror: { type: 'boolean' }, reason: { type: 'string' } }, required: ['a', 'b', 'value', 'reason'] },
+  },
+  {
+    name: 'adjust_individual_relation',
+    description: 'Shift how individual `a` regards individual `b` by `delta` (positive = friendlier, negative = more hostile), resolving the current effective value (individual override → faction baseline) first. `a` / `b` are individual ids (an NPC id or "player"). Use for incremental personal shifts; use set_individual_relation for hard resets. Mirrors by default.',
+    input_schema: { type: 'object' as const, properties: { a: { type: 'string' }, b: { type: 'string' }, delta: { type: 'integer' }, mirror: { type: 'boolean' }, reason: { type: 'string' } }, required: ['a', 'b', 'delta', 'reason'] },
+  },
+  {
     name: 'reveal_faction',
     description: 'Mark a faction as identified by the player — from now on the Target Panel will render its name instead of "???" for every member. Use when the player learns who a group really is through dialogue, finding a sigil, an obvious uniform, etc. Idempotent: a second call with the same factionId is a no-op.',
     input_schema: { type: 'object' as const, properties: { faction_id: { type: 'string' }, reason: { type: 'string' } }, required: ['faction_id', 'reason'] },
@@ -721,6 +731,29 @@ export function applyAIGMTool(
       engine.fireTriggerAction({ type: 'set_faction_relation', a, b, value, mirror });
       const after = engine.getFactionRelation(a, b);
       toolResultContent = `Faction relation "${a}" ↔ "${b}" set to ${after}${mirror ? '' : ' (one-sided)'}.`;
+      break;
+    }
+    case 'set_individual_relation': {
+      const a = String(input['a'] ?? '').trim();
+      const b = String(input['b'] ?? '').trim();
+      const value = Number(input['value']);
+      const mirror = input['mirror'] === undefined ? true : !!input['mirror'];
+      if (!a || !b) { toolResultContent = 'set_individual_relation requires both a and b.'; break; }
+      if (Number.isNaN(value)) { toolResultContent = 'set_individual_relation value must be a number.'; break; }
+      engine.fireTriggerAction({ type: 'set_individual_relation', a, b, value, mirror });
+      const after = engine.getIndividualRelation(a, b);
+      toolResultContent = `Individual relation "${a}" → "${b}" set to ${after}${mirror ? '' : ' (one-sided)'}.`;
+      break;
+    }
+    case 'adjust_individual_relation': {
+      const a = String(input['a'] ?? '').trim();
+      const b = String(input['b'] ?? '').trim();
+      const delta = Number(input['delta']) || 0;
+      const mirror = input['mirror'] === undefined ? true : !!input['mirror'];
+      if (!a || !b) { toolResultContent = 'adjust_individual_relation requires both a and b.'; break; }
+      engine.fireTriggerAction({ type: 'adjust_individual_relation', a, b, delta, mirror });
+      const after = engine.getIndividualRelation(a, b);
+      toolResultContent = `Individual relation "${a}" → "${b}" set to ${after} (Δ ${delta >= 0 ? '+' : ''}${delta}${mirror ? '' : ', one-sided'}).`;
       break;
     }
     case 'reveal_faction': {

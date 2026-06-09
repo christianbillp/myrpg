@@ -70,6 +70,10 @@ export type TriggerGuard =
   | { type: 'phase'; in: CombatMode[] }
   /** True when the player's standing with `factionId` satisfies the comparison. Unknown factions default to 0. */
   | { type: 'faction_standing'; factionId: string; op: ComparisonOp; value: number }
+  /** True when the *individual* relationship `a → b` satisfies the comparison.
+   *  `a` / `b` are individual ids — an NPC id or `'player'`. Resolves through
+   *  the relationship layer (individual override → faction baseline → 0). */
+  | { type: 'individual_relation'; a: string; b: string; op: ComparisonOp; value: number }
   /** True when the player's coin purse (in copper pieces — see
    *  `PlayerState.balanceCp`) satisfies the comparison. Use to gate
    *  conversation choices on whether the player can afford something. */
@@ -148,6 +152,16 @@ export type TriggerAction =
   | { type: 'adjust_faction_relation'; a: string; b: string; delta: number; mirror?: boolean }
   /** Set the standing between two factions to an absolute value (clamped to ±100). Mirroring behaves like `adjust_faction_relation`. */
   | { type: 'set_faction_relation'; a: string; b: string; value: number; mirror?: boolean }
+  /**
+   * Set the *individual* relationship `a → b` to an absolute value (±100). `a` /
+   * `b` are individual ids — an NPC id or `'player'`. This is the override layer
+   * in front of faction baselines: use it to make same-faction members enemies
+   * or opposing-faction members friends. Mirrors by default; `mirror: false`
+   * for a one-sided link. Reprojects affected NPCs' disposition.
+   */
+  | { type: 'set_individual_relation'; a: string; b: string; value: number; mirror?: boolean }
+  /** Shift the individual relationship `a → b` by `delta` (clamped ±100), resolving the current effective value first. Mirroring behaves like `set_individual_relation`. */
+  | { type: 'adjust_individual_relation'; a: string; b: string; delta: number; mirror?: boolean }
   /** Mark a faction as identified by the player — its name will render in the Target Panel of every member from now on (Pass 3 UI work). Idempotent. */
   | { type: 'reveal_faction'; factionId: string }
   | { type: 'record_rumor'; id: string; text: string; salience?: number }

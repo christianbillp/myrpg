@@ -9,7 +9,7 @@ import { armorSpeedPenaltyFt } from './EquipmentSystem.js';
 import { chebyshev } from './EnemyAI.js';
 import { isHostileTo } from './FactionRelations.js';
 import { isMagicInitiateSpell, magicInitiateResourceId } from './MagicInitiate.js';
-import { PLAYER_FACTION_ID } from '../../../shared/types.js';
+import { PLAYER_FACTION_ID, PLAYER_ID } from '../../../shared/types.js';
 import type { GameState, PlayerDef } from '../../../shared/types.js';
 
 /** A Magic Initiate spell has a free cast available when it's one of the
@@ -38,9 +38,9 @@ export function canSpendBonusAction(ctx: GameContext): boolean {
 /** Are there any living enemies the player can be targeted by / can target? */
 export function hasLivingEnemies(ctx: GameContext): boolean {
   const s = ctx.state;
-  const partyView = { factionId: PLAYER_FACTION_ID } as const;
+  const partyView = { id: PLAYER_ID, factionId: PLAYER_FACTION_ID } as const;
   return s.npcs.some((n) => n.hp > 0
-    && isHostileTo(s, partyView, { factionId: n.factionId, disposition: n.disposition }));
+    && isHostileTo(s, partyView, { id: n.id, factionId: n.factionId }));
 }
 
 /**

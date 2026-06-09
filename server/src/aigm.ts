@@ -4,7 +4,7 @@ import { GameEvent } from './engine/types.js';
 import { applyAIGMTool, resetTurnGuards, AIGMToolContext } from './engine/AIGMTools.js';
 import { isHostileTo, isFriendlyTo } from './engine/FactionRelations.js';
 import { isDead } from './engine/ConditionSystem.js';
-import { PLAYER_FACTION_ID, isBloodied } from '../../shared/types.js';
+import { PLAYER_FACTION_ID, PLAYER_ID, isBloodied } from '../../shared/types.js';
 import type { NpcState } from '../../shared/types.js';
 import type { AigmMessage } from './sessions.js';
 import { getActiveSetting, settingPromptBlock } from './settings.js';
@@ -220,11 +220,11 @@ function buildStateMessage(engine: GameEngine): string {
     ? `Mystic Arcanum: ${Object.entries(p.mysticArcanum).map(([lvl, slot]) => `L${lvl}=${slot.spellId}${slot.used ? ' [used]' : ''}`).join(', ')}`
     : '';
 
-  const partyView = { factionId: PLAYER_FACTION_ID } as const;
+  const partyView = { id: PLAYER_ID, factionId: PLAYER_FACTION_ID } as const;
   const isHostileNpc = (n: NpcState) =>
-    isHostileTo(s, partyView, { factionId: n.factionId, disposition: n.disposition });
+    isHostileTo(s, partyView, { id: n.id, factionId: n.factionId });
   const isFriendlyNpc = (n: NpcState) =>
-    isFriendlyTo(s, partyView, { factionId: n.factionId, disposition: n.disposition });
+    isFriendlyTo(s, partyView, { id: n.id, factionId: n.factionId });
   const entityRefFor = (n: NpcState): string => {
     if (isHostileNpc(n) && n.combatLabel) return `enemy_${n.combatLabel}`;
     if (isFriendlyNpc(n) && n.combatLabel) return `ally_${n.combatLabel}`;

@@ -26,6 +26,11 @@ export interface EnemyAttackTarget {
    *  attacker without each one needing its own discrete flag here. */
   conditions: string[];
   passivePerception: number;
+  /** Set on the synthesised "no reachable/locatable target" snapshot — the
+   *  attacker has no one it can attack (e.g. its only foe is an Invisible
+   *  creature it failed to find, or the Charmer it can't strike). `runEnemyTurn`
+   *  holds position and makes no attack roll. */
+  noAttack?: boolean;
 }
 
 export interface EnemyTurnConfig {
@@ -128,6 +133,14 @@ export function runEnemyTurn(
 
   if (isIncapacitated(enemy.conditions)) {
     logs.push({ left: `${config.displayName} is incapacitated`, style: 'status' });
+    return skip();
+  }
+
+  // No creature this enemy can attack — its only foe is unreachable, or an
+  // Invisible creature it failed to locate. It holds position and makes no
+  // attack roll (it can't see where to swing).
+  if (target.noAttack) {
+    logs.push({ left: `${config.displayName} can't find a target`, style: 'normal' });
     return skip();
   }
 

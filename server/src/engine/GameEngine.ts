@@ -17,8 +17,9 @@ import { applyStoneEndurance } from './GiantGifts.js';
 import { chebyshev } from './EnemyAI.js';
 import { buildAIGMTools } from './AIGMTools.js';
 import { setRelation, getRelation, isHostileTo } from './FactionRelations.js';
+import { setIndividualRelation, reprojectDisposition, relation, aggroOnAttack as aggroOnAttackImpl } from './Relationships.js';
 import { runOffCameraTick as runOffCameraTickImpl } from './WorldTick.js';
-import { PLAYER_FACTION_ID, INFLUENCE_SKILLS } from '../../../shared/types.js';
+import { PLAYER_FACTION_ID, PLAYER_ID, INFLUENCE_SKILLS } from '../../../shared/types.js';
 import { SKILL_ABILITY } from './Leveling.js';
 import { Logger } from '../Logger.js';
 import * as Guard from './ActionGuards.js';
@@ -216,9 +217,9 @@ export class GameEngine {
    *  here so `createSession` can decide to auto-start combat while still
    *  holding the `isConstructing` flag. */
   private anyHostileToParty(): boolean {
-    const partyView = { factionId: PLAYER_FACTION_ID } as const;
+    const partyView = { id: PLAYER_ID, factionId: PLAYER_FACTION_ID } as const;
     return this.state.npcs.some((n) => n.hp > 0
-      && isHostileTo(this.state, partyView, { factionId: n.factionId, disposition: n.disposition }));
+      && isHostileTo(this.state, partyView, { id: n.id, factionId: n.factionId }));
   }
 
   /** Run the first-turn `advanceTurn` that `doStartCombat` deferred during
@@ -260,7 +261,7 @@ export class GameEngine {
       resolveMonsterDef: (id) => this.resolveMonsterDef(id),
       resolveNpcByEntity: (e) => this.resolveNpcByEntity(e),
       assignCombatLabel: (npc) => this.assignCombatLabel(npc),
-      aggroFaction: (npc) => this.aggroFaction(npc),
+      aggroOnAttack: (npc) => this.aggroOnAttack(npc),
       autoEndCombatIfNoEnemies: () => this.autoEndCombatIfNoEnemies(),
       resistMod: (d, t, def, n) => this.resistMod(d, t, def, n),
       applyDamageToPlayer: (d, ev, dt) => this.applyDamageToPlayer(d, ev, dt),
@@ -725,6 +726,10 @@ export class GameEngine {
   getFactionRelation(a: string, b: string): number {
     return getRelation(this.state, a, b);
   }
+  /** Directed individual relation `a → b` (individual override → faction baseline → 0). Surfaced for AIGM tool result strings. */
+  getIndividualRelation(a: string, b: string): number {
+    return relation(this.state, a, b);
+  }
   /** Add `factionId` to `discoveredFactions` if not already present. Returns true on first reveal, false if a no-op. */
   revealFaction(factionId: string): boolean {
     if (this.state.discoveredFactions.includes(factionId)) return false;
@@ -772,19 +777,23 @@ export class GameEngine {
     }
     if (npc) {
       const before = npc.disposition;
-      npc.disposition = disposition as Disposition;
-      Logger.log('combat.disposition_changed', { npcId: npc.id, defId: npc.defId, before, after: disposition });
+      // Write the player↔NPC *individual* relationship; disposition is then a
+      // projection of it. 'enemy' rallies the NPC's friends (aggroOnAttack);
+      // 'ally' is an explicit friendly-combatant flag; 'neutral' pins the link
+      // to 0 in both directions so it overrides any hostile faction baseline.
       if ((disposition === 'ally' || disposition === 'enemy') && !npc.combatLabel) this.assignCombatLabel(npc);
-      if (disposition === 'enemy') this.aggroFaction(npc);
-      else this.autoEndCombatIfNoEnemies();
-      // Mirror the player-relative disposition into the matrix: every NPC
-      // sharing this faction inherits the same standing with party. (For an
-      // enemy flip this is redundant with aggroFaction's matrix write — it
-      // still serves as the only path for 'ally' / 'neutral' transitions.)
-      if (disposition !== 'enemy') {
-        const standing = disposition === 'ally' ? 100 : 0;
-        setRelation(this.state, npc.factionId ?? npc.defId, PLAYER_FACTION_ID, standing);
+      if (disposition === 'enemy') {
+        setIndividualRelation(this.state, npc.id, PLAYER_ID, -100);
+        this.aggroOnAttack(npc);
+      } else if (disposition === 'ally') {
+        setIndividualRelation(this.state, npc.id, PLAYER_ID, 100, { mirror: true });
+        npc.disposition = 'ally';
+      } else {
+        setIndividualRelation(this.state, npc.id, PLAYER_ID, 0, { mirror: true });
+        reprojectDisposition(this.state, npc);
+        this.autoEndCombatIfNoEnemies();
       }
+      Logger.log('combat.disposition_changed', { npcId: npc.id, defId: npc.defId, before, after: npc.disposition });
     }
     return [];
   }
@@ -970,18 +979,18 @@ export class GameEngine {
     }
   }
 
-  private aggroFaction(instigator: NpcState): void {
-    const factionId = instigator.factionId ?? instigator.defId;
+  /**
+   * Relationship-aware aggro: the attacked NPC turns hostile to the player and
+   * so does everyone who is *friendly to it* (friends defend), regardless of
+   * faction — while intra-faction enemies of the victim do NOT rally. Replaces
+   * the old same-faction cascade. Reprojects every NPC's disposition and assigns
+   * combat labels to the newly-hostile.
+   */
+  private aggroOnAttack(victim: NpcState): void {
+    aggroOnAttackImpl(this.state, victim);
     for (const npc of this.state.npcs) {
-      if (npc === instigator || npc.disposition !== 'neutral') continue;
-      if ((npc.factionId ?? npc.defId) !== factionId) continue;
-      npc.disposition = 'enemy';
-      if (!npc.combatLabel) this.assignCombatLabel(npc);
+      if (npc.disposition === 'enemy' && !npc.combatLabel) this.assignCombatLabel(npc);
     }
-    // Mirror the aggro into the matrix: the instigator's faction is now
-    // hostile to the party. Pass 3's matrix-driven readers will see this
-    // alongside the legacy disposition flip.
-    setRelation(this.state, factionId, PLAYER_FACTION_ID, -100);
   }
 
   private autoEndCombatIfNoEnemies(): void {

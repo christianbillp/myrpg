@@ -8,6 +8,7 @@ import type { GameContext } from './GameContext.js';
 import { d20, mod, applyHalflingLuck } from './Dice.js';
 import { Logger } from '../Logger.js';
 import { removeBuffsForSpell, removeSpellBuffsFrom } from './Buffs.js';
+import { clearInvisibilityConcealment } from './InvisibilitySystem.js';
 
 /** Begin concentrating on `spellId` — drops any previous concentration first. */
 export function startConcentration(ctx: GameContext, spellId: string): void {
@@ -76,7 +77,10 @@ export function endConcentration(ctx: GameContext, reason: string): void {
   // Invisibility's `invisible` condition is stripped by the creature-agnostic
   // buff cleanup above; clear the end-on-attack pointer so a future cast starts
   // clean.
-  if (spellId === 'invisibility') s.player.invisibilityTargetId = undefined;
+  if (spellId === 'invisibility') {
+    s.player.invisibilityTargetId = undefined;
+    clearInvisibilityConcealment(s);
+  }
   // Concentration-bound summons (Flaming Sphere, …) despawn when the spell
   // ends. Each summon NPC carries the `summonSpellId` that conjured it, so
   // dropping every player-owned summon from the ending spell is generic — a

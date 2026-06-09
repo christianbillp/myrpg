@@ -68,13 +68,23 @@ export interface LongRestChoices {
 }
 
 // Unified NPC state — covers neutral social NPCs, allied combatants, and enemies.
-// disposition drives rendering (token colour, HP bar) and AI (who they attack).
+// disposition drives rendering (token colour, HP bar) and the combat machinery
+// (turn-order buckets, AoE filters, target guards).
 export interface NpcState {
   id: string;
   defId: string;
   name: string;
   tileX: number;
   tileY: number;
+  /**
+   * Party-relative combat label (ally / neutral / enemy). **Projection** of the
+   * relationship layer (`GameState.relationships` → `engine/Relationships.ts`
+   * `projectDisposition`): `enemy` when the NPC is hostile to the player, `ally`
+   * when it's a committed friendly combatant (companion), else `neutral`.
+   * Recomputed at spawn, at combat start, and after any relationship mutation —
+   * direct hostility decisions go through `isHostileTo`, which reads the
+   * relationship layer, not this field.
+   */
   disposition: Disposition;
   /**
    * Live social attitude (US-092). Seeded from `NPCDef.attitude` at spawn;
@@ -126,6 +136,11 @@ export interface NpcState {
   /** SRD Hide outcome for this NPC — Stealth roll total recorded when the
    *  creature took the Hide action. Opposed by player / other NPC Perception. */
   hideDC?: number;
+  /** Ids of enemies that have lost track of this creature while it has the
+   *  Invisible condition (Invisibility cast on it). Mirrors `PlayerState.unseenBy`
+   *  — each failed a Perception check vs the creature's Stealth total and cannot
+   *  make direct attack rolls against it. Cleared when Invisibility ends. */
+  unseenBy?: string[];
   /** When true, the passive Perception movement-sweep skips this NPC
    *  entirely — they can only be revealed by an explicit
    *  `set_npc_hidden { hidden: false }` action. Used by encounter authors
@@ -564,6 +579,24 @@ export interface GameState {
    * the optional `EncounterDef.factionRelations` override block.
    */
   factionRelations: Record<string, Record<string, number>>;
+  /**
+   * Per-**individual** relationship overrides — the layer that sits *in front
+   * of* the faction matrix. `relationships[a][b]` is how individual `a` regards
+   * individual `b` (−100..+100). Keys are individual ids: an NPC id, or the
+   * literal `'player'` (`PLAYER_ID`) for the player character.
+   *
+   * **Sparse**: only authored / runtime deviations from the faction baseline
+   * are stored. An absent pair falls through to `factionRelations` (using each
+   * individual's faction), then to 0. This is what lets two members of the same
+   * faction be enemies, or members of opposing factions be friends — the
+   * individual link overrides the faction default. Asymmetric, like the faction
+   * matrix; `relationStance` takes the worse of the two directions.
+   *
+   * Resolved by `engine/Relationships.ts` (`relation`, `viewStance`,
+   * `projectDisposition`). `NpcState.disposition` is a party-relative projection
+   * of this layer, kept in sync the way `factionStandings` projects the matrix.
+   */
+  relationships: Record<string, Record<string, number>>;
   /**
    * Faction ids the player has identified through play (Insight check on
    * combat-start, or the AIGM's `reveal_faction` tool). The Target Panel

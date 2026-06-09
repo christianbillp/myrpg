@@ -465,6 +465,30 @@ Hard-set the standing between two factions to an absolute value (clamped to ±10
 | `mirror`    | boolean | no       | Default `true`.                                                                        |
 | `reason`    | string  | yes      |                                                                                        |
 
+#### `set_individual_relation`
+
+Set how one **individual** regards another to an absolute value (clamped ±100) — the override layer in front of faction relations. Use when a specific creature feels differently from its faction: a bandit loyal to a particular guard (+80) despite the bandits/guards feud, or a soldier who betrays his own captain (−100). Negative makes them fight; positive makes them allies. Reprojects combat disposition immediately.
+
+| Parameter | Type    | Required | Notes                                                                       |
+| --------- | ------- | -------- | --------------------------------------------------------------------------- |
+| `a`       | string  | yes      | First individual id — an NPC id, or `"player"`.                             |
+| `b`       | string  | yes      | Second individual id — an NPC id, or `"player"`.                           |
+| `value`   | integer | yes      | Absolute relationship in [−100, +100].                                       |
+| `mirror`  | boolean | no       | Default `true` (set both directions). `false` for a one-sided link.         |
+| `reason`  | string  | yes      |                                                                             |
+
+#### `adjust_individual_relation`
+
+Shift how individual `a` regards individual `b` by `delta`, resolving the current effective value (individual override → faction baseline) first. Use for incremental personal shifts; use `set_individual_relation` for hard resets.
+
+| Parameter | Type    | Required | Notes                                              |
+| --------- | ------- | -------- | -------------------------------------------------- |
+| `a`       | string  | yes      | First individual id — an NPC id, or `"player"`.    |
+| `b`       | string  | yes      | Second individual id — an NPC id, or `"player"`.   |
+| `delta`   | integer | yes      | Signed shift, result clamped to [−100, +100].      |
+| `mirror`  | boolean | no       | Default `true`.                                    |
+| `reason`  | string  | yes      |                                                    |
+
 #### `reveal_faction`
 
 Marks a faction as identified by the player — from this point on the Target Panel will render its display name + colour instead of `"???"` for every member. Use when the player learns who a group really is through dialogue, finding a sigil, an obvious uniform, etc. Idempotent: a second call with the same id is a no-op.

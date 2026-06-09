@@ -16,7 +16,10 @@ export interface GameContext {
   resolveMonsterDef(defId: string): MonsterDef | undefined;
   resolveNpcByEntity(entity: string): NpcState | undefined;
   assignCombatLabel(npc: NpcState): void;
-  aggroFaction(npc: NpcState): void;
+  /** Relationship-aware aggro on the player attacking `npc` — the victim and its
+   *  friends turn hostile to the player; intra-faction enemies of the victim do
+   *  not rally. Reprojects disposition. */
+  aggroOnAttack(npc: NpcState): void;
 
   autoEndCombatIfNoEnemies(): void;
   resistMod(damage: number, damageType: string, def: MonsterDef, displayName: string): { finalDamage: number; log: LogEntry | null };

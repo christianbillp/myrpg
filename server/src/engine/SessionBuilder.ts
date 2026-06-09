@@ -3,14 +3,15 @@ import {
   SecretState, NpcPersona, CreateSessionRequest, EncounterTileProperty,
   MapTilesetInfo, LogEntry, TrapState,
 } from './types.js';
-import { PLAYER_FACTION_ID } from '../../../shared/types.js';
+import { PLAYER_FACTION_ID, PLAYER_ID } from '../../../shared/types.js';
 import type { EncounterContext } from '../encounterService.js';
 import { generateMap } from './MapGenerator.js';
 import { generateRoomsMap } from './RoomsMapGenerator.js';
 import {
   ZoneMap, parseStartingZones, findPlayerSpawn, populateNpcs,
 } from './SpawnHelpers.js';
-import { buildFactionRelations, projectFactionStandings } from './FactionRelations.js';
+import { buildFactionRelations, projectFactionStandings, seedFactionRelationsFromDispositions } from './FactionRelations.js';
+import { reprojectAllDispositions } from './Relationships.js';
 import { speciesAbilityResources } from './SpeciesAbilities.js';
 import { magicInitiateResources } from './MagicInitiate.js';
 import { stripTileFlipBits } from '../../../shared/tileGid.js';
@@ -386,15 +387,26 @@ export function buildSessionState(
     seedFactionStandings: req.adventureSeed?.seedFactionStandings,
     encounterOverride: req.encounterContext.factionRelations,
   });
+  // `disposition` is a faction-level default: back-fill the faction↔party cell
+  // from each spawned NPC's disposition (so an enemy fights the player AND the
+  // player's allies), unless the faction defaults / encounter override already
+  // set it.
+  seedFactionRelationsFromDispositions(factionRelations, npcs);
+
+  // Individual relationship overrides — the layer in front of the faction
+  // matrix. Carried adventure relationships layer underneath, then each NPC's
+  // authored `NPCDef.relations` links (intra-faction enemies / cross-faction
+  // friends). Disposition does NOT seed here — it's a faction-level default
+  // above; individual entries are explicit per-creature exceptions.
+  const relationships: Record<string, Record<string, number>> = {};
+  for (const [a, row] of Object.entries(req.adventureSeed?.seedRelationships ?? {})) {
+    relationships[a] = { ...row };
+  }
+  const clampRel = (v: number): number => Math.max(-100, Math.min(100, v));
   for (const n of npcs) {
-    const cur = factionRelations[n.factionId]?.[PLAYER_FACTION_ID];
-    if (cur !== undefined) continue;
-    if (n.disposition === 'enemy') {
-      factionRelations[n.factionId] = { ...(factionRelations[n.factionId] ?? {}), [PLAYER_FACTION_ID]: -100 };
-      factionRelations[PLAYER_FACTION_ID] = { ...(factionRelations[PLAYER_FACTION_ID] ?? {}), [n.factionId]: -100 };
-    } else if (n.disposition === 'ally') {
-      factionRelations[n.factionId] = { ...(factionRelations[n.factionId] ?? {}), [PLAYER_FACTION_ID]: 100 };
-      factionRelations[PLAYER_FACTION_ID] = { ...(factionRelations[PLAYER_FACTION_ID] ?? {}), [n.factionId]: 100 };
+    const def = defs.npcs.find((d) => d.id === n.defId);
+    if (def?.relations) {
+      for (const [other, v] of Object.entries(def.relations)) (relationships[n.id] ??= {})[other] = clampRel(v);
     }
   }
 
@@ -455,6 +467,7 @@ export function buildSessionState(
     activeZones: [],
     traps,
     factionRelations,
+    relationships,
     // Legacy projection kept in sync with the matrix at boot. Pass 2 will
     // re-project after every mutation so existing readers stay correct.
     factionStandings: projectFactionStandings(factionRelations),
@@ -476,6 +489,11 @@ export function buildSessionState(
     environment: req.encounterContext.environment ?? {},
     devFlags: req.devFlags,
   };
+
+  // Project each NPC's stored disposition from the resolved relationship model
+  // (individual override → faction baseline). Explicit allies stay allies; an
+  // NPC the faction baseline / an individual link makes hostile reads `enemy`.
+  reprojectAllDispositions(state);
 
   return state;
 }

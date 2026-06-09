@@ -1,6 +1,6 @@
 import type { GameContext } from './GameContext.js';
 import { isHostileTo, isFriendlyTo } from './FactionRelations.js';
-import { PLAYER_FACTION_ID } from '../../../shared/types.js';
+import { PLAYER_FACTION_ID, PLAYER_ID } from '../../../shared/types.js';
 
 /**
  * Director (Phase E — pacing layer) — watches the bus and emits `custom`
@@ -50,11 +50,11 @@ function evaluateDirectorRules(ctx: GameContext): void {
 
   const round = (s.worldFlags[F_ROUND_COUNT] as number | undefined) ?? 0;
   const hpRatio = s.player.hp / Math.max(1, ctx.playerDef.maxHp);
-  const partyView = { factionId: PLAYER_FACTION_ID } as const;
+  const partyView = { id: PLAYER_ID, factionId: PLAYER_FACTION_ID } as const;
   const enemies = s.npcs.filter((n) => n.hp > 0
-    && isHostileTo(s, partyView, { factionId: n.factionId, disposition: n.disposition })).length;
+    && isHostileTo(s, partyView, { id: n.id, factionId: n.factionId })).length;
   const allies = s.npcs.filter((n) => n.hp > 0
-    && isFriendlyTo(s, partyView, { factionId: n.factionId, disposition: n.disposition })).length;
+    && isFriendlyTo(s, partyView, { id: n.id, factionId: n.factionId })).length;
 
   // Assist rule — the fight is going badly, hint to encounter triggers that
   // it's time to spawn help / lower the heat. Authors who want this listen

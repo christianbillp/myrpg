@@ -30,6 +30,7 @@ import type {
   LogEntry, GameEvent,
 } from '../engine/types.js';
 import { EventBus } from '../engine/EventBus.js';
+import { seedFactionRelationsFromDispositions } from '../engine/FactionRelations.js';
 
 export interface TestContextOverrides {
   player?: Partial<GameState['player']>;
@@ -186,6 +187,7 @@ export function buildTestContext(overrides: TestContextOverrides = {}): TestCont
     activeNpcIndex: 0,
     factionStandings: {},
     factionRelations: {},
+    relationships: {},
     discoveredFactions: [],
     rumors: [],
     worldFlags: {},
@@ -202,6 +204,11 @@ export function buildTestContext(overrides: TestContextOverrides = {}): TestCont
     pendingReroll: null,
     pendingCombatStart: null,
   } as unknown as GameState;
+
+  // Mirror the session-build step: `disposition` seeds a faction-level standing
+  // with the party so `isHostileTo` resolves enemies/allies in tests that set
+  // disposition directly (without going through SessionBuilder).
+  seedFactionRelationsFromDispositions(state.factionRelations, state.npcs);
 
   const playerDef = makePlayerDef(overrides.playerDef);
   const defs: GameDefs = {
@@ -241,7 +248,7 @@ export function buildTestContext(overrides: TestContextOverrides = {}): TestCont
     resolveMonsterDef(defId) { return defs.monsters.find((m) => m.id === defId); },
     resolveNpcByEntity(entity) { return state.npcs.find((n) => n.id === entity); },
     assignCombatLabel() { /* no-op */ },
-    aggroFaction() { /* no-op */ },
+    aggroOnAttack() { /* no-op */ },
     autoEndCombatIfNoEnemies() { /* no-op */ },
     resistMod(damage) { return { finalDamage: damage, log: null }; },
     applyDamageToPlayer(damage) { state.player.hp = Math.max(0, state.player.hp - damage); },

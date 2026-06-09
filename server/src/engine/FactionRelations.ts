@@ -12,13 +12,14 @@
  *     lookup without parsing the matrix layout itself.
  */
 import type {
-  FactionDef, GameState, FactionStance, NpcState,
+  FactionDef, GameState, FactionStance,
 } from '../../../shared/types.js';
 import {
   PLAYER_FACTION_ID,
   FACTION_HOSTILE_THRESHOLD,
   FACTION_FRIENDLY_THRESHOLD,
 } from '../../../shared/types.js';
+import { viewStance, type RelationView } from './Relationships.js';
 
 /**
  * Seed the full pair-wise relation matrix from faction defs + optional
@@ -132,50 +133,34 @@ export function isFriendly(
 }
 
 /**
- * Returns true when `me` considers `other` hostile. Bridges the matrix view
- * with the legacy per-NPC `disposition` field so callers don't have to know
- * which source authored the relation:
+ * Returns true when `me` considers `other` hostile. Resolves through the
+ * **individual relationship layer** (`Relationships.viewStance`): an explicit
+ * `relationships[a][b]` link wins, else the faction baseline, else neutral. This
+ * is what lets same-faction members be enemies (an individual −link overriding a
+ * friendly faction default) and opposing-faction members be friends.
  *
- *   1. Both creatures look at the factionRelations matrix first.
- *   2. If the matrix is neutral (default for unannotated content) the NPC's
- *      `disposition` field acts as a fallback — historically `disposition:
- *      enemy` is the only signal that an NPC wants to fight the player, and
- *      we honour that until content is fully tagged.
- *
- * Pass `other` as the player by setting `other = { factionId: PLAYER_FACTION_ID,
- * disposition: 'neutral' }` (the player has no per-NPC disposition).
+ * Both views carry an individual `id` and a `factionId`. Pass the player as
+ * `{ id: PLAYER_ID, factionId: PLAYER_FACTION_ID }`.
  */
 export function isHostileTo(
-  state: Pick<GameState, 'factionRelations'>,
-  me: { factionId: string; disposition?: NpcState['disposition'] },
-  other: { factionId: string; disposition?: NpcState['disposition'] },
+  state: Pick<GameState, 'factionRelations' | 'relationships'>,
+  me: RelationView,
+  other: RelationView,
 ): boolean {
-  // Self never hostile to self.
-  if (me === other) return false;
-  // Matrix view first.
-  if (isHostile(state, me.factionId, other.factionId)) return true;
-  // Legacy disposition fallback — only matters when the matrix reads neutral.
-  // The player-vs-NPC case: 'enemy' disposition means hostile to the party.
-  if (me.factionId === PLAYER_FACTION_ID && other.disposition === 'enemy') return true;
-  if (other.factionId === PLAYER_FACTION_ID && me.disposition === 'enemy') return true;
-  return false;
+  return viewStance(state, me, other) === 'hostile';
 }
 
 /**
- * Returns true when `me` and `other` are allied. Mirrors `isHostileTo`'s
- * matrix-first / disposition-fallback rule. Used by ally-OA detection,
- * pack tactics, and ally turn target filtering.
+ * Returns true when `me` and `other` are allied. Mirror of `isHostileTo` on the
+ * friendly side. Used by ally-OA detection, pack tactics, and ally turn target
+ * filtering.
  */
 export function isFriendlyTo(
-  state: Pick<GameState, 'factionRelations'>,
-  me: { factionId: string; disposition?: NpcState['disposition'] },
-  other: { factionId: string; disposition?: NpcState['disposition'] },
+  state: Pick<GameState, 'factionRelations' | 'relationships'>,
+  me: RelationView,
+  other: RelationView,
 ): boolean {
-  if (me === other) return true;
-  if (isFriendly(state, me.factionId, other.factionId)) return true;
-  if (me.factionId === PLAYER_FACTION_ID && other.disposition === 'ally') return true;
-  if (other.factionId === PLAYER_FACTION_ID && me.disposition === 'ally') return true;
-  return false;
+  return viewStance(state, me, other) === 'friendly';
 }
 
 /**
@@ -207,6 +192,25 @@ export function adjustRelation(
 ): void {
   const current = getRelation(state as Pick<GameState, 'factionRelations'>, a, b);
   setRelation(state, a, b, current + delta, opts);
+}
+
+/**
+ * Back-fill the faction matrix from spawned NPCs' authored `disposition`: an
+ * `enemy` makes its faction hostile to the party, an `ally` friendly — but only
+ * when the faction↔party cell isn't already set (faction defaults / encounter
+ * overrides win). This keeps `disposition` a **faction-level** default so an
+ * enemy fights the player AND the player's allies; per-individual exceptions
+ * live in the relationship layer (`GameState.relationships`) on top.
+ */
+export function seedFactionRelationsFromDispositions(
+  matrix: Record<string, Record<string, number>>,
+  npcs: Array<{ factionId: string; disposition: FactionStance | 'ally' | 'neutral' | 'enemy' }>,
+): void {
+  for (const n of npcs) {
+    if (matrix[n.factionId]?.[PLAYER_FACTION_ID] !== undefined) continue;
+    if (n.disposition === 'enemy') setBoth(matrix, n.factionId, PLAYER_FACTION_ID, -100, true);
+    else if (n.disposition === 'ally') setBoth(matrix, n.factionId, PLAYER_FACTION_ID, 100, true);
+  }
 }
 
 /**

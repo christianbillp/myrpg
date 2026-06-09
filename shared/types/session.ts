@@ -58,6 +58,8 @@ export interface CreateSessionRequest {
     seedFactionStandings?: Record<string, number>;
     /** Cross-chapter full faction-relation matrix (Pass 1+). When absent we fall back to seeding from `seedFactionStandings` (`party` row only). */
     seedFactionRelations?: Record<string, Record<string, number>>;
+    /** Cross-chapter individual relationship overrides (`GameState.relationships`). Empty when absent. */
+    seedRelationships?: Record<string, Record<string, number>>;
     /** Cross-chapter discovered factions (Pass 1+). Empty when absent. */
     seedDiscoveredFactions?: string[];
     seedRumors?: Rumor[];

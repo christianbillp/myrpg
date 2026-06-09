@@ -30,6 +30,7 @@ import { Logger } from '../Logger.js';
 import { canSee as visCanSee } from './Vision.js';
 import { hasModifierFlag, hasAdvantageOn } from './Modifiers.js';
 import { applySelfBuff, applyBuffTo, removeSpellBuffsFrom } from './Buffs.js';
+import { applyInvisibilityConcealment, logInvisibilityFind } from './InvisibilitySystem.js';
 import { SPEED_ZERO_CONDITIONS, isIncapacitated } from './ConditionSystem.js';
 import {
   tilesInArea, playerInArea, creaturesInArea,
@@ -1817,10 +1818,12 @@ function resolveUtilitySpell(ctx: GameContext, spell: SpellDef, slotLevel: numbe
         applyBuffTo(target, { spellId: 'invisibility', conditions: ['invisible'], concentration: true });
         s.player.invisibilityTargetId = target.id;
         ctx.addLog({ left: `${ctx.playerDef.name} casts Invisibility on ${target.revealedName ?? target.name}`, style: 'status' });
+        logInvisibilityFind(ctx, applyInvisibilityConcealment(ctx, target.id), target.revealedName ?? target.name);
       } else {
         applySelfBuff(ctx, { spellId: 'invisibility', conditions: ['invisible'], concentration: true });
         s.player.invisibilityTargetId = 'player';
         ctx.addLog({ left: `${ctx.playerDef.name} casts Invisibility on themselves — they vanish`, style: 'status' });
+        logInvisibilityFind(ctx, applyInvisibilityConcealment(ctx, 'player'), ctx.playerDef.name);
       }
       break;
     }

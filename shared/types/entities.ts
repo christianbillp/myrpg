@@ -490,6 +490,16 @@ export interface NPCDef {
    */
   factionId?: string;
   /**
+   * Seed individual relationship overrides for this NPC (the layer in front of
+   * faction baselines — see `GameState.relationships`). Keyed by the *other*
+   * individual's id: another NPC's id, or `'player'`. Value is −100..+100. Use
+   * to author intra-faction enemies (a grudge against a faction-mate) or
+   * cross-faction friends (loyalty to a specific creature in a hostile faction).
+   * Spawn-time only seeds the directed link `thisNpc → other`; mirror with the
+   * other NPC's own `relations` or a trigger if you want it reciprocated.
+   */
+  relations?: Record<string, number>;
+  /**
    * Default conversation graph id this NPC opens when the player initiates
    * dialogue. Resolves against `server/data/settings/<setting>/conversations/`.
    * Encounter authors can override per-encounter via

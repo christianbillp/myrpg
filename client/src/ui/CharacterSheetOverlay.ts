@@ -809,7 +809,7 @@ export class CharacterSheetOverlay extends BaseOverlay {
       : "";
 
     this.contentEl.insertAdjacentHTML("beforeend", `
-      <div style="overflow-y:auto;scrollbar-width:thin;scrollbar-color:${ACCENT} transparent;flex:1;min-height:0;">
+      <div data-cs-scroll="spells" style="overflow-y:auto;scrollbar-width:thin;scrollbar-color:${ACCENT} transparent;flex:1;min-height:0;">
         <div style="display:flex;gap:8px;margin-bottom:10px;">
           <div style="flex:1;padding:6px 8px;border:1px solid ${DIM};background:#0a0a18;">
             <div style="font-size:9px;color:#556677;letter-spacing:1px;">SAVE DC</div>
@@ -858,7 +858,12 @@ export class CharacterSheetOverlay extends BaseOverlay {
         e.stopPropagation();
         toggleQuickcast(playerDef.id, btn.dataset.quickcast!);
         this.callbacks.onQuickcastChanged();
+        // Toggling ✦ re-renders the tab; keep the spell list where it was
+        // instead of jumping back to the top.
+        const prevScroll = this.contentEl.querySelector<HTMLElement>('[data-cs-scroll="spells"]')?.scrollTop ?? 0;
         this.renderActiveTab();
+        const sc = this.contentEl.querySelector<HTMLElement>('[data-cs-scroll="spells"]');
+        if (sc) sc.scrollTop = prevScroll;
       });
     });
   }

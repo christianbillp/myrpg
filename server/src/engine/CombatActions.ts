@@ -495,7 +495,7 @@ export function throwItem(ctx: GameContext, itemId: string, targetId?: string): 
   if (target.disposition === 'neutral') {
     target.disposition = 'enemy';
     if (!target.combatLabel) ctx.assignCombatLabel(target);
-    ctx.aggroFaction(target);
+    ctx.aggroOnAttack(target);
   }
 
   const targetDef = ctx.resolveMonsterDef(target.defId);

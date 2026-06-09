@@ -1,6 +1,6 @@
 import type { GameContext } from './GameContext.js';
 import { isHostileTo } from './FactionRelations.js';
-import { PLAYER_FACTION_ID } from '../../../shared/types.js';
+import { PLAYER_FACTION_ID, PLAYER_ID } from '../../../shared/types.js';
 import type { GameState } from '../../../shared/types.js';
 
 /** True while the encounter still has an un-fired `magic_feature` rite point —
@@ -45,9 +45,9 @@ export function registerEncounterLifecycle(ctx: GameContext): void {
 
   ctx.bus.subscribe('combat_ended', () => {
     const s = ctx.state;
-    const partyView = { factionId: PLAYER_FACTION_ID } as const;
+    const partyView = { id: PLAYER_ID, factionId: PLAYER_FACTION_ID } as const;
     const enemiesAlive = s.npcs.some((n) => n.hp > 0
-      && isHostileTo(s, partyView, { factionId: n.factionId, disposition: n.disposition }));
+      && isHostileTo(s, partyView, { id: n.id, factionId: n.factionId }));
     // A pending rite (an un-fired `magic_feature` trigger) is the real objective
     // — clearing the enemies isn't enough. Hold completion until it's performed.
     if (!enemiesAlive && !hasPendingRite(s)) fireCompleted();

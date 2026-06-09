@@ -22,7 +22,8 @@ import {
   runEnemyTurn, runAllyTurn, chebyshev, type EnemyAttackTarget,
 } from './EnemyAI.js';
 import { isHostileTo } from './FactionRelations.js';
-import { PLAYER_FACTION_ID } from '../../../shared/types.js';
+import { attackerCannotLocate } from './InvisibilitySystem.js';
+import { PLAYER_FACTION_ID, PLAYER_ID } from '../../../shared/types.js';
 import { isIncapacitated, isVisible, TURN_CONDITIONS } from './ConditionSystem.js';
 import { doNpcOpportunityAttack } from './CombatActions.js';
 import { applyNpcAttackHit } from './NpcDamage.js';
@@ -185,8 +186,8 @@ function sanctuaryWardBlocks(ctx: GameContext, attacker: NpcState, targetConditi
 
 export function pickEnemyAttackTarget(ctx: GameContext, attacker: NpcState): EnemyAttackTarget {
   const s = ctx.state;
-  const attackerView = { factionId: attacker.factionId, disposition: attacker.disposition };
-  const playerView = { factionId: PLAYER_FACTION_ID };
+  const attackerView = { id: attacker.id, factionId: attacker.factionId };
+  const playerView = { id: PLAYER_ID, factionId: PLAYER_FACTION_ID };
   const candidates: Array<{ target: EnemyAttackTarget; dist: number; isPlayer: boolean }> = [];
 
   // SRD Charmed condition: a Charmed creature can't attack the charmer or
@@ -209,6 +210,7 @@ export function pickEnemyAttackTarget(ctx: GameContext, attacker: NpcState): Ene
 
   const charmedByPlayer = attacker.conditions.includes('charmed');
   if (!calmed && !playerEthereal && isHostileTo(s, attackerView, playerView) && !charmedByPlayer
+      && !attackerCannotLocate(attacker.id, s.player)
       && !sanctuaryWardBlocks(ctx, attacker, s.player.conditions, ctx.playerDef.name)) {
     candidates.push({
       target: {
@@ -231,8 +233,9 @@ export function pickEnemyAttackTarget(ctx: GameContext, attacker: NpcState): Ene
   for (const other of s.npcs) {
     if (calmed) break;  // becalmed: no targets at all
     if (other === attacker || other.hp <= 0) continue;
-    const otherView = { factionId: other.factionId, disposition: other.disposition };
+    const otherView = { id: other.id, factionId: other.factionId };
     if (!isHostileTo(s, attackerView, otherView)) continue;
+    if (attackerCannotLocate(attacker.id, other)) continue; // invisible + this attacker lost track of it
     if (sanctuaryWardBlocks(ctx, attacker, other.conditions, combatantDisplayName(other, s.npcs))) continue;
     candidates.push({
       target: {
@@ -273,6 +276,9 @@ export function pickEnemyAttackTarget(ctx: GameContext, attacker: NpcState): Ene
       invisible: s.player.conditions.includes('invisible'),
       conditions: s.player.conditions,
       passivePerception: 10 + (ctx.playerDef.skills['perception'] ?? 0),
+      // The picker found no creature this attacker may strike — the snapshot is
+      // a placeholder for logging only; `runEnemyTurn` must not attack it.
+      noAttack: true,
     };
   }
   candidates.sort((a, b) => (a.dist - b.dist) || (a.isPlayer ? -1 : b.isPlayer ? 1 : 0));
@@ -652,7 +658,7 @@ export function runSingleAllyTurn(ctx: GameContext, ally: NpcState, events: Game
   // (movement + attack roll); only the target picker is overridden. If the
   // forced target is dead / missing, fall through to autonomous selection
   // and clear the override so the panel resyncs.
-  const allyView = { factionId: ally.factionId, disposition: ally.disposition };
+  const allyView = { id: ally.id, factionId: ally.factionId };
   const override = ally.companion?.override;
   let forcedTarget: NpcState | null = null;
   if (override?.kind === 'attack') {
@@ -662,7 +668,7 @@ export function runSingleAllyTurn(ctx: GameContext, ally: NpcState, events: Game
   }
   const enemyTargets = (forcedTarget
     ? [forcedTarget]
-    : s.npcs.filter((n) => n !== ally && n.hp > 0 && isHostileTo(s, allyView, { factionId: n.factionId, disposition: n.disposition })))
+    : s.npcs.filter((n) => n !== ally && n.hp > 0 && isHostileTo(s, allyView, { id: n.id, factionId: n.factionId })))
     .map((n) => {
       const ndef = ctx.resolveMonsterDef(n.defId);
       return { id: n.id, tileX: n.tileX, tileY: n.tileY, ac: ndef?.ac ?? 10, conditions: n.conditions };

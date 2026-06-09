@@ -35,6 +35,10 @@ import type { GameState, NpcState } from "./longRest.js";
 
 /** The reserved faction id every player party is a member of. */
 export const PLAYER_FACTION_ID = 'party';
+/** The reserved individual id of the player character in the relationship layer
+ *  (`GameState.relationships`). Distinct from `PLAYER_FACTION_ID`: the player is
+ *  an individual (`'player'`) who belongs to the `'party'` faction. */
+export const PLAYER_ID = 'player';
 /** Standing threshold at or below which a relation reads as `hostile`. */
 export const FACTION_HOSTILE_THRESHOLD = -30;
 /** Standing threshold at or above which a relation reads as `friendly`. */

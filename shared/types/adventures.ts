@@ -94,6 +94,12 @@ export interface AdventureSave {
    */
   factionRelations?: Record<string, Record<string, number>>;
   /**
+   * Cross-chapter individual relationship overrides (`GameState.relationships`).
+   * Seeds the individual layer on chapter boot; persisted back when the chapter
+   * ends so personal grudges / loyalties survive. Absent on older saves.
+   */
+  relationships?: Record<string, Record<string, number>>;
+  /**
    * Cross-chapter discovered factions. Seeds `GameState.discoveredFactions`
    * on chapter boot; persisted back when the chapter ends so identity
    * reveals survive.

@@ -25,7 +25,7 @@ import type { GameContext } from './GameContext.js';
 import type { GameEvent, NpcState } from './types.js';
 import { runEnemyTurn, chebyshev, type EnemyAttackTarget } from './EnemyAI.js';
 import { isHostileTo } from './FactionRelations.js';
-import { PLAYER_FACTION_ID } from '../../../shared/types.js';
+import { PLAYER_FACTION_ID, PLAYER_ID } from '../../../shared/types.js';
 import { applyNpcAttackHit } from './NpcDamage.js';
 import { tickActiveZones } from './SpellSystem.js';
 import { tickSpellConditionExpiries } from './CombatFlow.js';
@@ -172,9 +172,9 @@ export function runOffCameraTick(ctx: GameContext): GameEvent[] {
  */
 function anyHostileToParty(ctx: GameContext): boolean {
   const s = ctx.state;
-  const partyView = { factionId: PLAYER_FACTION_ID } as const;
+  const partyView = { id: PLAYER_ID, factionId: PLAYER_FACTION_ID } as const;
   return s.npcs.some((n) => n.hp > 0
-    && isHostileTo(s, partyView, { factionId: n.factionId, disposition: n.disposition }));
+    && isHostileTo(s, partyView, { id: n.id, factionId: n.factionId }));
 }
 
 /**
@@ -185,12 +185,12 @@ function anyHostileToParty(ctx: GameContext): boolean {
  */
 function pickHostileNpcTarget(ctx: GameContext, attacker: NpcState): NpcState | undefined {
   const s = ctx.state;
-  const attackerView = { factionId: attacker.factionId, disposition: attacker.disposition };
+  const attackerView = { id: attacker.id, factionId: attacker.factionId };
   let best: NpcState | undefined;
   let bestDist = Infinity;
   for (const other of s.npcs) {
     if (other === attacker || other.hp <= 0) continue;
-    const otherView = { factionId: other.factionId, disposition: other.disposition };
+    const otherView = { id: other.id, factionId: other.factionId };
     if (!isHostileTo(s, attackerView, otherView)) continue;
     const d = chebyshev(attacker.tileX, attacker.tileY, other.tileX, other.tileY);
     if (d < bestDist) { best = other; bestDist = d; }

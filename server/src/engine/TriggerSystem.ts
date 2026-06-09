@@ -9,7 +9,8 @@ import { pickNarrationVariant } from './NarrationSystem.js';
 import { startQuest } from './QuestSystem.js';
 import { d20 as d20Local } from './Dice.js';
 import { setRelation, adjustRelation } from './FactionRelations.js';
-import { PLAYER_FACTION_ID } from '../../../shared/types.js';
+import { setIndividualRelation, adjustIndividualRelation, reprojectAllDispositions, relation } from './Relationships.js';
+import { PLAYER_FACTION_ID, PLAYER_ID } from '../../../shared/types.js';
 import { formatCoins as formatCoinsTrigger } from '../../../shared/currency.js';
 import { Logger } from '../Logger.js';
 import { generateMission } from '../mission/missionGenerator.js';
@@ -256,6 +257,8 @@ export function guardHolds(ctx: GameContext, guard: TriggerGuard): boolean {
       const value = s.factionStandings[guard.factionId] ?? 0;
       return compare(value, guard.op, guard.value);
     }
+    case 'individual_relation':
+      return compare(relation(s, guard.a, guard.b), guard.op, guard.value);
     case 'balance_cp':
       return compare(s.player.balanceCp, guard.op, guard.value);
   }
@@ -414,6 +417,14 @@ const TRIGGER_ACTIONS: TriggerRegistry = {
     if (a.a === PLAYER_FACTION_ID) ctx.publish({ type: 'faction_changed', factionId: a.b, oldValue: before, newValue: after });
     else if (a.b === PLAYER_FACTION_ID) ctx.publish({ type: 'faction_changed', factionId: a.a, oldValue: before, newValue: after });
   },
+  set_individual_relation: (ctx, a) => {
+    setIndividualRelation(ctx.state, a.a, a.b, a.value, { mirror: a.mirror ?? true });
+    reprojectAllDispositions(ctx.state);
+  },
+  adjust_individual_relation: (ctx, a) => {
+    adjustIndividualRelation(ctx.state, a.a, a.b, a.delta, { mirror: a.mirror ?? true });
+    reprojectAllDispositions(ctx.state);
+  },
   reveal_faction: (ctx, a) => {
     if (!ctx.state.discoveredFactions.includes(a.factionId)) {
       ctx.state.discoveredFactions.push(a.factionId);
@@ -489,9 +500,10 @@ const TRIGGER_ACTIONS: TriggerRegistry = {
     }
   },
   set_disposition_by_def_id: (ctx, a) => {
-    // Disposition flips are sugar for the affected NPC's faction standing
-    // with `party`. `defId` accepts a bare def or an instance id;
-    // instance-targeted flips skip the faction-wide aggro + matrix flip.
+    // Write the player↔NPC *individual* relationship for each matched NPC;
+    // disposition is then a projection. A bare `defId` (not an instance id) is a
+    // faction-wide flip, so it also moves the faction baseline so unaffected
+    // members / future spawns inherit it; an instance id touches only that NPC.
     const standingByDisp = a.disposition === 'enemy' ? -100
                           : a.disposition === 'ally' ? 100
                           : 0;
@@ -501,11 +513,17 @@ const TRIGGER_ACTIONS: TriggerRegistry = {
     );
     const touchedFactions = new Set<string>();
     for (const npc of matches) {
-      npc.disposition = a.disposition;
+      if (a.disposition === 'ally') {
+        setIndividualRelation(ctx.state, npc.id, PLAYER_ID, 100, { mirror: true });
+        npc.disposition = 'ally';
+      } else if (a.disposition === 'enemy') {
+        setIndividualRelation(ctx.state, npc.id, PLAYER_ID, -100);
+      } else {
+        setIndividualRelation(ctx.state, npc.id, PLAYER_ID, 0, { mirror: true });
+      }
       if ((a.disposition === 'ally' || a.disposition === 'enemy') && !npc.combatLabel) {
         ctx.assignCombatLabel(npc);
       }
-      if (a.disposition === 'enemy' && !isInstanceTargeted) ctx.aggroFaction(npc);
       touchedFactions.add(npc.factionId);
     }
     if (!isInstanceTargeted) {
@@ -513,6 +531,7 @@ const TRIGGER_ACTIONS: TriggerRegistry = {
         setRelation(ctx.state, factionId, PLAYER_FACTION_ID, standingByDisp);
       }
     }
+    reprojectAllDispositions(ctx.state);
   },
   trigger_combat: (ctx) => {
     if (ctx.state.phase !== 'exploring') return;

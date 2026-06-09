@@ -241,11 +241,7 @@ export function resolveSpiritualWeaponAttack(
 
   // First strike in exploration promotes the target and opens combat.
   if (s.phase === 'exploring') {
-    if (target.disposition === 'neutral') {
-      target.disposition = 'enemy';
-      if (!target.combatLabel) ctx.assignCombatLabel(target);
-    }
-    ctx.aggroFaction(target);
+    ctx.aggroOnAttack(target);
     ctx.doStartCombat(events);
   }
 

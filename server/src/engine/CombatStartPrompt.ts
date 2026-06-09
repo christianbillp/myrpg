@@ -9,6 +9,8 @@
  */
 import type { GameContext } from './GameContext.js';
 import type { GameEvent } from './types.js';
+import { PLAYER_ID } from '../../../shared/types.js';
+import { setIndividualRelation, reprojectDisposition } from './Relationships.js';
 
 export function requestCombatStart(ctx: GameContext, promoteIds: string[], label: string): void {
   ctx.state.pendingCombatStart = { promoteIds, label };
@@ -24,11 +26,13 @@ export function doResolveCombatStart(ctx: GameContext, accept: boolean, events: 
   for (const id of pending.promoteIds) {
     const npc = s.npcs.find((n) => n.id === id && n.hp > 0);
     if (npc && npc.disposition !== 'ally') {
-      npc.disposition = 'enemy';
+      // Player-initiated attack → the target turns hostile to the player.
+      setIndividualRelation(s, npc.id, PLAYER_ID, -100);
+      reprojectDisposition(s, npc);
       if (!npc.combatLabel) ctx.assignCombatLabel(npc);
     }
   }
   const first = s.npcs.find((n) => n.id === pending.promoteIds[0] && n.hp > 0);
-  if (first) ctx.aggroFaction(first);
+  if (first) ctx.aggroOnAttack(first); // rally the victim's friends + reproject
   ctx.doStartCombat(events);
 }

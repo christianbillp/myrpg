@@ -66,6 +66,14 @@ export interface PlayerState {
    *  (passive sweep on turn boundary / movement, or active Search) opposes
    *  this DC. Cleared together with the `hidden` condition. */
   hideDC?: number;
+  /** Ids of enemies that have lost track of this creature while it has the
+   *  Invisible condition (Invisibility spell): each failed a Wisdom (Perception)
+   *  check against the creature's Dexterity (Stealth) total at cast time and so
+   *  cannot make direct attack rolls against it until it is found / the spell
+   *  ends. Enemies who succeeded (or have truesight/blindsight) are absent and
+   *  attack normally — with the Invisible condition's Disadvantage. Cleared when
+   *  Invisibility ends (`endConcentration`). */
+  unseenBy?: string[];
   equippedSlotLabels: { armor: string | null; weapon: string | null; shield: string | null };
   /** Current effective AC after armor / shield / Mage Armor / Defense fighting style. Synced from `playerDef.ac` after every `applyEquipment` call so the client doesn't have to recompute. */
   ac: number;

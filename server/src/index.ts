@@ -43,7 +43,7 @@ import {
 } from "./storylog.js";
 import { GameEngine } from "./engine/GameEngine.js";
 import { GameDefs } from "./engine/types.js";
-import { isHostileTo } from "./engine/FactionRelations.js";
+import { deriveRelationshipsFromDispositions } from "./engine/Relationships.js";
 import { Logger } from "./Logger.js";
 import { PLAYER_FACTION_ID, parseCreatureSize } from "../../shared/types.js";
 import {
@@ -916,6 +916,7 @@ server.post<{ Params: { characterId: string } }>(
     Object.assign(save, carryForwardQuests(state));
     save.factionStandings = { ...state.factionStandings };
     save.factionRelations = structuredClone(state.factionRelations);
+    save.relationships = structuredClone(state.relationships);
     save.discoveredFactions = [...state.discoveredFactions];
     save.rumors = [...state.rumors];
     await flushSessionNpcSaves(found.sessionId);
@@ -978,6 +979,7 @@ server.post<{ Params: { characterId: string }; Body: { devFlags?: import("../../
       Object.assign(save, carryForwardQuests(finishedState));
       save.factionStandings = { ...finishedState.factionStandings };
       save.factionRelations = structuredClone(finishedState.factionRelations);
+      save.relationships = structuredClone(finishedState.relationships);
       save.discoveredFactions = [...finishedState.discoveredFactions];
       save.rumors = [...finishedState.rumors];
       await flushSessionNpcSaves(found.sessionId);
@@ -1043,6 +1045,7 @@ server.post<{ Params: { characterId: string }; Body: { devFlags?: import("../../
       Object.assign(save, carryForwardQuests(finishedState));
       save.factionStandings = { ...finishedState.factionStandings };
       save.factionRelations = structuredClone(finishedState.factionRelations);
+      save.relationships = structuredClone(finishedState.relationships);
       save.discoveredFactions = [...finishedState.discoveredFactions];
       save.rumors = [...finishedState.rumors];
       await flushSessionNpcSaves(found.sessionId);
@@ -1767,6 +1770,10 @@ async function loadWorldState(): Promise<{
         ? { party: { ...worldSave.factionStandings } }
         : {}
     ),
+    // New in the relationship pass — older saves migrate by deriving each NPC's
+    // individual link to the player from its stored disposition (enemy → −100,
+    // ally → +100), so resume produces the same hostility outcomes.
+    relationships: worldSave.relationships ?? deriveRelationshipsFromDispositions(worldSave.npcs ?? []),
     discoveredFactions: worldSave.discoveredFactions ?? [],
     rumors: worldSave.rumors ?? [],
     adventureContext: worldSave.adventureContext ?? null,
@@ -1878,6 +1885,7 @@ function buildAdventureSeed(adv: AdventureDef, chapterIndex: number, save: Adven
   seedWorldFlags?: Record<string, WorldFlagValue>;
   seedFactionStandings?: Record<string, number>;
   seedFactionRelations?: Record<string, Record<string, number>>;
+  seedRelationships?: Record<string, Record<string, number>>;
   seedDiscoveredFactions?: string[];
   seedRumors?: Rumor[];
   seedQuests?: QuestState[];
@@ -1909,6 +1917,9 @@ function buildAdventureSeed(adv: AdventureDef, chapterIndex: number, save: Adven
     seedFactionRelations: save.factionRelations
       ? structuredClone(save.factionRelations)
       : undefined,
+    seedRelationships: save.relationships
+      ? structuredClone(save.relationships)
+      : undefined,
     seedDiscoveredFactions: save.discoveredFactions
       ? [...save.discoveredFactions]
       : undefined,
@@ -1925,6 +1936,7 @@ function makeAdventureSave(characterId: string, adventureId: string): AdventureS
     worldFlags: {},
     factionStandings: {},
     factionRelations: {},
+    relationships: {},
     discoveredFactions: [],
     rumors: [],
     priorChapterSummaries: [],
