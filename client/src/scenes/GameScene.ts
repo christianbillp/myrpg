@@ -1750,8 +1750,11 @@ export class GameScene extends Phaser.Scene {
         leaveAdventure: true,
       });
     } else if (typeof here === 'string' && here.startsWith('mission_')) {
+      // The hub a mission returns to is data-driven (`mission_hub_id`, set to
+      // whichever encounter issued the contract). `signing_on` is the sole
+      // station hub, so it's the fallback when the flag is somehow unset.
       const hub = flags['mission_hub_id'];
-      this.missionTopBar.setButtons({ leaveMission: typeof hub === 'string' && hub.length > 0 ? hub : 'bureau_office' });
+      this.missionTopBar.setButtons({ leaveMission: typeof hub === 'string' && hub.length > 0 ? hub : 'signing_on' });
     } else {
       this.missionTopBar.setButtons({});
     }

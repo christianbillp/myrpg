@@ -365,6 +365,13 @@ export interface EncounterDef {
    */
   generated?: boolean;
   /**
+   * Marks this encounter as a **demo** built to exercise a specific engine
+   * implementation (a new system, mechanic, or content shape). The Encounter
+   * Setup picker groups all `demo` encounters under a dedicated "Demo" section,
+   * separate from authored scenarios and adventure chapters.
+   */
+  demo?: boolean;
+  /**
    * Marks this encounter as a Bureau mission **hub** (e.g. the station where
    * the player takes/turns-in contracts). Hubs drive the MissionTopBar: while
    * the player is in one they get LEAVE ADVENTURE (and TO MISSION when a

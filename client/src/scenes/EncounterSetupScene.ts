@@ -462,8 +462,9 @@ export class EncounterSetupScene extends Phaser.Scene {
 
   /** Build the ordered section list. GENERATED first; then each adventure's
    *  encounters (chapters in order, plus its rest encounter), deduped within
-   *  the adventure but NOT across adventures; then OTHER for whatever authored
-   *  encounter no adventure claimed. Empty sections are dropped. */
+   *  the adventure but NOT across adventures; then DEMO for `demo`-flagged
+   *  encounters; then OTHER for whatever authored encounter no section claimed.
+   *  Empty sections are dropped. */
   private computeEncounterSections(): { label: string; encounters: EncounterDef[] }[] {
     // Apply the active quick-filter first; sections are built from the visible
     // set so empty ones drop out naturally.
@@ -497,6 +498,16 @@ export class EncounterSetupScene extends Phaser.Scene {
       if (encs.length === 0) continue;
       for (const e of encs) claimed.add(e.id);
       sections.push({ label: adv.title, encounters: sortEncs(encs) });
+    }
+
+    // Demo encounters (built to exercise a new implementation) get their own
+    // section, after the adventures and before Other, so they don't masquerade
+    // as authored scenarios. An adventure chapter that happens to be flagged
+    // `demo` is already claimed above and stays under its adventure.
+    const demos = visible.filter((e) => !claimed.has(e.id) && (e as { demo?: boolean }).demo);
+    if (demos.length > 0) {
+      sections.push({ label: "Demo", encounters: sortEncs(demos) });
+      for (const e of demos) claimed.add(e.id);
     }
 
     const other = visible.filter((e) => !claimed.has(e.id));
