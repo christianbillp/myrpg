@@ -7,8 +7,8 @@ RUN apt-get update && apt-get install -y \
     psmisc \
     && rm -rf /var/lib/apt/lists/*
 
-# Install global dev tools (incl. the Claude Code CLI — the `claude` command)
-RUN npm install -g typescript@latest vite@latest @anthropic-ai/claude-code@latest
+# Install global dev tools
+RUN npm install -g typescript@latest vite@latest
 
 WORKDIR /workspace
 
@@ -29,3 +29,15 @@ RUN mkdir -p \
     && chown -R node:node /workspace
 
 USER node
+
+# Install the Claude Code CLI via the official native installer, as `node` so
+# the install under ~/.local is owned by the runtime user and can auto-update
+# itself at runtime (the npm global package cannot self-update cleanly).
+# Install from a small WORKDIR — the installer can hang when the current
+# directory is a large tree.
+WORKDIR /tmp
+RUN curl -fsSL https://claude.ai/install.sh | bash \
+    && /home/node/.local/bin/claude --version
+ENV PATH="/home/node/.local/bin:${PATH}"
+
+WORKDIR /workspace
