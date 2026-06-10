@@ -26,6 +26,14 @@ export type EngineEvent =
    *  tile to resolve the rite. */
   | { type: 'magic_feature'; x: number; y: number }
   | { type: 'npc_killed'; npcId: string; defId: string; killerId?: string }
+  /** Published when the player casts any spell (cantrip or levelled), at the
+   *  resolution site. Encounter authors hang a `spell_cast` trigger to react to
+   *  the player using magic (e.g. NPCs surprised to see it). */
+  | { type: 'spell_cast'; spellId: string; school: string; level: number }
+  /** Published when the player takes the Help action to aid a creature — carries
+   *  the aided creature's instance id + defId. Encounter authors react to the
+   *  player helping a specific NPC (e.g. freeing a captive). */
+  | { type: 'help_used'; targetId: string; targetDefId: string }
   | { type: 'item_picked_up'; defId: string }
   | { type: 'turn_started'; combatantId: 'player' | string }
   | { type: 'turn_ended'; combatantId: 'player' | string }

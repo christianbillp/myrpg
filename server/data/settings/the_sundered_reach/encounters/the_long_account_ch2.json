@@ -1,0 +1,86 @@
+{
+  "id": "the_long_account_ch2",
+  "encounterTitle": "The Season of Passage",
+  "description": "Chapter 2 of The Long Account. A larger group of elves is held at a 'Season of Passage' rite — a White Cape-sanctioned culling dressed as ceremony. Caelen breaks the captors; the slaughter of magic draws Investigator Aldric Vane (the mage stat block) out of the treeline. He does not attack — he declares Caelen under arrest for the practice of magic, and it is that sentence that makes the freed elves charge the Cape they know they cannot kill, buying Caelen the time to run. The chapter ends when Caelen escapes west off the rite field.",
+  "mapId": "the_passage_stone",
+  "npcIds": ["captive_elf", "captive_elf", "captive_elf", "captive_elf", "white_cape_investigator"],
+  "allyIds": [],
+  "enemyIds": ["cultist", "cultist", "bandit", "bandit"],
+  "customIntroduction": "The Season of Passage, they call it — a rite the Empire blesses and the White Capes file under 'population adjustment'. A dozen of your people are penned at the broken ward, waiting their turn at the stone. Cultists tend the fire; hired bandits hold the line. You have spent two pact slots and most of your patience. Tonight the ledger gets a little more even.",
+  "customContext": "THE LONG ACCOUNT — CHAPTER 2. Caelen assaults the 'Season of Passage' rite to free four captive elves (penned at the eastern treeline) held by cultists + bandits (hostile). PHASE 1 — THE ASSAULT: the moment fighting breaks out, the captive elves RISE — they arm themselves with whatever the pen holds and join the battle on Caelen's side (frail CR-0 allies; courage, not competence — some may fall, and it should land hard). PHASE 2 — THE CAPE: the moment the last captor dies, INVESTIGATOR ALDRIC VANE — a White Cape (a Mage, far beyond Caelen at this level) — steps from the treeline, drawn by the unsanctioned magic. He does NOT attack: he formally declares Caelen UNDER ARREST for the practice of magic, by writ of the Empire. That sentence is what breaks the freed elves — they arm themselves with the slavers' weapons and CHARGE HIM, and only then does the fight begin. They know they cannot kill a White Cape. They are buying time, because Caelen is the first hope their people have had, and they spend themselves to keep that hope breathing. PHASE 3 — THE ESCAPE: Caelen must flee WEST along the road and off the field while the elves hold the Cape. Build dread and urgency; the Cape is methodical and lethal; the elves are falling one by one. NEVER let the player win a straight fight against the White Cape — if Caelen lingers to fight, the Cape should make the cost obvious. (Engine: the investigator spawns hidden and is revealed + flipped hostile by trigger when the captors are all dead; the elves flip to allies and attack him on their own turns; the chapter completes when Caelen reaches the western road's edge.)",
+  "objective": "Free the elves at the rite — then run before the Cape reaches you.",
+  "completionFlag": "tla_ch2_done",
+  "completeOnFlagOnly": true,
+  "allowsLongRest": false,
+  "factionRelations": {
+    "white_capes": { "commoners": -100 },
+    "commoners": { "white_capes": -100 },
+    "bandits": { "party": -100 },
+    "party": { "bandits": -100 }
+  },
+  "placementMode": "exact",
+  "placements": [
+    { "role": "player", "x": 4, "y": 11 },
+    { "role": "enemy", "index": 0, "x": 19, "y": 9 },
+    { "role": "enemy", "index": 1, "x": 19, "y": 13 },
+    { "role": "enemy", "index": 2, "x": 23, "y": 10 },
+    { "role": "enemy", "index": 3, "x": 23, "y": 12 },
+    { "role": "neutral", "index": 0, "x": 26, "y": 9 },
+    { "role": "neutral", "index": 1, "x": 26, "y": 11 },
+    { "role": "neutral", "index": 2, "x": 26, "y": 13 },
+    { "role": "neutral", "index": 3, "x": 27, "y": 11 },
+    { "role": "neutral", "index": 4, "x": 24, "y": 3 }
+  ],
+  "triggers": [
+    {
+      "id": "ch2_intro",
+      "when": { "event": "encounter_started" },
+      "then": [
+        { "type": "set_npc_hidden", "defId": "white_cape_investigator", "hidden": true, "revealedBy": "trigger" },
+        { "type": "send_aigm_message", "message": "Open on the rite — cultists at the fire, bandits on the line, four elves penned beyond. The fight starts on Caelen's first hostile move. A White Cape investigator is already converging on the unsanctioned magic in this wood, but he has not arrived yet — do not mention him until he appears." }
+      ],
+      "once": true
+    },
+    {
+      "id": "ch2_elves_rise",
+      "when": { "event": "combat_started" },
+      "if": [{ "type": "flag_unset", "name": "tla_cape_arrived" }],
+      "then": [
+        { "type": "set_disposition_by_def_id", "defId": "captive_elf", "disposition": "ally" },
+        { "type": "npc_speaks", "entity": "npc_captive_elf_1", "text": "The penned elves see what is happening — see WHO is happening — and something long beaten down comes back up. \"He came for us. HE CAME FOR US!\" They snatch up stones, tent-stakes, anything, and pour out of the pen at their captors." },
+        { "type": "send_aigm_message", "message": "The moment the fight breaks out, the captive elves rise: they arm themselves with whatever the pen holds and join the battle on Caelen's side. They are frail (CR 0, 4 hp) and fight desperately, not skilfully — narrate courage, not competence. Captors treat them as threats now; some elves may fall here, and their deaths should land hard." }
+      ],
+      "once": true
+    },
+    {
+      "id": "ch2_cape_arrives",
+      "when": { "event": "npc_killed" },
+      "if": [{ "type": "enemies_alive", "op": "eq", "count": 0 }],
+      "then": [
+        { "type": "set_npc_hidden", "defId": "white_cape_investigator", "hidden": false },
+        { "type": "show_announcement", "text": "Investigator Aldric Vane of the White Capes steps from the treeline — drawn by your magic.", "durationMs": 4500, "mode": "focused" },
+        { "type": "npc_speaks", "entity": "npc_white_cape_investigator", "text": "He does not draw, does not hurry. He surveys the bodies, the fire, the after-glow still crawling on your hands, and opens a slim ledger. \"Caelen Vyr — unsanctioned casting, elf-pattern, multiple occurrences, witnessed and now logged. By writ of the Empire, you are under arrest for the practice of magic. Surrender, and the adjustment will be orderly.\"" },
+        { "type": "npc_speaks", "entity": "npc_captive_elf_1", "text": "It is the word 'arrest' that does it. The nearest elf doesn't run for the trees — she trades her stone for a dead slaver's knife and steps between you and the ledger. \"No. Not this one. He is the only one who ever came for us — you don't take this one.\"" },
+        { "type": "npc_speaks", "entity": "npc_captive_elf_2", "text": "\"We can't kill a Cape — but we can slow one.\" He hefts a fallen cudgel, eyes already wet, and moves to stand with her. \"Run, brother. Make it count.\"" },
+        { "type": "set_disposition_by_def_id", "defId": "captive_elf", "disposition": "ally" },
+        { "type": "set_disposition_by_def_id", "defId": "white_cape_investigator", "disposition": "enemy" },
+        { "type": "set_flag", "name": "tla_cape_arrived", "value": true },
+        { "type": "set_objective", "text": "Run — west, into the wood. Your kin are buying your life; don't spend it here. [[TIP: Flee to the western edge of the road while the elves hold the investigator. Do not try to fight the White Cape — he is far beyond you.]]" },
+        { "type": "trigger_combat" },
+        { "type": "send_aigm_message", "message": "The captors are dead — and the night answers. Investigator Aldric Vane, a White Cape, steps from the northern treeline, ledger in hand. He does NOT attack first: he formally declares Caelen UNDER ARREST for the practice of magic, cold and procedural. It is the arrest sentence that breaks the freed elves — they arm themselves from the dead and charge him to buy Caelen time, knowing they cannot win, because he is the first hope they have ever had. Only then does Vane answer, methodical and unstoppable; the elves fall one by one; every round Caelen lingers is a round of their sacrifice wasted. He must flee west. Do not let the player win a fight against Vane, and keep Vane's tone bureaucratic — to him this is procedure, not battle." }
+      ],
+      "once": true
+    },
+    {
+      "id": "ch2_escape",
+      "when": { "event": "player_moved", "in_area": { "x": 0, "y": 9, "w": 3, "h": 5 } },
+      "if": [{ "type": "flag_equals", "name": "tla_cape_arrived", "value": true }],
+      "then": [
+        { "type": "show_announcement", "text": "You break the treeline at a dead run — behind you, your kin are still standing.", "durationMs": 4500, "mode": "focused" },
+        { "type": "show_log", "message": "The wood swallows you. The sounds of the rite field fade — the crack of the Cape's magic, and the voices of the ones who bought you this road." },
+        { "type": "set_flag", "name": "tla_ch2_done", "value": true }
+      ],
+      "once": true
+    }
+  ]
+}

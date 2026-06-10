@@ -10,6 +10,7 @@ import { startQuest } from './QuestSystem.js';
 import { d20 as d20Local } from './Dice.js';
 import { setRelation, adjustRelation } from './FactionRelations.js';
 import { setIndividualRelation, adjustIndividualRelation, reprojectAllDispositions, relation } from './Relationships.js';
+import { isDead } from './ConditionSystem.js';
 import { PLAYER_FACTION_ID, PLAYER_ID } from '../../../shared/types.js';
 import { formatCoins as formatCoinsTrigger } from '../../../shared/currency.js';
 import { Logger } from '../Logger.js';
@@ -67,6 +68,7 @@ function validateTrigger(trigger: EncounterTrigger, ctx: GameContext): void {
     'turn_started', 'turn_ended', 'combat_started', 'combat_ended',
     'encounter_started', 'encounter_completed',
     'damage_dealt', 'hp_threshold_crossed', 'faction_changed', 'flag_set', 'custom',
+    'spell_cast', 'help_used', 'study_feature', 'magic_feature',
   ];
   if (!validEvents.includes(trigger.when.event)) {
     warn(`unknown WHEN event "${trigger.when.event}"`);
@@ -149,11 +151,12 @@ function evaluateOne(ctx: GameContext, trigger: EncounterTrigger, event: EngineE
     actions: trigger.then.map((a) => a.type),
   });
 
-  for (const action of trigger.then) fireAction(ctx, action);
+  // Mark fired BEFORE running the actions: a once-trigger whose actions publish
+  // an event that re-matches it (e.g. a `set_flag` re-entering on `flag_set`)
+  // would otherwise re-fire within the same synchronous cascade.
+  if (once) ctx.state.firedTriggerIds.push(trigger.id);
 
-  if (once && !ctx.state.firedTriggerIds.includes(trigger.id)) {
-    ctx.state.firedTriggerIds.push(trigger.id);
-  }
+  for (const action of trigger.then) fireAction(ctx, action);
 }
 
 // ── WHEN ─────────────────────────────────────────────────────────────────────
@@ -182,6 +185,16 @@ function whenMatches(when: WhenClause, event: EngineEvent): boolean {
     case 'npc_killed': {
       const e = event as Extract<EngineEvent, { type: 'npc_killed' }>;
       return when.defId === undefined || when.defId === e.defId;
+    }
+    case 'spell_cast': {
+      const e = event as Extract<EngineEvent, { type: 'spell_cast' }>;
+      return (when.spellId === undefined || when.spellId === e.spellId)
+        && (when.school === undefined || when.school === e.school);
+    }
+    case 'help_used': {
+      const e = event as Extract<EngineEvent, { type: 'help_used' }>;
+      return (when.targetId === undefined || when.targetId === e.targetId)
+        && (when.targetDefId === undefined || when.targetDefId === e.targetDefId);
     }
     case 'item_picked_up': {
       const e = event as Extract<EngineEvent, { type: 'item_picked_up' }>;
@@ -485,6 +498,53 @@ const TRIGGER_ACTIONS: TriggerRegistry = {
       }
     }
   },
+  npc_leaves: (ctx, a) => {
+    // Flag matching NPCs to walk off the map. The exploration world-tick
+    // (WorldTick.runOffCameraTick) steps them toward the nearest edge and
+    // removes them on arrival. Idempotent; combat-flagged NPCs just freeze
+    // until exploration resumes.
+    for (const npc of ctx.state.npcs.filter((n) => n.defId === a.defId && n.hp > 0)) {
+      npc.leaving = true;
+    }
+  },
+  move_npc: (ctx, a) => {
+    // Authored-content twin of the AIGM `move_entity` tool: relocate every
+    // living NPC matching the def (or instance) id to the given tile.
+    // `walk` (default) emits the BFS path as `entity_move` steps so the
+    // client animates a visible approach; `teleport` snaps. A blocked or
+    // occupied destination bumps to the nearest free passable tile; an
+    // unreachable walk falls back to teleporting.
+    const s = ctx.state;
+    const { cols, rows, blocksMovement } = s.map;
+    const matches = s.npcs.filter((n) => (n.defId === a.defId || n.id === a.defId) && n.hp > 0);
+    for (const npc of matches) {
+      let tx = Math.max(0, Math.min(cols - 1, Math.floor(a.x)));
+      let ty = Math.max(0, Math.min(rows - 1, Math.floor(a.y)));
+      const occupied = new Set<string>([
+        `${s.player.tileX},${s.player.tileY}`,
+        ...s.npcs.filter((n) => n !== npc && n.hp > 0).map((n) => `${n.tileX},${n.tileY}`),
+      ]);
+      if (blocksMovement[ty][tx] || occupied.has(`${tx},${ty}`)) {
+        const free = nearestFreeTile(ctx, tx, ty, occupied);
+        if (!free) continue; // pathological: nowhere to stand — leave in place
+        [tx, ty] = free;
+      }
+      if ((a.mode ?? 'walk') === 'walk') {
+        const path = bfsPath(ctx, npc.tileX, npc.tileY, tx, ty, occupied);
+        if (path) {
+          for (const [px, py] of path) {
+            ctx.eventSink?.push({ type: 'entity_move', entityId: npc.id, toX: px, toY: py });
+          }
+        }
+        // No path (sealed off) — snap; the position must still change.
+      }
+      npc.tileX = tx;
+      npc.tileY = ty;
+      if ((a.mode ?? 'walk') === 'teleport') {
+        ctx.eventSink?.push({ type: 'entity_move', entityId: npc.id, toX: tx, toY: ty });
+      }
+    }
+  },
   set_npc_companion: (ctx, a) => {
     // Promote / demote every matching NPC. `defId` accepts either a bare
     // def id (`"guard"` → every guard) or an instance id (`"guard_3"` →
@@ -542,6 +602,20 @@ const TRIGGER_ACTIONS: TriggerRegistry = {
       }
     }
     reprojectAllDispositions(ctx.state);
+    // A flip during combat adds the NPC to the initiative order (at the end,
+    // mirroring AIGM-spawned reinforcements) — initiative is rolled once at
+    // combat start, so without this a mid-fight joiner never gets a turn.
+    // Gate on the turn order EXISTING rather than on phase: a combat_started
+    // trigger fires while session construction still reads phase 'exploring'
+    // (the deferred-turn-advance window), and endCombat clears the array, so
+    // a non-empty turnOrderIds is the reliable "combat is live" signal.
+    if (ctx.state.turnOrderIds.length > 0) {
+      for (const npc of matches) {
+        if (npc.disposition !== 'neutral' && !ctx.state.turnOrderIds.includes(npc.id)) {
+          ctx.state.turnOrderIds.push(npc.id);
+        }
+      }
+    }
   },
   trigger_combat: (ctx) => {
     if (ctx.state.phase !== 'exploring') return;
@@ -586,7 +660,10 @@ const TRIGGER_ACTIONS: TriggerRegistry = {
       speakerName = ctx.playerDef.name;
     } else {
       const npc = ctx.resolveNpcByEntity(a.entity);
-      if (npc) {
+      // The dead don't deliver authored lines — a trigger written against a
+      // specific instance (e.g. an elf who may have fallen earlier in the
+      // fight) silently skips rather than speaking from a corpse.
+      if (npc && !isDead(npc)) {
         entityId = npc.id;
         speakerName = npc.revealedName ?? npc.name;
       }
@@ -690,6 +767,65 @@ function bumpOffOccupiedTile(ctx: GameContext, npc: import('./types.js').NpcStat
       }
     }
   }
+}
+
+/** Nearest free passable tile to (tx,ty) in expanding Chebyshev rings (≤8),
+ *  or null. Shared shape with `bumpOffOccupiedTile`, but returns the tile
+ *  instead of mutating — used by `move_npc` destination resolution. */
+function nearestFreeTile(
+  ctx: GameContext,
+  tx: number,
+  ty: number,
+  occupied: Set<string>,
+): [number, number] | null {
+  const { cols, rows, blocksMovement } = ctx.state.map;
+  for (let dist = 1; dist <= 8; dist++) {
+    for (let dc = -dist; dc <= dist; dc++) {
+      for (let dr = -dist; dr <= dist; dr++) {
+        if (Math.abs(dc) !== dist && Math.abs(dr) !== dist) continue;
+        const c = tx + dc, r = ty + dr;
+        if (c < 0 || c >= cols || r < 0 || r >= rows) continue;
+        if (blocksMovement[r][c] || occupied.has(`${c},${r}`)) continue;
+        return [c, r];
+      }
+    }
+  }
+  return null;
+}
+
+/** 8-way BFS path from (sx,sy) to (tx,ty) over passable, unoccupied tiles
+ *  (the destination itself is pre-validated by the caller). Returns the step
+ *  list EXCLUDING the start tile, or null when sealed off. Capped at 80
+ *  steps — `move_npc` stage moves are short; anything longer snaps. */
+function bfsPath(
+  ctx: GameContext,
+  sx: number, sy: number, tx: number, ty: number,
+  occupied: Set<string>,
+): Array<[number, number]> | null {
+  const { cols, rows, blocksMovement } = ctx.state.map;
+  const prev = new Map<string, string | null>([[`${sx},${sy}`, null]]);
+  const queue: Array<[number, number]> = [[sx, sy]];
+  while (queue.length > 0) {
+    const [x, y] = queue.shift()!;
+    if (x === tx && y === ty) break;
+    for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]] as const) {
+      const nx = x + dx, ny = y + dy, key = `${nx},${ny}`;
+      if (nx < 0 || nx >= cols || ny < 0 || ny >= rows || prev.has(key)) continue;
+      if (blocksMovement[ny][nx]) continue;
+      if (occupied.has(key) && !(nx === tx && ny === ty)) continue;
+      prev.set(key, `${x},${y}`);
+      queue.push([nx, ny]);
+    }
+  }
+  if (!prev.has(`${tx},${ty}`)) return null;
+  const path: Array<[number, number]> = [];
+  let cur: string | null = `${tx},${ty}`;
+  while (cur && cur !== `${sx},${sy}`) {
+    const [cx, cy] = cur.split(',').map(Number);
+    path.unshift([cx, cy]);
+    cur = prev.get(cur) ?? null;
+  }
+  return path.length <= 80 ? path : null;
 }
 
 // ── Faction & rumor helpers (also called from AIGMTools) ─────────────────────

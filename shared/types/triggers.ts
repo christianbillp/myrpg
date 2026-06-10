@@ -36,6 +36,12 @@ export type WhenClause =
    *  button enters a tile picker. */
   | { event: 'magic_feature'; tile: { x: number; y: number } }
   | { event: 'npc_killed'; defId?: string }
+  /** Fires when the player casts a spell. Optional `spellId` / `school` filters
+   *  narrow it (omit to fire on any spell). */
+  | { event: 'spell_cast'; spellId?: string; school?: string }
+  /** Fires when the player uses the Help action to aid a creature. Optional
+   *  `targetId` (instance) / `targetDefId` filters narrow it. */
+  | { event: 'help_used'; targetId?: string; targetDefId?: string }
   | { event: 'item_picked_up'; defId?: string }
   | { event: 'turn_started'; combatantId?: 'player' | string }
   | { event: 'turn_ended'; combatantId?: 'player' | string }
@@ -193,6 +199,27 @@ export type TriggerAction =
    *     no roll should be able to spoil the beat.
    */
   | { type: 'set_npc_hidden'; defId: string; hidden: boolean; hideDC?: number; revealedBy?: 'perception' | 'trigger' }
+  /**
+   * Make every living NPC whose `defId` matches WALK OFF the map. Each marked
+   * NPC steps toward the nearest map edge on every exploration world-tick and
+   * is removed from the encounter once it reaches the edge — so a creature that
+   * is paid off, talked down, or otherwise dismissed visibly departs instead of
+   * blinking out in place. Use for non-lethal "the bandits withdraw into the
+   * trees" resolutions. (For an instant death-removal use `set_npc_dead`.)
+   */
+  | { type: 'npc_leaves'; defId: string }
+  /**
+   * Relocate every living NPC whose `defId` (or instance id) matches to the
+   * given tile — the authored-content twin of the AIGM `move_entity` tool.
+   * `mode: 'walk'` (default) emits `entity_move` steps along a BFS path so
+   * the client animates a visible approach (a hunter closing in, a guard
+   * redeploying); `'teleport'` repositions instantly (off-screen staging).
+   * A blocked / occupied destination bumps to the nearest free passable
+   * tile; an unreachable walk destination falls back to teleport. Multiple
+   * matches fan out around the tile. Not editor-authored (preserved
+   * verbatim on round-trip).
+   */
+  | { type: 'move_npc'; defId: string; x: number; y: number; mode?: 'walk' | 'teleport' }
   /**
    * Mark every living NPC currently in the encounter whose `defId` matches
    * as dead. Sets `hp = 0`, applies the `dead` condition, and (optionally)

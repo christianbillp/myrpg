@@ -1,0 +1,150 @@
+{
+  "id": "the_long_account_ch3",
+  "encounterTitle": "Into Hiding",
+  "description": "Chapter 3 of The Long Account (finale). Caelen leads the survivors of the rite field through a dead imperial waystation at dawn, hunted by Investigator Aldric Vane. Vane tracks by traces of magic — every spell Caelen casts pulls the hunter a stage closer; a quiet crossing never alerts him. One elf is pinned under fallen stone at the ruin's south breach: freeing her is the Help gesture from chapter one, but the falling rubble is loud. The goal is the warren arch — the lit braziers at the south-east — and the ending changes with who comes through it.",
+  "mapId": "the_dead_waystation",
+  "npcIds": ["white_cape_investigator", "captive_elf"],
+  "allyIds": ["captive_elf"],
+  "enemyIds": [],
+  "customIntroduction": "You ran the whole night. The waystation swallows you at dawn — a dead imperial ruin the maps forgot, and beneath it, a warren no Cape has writ to search. Across the broken ground to the south-east, two pairs of braziers still burn beside a shattered arch: the warren mouth, kept lit by whoever went down before you. Vane is in the wood behind you, quartering the ground with patient, lethal certainty — and he hunts the way Capes hunt: by the trace of magic on the air. Keep your hands cold and he is blind. One of your kin is missing since the treeline. Get to the arch.",
+  "customContext": "THE LONG ACCOUNT — CHAPTER 3 (finale). Caelen and one freed elf cross a ruined waystation to reach the WARREN ARCH (the brazier-lit broken arch at the south-east plaza) while INVESTIGATOR ALDRIC VANE hunts them. CORE RULE: Vane tracks MAGIC. He starts far to the north-east and advances in stages — when Caelen pushes deeper into the ruin (unavoidable, slow pressure), and IMMEDIATELY whenever Caelen CASTS A SPELL (the engine relocates him; narrate the lantern light swinging toward the player). A quiet player is never caught; a casting player brings him to the arch approach, and a SECOND cast with him close turns him hostile — a live Mage chase the player can only survive by reaching the arch. THE PINNED ELF: the second survivor of the rite field is trapped under a fallen lintel in the ruin's south breach (the rubble choke). Freeing her = the HELP action, the same gesture as chapter one — but the falling stone is LOUD and brings Vane to the arch approach. Leaving her is silent; Vane will collar her as evidence, and the ending gains its first debt of guilt. ENDINGS (both end the adventure at the arch): with both elves — the oath lands as mercy hardened into purpose; with the elf abandoned — the oath gains guilt. NEVER let the player win a fight against Vane; if combat starts, drive them to run for the arch. Do not reveal the casting rule mechanically — Vane's own lines carry it ('You cannot help yourself, can you').",
+  "objective": "Reach the warren arch — the lit braziers at the south-east — and vanish. [[TIP: Casting any spell tells Vane exactly where you are. Stay quiet, or be quick.]]",
+  "completionFlag": "tla_ch3_done",
+  "completeOnFlagOnly": true,
+  "allowsLongRest": false,
+  "factionRelations": {
+    "white_capes": { "commoners": -20, "party": -20 },
+    "commoners": { "white_capes": -20 },
+    "party": { "white_capes": -20 }
+  },
+  "placementMode": "exact",
+  "placements": [
+    { "role": "player", "x": 4, "y": 16 },
+    { "role": "ally", "index": 0, "x": 5, "y": 17 },
+    { "role": "neutral", "index": 0, "x": 24, "y": 2 },
+    { "role": "neutral", "index": 1, "x": 18, "y": 16 }
+  ],
+  "triggers": [
+    {
+      "id": "ch3_intro",
+      "when": { "event": "encounter_started" },
+      "then": [
+        { "type": "set_disposition_by_def_id", "defId": "white_cape_investigator", "disposition": "neutral" },
+        { "type": "send_aigm_message", "message": "Open inside the ruin at dawn. Vane is a distant silhouette to the north-east — hunting, ledger in hand, not yet aware of exactly where they are. The warren arch burns between its braziers at the south-east. Establish the rule in fiction: Capes hunt by the trace of magic; cold hands keep Caelen invisible. The second elf from the rite field is missing — she is pinned under a fallen lintel at the ruin's south breach." }
+      ],
+      "once": true
+    },
+    {
+      "id": "ch3_caught",
+      "when": { "event": "spell_cast" },
+      "if": [
+        { "type": "flag_equals", "name": "tla_first_cast", "value": true },
+        { "type": "flag_unset", "name": "tla_ch3_done" }
+      ],
+      "then": [
+        { "type": "npc_speaks", "entity": "npc_white_cape_investigator", "text": "\"Twice.\" The ledger closes. \"The file no longer requires you alive.\"" },
+        { "type": "set_disposition_by_def_id", "defId": "white_cape_investigator", "disposition": "enemy" },
+        { "type": "trigger_combat" },
+        { "type": "set_objective", "text": "RUN. The arch — between the braziers, south-east. Nothing else matters now. [[TIP: Vane cannot be beaten. Dash for the arch — reaching it completes the escape even in combat.]]" },
+        { "type": "send_aigm_message", "message": "Caelen cast again with Vane already at the arch approach — the hunt is over and the kill begins. Vane attacks with the full weight of a White Cape. Drive pure flight: the only out is through the arch." }
+      ],
+      "once": true
+    },
+    {
+      "id": "ch3_first_cast",
+      "when": { "event": "spell_cast" },
+      "if": [{ "type": "flag_unset", "name": "tla_first_cast" }],
+      "then": [
+        { "type": "set_flag", "name": "tla_first_cast", "value": true },
+        { "type": "set_flag", "name": "tla_vane_v2", "value": true },
+        { "type": "set_flag", "name": "tla_vane_v3", "value": true },
+        { "type": "move_npc", "defId": "white_cape_investigator", "x": 22, "y": 14, "mode": "walk" },
+        { "type": "npc_speaks", "entity": "npc_white_cape_investigator", "text": "Far across the ruin, a lantern swings around — straight toward the after-glow on your hands. \"There. Elf-pattern.\" His voice carries flat across the stones. \"You cannot help yourself, can you.\"" },
+        { "type": "show_log", "message": "The spell hangs on the dawn air like smoke. Vane is coming, fast and straight — one more breath of magic and he will not bother with the writ." }
+      ],
+      "once": true
+    },
+    {
+      "id": "ch3_progress_hall",
+      "when": { "event": "player_moved", "in_area": { "x": 9, "y": 2, "w": 13, "h": 15 } },
+      "if": [{ "type": "flag_unset", "name": "tla_vane_v2" }],
+      "then": [
+        { "type": "set_flag", "name": "tla_vane_v2", "value": true },
+        { "type": "move_npc", "defId": "white_cape_investigator", "x": 22, "y": 8, "mode": "walk" },
+        { "type": "show_announcement", "text": "Behind you, lantern light sweeps the colonnade. He is inside the ruin.", "durationMs": 3500, "mode": "unfocused" }
+      ],
+      "once": true
+    },
+    {
+      "id": "ch3_progress_east",
+      "when": { "event": "player_moved", "in_area": { "x": 22, "y": 2, "w": 7, "h": 12 } },
+      "if": [{ "type": "flag_unset", "name": "tla_vane_v3" }],
+      "then": [
+        { "type": "set_flag", "name": "tla_vane_v3", "value": true },
+        { "type": "set_flag", "name": "tla_vane_v2", "value": true },
+        { "type": "move_npc", "defId": "white_cape_investigator", "x": 22, "y": 14, "mode": "walk" },
+        { "type": "show_announcement", "text": "Stone turns under a boot, close. He is between you and the arch.", "durationMs": 3500, "mode": "unfocused" }
+      ],
+      "once": true
+    },
+    {
+      "id": "ch3_progress_south",
+      "when": { "event": "player_moved", "in_area": { "x": 13, "y": 17, "w": 9, "h": 3 } },
+      "if": [{ "type": "flag_unset", "name": "tla_vane_v3" }],
+      "then": [
+        { "type": "set_flag", "name": "tla_vane_v3", "value": true },
+        { "type": "set_flag", "name": "tla_vane_v2", "value": true },
+        { "type": "move_npc", "defId": "white_cape_investigator", "x": 22, "y": 14, "mode": "walk" },
+        { "type": "show_announcement", "text": "Stone turns under a boot, close. He is between you and the arch.", "durationMs": 3500, "mode": "unfocused" }
+      ],
+      "once": true
+    },
+    {
+      "id": "ch3_rubble_seen",
+      "when": { "event": "player_moved", "in_area": { "x": 16, "y": 13, "w": 5, "h": 6 } },
+      "then": [
+        { "type": "npc_speaks", "entity": "npc_captive_elf_2", "text": "A hand moves under the fallen lintel at the breach — the missing elf, white with dust, pinned at the hip. \"Go,\" she breathes. \"The stone has me. If you lift it, half the ruin will hear — GO.\"" }
+      ],
+      "once": true
+    },
+    {
+      "id": "ch3_free_elf",
+      "when": { "event": "help_used", "targetId": "captive_elf_2" },
+      "then": [
+        { "type": "set_disposition_by_def_id", "defId": "captive_elf_2", "disposition": "ally" },
+        { "type": "set_flag", "name": "tla_elf_freed", "value": true },
+        { "type": "show_log", "message": "The lintel comes off her with a crack that rolls across the ruin like a quarry blast. She is free — and the whole wood knows where you are." },
+        { "type": "npc_speaks", "entity": "npc_captive_elf_2", "text": "She grips your arm, hauling herself up. \"You absolute fool. Twice now you've come for one of us when running was the wise thing.\" Her eyes are wet. \"Make the arch worth it.\"" },
+        { "type": "set_flag", "name": "tla_vane_v3", "value": true },
+        { "type": "set_flag", "name": "tla_vane_v2", "value": true },
+        { "type": "move_npc", "defId": "white_cape_investigator", "x": 22, "y": 14, "mode": "walk" },
+        { "type": "show_announcement", "text": "The crack of stone echoes off the hall. The lantern turns toward it.", "durationMs": 3500, "mode": "unfocused" }
+      ],
+      "once": true
+    },
+    {
+      "id": "ch3_escape_with_kin",
+      "when": { "event": "player_moved", "in_area": { "x": 24, "y": 15, "w": 5, "h": 5 } },
+      "if": [{ "type": "flag_equals", "name": "tla_elf_freed", "value": true }],
+      "then": [
+        { "type": "show_announcement", "text": "You pull the dark down behind you. All of you. The hunt loses your trail.", "durationMs": 4500, "mode": "focused" },
+        { "type": "send_aigm_message", "message": "Caelen ushers the last of his kin through the arch and the warren takes them — ALL of them; nobody was left for the Cape's ledger. In the cold dark he does not feel relief. He feels the ledger's other side. He names it aloud to the thing that holds his soul: the White Capes took his people off the rolls and called it order; he will take the Capes off the world and call it the same. The adventure ends here — Caelen Vyr, hidden among the people he saved, beginning the long account of his revenge." },
+        { "type": "set_flag", "name": "tla_ch3_done", "value": true }
+      ],
+      "once": true
+    },
+    {
+      "id": "ch3_escape_alone",
+      "when": { "event": "player_moved", "in_area": { "x": 24, "y": 15, "w": 5, "h": 5 } },
+      "if": [{ "type": "flag_unset", "name": "tla_elf_freed" }],
+      "then": [
+        { "type": "set_flag", "name": "tla_elf_left_behind", "value": true },
+        { "type": "show_announcement", "text": "You pull the dark down behind you. Behind, in the ruin, a lantern stops over the breach.", "durationMs": 4500, "mode": "focused" },
+        { "type": "npc_speaks", "entity": "npc_white_cape_investigator", "text": "Far behind you, at the rubble, Vane's voice — unhurried, already writing. \"One elf, female, pinned. Material witness to unsanctioned casting. Entered into evidence.\"" },
+        { "type": "send_aigm_message", "message": "Caelen escapes into the warren — but the pinned elf was left in the rubble, and Vane collars her as evidence on his way out. The oath in the dark still comes, but it tastes different now: the White Capes took his people off the rolls and called it order; he will answer in kind — and the first entry in HIS account is the one he left behind. End the adventure on that weight: purpose, and the first debt of guilt." },
+        { "type": "set_flag", "name": "tla_ch3_done", "value": true }
+      ],
+      "once": true
+    }
+  ]
+}

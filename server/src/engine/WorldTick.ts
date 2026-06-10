@@ -81,6 +81,11 @@ export function runOffCameraTick(ctx: GameContext): GameEvent[] {
   // ally AI path, and routine NPCs freeze on their current tile.
   if (s.phase === 'exploring') {
     runSimNpcTicks(ctx, tickId, events);
+    // Walk any departing NPCs (flagged by `npc_leaves`) toward the nearest map
+    // edge and remove them once they reach it. Runs before the hostility check
+    // and the NPC-vs-NPC pass so a creature that has reached the edge is gone
+    // from `s.npcs` for the remainder of the tick.
+    stepLeavingNpcs(ctx, events);
   }
 
   // Escalate to combat if any living NPC turns hostile to the party while
@@ -408,4 +413,70 @@ function decayAlertness(ctx: GameContext, tickId: number): void {
       Logger.log('ai.alertness_decayed', { npcId: npc.id, to: 'calm', tickId });
     }
   }
+}
+
+/** Tiles a departing NPC covers per real-time tick — a brisk walk, fast enough
+ *  that a creature near the edge clears the map in a single tick rather than
+ *  lingering for several. */
+const LEAVE_TILES_PER_TICK = 8;
+
+/**
+ * Advance every NPC flagged `leaving` toward the nearest map edge, emitting an
+ * `entity_move` per step so the client animates the exit, and remove it from
+ * the encounter the moment it reaches an edge. Boxed-in NPCs simply retry on
+ * the next tick. Set the flag with the `npc_leaves` trigger action.
+ */
+function stepLeavingNpcs(ctx: GameContext, events: GameEvent[]): void {
+  const s = ctx.state;
+  const { cols, rows, blocksMovement } = s.map;
+  const atEdge = (x: number, y: number): boolean => x === 0 || y === 0 || x === cols - 1 || y === rows - 1;
+
+  for (const npc of s.npcs.filter((n) => n.leaving && n.hp > 0)) {
+    let budget = LEAVE_TILES_PER_TICK;
+    while (budget-- > 0 && !atEdge(npc.tileX, npc.tileY)) {
+      const occupied = s.npcs
+        .filter((n) => n !== npc && n.hp > 0)
+        .map((n): [number, number] => [n.tileX, n.tileY]);
+      const next = stepToNearestEdge(npc.tileX, npc.tileY, cols, rows, blocksMovement, occupied);
+      if (!next) break; // boxed in this tick — try again next tick
+      npc.tileX = next[0];
+      npc.tileY = next[1];
+      events.push({ type: 'entity_move', entityId: npc.id, toX: next[0], toY: next[1] });
+    }
+    if (atEdge(npc.tileX, npc.tileY)) {
+      ctx.addLog({ left: `${npc.name} slips away past the edge of the map.`, style: 'status' });
+      ctx.removeNpc(npc.id);
+    }
+  }
+}
+
+/** One greedy step toward whichever map edge is closest, sidestepping a blocked
+ *  tile along the way. Returns the next tile, or `null` if every candidate is
+ *  blocked this tick. */
+function stepToNearestEdge(
+  x: number, y: number, cols: number, rows: number,
+  blocksMovement: boolean[][], occupied: [number, number][],
+): [number, number] | null {
+  const blocked = (nx: number, ny: number): boolean =>
+    nx < 0 || ny < 0 || nx >= cols || ny >= rows
+    || blocksMovement[ny][nx]
+    || occupied.some(([ox, oy]) => ox === nx && oy === ny);
+
+  const cands = [
+    { dist: x, dx: -1, dy: 0 },
+    { dist: cols - 1 - x, dx: 1, dy: 0 },
+    { dist: y, dx: 0, dy: -1 },
+    { dist: rows - 1 - y, dx: 0, dy: 1 },
+  ].sort((a, b) => a.dist - b.dist);
+
+  for (const c of cands) {
+    if (!blocked(x + c.dx, y + c.dy)) return [x + c.dx, y + c.dy];
+    // Sidestep around an obstacle while still advancing on the primary axis.
+    if (c.dx !== 0) {
+      for (const sy of [-1, 1]) if (!blocked(x + c.dx, y + sy)) return [x + c.dx, y + sy];
+    } else {
+      for (const sx of [-1, 1]) if (!blocked(x + sx, y + c.dy)) return [x + sx, y + c.dy];
+    }
+  }
+  return null;
 }

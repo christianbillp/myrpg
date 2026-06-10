@@ -50,6 +50,7 @@ import { doCommandSummon, checkSummonTether, registerSummonHooks } from './Summo
 import { registerSoundHooks } from './Sound.js';
 import { registerAwarenessHooks, registerCompanionFollowHooks } from './npcSim/index.js';
 import { registerPresentationHooks } from './PresentationHooks.js';
+import { registerWarlockHooks } from './WarlockFeatures.js';
 import { maybeBreakConcentration, endConcentration } from './ConcentrationSystem.js';
 import { doUseFeature } from './FeatureRegistry.js';
 import { buildSessionState, SavedMapRecord } from './SessionBuilder.js';
@@ -70,6 +71,7 @@ import { buildLevelUpPreview, applyLevelUp, applyLevelUpHistory, syncCharacterTr
 import { canLevelUp } from '../../../shared/xpTable.js';
 import type { LevelUpPreview, LevelUpChoices, LongRestPreview, LongRestChoices, ClassDef } from '../../../shared/types.js';
 import { buildLongRestPreview, applyLongRest } from './Resting.js';
+import { monsterLimitedUses } from './SpawnHelpers.js';
 import { dispatchPlayerAction } from './playerActions/registry.js';
 
 export interface ActionResult {
@@ -97,6 +99,7 @@ const ENGINE_HOOKS: Array<(ctx: GameContext) => void> = [
   registerAwarenessHooks,
   registerCompanionFollowHooks,
   registerPresentationHooks,
+  registerWarlockHooks,
 ];
 
 let uidCounter = 0;
@@ -676,6 +679,7 @@ export class GameEngine {
       tileX: tx, tileY: ty,
       disposition: 'enemy', attitude: 'hostile', factionId: def.id,
       hp: def.maxHp, maxHp: def.maxHp,
+      ...monsterLimitedUses(def),
       isActive: false,
       reactionUsed: false, conditions: [], inventoryIds: [], ongoingEffects: [],
     };
@@ -1173,6 +1177,11 @@ export class GameEngine {
     const s = this.state;
     const dying = s.npcs.find((n) => n.id === id);
     if (!dying) return;
+    // Most callers reach here with hp already at 0 (the damage paths clamp
+    // first), but direct kills (devCompleteEncounter, NPC-cast AoE) must not
+    // leave a "dead" NPC standing at full hp — isDead() and enemies_alive
+    // both read hp.
+    dying.hp = 0;
     for (const defId of dying.inventoryIds) {
       s.mapItems.push({ id: `e${++uidCounter}`, defId, tileX: dying.tileX, tileY: dying.tileY });
     }
@@ -1303,16 +1312,20 @@ export class GameEngine {
       grappleableTargetIds = adj.filter((n) => !n.conditions.includes('grappled')).map((n) => n.id);
     }
 
-    // Help / Assist an Attack (US-057): an adjacent enemy + a living ally to benefit.
+    // Help (US-057): distract an adjacent enemy so a living ally gets Advantage,
+    // OR aid an adjacent neutral creature (e.g. free a captive — free out of
+    // combat). Ready: Action + Reaction free, not already readied, a living enemy.
     let canHelp = false;
-    // Ready (US-057): Action + Reaction free, not already readied, a living enemy.
     let canReady = false;
+    const adjNeutral = s.npcs.some((n) => n.disposition === 'neutral' && n.hp > 0 && chebyshev(p.tileX, p.tileY, n.tileX, n.tileY) <= 1);
     if (Guard.canSpendAction(this.ctx)) {
       const adjEnemy = s.npcs.some((n) => n.disposition === 'enemy' && n.hp > 0 && chebyshev(p.tileX, p.tileY, n.tileX, n.tileY) <= 1);
       const livingAlly = s.npcs.some((n) => n.disposition === 'ally' && n.hp > 0);
-      canHelp = adjEnemy && livingAlly;
+      canHelp = (adjEnemy && livingAlly) || adjNeutral;
       canReady = phase === 'player_turn' && !p.reactionUsed && !p.readiedAttack
         && s.npcs.some((n) => n.disposition === 'enemy' && n.hp > 0);
+    } else if (phase === 'exploring' && adjNeutral) {
+      canHelp = true;
     }
 
     // Attunement (US-124): magic + requiresAttunement items the player holds,

@@ -1,0 +1,128 @@
+{
+  "id": "the_long_account_ch1",
+  "encounterTitle": "The Roadside Cage",
+  "description": "Chapter 1 of The Long Account. Two bandit slavers hold a pair of elves roped to a stake for a bounty — alive, since a corpse fetches nothing. The objective is to free the captives; getting rid of the bandits by ANY means achieves it. They start neutral and unaware: Caelen can talk them down (bribe, persuade, or intimidate them into leaving), drive them off, or kill them. Attacking or casting a spell provokes them to fight. Once the bandits are gone, the player frees each elf with the Help action; each thanks Caelen but warns that magic is dangerous and illegal. The chapter ends when both elves are freed.",
+  "mapId": "the_wardstone_in_the_wood",
+  "npcIds": ["captive_elf", "captive_elf", "bandit", "bandit"],
+  "allyIds": [],
+  "enemyIds": [],
+  "conversationOverrides": { "bandit": "bandit_slaver_parley" },
+  "customIntroduction": "Word reached you in the dark places you keep now: bandits working the wardstone wood, taking elves off the road to sell to whoever still pays for unrostered flesh. You came up through the trees and stopped in their shadow, unseen — two of your kin kneel roped to a stake in the open clearing ahead, unharmed; a corpse fetches nothing at market. Two bandits loiter over them, bored and watchful, with no idea you're here. The treeline hides you. Free your kin — how you deal with the men holding them is yours to choose.",
+  "customContext": "THE LONG ACCOUNT — CHAPTER 1. An elf Fiend-pact Warlock (Caelen Vyr) frees two captive elves from bandit slavers. THE GOAL IS THE RESCUE, NOT THE KILL — getting rid of the bandits by any means frees the captives. SETUP: Caelen starts CONCEALED in the western treeline with no line of sight to the camp. The two bandits and the two roped elves are out in an open eastern clearing. The bandits start NEUTRAL and unaware — they are greedy road-slavers, not zealots, and would rather keep the easy coin than die for it. APPROACHES: (a) PARLEY — if Caelen walks up openly a scripted conversation opens; he can buy the captives, or talk/scare the bandits into leaving (Persuasion/Intimidation DC 13). Do NOT voice the bandits during that scripted parley unless the player picks the free-talk choice. (b) STEALTH/COMBAT — Caelen can open with a surprise attack from the trees, or just charge; attacking or casting a spell turns the bandits hostile and starts the fight. (c) If Caelen uses MAGIC, the bandits are shocked and frightened: elven casting is rare and viciously suppressed by the White Capes — to them it's like watching a dead man stand up — and they turn on him. ONCE THE BANDITS ARE GONE (paid off, driven off, or killed): the captives are still roped to the stake; Caelen must use the Help action on EACH elf to cut them free. Each freed elf thanks him but warns that using magic is dangerous and illegal in the Reach. The chapter ends once BOTH elves are freed. (Engine: bandits spawn neutral; the faction override pins bandits↔party AND bandits↔commoners to neutral so a hidden player is never auto-discovered and the bandits never turn on their captives — a provoke writes an individual hostile link that overrides it. The `tla_bandits_gone` flag — set on parley success OR on both bandits dying — unlocks freeing.)",
+  "objective": "Free your two kin from the bandit slavers — talk them down, drive them off, or cut them down.",
+  "completionFlag": "tla_ch1_done",
+  "completeOnFlagOnly": true,
+  "allowsLongRest": false,
+  "factionRelations": {
+    "bandits": { "commoners": 0, "party": 0 },
+    "commoners": { "bandits": 0 },
+    "party": { "bandits": 0 }
+  },
+  "placementMode": "exact",
+  "placements": [
+    { "role": "player", "x": 3, "y": 11 },
+    { "role": "neutral", "index": 0, "x": 24, "y": 10 },
+    { "role": "neutral", "index": 1, "x": 24, "y": 12 },
+    { "role": "neutral", "index": 2, "x": 23, "y": 10 },
+    { "role": "neutral", "index": 3, "x": 23, "y": 12 }
+  ],
+  "triggers": [
+    {
+      "id": "ch1_intro",
+      "when": { "event": "encounter_started" },
+      "then": [{ "type": "send_aigm_message", "message": "Open on the clearing: two bandits loitering over two elves roped to a stake, with no idea Caelen is watching from the trees. The bandits are neutral for now — they keep the captives alive (worth coin). Let Caelen choose his approach. Don't force a fight; combat only begins if he attacks, casts, or refuses the parley." }],
+      "once": true
+    },
+    {
+      "id": "ch1_parley",
+      "when": { "event": "player_moved", "in_area": { "x": 18, "y": 8, "w": 4, "h": 7 } },
+      "if": [
+        { "type": "phase", "in": ["exploring"] },
+        { "type": "flag_unset", "name": "tla_bandits_gone" }
+      ],
+      "then": [
+        { "type": "start_conversation", "npcRef": "npc_bandit_1", "conversationId": "bandit_slaver_parley" }
+      ],
+      "once": true
+    },
+    {
+      "id": "ch1_combat_start",
+      "when": { "event": "combat_started" },
+      "if": [{ "type": "flag_unset", "name": "tla_combat_dialog_done" }],
+      "then": [
+        { "type": "set_disposition_by_def_id", "defId": "bandit", "disposition": "enemy" },
+        { "type": "npc_speaks", "entity": "npc_bandit_1", "text": "Far enough! Another knife-ear sniffing round our stock — sell this one too, or just bleed it?" },
+        { "type": "npc_speaks", "entity": "npc_bandit_2", "text": "No witnesses. Put it down and we'll have the whole lot to market by dusk." },
+        { "type": "send_aigm_message", "message": "The bandits have turned on Caelen and the fight is on. They are greedy slaver-types who clock him as just another elf to sell or kill — they have no idea he's a warlock yet. Play them as cruel and confident, closing in for an easy capture." }
+      ],
+      "once": true
+    },
+    {
+      "id": "ch1_magic_reaction",
+      "when": { "event": "spell_cast" },
+      "if": [{ "type": "flag_unset", "name": "tla_bandits_gone" }],
+      "then": [
+        { "type": "set_flag", "name": "tla_combat_dialog_done", "value": true },
+        { "type": "set_disposition_by_def_id", "defId": "bandit", "disposition": "enemy" },
+        { "type": "npc_speaks", "entity": "npc_bandit_1", "text": "An ELF? Casting?!" },
+        { "type": "npc_speaks", "entity": "npc_bandit_2", "text": "The Capes hang elves for less than that — what ARE you?!" },
+        { "type": "trigger_combat" },
+        { "type": "send_aigm_message", "message": "Caelen has just used magic in front of the bandits. Have them react with real fear and disbelief — an elf wielding magic is rare and viciously suppressed by the White Capes; to these bandits it's like watching a dead man stand up. Terrified but cornered, they go for him." }
+      ],
+      "once": true
+    },
+    {
+      "id": "ch1_bandits_down",
+      "when": { "event": "npc_killed", "defId": "bandit" },
+      "if": [{ "type": "enemies_alive", "op": "eq", "count": 0 }],
+      "then": [
+        { "type": "set_flag", "name": "tla_bandits_gone", "value": true }
+      ],
+      "once": true
+    },
+    {
+      "id": "ch1_bandits_gone",
+      "when": { "event": "flag_set", "name": "tla_bandits_gone" },
+      "then": [
+        { "type": "set_objective", "text": "Free your kin — they're still roped to the stake. [[TIP: Stand next to each captive and use the Help action to cut them loose.]]" },
+        { "type": "show_log", "message": "The bandits are gone. Your kin strain against the ropes — you'll have to free them by hand. (Stand adjacent to each elf and use the HELP action.)" }
+      ],
+      "once": true
+    },
+    {
+      "id": "ch1_free_elf1",
+      "when": { "event": "help_used", "targetId": "captive_elf_1" },
+      "if": [{ "type": "flag_equals", "name": "tla_bandits_gone", "value": true }],
+      "then": [
+        { "type": "set_disposition_by_def_id", "defId": "captive_elf_1", "disposition": "ally" },
+        { "type": "npc_speaks", "entity": "npc_captive_elf_1", "text": "\"Thank you — gods, thank you.\" The elf rubs raw wrists and lowers their voice. \"But that fire on your hand… hide it. They hang us for far less than magic. It's death, and it's against their law, and they are always watching.\"" },
+        { "type": "set_flag", "name": "tla_elf1_freed", "value": true }
+      ],
+      "once": true
+    },
+    {
+      "id": "ch1_free_elf2",
+      "when": { "event": "help_used", "targetId": "captive_elf_2" },
+      "if": [{ "type": "flag_equals", "name": "tla_bandits_gone", "value": true }],
+      "then": [
+        { "type": "set_disposition_by_def_id", "defId": "captive_elf_2", "disposition": "ally" },
+        { "type": "npc_speaks", "entity": "npc_captive_elf_2", "text": "\"You came for us. No one comes for us.\" The second elf stares at the after-glow around your fingers, frightened and grateful in equal measure. \"Whatever you paid for that power — be careful. The White Capes will burn the whole wood to find a caster. Magic is a death sentence out here.\"" },
+        { "type": "set_flag", "name": "tla_elf2_freed", "value": true }
+      ],
+      "once": true
+    },
+    {
+      "id": "ch1_both_freed",
+      "when": { "event": "flag_set" },
+      "if": [
+        { "type": "flag_equals", "name": "tla_elf1_freed", "value": true },
+        { "type": "flag_equals", "name": "tla_elf2_freed", "value": true }
+      ],
+      "then": [
+        { "type": "show_log", "message": "Both elves are free. They fall in behind you, glancing at the treeline — and at your hands — as you lead them out of the clearing." },
+        { "type": "set_flag", "name": "tla_ch1_done", "value": true }
+      ],
+      "once": true
+    }
+  ]
+}

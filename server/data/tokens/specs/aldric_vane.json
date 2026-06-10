@@ -1,0 +1,18 @@
+{
+  "id": "aldric_vane",
+  "slots": {
+    "body": "bordered",
+    "ears": "round_small",
+    "face": "pear",
+    "beard": "goatee_pointed",
+    "eyes": "normal",
+    "mouth": "small_line",
+    "hair": "ponytail",
+    "accessory": "war_paint_h"
+  },
+  "palette": {
+    "body": "#ffffff",
+    "skin": "#e0b083",
+    "hair": "#50281b"
+  }
+}

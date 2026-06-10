@@ -1,0 +1,9 @@
+{
+  "id": "captive_elf",
+  "name": "Captive Elf",
+  "monsterClass": "commoner",
+  "color": 9498256,
+  "persona": "You are one of the Reach's elves, struck from the imperial rolls and herded off by force. You are frightened but not broken. When the one who frees you is also an elf — and clearly something more — you do not ask what bargain bought that power. You are only grateful, and quietly afraid of what it cost him.",
+  "tokenAsset": "/tokens/monster_commoner.svg",
+  "factionId": "commoners"
+}

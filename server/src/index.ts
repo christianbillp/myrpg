@@ -1958,6 +1958,10 @@ interface EncounterDefJson {
    *  Mirrored into `GameState.encounterCompletionFlag` so the
    *  `encounter_completed` engine event fires when the flag is set. */
   completionFlag?: string;
+  /** When true, clearing the enemies does NOT complete the encounter — only the
+   *  `completionFlag` being set does. For encounters where combat is a step, not
+   *  the objective (kill the captors, THEN free the captives). */
+  completeOnFlagOnly?: boolean;
   tileProperties?: import("./engine/types.js").EncounterTileProperty[];
   startingZones?: import("./engine/types.js").StartingZonesLayer;
   placementMode?: 'zones' | 'exact';
@@ -2052,6 +2056,7 @@ async function startAdventureChapter(
     customContext: encDef.customContext,
     customObjective: encDef.objective,
     completionFlag: encDef.completionFlag,
+    completeOnFlagOnly: encDef.completeOnFlagOnly,
     tileProperties: encDef.tileProperties,
     startingZones: encDef.startingZones,
     placementMode: encDef.placementMode,
@@ -2207,6 +2212,7 @@ async function startAdventureRest(
     customContext: encDef.customContext,
     customObjective: encDef.objective,
     completionFlag: encDef.completionFlag,
+    completeOnFlagOnly: encDef.completeOnFlagOnly,
     tileProperties: encDef.tileProperties,
     startingZones: encDef.startingZones,
     placementMode: encDef.placementMode,
@@ -2609,6 +2615,7 @@ server.post<{
     customContext: encDef.customContext,
     customObjective: encDef.objective,
     completionFlag: encDef.completionFlag,
+    completeOnFlagOnly: encDef.completeOnFlagOnly,
     tileProperties: encDef.tileProperties,
     startingZones: encDef.startingZones,
     placementMode: encDef.placementMode,

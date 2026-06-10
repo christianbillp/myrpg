@@ -1,0 +1,114 @@
+{
+  "id": "bandit_slaver_parley",
+  "defaultParticipants": ["player", "npc_self"],
+  "startNode": "intro",
+  "nodes": [
+    {
+      "id": "intro",
+      "lines": [
+        "The nearer bandit steps between you and the stake, hand on his hilt, eyes flicking to your ears. \"Far enough. You walk like you've got business — and we're the only business on this road. State it, knife-ear, before we decide you're cargo too.\""
+      ],
+      "choices": [
+        {
+          "label": "(Offer 20 gp — buy the two at the stake.)",
+          "visibleIf": [{ "type": "balance_cp", "op": "ge", "value": 2000 }],
+          "actions": [
+            { "type": "adjust_player_balance_cp", "deltaCp": -2000, "reason": "buying the captive elves' freedom" }
+          ],
+          "next": "bought_off"
+        },
+        {
+          "label": "[Persuasion DC 13] The White Capes are sweeping this wood for casters. You don't want to be standing over roped elves when they ride through.",
+          "check": { "skill": "persuasion", "dc": 13 },
+          "onPass": { "next": "talked_down" },
+          "onFail": { "next": "parley_sours" }
+        },
+        {
+          "label": "[Intimidation DC 13] There are two of you, and the wood is very quiet. Walk away — or don't walk at all.",
+          "check": { "skill": "intimidation", "dc": 13 },
+          "onPass": { "next": "scared_off" },
+          "onFail": { "next": "parley_sours" }
+        },
+        { "label": "(Say nothing. Draw on them.)", "next": "to_blows" },
+        { "label": "(Speak with them freely.)", "openAigm": true }
+      ]
+    },
+    {
+      "id": "bought_off",
+      "lines": [
+        "He bites the coin, grunts, and waves his partner back from the stake. \"Hah. Paying for what you could've taken — that's elves for you. They're yours, knife-ear.\" The two of them gather their gear and melt back into the trees."
+      ],
+      "onEnter": [
+        { "type": "set_flag", "name": "tla_bandits_gone", "value": true },
+        { "type": "npc_leaves", "defId": "bandit" },
+        { "type": "award_xp", "amount": 40 }
+      ],
+      "ends": true,
+      "choices": []
+    },
+    {
+      "id": "talked_down",
+      "lines": [
+        "He looks past you, down the road, and something in his face does the sum. \"...Tch. Not worth a Cape's noose, the two of 'em.\" He spits, jerks his head at his partner. \"Keep your strays.\" They back off the clearing and are gone into the wood."
+      ],
+      "onEnter": [
+        { "type": "set_flag", "name": "tla_bandits_gone", "value": true },
+        { "type": "npc_leaves", "defId": "bandit" },
+        { "type": "award_xp", "amount": 60 }
+      ],
+      "ends": true,
+      "choices": []
+    },
+    {
+      "id": "scared_off",
+      "lines": [
+        "The smaller one is already stepping back, hands rising. \"Easy. Easy — they're not worth dying over.\" The nearer bandit holds your eye a breath longer, then follows him off into the trees, swearing under his breath."
+      ],
+      "onEnter": [
+        { "type": "set_flag", "name": "tla_bandits_gone", "value": true },
+        { "type": "npc_leaves", "defId": "bandit" },
+        { "type": "award_xp", "amount": 60 }
+      ],
+      "ends": true,
+      "choices": []
+    },
+    {
+      "id": "parley_sours",
+      "lines": [
+        "He smiles, slow and unimpressed. \"Words. We've heard a lot of words on this road.\" His hand tightens on the hilt. \"Last chance — pay, or back off this clearing while you've still got the legs for it.\""
+      ],
+      "choices": [
+        {
+          "label": "(Offer 20 gp — buy the two at the stake.)",
+          "visibleIf": [{ "type": "balance_cp", "op": "ge", "value": 2000 }],
+          "actions": [
+            { "type": "adjust_player_balance_cp", "deltaCp": -2000, "reason": "buying the captive elves' freedom" }
+          ],
+          "next": "bought_off"
+        },
+        { "label": "Back away — leave them for now.", "next": "backed_off" },
+        { "label": "(Say nothing. Draw on them.)", "next": "to_blows" }
+      ]
+    },
+    {
+      "id": "backed_off",
+      "lines": [
+        "\"Wise,\" he calls after you, not bothering to follow. \"They'll keep. So will we.\""
+      ],
+      "ends": true,
+      "choices": []
+    },
+    {
+      "id": "to_blows",
+      "lines": [
+        "\"Cargo it is, then.\" Steel rasps free of leather."
+      ],
+      "onEnter": [
+        { "type": "set_disposition_by_def_id", "defId": "bandit", "disposition": "enemy" },
+        { "type": "trigger_combat" }
+      ],
+      "ends": true,
+      "choices": []
+    }
+  ]
+}

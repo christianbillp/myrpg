@@ -50,7 +50,10 @@ export function registerEncounterProgress(ctx: GameContext): void {
     const partyView = { id: PLAYER_ID, factionId: PLAYER_FACTION_ID } as const;
     const enemiesAlive = s.npcs.some((n) => n.hp > 0
       && isHostileTo(s, partyView, { id: n.id, factionId: n.factionId }));
-    // Hold completion while a rite is still pending (see EncounterLifecycle).
+    // Hold completion while a rite is still pending (see EncounterLifecycle), or
+    // when the encounter opts into flag-only completion (combat is a step, not
+    // the objective — only `completionFlag` finishes it).
+    if (s.encounterCompleteOnFlagOnly) return;
     if (!enemiesAlive && !hasPendingRite(s)) s.encounterComplete = true;
   }, /*priority*/ 40);
 

@@ -50,6 +50,8 @@ export function registerEncounterLifecycle(ctx: GameContext): void {
       && isHostileTo(s, partyView, { id: n.id, factionId: n.factionId }));
     // A pending rite (an un-fired `magic_feature` trigger) is the real objective
     // — clearing the enemies isn't enough. Hold completion until it's performed.
+    // Likewise `completeOnFlagOnly` defers entirely to the completion flag.
+    if (s.encounterCompleteOnFlagOnly) return;
     if (!enemiesAlive && !hasPendingRite(s)) fireCompleted();
   }, /*priority*/ 30);
 
