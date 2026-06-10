@@ -70,7 +70,11 @@ easy to shrink."
    (apply damage, set disposition, request an ability check, …) that mutate the
    same `GameState`. See [aigm.md](./aigm.md) and [aigm-tools.md](./aigm-tools.md).
 5. **Persistence.** Save state is written server-side on every encounter
-   transition and read back on startup.
+   transition and read back on startup — world / character / adventure save
+   files and their load migrations live in `server/src/persistence/saves.ts`
+   (dependency-injected at boot via `initSavesPersistence`). The server
+   enforces one live session per character and gates
+   `/adventure/:characterId/advance` on `encounterComplete`.
 
 ## The rules engine (`server/src/engine/`)
 
@@ -79,18 +83,26 @@ The engine is a set of focused modules that operate on `GameState`. Notable ones
 - **Combat** — `CombatSystem` (attack/damage resolution, masteries), `CombatFlow`
   (turn order, death saves, end-of-turn hooks), `CombatActions` (player actions).
 - **Enemy/ally AI** — `EnemyAI`, `NpcTurnRunners` (target selection, movement).
-- **Spells** — `SpellSystem` (the generic resolver), plus per-system modules like
-  `SpiritGuardiansSystem`, `SummonSystem`, `ConcentrationSystem`.
+- **Spells** — `SpellSystem` (cast entry + attack/save/heal resolvers) layered
+  over `SpellPrimitives` (caster math, damage application), `SpellZones`
+  (placed-area spells), and `SpellUtilityResolvers` (the buff/cure/dispel
+  dispatcher); NPC-side casting in `NpcSpellcasting` + `NpcConcentration`;
+  per-system modules like `SpiritGuardiansSystem`, `SummonSystem`,
+  `ConcentrationSystem`.
 - **Conditions & buffs** — `ConditionSystem`, `Buffs` (the modifier-derived buff
   layer), `EquipmentSystem` (AC/attack derivation).
 - **World** — `TriggerSystem`, factions, `Vision`, `WorldTick`, resting.
-- **The bus** — an `EventBus` carries `GameEvent`s that decouple producers
-  (damage, movement) from subscribers (sound, hide-clearing, thresholds).
+- **The bus** — an `EventBus` carries `EngineEvent`s that decouple producers
+  (damage, movement) from subscribers (sound, hide-clearing, thresholds);
+  `PresentationHooks` projects them into the ordered `GameEvent` beat stream
+  the client animates (see
+  [systems/animation-timeline.md](./systems/animation-timeline.md)).
 
 Each concern is one module so features can be added or removed without rippling
 changes. The detailed per-rule specification is in
-[systems/srd-rules.md](./systems/srd-rules.md) and
-[systems/content-generation.md](./systems/content-generation.md).
+[systems/srd-rules.md](./systems/srd-rules.md),
+[systems/content-generation.md](./systems/content-generation.md), and
+[systems/animation-timeline.md](./systems/animation-timeline.md).
 
 ## Dev commands
 

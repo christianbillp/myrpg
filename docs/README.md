@@ -30,6 +30,8 @@ SRD 5.2.1 RPG with an AI Game Master. Start with the signpost for your role.
 - [design/aigm-tools.md](./design/aigm-tools.md) — the AIGM tool catalog.
 - [design/systems/srd-rules.md](./design/systems/srd-rules.md) — detailed spec for the SRD rule systems.
 - [design/systems/content-generation.md](./design/systems/content-generation.md) — detailed spec for content generation & the AIGM-driven world.
+- [design/systems/npc-simulation.md](./design/systems/npc-simulation.md) — the off-camera living world: world ticks, alertness, routines, companions (US-094).
+- [design/systems/animation-timeline.md](./design/systems/animation-timeline.md) — the ordered combat-beat timeline the client animates.
 
 **Guides** — task recipes.
 - [guides/getting-started.md](./guides/getting-started.md) — run it locally.

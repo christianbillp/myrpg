@@ -271,7 +271,7 @@ For all other tools (`reveal_npc_name`, `set_disposition`, `award_gold`, …) th
 | File | Purpose |
 |------|---------|
 | `server/src/aigm.ts` | Conversation loop — prompt construction, prompt-cache markers, streaming Claude API call, retry/backoff, history summarization, state refresh, tool dispatch |
-| `server/src/engine/AIGMTools.ts` | Tool schema definitions (`buildAIGMTools`), `applyAIGMTool` switch, per-turn guards (`resetTurnGuards` — quest/XP double-credit detection) |
+| `server/src/engine/AIGMTools.ts` | Tool schema definitions (`buildAIGMTools`), the `AIGM_TOOL_HANDLERS` registry dispatched by `applyAIGMTool` (adding a tool = one schema + one handler entry, no central switch), per-turn guards (`resetTurnGuards` — quest/XP double-credit detection) |
 | `server/src/engine/GameEngine.ts` | Engine methods called by `applyAIGMTool` |
 | `server/src/engine/ConditionSystem.ts` | Condition constants and predicate functions |
 | `server/src/engine/CombatSystem.ts` | Roll functions: `rollSkillCheck`, `rollSavingThrow`, `rollPlayerAttackVsAc`, `rollNpcAttackVsAc`, `rollOneInitiative` |

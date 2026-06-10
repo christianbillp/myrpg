@@ -62,7 +62,7 @@ data shapes in [design/data-model.md](./design/data-model.md).
 - **Target Panel** — the selected-creature inspector.
 - **HUD** — the heads-up display (incl. the Turn Order Bar and GM tab).
 - **Turn Order Bar** — the initiative-ordered combatant chips.
-- **Event Log / Combat Log** — the two-column narrative + dice-detail log.
+- **Event Log** — the two-column narrative + dice-detail log. (Formerly "Combat Log"; old saves carry a `combatLog` field migrated on load.)
 
 ## Dev terms
 
