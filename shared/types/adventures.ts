@@ -9,7 +9,7 @@
 import type { EncounterDef } from "./encounter.js";
 import type { WorldFlagValue } from "./engineEvents.js";
 import type { Rumor } from "./factions.js";
-import type { GameState } from "./longRest.js";
+import type { GameState } from "./gameState.js";
 
 //
 // An adventure is a string of encounters with overarching narrative and

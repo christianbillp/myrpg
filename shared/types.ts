@@ -22,6 +22,7 @@ export * from "./types/combatLog.js";
 export * from "./types/gameState.js";
 export * from "./types/levelUp.js";
 export * from "./types/longRest.js";
+export * from "./types/npcState.js";
 export * from "./types/reaction.js";
 export * from "./types/animation.js";
 export * from "./types/playerActions.js";

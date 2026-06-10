@@ -8,7 +8,6 @@
 // Cross-domain imports — keep these explicit so the dependency graph is visible.
 import type { FeatureDef } from "./classes.js";
 import type { EquipmentSlots, OngoingEffect, Senses, CreatureSize } from "./entities.js";
-import type { GameState } from "./longRest.js";
 import type { Modifier } from "./modifiers.js";
 
 /** One active buff spell on a creature (the player or an NPC). Its `modifiers`
@@ -297,3 +296,455 @@ export interface AvailableActions {
    *  (US-057). Drives the READY button. */
   canReady: boolean;
 }
+
+// ── World/runtime state (moved from the former longRest.ts grab-bag) ────────
+import type { AdventureChapter, AdventureDef } from "./adventures.js";
+import type { LogEntry } from "./combatLog.js";
+import type { ActiveConversation } from "./conversation.js";
+import type { EncounterEnvironment, EncounterTileProperty, MapTilesetInfo, SecretDef } from "./encounter.js";
+import type { WorldFlagValue } from "./engineEvents.js";
+import type { Rumor } from "./factions.js";
+import type { PendingReaction, PendingReroll, PendingCombatStart } from "./reaction.js";
+import type { EncounterTrigger } from "./triggers.js";
+import type { NpcState, NpcPersona } from "./npcState.js";
+
+export type DayPhase = 'morning' | 'noon' | 'evening' | 'night';
+
+/** NPC awareness state.
+ *
+ *   • `calm`       — default. Follows routine. Default-RAM 0.
+ *   • `suspicious` — heard / saw something out of place. Pauses routine to
+ *     glance toward last alert tile. Decays back to `calm` over a few
+ *     ticks unless re-alerted.
+ *   • `alert`      — something hostile is happening. Walks toward last
+ *     alert tile aggressively. Becomes combat-ready if a hostile is
+ *     visible. Decays to `suspicious` then `calm` unless renewed.
+ *
+ * Drives the InvestigateTask / AlertTask priority bands so an alerted NPC
+ * outranks their routine without code-level special-casing.
+ */
+export const DAY_PHASE_CYCLE: readonly DayPhase[] = ['morning', 'noon', 'evening', 'night'] as const;
+
+/** How many world ticks fit in one day phase. 60 ticks × 6 sim-seconds per
+ *  tick ≈ 6 real minutes per phase ≈ 24 real minutes per day. Tune in one
+ *  place; every routine consumer reads from here. */
+export const TICKS_PER_DAY_PHASE = 60;
+
+/** One row in an NPC's routine. The first entry whose `phase` matches the
+ *  current day phase wins; the rest are evaluated each phase boundary as
+ *  the cycle advances. */
+export interface MapItemState {
+  id: string;
+  defId: string;
+  tileX: number;
+  tileY: number;
+}
+
+export interface SecretState {
+  tileX: number;
+  tileY: number;
+  def: SecretDef;
+}
+
+export interface GameMap {
+  /** Per-tile movement blocking. `blocksMovement[y][x] === true` means the
+   *  tile cannot be walked onto (wall, tree, chasm). Baked at session-build
+   *  from each tile's `blocksMovement` flag (object-overrides-terrain). */
+  blocksMovement: boolean[][];
+  /** Per-tile sight blocking. `blocksSight[y][x] === true` means line-of-sight
+   *  cannot pass through the tile. Baked from each tile's `blocksSight` flag,
+   *  ORing the ground and object features so either one blocks the cell. */
+  blocksSight: boolean[][];
+  cols: number;
+  rows: number;
+  /** Per-tile cover (SRD 5.2.1). `null` = no cover. Authored via
+   *  `EncounterTileProperty.cover` and baked at session-build time so the
+   *  Vision LOS walker and combat resolver can read it in O(1). */
+  cover?: (null | 'half' | 'three-quarters' | 'total')[][];
+  /** Per-tile obscurance (SRD 5.2.1). `null` = clear; `lightly` imposes
+   *  Disadv on Perception (sight); `heavily` Blinds the observer into the
+   *  tile and counts as Hide-eligible cover. Baked from
+   *  `EncounterTileProperty.obscurance`. Encounter-wide light defaults
+   *  (`EncounterEnvironment.lightLevel`) are NOT baked in here — they are
+   *  layered on top at read time so darkvision can override them per
+   *  observer. */
+  obscurance?: (null | 'lightly' | 'heavily')[][];
+  /** Ground-layer tile GIDs for rendering. Optional: procedural maps may omit. */
+  gidGrid?: number[][];
+  /** Object-layer tile GIDs (drawn over the ground layer). 0 = empty cell. */
+  objectGidGrid?: number[][];
+  /** Tileset metadata for rendering. Optional: procedural maps may omit. */
+  tilesets?: MapTilesetInfo[];
+}
+
+export interface ActiveZone {
+  id: string;
+  spellId: string;
+  /** Display label rendered on the map (e.g. "Fog Cloud", "Web"). */
+  name: string;
+  shape: 'sphere' | 'cube' | 'cone' | 'line';
+  sizeFeet: number;
+  /** Anchor tile — center for sphere/cube, origin for cone/line. */
+  originX: number;
+  originY: number;
+  /** For cone/line shapes: the tile the area points toward (lets the client
+   *  re-derive orientation without re-running the shape sweep). */
+  targetX?: number;
+  targetY?: number;
+  /** Pre-computed list of tiles the zone covers. The client renders these
+   *  directly; the engine reads them for in-zone checks without re-running
+   *  `creaturesInArea`. */
+  tiles: Array<[number, number]>;
+  /** Engine condition applied to creatures in the zone (heavily-obscured,
+   *  restrained, …). Absent for purely visual zones (illusions, gust). */
+  condition?: string;
+  /** Re-tag-on-enter save (Web): when a creature enters the zone on a turn
+   *  or starts its turn there, it rolls `ability` vs `dc`; on a failed save
+   *  the zone's `condition` is applied. Absent for auto-tag zones (Fog
+   *  Cloud — heavily-obscured applies on entry without a save). */
+  enterSave?: { ability: 'str' | 'dex' | 'con' | 'int' | 'wis' | 'cha'; dc: number };
+  /** Flat damage dealt on a failed `enterSave` (deployed caltrops: 1
+   *  Piercing). Applied in addition to `condition`. Absent for non-damaging
+   *  zones. */
+  enterDamage?: { amount: number; type: string };
+  /** True when the zone's tiles are Difficult Terrain (Web, Spike Growth,
+   *  Plant Growth, Sleet Storm). Movement consumed by a tile inside the
+   *  zone is doubled for the moving creature. */
+  difficultTerrain?: boolean;
+  /** Ids of NPCs the zone has applied its `condition` to. Used at zone end
+   *  to reliably strip the condition even if the creature has since been
+   *  pushed / teleported outside the original tile set. */
+  affectedNpcIds: string[];
+  /** True when the zone has applied its condition to the player. */
+  affectedPlayer: boolean;
+  /** Rounds left until expiry. Decremented at end of each round; zone is
+   *  removed (and `condition` stripped from any creature still inside)
+   *  when this reaches 0. */
+  roundsRemaining: number;
+  /** Caster id — `'player'` or an NPC id. Used by re-cast / Dispel paths. */
+  casterId: string;
+  /** Visual tint colour (CSS hex). The client falls back to a default if
+   *  absent. Lets each spell pick its own atmosphere — fog grey, web white,
+   *  darkness near-black. */
+  tintHex?: string;
+  /** Slot level the zone was cast at — carries upcast scaling to the
+   *  recurring per-turn effect (Spirit Guardians: +1d8 radiant per slot
+   *  above 3). Absent for zones whose effect doesn't scale. */
+  castSlotLevel?: number;
+}
+
+/**
+ * A first-class trap placed on a tile. Distinct from area-denial gear zones
+ * (those are `ActiveZone`s): a trap is a single concealed hazard that must be
+ * spotted (Perception vs `detectDC`), disarmed (Dexterity / Sleight of Hand
+ * with Thieves' Tools vs `disarmDC`, SRD default 15), or it springs when a
+ * creature steps on its tile — rolling `trigger.saveAbility` vs `trigger.saveDC`
+ * for damage (half on save when `halfOnSave`) and an optional `condition`.
+ *
+ * SRD basis: detecting/understanding traps is Intelligence (Investigation) /
+ * Wisdom (Perception); disarming a trap with Thieves' Tools is a DC 15
+ * Dexterity (Sleight of Hand) check (Tools.md, Rogue L1).
+ */
+export interface TrapState {
+  id: string;
+  name: string;
+  tileX: number;
+  tileY: number;
+  /** False once disarmed or sprung — an inert trap never triggers again. */
+  armed: boolean;
+  /** False while concealed; flips true once detected (passive or Search). */
+  discovered: boolean;
+  /** Passive/active Perception needed to notice the trap. */
+  detectDC: number;
+  /** Dexterity (Sleight of Hand) DC to disarm with Thieves' Tools (SRD 15). */
+  disarmDC: number;
+  trigger: TrapTrigger;
+  /** One-line flavour shown when the trap springs. */
+  triggeredMessage?: string;
+  /** Visual tint (CSS hex) for the map marker; falls back to a default. */
+  tintHex?: string;
+}
+
+export interface TrapTrigger {
+  saveAbility: 'str' | 'dex' | 'con' | 'int' | 'wis' | 'cha';
+  saveDC: number;
+  damageDice: number;
+  damageSides: number;
+  damageBonus: number;
+  damageType: string;
+  /** Half damage on a successful save (SRD trap convention). */
+  halfOnSave: boolean;
+  /** Condition applied on a failed save (e.g. 'restrained', 'poisoned'). */
+  condition?: string;
+}
+
+export interface GameState {
+  sessionId: string;
+  phase: CombatMode;
+  map: GameMap;
+  player: PlayerState;
+  npcs: NpcState[];
+  mapItems: MapItemState[];
+  secrets: SecretState[];
+  eventLog: LogEntry[];
+  logScrollOffset: number;
+  mapName: string;
+  encounterTitle: string;
+  /** Id of the authored `EncounterDef` driving this session, when one
+   *  exists. Procedurally-generated / ad-hoc sessions leave this
+   *  undefined. The client reads it to drive encounter-aware UI such
+   *  as the Mission Top Bar (TO MISSION / LEAVE MISSION buttons in the
+   *  Bureau-office mission cycle). */
+  currentEncounterId?: string;
+  /** Player-facing one-line goal for this encounter. */
+  objective: string;
+  selectedTargetId: string | null;
+  activeNpcIndex: number;
+  turnOrderIds: string[];
+  introduction: string;
+  encounterContext: string;
+  /** Carried from `EncounterDef.allowsLongRest` (default `false`) — drives `AvailableActions.canLongRest`. */
+  allowsLongRest: boolean;
+  npcPersonas: NpcPersona[];
+  availableActions: AvailableActions;
+  /** Set when the engine has paused on a reaction-eligible trigger. The next player action must be `resolveReaction`. Cleared on resolution. */
+  pendingReaction: PendingReaction | null;
+  /** Set when the engine has paused to offer a Heroic Inspiration reroll
+   *  (US-109a). The next player action must be `resolveReroll`. Cleared on
+   *  resolution. */
+  pendingReroll: PendingReroll | null;
+  /** Set when a player action in the exploring phase would start combat — the
+   *  engine pauses for confirmation. The next player action must be
+   *  `resolveCombatStart`. Cleared on resolution. */
+  pendingCombatStart: PendingCombatStart | null;
+  /** Active conversation when one is open — `null` otherwise. The client
+   *  renders the ConversationOverlay whenever this transitions non-null.
+   *  Pauses world tick (`isWorldTickEligible` skips when set). */
+  activeConversation: ActiveConversation | null;
+  /** True when an `encounter_started` combat trigger fired during session
+   *  construction and the engine deferred `advanceTurn` so the player has
+   *  a chance to see the intro overlay / announcement before NPC turns
+   *  run. Consumed by `GameEngine.runPendingTurnAdvance()` once the client
+   *  signals readiness by releasing the world pause. */
+  pendingTurnAdvance?: boolean;
+  /** Authored encounter triggers active for this session. Sourced from `EncounterDef.triggers` at session creation. */
+  triggers: EncounterTrigger[];
+  /** Ids of triggers that have already fired. Persisted in `world.json` so `once` semantics survive save/load. */
+  firedTriggerIds: string[];
+  /** Scripted-event lines queued by `send_aigm_message` actions. Surfaced to the next AIGM turn under the SCRIPTED EVENTS block and cleared once consumed. */
+  pendingAigmEvents: string[];
+  /** Authored world flags keyed by name. Written by `set_flag` trigger actions, read by `flag_set` / `flag_unset` / `flag_equals` guards. Persisted with the world save. */
+  worldFlags: Record<string, WorldFlagValue>;
+  /** Active/completed/failed quests for this character (structured quest system).
+   *  Persisted with the world save; adventure/world-scope quests also carry across
+   *  chapters via `AdventureSave`. The `QuestSystem` advances these off bus events. */
+  quests: import('./quests.js').QuestState[];
+  /** Defs for quests the AIGM created at runtime (not loaded from JSON). Stored
+   *  here so a runtime quest's definition survives reload alongside its state. */
+  runtimeQuestDefs: import('./quests.js').QuestDef[];
+  /** Last variant index picked per `narrationId`. Used by NarrationSystem to avoid back-to-back repeats. */
+  narrationLastUsed: Record<string, number>;
+  /** Monotonic counter incremented once per off-camera `WorldTick`. Used as
+   *  the `tickId` for the NPC sim engine's seeded RNG — combined with each
+   *  NPC's id it produces a deterministic stream that reproduces across
+   *  runs (unlike `Date.now()`). Survives save/load so loading a saved
+   *  session mid-tick gives the same companion decisions on the next tick
+   *  it would have given pre-save. */
+  worldTickCount: number;
+  /** Coarse-grained time of day for NPC routines. Advances on a fixed tick
+   *  cadence (see TICKS_PER_DAY_PHASE) and wraps morning → noon → evening →
+   *  night → morning. Per-encounter scope: every encounter starts at
+   *  `morning` and the cycle runs while the player explores. Persistence
+   *  across encounters is part of the WorldState refactor (step 7). */
+  dayPhase: DayPhase;
+  /**
+   * Legacy player-relative view of standings. **Kept for backward compatibility**
+   * with existing `faction_standing` guards, `adjust_faction_standing` AIGM
+   * tool calls, and adventure-save seeding — internally this is just a
+   * projection of `factionRelations[PLAYER_FACTION_ID]` and the engine keeps
+   * it in sync.
+   *
+   * New code should read / write via `factionRelations` directly.
+   */
+  factionStandings: Record<string, number>;
+  /**
+   * Full pair-wise relation matrix between every faction the session is aware
+   * of. `factionRelations[a][b]` is faction `a`'s standing with faction `b`
+   * in the range −100..+100. The matrix is **symmetric when first built**
+   * (we mirror each declared default), but runtime triggers / AIGM tool calls
+   * may break that symmetry. `getRelation(state, a, b)` resolves the
+   * effective standing by taking the worse of the two directions, so one
+   * faction can read another as hostile without the second reciprocating.
+   *
+   * Seeded at session creation from `defs.factions[*].defaultRelations` and
+   * the optional `EncounterDef.factionRelations` override block.
+   */
+  factionRelations: Record<string, Record<string, number>>;
+  /**
+   * Per-**individual** relationship overrides — the layer that sits *in front
+   * of* the faction matrix. `relationships[a][b]` is how individual `a` regards
+   * individual `b` (−100..+100). Keys are individual ids: an NPC id, or the
+   * literal `'player'` (`PLAYER_ID`) for the player character.
+   *
+   * **Sparse**: only authored / runtime deviations from the faction baseline
+   * are stored. An absent pair falls through to `factionRelations` (using each
+   * individual's faction), then to 0. This is what lets two members of the same
+   * faction be enemies, or members of opposing factions be friends — the
+   * individual link overrides the faction default. Asymmetric, like the faction
+   * matrix; `relationStance` takes the worse of the two directions.
+   *
+   * Resolved by `engine/Relationships.ts` (`relation`, `viewStance`,
+   * `projectDisposition`). `NpcState.disposition` is a party-relative projection
+   * of this layer, kept in sync the way `factionStandings` projects the matrix.
+   */
+  relationships: Record<string, Record<string, number>>;
+  /**
+   * Faction ids the player has identified through play (Insight check on
+   * combat-start, or the AIGM's `reveal_faction` tool). The Target Panel
+   * renders the faction name + colour for ids in this set, `???` otherwise.
+   * Persisted with the world save and seeded from adventure saves so identity
+   * reveals carry across chapters.
+   */
+  discoveredFactions: string[];
+  /** World memory log of significant events, recorded by AIGM `create_rumor` tool or trigger `record_rumor` action. Surfaced to the GM in CURRENT STATE. */
+  rumors: Rumor[];
+  /** Set when the current session is a chapter of an adventure. Drives the END CHAPTER button and the chapter-advance flow. Null for single-encounter sessions. */
+  adventureContext: AdventureSessionContext | null;
+  /** Set true when the active chapter has been resolved (combat-ended or `completionFlag` set). Drives the END CHAPTER button. */
+  encounterComplete: boolean;
+  /** Optional world-flag name that, when set, marks the encounter complete. Mirrors `EncounterDef.completionFlag` for standalone (non-adventure) encounters so the `encounter_completed` engine event can fire on flag-driven resolutions. */
+  encounterCompletionFlag?: string;
+  /** When true, clearing all enemies does NOT complete the encounter — only the `completionFlag` being set does. For encounters where combat is a step, not the objective (e.g. kill the captors, THEN free the captives). Mirrors `EncounterDef.completeOnFlagOnly`. */
+  encounterCompleteOnFlagOnly?: boolean;
+  /** Environmental flags consulted by combat resolvers — sourced from EncounterDef.environment at session creation. */
+  environment: EncounterEnvironment;
+  /** Persistent area-of-effect zones currently in play (Fog Cloud, Web,
+   *  Darkness, Grease, illusions, future Walls + Spirit Guardians + Cloudkill).
+   *  Lifetime is driven by `roundsRemaining`, not by concentration — the
+   *  visible cloud stays on the map until its duration expires so the player
+   *  can plan around it. Rendered on the client as a tile overlay. */
+  activeZones: ActiveZone[];
+  /** Concealed tile traps placed by the encounter. Detected via Perception,
+   *  removed via the Disarm action, or sprung when a creature steps onto the
+   *  trap tile. Rendered on the client once `discovered`. */
+  traps: TrapState[];
+  /** Dev-mode overrides for the active session, copied from the
+   *  `CreateSessionRequest` at session boot. Engine consumers consult these
+   *  on every state push (see `GameEngine.getState`) to keep resources
+   *  "topped up" so the player can test freely without rerunning encounters. */
+  devFlags?: DevFlags;
+}
+
+/**
+ * Dev-mode session overrides. Set via the Configuration scene's
+ * "Development Mode" section. Persisted in the browser's localStorage and
+ * spliced into every `CreateSessionRequest`. Intended for testing — disabled
+ * by default in any normal play session. See `client/src/devMode.ts`.
+ */
+export interface DevFlags {
+  /** Skip the IntroductionOverlay supertitle at encounter start. The intro
+   *  text is still pushed to the GM chat so the narrative record is intact.
+   *  Client-only — server ignores this field. */
+  disableSupertitle?: boolean;
+  /** Spell slots are refilled to their max on every server state push, so
+   *  casting never decrements the visible slot counter. */
+  unlimitedSpellSlots?: boolean;
+  /** At session creation the player's `preparedSpellIds` is seeded with
+   *  every L1+ spell of their class, their `defaultCantripIds` is widened
+   *  to every cantrip of their class (so cantrip-gated knowledge checks
+   *  pass), and the spell-slot pool is replaced with **4 slots of every
+   *  level represented in the shipped spell roster** (capped at L9) so
+   *  the prepared L2 / L3 / … spells are actually castable, not just
+   *  visible. Lets the tester invoke any spell without a level-up
+   *  rebuild. Combine with `unlimitedSpellSlots` to keep the pool full
+   *  between casts. */
+  unlockAllSpells?: boolean;
+  /** `actionUsed` and `bonusActionUsed` are reset to `false` on every server
+   *  state push, so a tester can spam attacks/spells in combat without
+   *  ending their turn. */
+  unlimitedActions?: boolean;
+  /** Show the DELETE SAVE button on the character setup detail panel. Off by
+   *  default so non-developers can't accidentally wipe a character's progress.
+   *  Client-only — server ignores this field. */
+  showDeleteSaveButton?: boolean;
+  /** Allow the player to retry a failed (or already-attempted) conversation
+   *  ability check. When OFF (default) the server rejects a second attempt
+   *  on the same `node#choiceIndex` and the client hides the choice. When
+   *  ON the choice remains clickable and the overlay flags it with a
+   *  `[DEV]` tag so the player knows the option is only reachable because
+   *  the dev override is active. */
+  allowRetryChecks?: boolean;
+  /** Surfaces a "★ COMPLETE OBJECTIVE" button (inside the DevTools panel
+   *  when `showDevToolsPanel` is on, or as a fallback button below the
+   *  Player Panel's CHARACTER button when it is not) that fires the
+   *  encounter's completion path — sets the `completionFlag` if one is
+   *  authored, or ends combat by clearing every enemy — so a tester can
+   *  blast through adventures without playing them out. Off by default. */
+  completePrimaryObjective?: boolean;
+  /** Show the DevTools panel — a small bottom-anchored bar to the right of
+   *  the Player Panel that hosts dev-only buttons (Reload Encounter,
+   *  Complete Objective, …). Off by default so non-developers never see
+   *  the panel. Client-only — server ignores this field. */
+  showDevToolsPanel?: boolean;
+  /**
+   * Clean Mode — when on, the server wipes every player progress
+   * artefact under `server/data/settings/<setting>/saves/` at startup:
+   *   • the world save (`saves/world.json`)
+   *   • every character save (`saves/<characterId>.json`)
+   *   • every persistent NPC save tree (`saves/<characterId>_npcs/`)
+   *   • every adventure save (`saves/*_adventure.json`)
+   * Logged loudly via `Logger.log('server.clean_mode_wipe', { … })`
+   * and to stdout. The flag stays ON across restarts — disable it
+   * explicitly from the Configuration screen when done.
+   *
+   * Server-only — the wipe runs in the startup path before any session
+   * restoration. Off by default so a normal player can't accidentally
+   * scrub their progress.
+   */
+  cleanModeOnStart?: boolean;
+  /**
+   * Server-side structured-logging verbosity. Controls how much the
+   * `Logger` writes per session — high-volume logging on the request path
+   * is a measurable source of in-encounter lag, so this lets a developer
+   * dial it down (or off) without a code change.
+   *   • `none`    — only `error` events are emitted; everything else is
+   *                 dropped before it touches stdout or the NDJSON file.
+   *   • `regular` — info / warn / error (debug dropped). The default.
+   *   • `maximum` — everything, including `debug` (= legacy MYRPG_LOG_DEBUG=1).
+   * Server-only, applied globally on boot and on every Configuration save.
+   * Absent means `regular`.
+   */
+  logLevel?: LogLevel;
+}
+
+/** Server logging verbosity — see `DevFlags.logLevel`. */
+export type LogLevel = "none" | "regular" | "maximum";
+
+export interface AdventureSessionContext {
+  adventureId: string;
+  adventureTitle: string;
+  chapterId: string;
+  chapterTitle: string;
+  chapterIndex: number;
+  totalChapters: number;
+  /** Short summaries of previously completed chapters; surfaced to the AIGM under PRIOR CHAPTERS. Empty for chapter 1. */
+  priorChapterSummaries: Array<{ chapterId: string; chapterTitle: string; summary: string }>;
+  /** Optional named flag that, when set, marks the chapter complete in addition to the default combat-ended detection. Mirrors `AdventureChapter.completionFlag`. */
+  completionFlag?: string;
+  /** True when this session is the adventure's rest-stop interlude rather
+   *  than an actual chapter. The client uses it to label the HUD and to
+   *  route LEAVE ENCOUNTER through `/adventure/.../advance` rather than back
+   *  to the setup screen — leaving rest means "I'm done, take me to the
+   *  next chapter". */
+  isRestSession?: boolean;
+  /** Id of the adventure's optional rest-stop encounter. Mirrored from
+   *  `AdventureDef.restEncounterId` so the client can decide whether to
+   *  surface the "rest first?" prompt between chapters without having to
+   *  fetch the full adventure registry. */
+  restEncounterId?: string;
+  /** Display title of the rest encounter (when `restEncounterId` is set).
+   *  Used as the prompt's body so the player knows what they're walking
+   *  into ("Drop in at the Sparrow's Nest before the next chapter?"). */
+  restEncounterTitle?: string;
+}
+

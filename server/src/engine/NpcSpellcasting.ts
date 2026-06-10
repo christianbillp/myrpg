@@ -32,8 +32,9 @@ import { chebyshev } from './EnemyAI.js';
 import { d20, d, mod, rollAdvantage } from './Dice.js';
 import { hasAdvantageOn } from './Modifiers.js';
 import { isIncapacitated } from './ConditionSystem.js';
-import { combatantDisplayName } from './CombatFlow.js';
+
 import { Logger } from '../Logger.js';
+import { combatantDisplayName } from './DisplayNames.js';
 import { dropNpcConcentration } from './NpcConcentration.js';
 import { publishNpcDamage } from './ThresholdPublisher.js';
 import { PLAYER_FACTION_ID, PLAYER_ID } from '../../../shared/types.js';

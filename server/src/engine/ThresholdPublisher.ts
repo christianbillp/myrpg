@@ -1,7 +1,8 @@
 import type { GameContext } from './GameContext.js';
+import { combatantDisplayName } from './DisplayNames.js';
 import type { NpcState } from './types.js';
 import { d20, mod } from './Dice.js';
-import { combatantDisplayName } from './CombatFlow.js';
+
 import { breakNpcConcentrationOnDamage } from './NpcConcentration.js';
 
 /**

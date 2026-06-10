@@ -24,10 +24,11 @@
  * is not separately rolled.
  */
 import type { GameContext } from './GameContext.js';
+import { combatantDisplayName } from './DisplayNames.js';
 import type { NpcState } from './types.js';
 import { chebyshev } from './EnemyAI.js';
 import { d, d20, mod } from './Dice.js';
-import { combatantDisplayName } from './CombatFlow.js';
+
 import { startConcentration } from './ConcentrationSystem.js';
 
 const SPELL_ID = 'spirit-guardians';

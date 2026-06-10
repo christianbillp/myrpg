@@ -15,10 +15,11 @@
  *    trigger damage so Unseen Servant ends the moment it's hit.
  */
 import type { GameContext } from './GameContext.js';
+import { combatantDisplayName } from './DisplayNames.js';
 import type { GameEvent, NpcState } from './types.js';
 import { chebyshev } from './EnemyAI.js';
 import { d, d20, mod } from './Dice.js';
-import { combatantDisplayName } from './CombatFlow.js';
+
 
 /**
  * Convert a feet distance to the equivalent chebyshev tile budget. SRD

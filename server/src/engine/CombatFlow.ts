@@ -1,5 +1,6 @@
 import { GameEvent, NpcState, LogEntry, CombatMode } from './types.js';
 import type { GameContext } from './GameContext.js';
+import { combatantDisplayName } from './DisplayNames.js';
 import { rollOneInitiative, rollDeathSave, type RolledBonusDamage } from './CombatSystem.js';
 import { chebyshev } from './EnemyAI.js';
 import { isIncapacitated, hasSpeedZero, proneStandCost, speedAfterExhaustion, TURN_CONDITIONS, clearHide } from './ConditionSystem.js';
@@ -459,17 +460,6 @@ export function doRollDeathSave(ctx: GameContext, events: GameEvent[]): void {
 
 // ── Per-NPC turn execution ────────────────────────────────────────────────
 
-/**
- * Returns the display name to use in turn-bar / combat-log lines for the given
- * NPC: bare name when unique, "Name (Label)" when more than one NPC in the
- * current encounter shares the same base name and the NPC has a combat label.
- */
-export function combatantDisplayName(npc: NpcState, allNpcs: NpcState[]): string {
-  const base = npc.revealedName ?? npc.name;
-  const duplicates = allNpcs.filter((n) => (n.revealedName ?? n.name) === base && n.disposition !== 'neutral').length;
-  if (duplicates > 1 && npc.combatLabel) return `${base} (${npc.combatLabel})`;
-  return base;
-}
 
 
 /** Does the player meet basic reaction eligibility (not used, conscious, not incapacitated)? */

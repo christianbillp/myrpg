@@ -6,7 +6,7 @@
  */
 
 // Cross-domain imports — keep these explicit so the dependency graph is visible.
-import type { GameState } from "./longRest.js";
+import type { GameState } from "./gameState.js";
 import type { NpcSave } from "./npcSave.js";
 import type { TriggerAction, TriggerGuard } from "./triggers.js";
 

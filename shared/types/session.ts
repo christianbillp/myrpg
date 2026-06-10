@@ -11,7 +11,7 @@ import type { WorldFlagValue } from "./engineEvents.js";
 import type { EquipmentSlots } from "./entities.js";
 import type { Rumor } from "./factions.js";
 import type { LevelUpChoices } from "./levelUp.js";
-import type { AdventureSessionContext, DevFlags, GameState } from "./longRest.js";
+import type { AdventureSessionContext, DevFlags, GameState } from "./gameState.js";
 import type { EncounterTrigger } from "./triggers.js";
 
 export interface CreateSessionRequest {

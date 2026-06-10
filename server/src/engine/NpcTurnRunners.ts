@@ -5,7 +5,6 @@
  * death-saves) and let the per-NPC turn logic evolve independently.
  *
  * What stays in CombatFlow and is imported back here:
- *   • `combatantDisplayName` — disambiguated label for log lines.
  *   • `playerCanReact`, `shieldAvailable` — gate the player reaction prompts.
  *   • `applyEnemyHitToPlayer` — death-save / Shield-decline path (also used
  *     by `doResolveReaction`).
@@ -14,10 +13,8 @@
  */
 import type { GameContext } from './GameContext.js';
 import type { GameEvent, NpcState, MonsterDef, ExtraAttack } from './types.js';
-import {
-  combatantDisplayName, playerCanReact, shieldAvailable,
-  applyEnemyHitToPlayer, finalizeNpcTurn,
-} from './CombatFlow.js';
+import { playerCanReact, shieldAvailable, applyEnemyHitToPlayer, finalizeNpcTurn } from './CombatFlow.js';
+import { combatantDisplayName } from './DisplayNames.js';
 import {
   runEnemyTurn, runAllyTurn, chebyshev, type EnemyAttackTarget,
 } from './EnemyAI.js';

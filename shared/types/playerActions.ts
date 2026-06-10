@@ -84,7 +84,7 @@ export type PlayerAction =
    *  pass consumes it. Sent by the Player Panel's COMPANION chip. `npcId`
    *  defaults to the player's first companion when the panel knows of
    *  only one. */
-  | { type: 'companionCommand'; npcId: string; command: import('./longRest.js').CompanionCommand }
+  | { type: 'companionCommand'; npcId: string; command: import('./npcState.js').CompanionCommand }
   /** Dev-mode shortcut — completes the current encounter so the tester can
    *  fast-forward through an adventure. Server-side this sets the
    *  encounter's `completionFlag` (when authored) AND clears every living

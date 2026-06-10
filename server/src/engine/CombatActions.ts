@@ -1,4 +1,5 @@
 import { GameEvent, NpcState, PlayerAttack, ItemDef, WeaponDef, MonsterDef, LogEntry, sizeRank } from './types.js';
+import { combatantDisplayName } from './DisplayNames.js';
 import type { RolledBonusDamage, ResolvedPlayerAttack } from './CombatSystem.js';
 import type { GameContext } from './GameContext.js';
 import {
@@ -23,7 +24,7 @@ import { canSee as visCanSee } from './Vision.js';
 import { endConcentration } from './ConcentrationSystem.js';
 import type { PlayerDef } from '../../../shared/types.js';
 import { d20, mod, rollDiceBonus } from './Dice.js';
-import { combatantDisplayName } from './CombatFlow.js';
+
 import { requestCombatStart } from './CombatStartPrompt.js';
 
 /** Number of weapon attacks the player makes per Attack action. Driven by

@@ -555,7 +555,7 @@ export interface NPCDef {
    * `set_npc_routine` triggers will be able to mutate at runtime). NPCs
    * without a routine simply skip the routine path.
    */
-  routine?: import('./longRest.js').RoutineEntry[];
+  routine?: import('./npcState.js').RoutineEntry[];
   /**
    * When true, the engine maintains a per-character `NpcSave` file recording
    * this NPC's relationship, memories, and stateful overrides across sessions,

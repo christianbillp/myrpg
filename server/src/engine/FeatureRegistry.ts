@@ -15,6 +15,7 @@
 // still owns their resource bookkeeping when applicable.
 
 import type { GameContext } from './GameContext.js';
+import { combatantDisplayName } from './DisplayNames.js';
 import type { GameEvent } from './types.js';
 import { canUseFeature, playerArmorSpeedPenaltyFt } from './ActionGuards.js';
 import { speedAfterExhaustion } from './ConditionSystem.js';
@@ -22,7 +23,7 @@ import { applySelfBuff } from './Buffs.js';
 import { applyCloudsJaunt } from './GiantGifts.js';
 import { playerSecondWind } from './CombatSystem.js';
 import { spellSaveDC, spellMod, npcSaveMod } from './SpellSystem.js';
-import { combatantDisplayName } from './CombatFlow.js';
+
 import { chebyshev } from './EnemyAI.js';
 import { d, d20 } from './Dice.js';
 

@@ -7,7 +7,7 @@
 
 // Cross-domain imports — keep these explicit so the dependency graph is visible.
 import type { GameEvent } from "./animation.js";
-import type { GameState } from "./longRest.js";
+import type { GameState } from "./gameState.js";
 
 export type ServerWSMessage =
   | { type: 'state_update'; state: GameState; events: GameEvent[] }

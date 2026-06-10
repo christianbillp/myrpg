@@ -10,7 +10,8 @@ import type { GameContext } from './GameContext.js';
 import type { NpcState } from './types.js';
 import { d20 } from './Dice.js';
 import { npcSaveMod } from './CombatSystem.js';
-import { combatantDisplayName } from './CombatFlow.js';
+import { combatantDisplayName } from './DisplayNames.js';
+
 
 /** Strip whatever buff `concentratingOn` sustains. */
 export function dropNpcConcentration(ctx: GameContext, npc: NpcState): void {

@@ -7,7 +7,8 @@
 
 // Cross-domain imports — keep these explicit so the dependency graph is visible.
 import type { EncounterDef } from "./encounter.js";
-import type { GameState, NpcState } from "./longRest.js";
+import type { GameState } from "./gameState.js";
+import type { NpcState } from "./npcState.js";
 
 //
 // Factions are referenced by string id on `NpcState.factionId` and held as a

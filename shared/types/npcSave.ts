@@ -7,7 +7,7 @@
 
 // Cross-domain imports — keep these explicit so the dependency graph is visible.
 import type { EntityRef } from "./conversation.js";
-import type { NpcState } from "./longRest.js";
+import type { NpcState } from "./npcState.js";
 
 //
 // Persistent NPCs maintain a per-character save file. Conversations write to

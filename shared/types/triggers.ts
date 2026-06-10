@@ -9,7 +9,7 @@
 import type { WorldFlagValue } from "./engineEvents.js";
 import type { NPCDef } from "./entities.js";
 import type { CombatMode, PlayerState } from "./gameState.js";
-import type { GameState } from "./longRest.js";
+import type { GameState } from "./gameState.js";
 import type { NpcFactValue, NpcSave } from "./npcSave.js";
 
 //
