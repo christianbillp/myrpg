@@ -166,6 +166,17 @@ export function findSessionByCharacter(characterId: string): { sessionId: string
   return undefined;
 }
 
+/** Enforce the one-active-session-per-character invariant: drop any session
+ *  already registered for this character (a stale tab, a scripted client, a
+ *  crashed flow) before a new one is registered. Without this, lookups via
+ *  findSessionByCharacter pick an arbitrary stale session — observed leaking
+ *  a previous run's world flags through /adventure/:char/advance. */
+export function deleteSessionsForCharacter(characterId: string): void {
+  for (const [sessionId, session] of [...sessions]) {
+    if (session.engine.getState().player.defId === characterId) deleteSession(sessionId);
+  }
+}
+
 export function getEngine(sessionId: string): GameEngine | undefined {
   return sessions.get(sessionId)?.engine;
 }
