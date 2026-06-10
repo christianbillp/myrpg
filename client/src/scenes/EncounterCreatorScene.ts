@@ -15,20 +15,15 @@ import { createHtmlButton, createHtmlText, type HtmlButtonHandle, type HtmlTextH
 import { buildLineInput as sharedBuildLineInput, buildTextarea as sharedBuildTextarea } from "../ui/sceneInputs";
 import { ScreenEffects } from "../ui/ScreenEffects";
 import {
-  TILE_SIZE,
-  GRID_COLS,
-  GRID_ROWS,
-  HUD_HEIGHT,
-  PLAYER_PANEL_WIDTH,
-  TARGET_PANEL_WIDTH,
-} from "../constants";
+  BaseCreatorScene,
+  htmlChromeHandle,
+  subcomponentChromeHandle,
+  type ChromeHandle,
+  CREATOR_SCENE_WIDTH as W,
+  CREATOR_SCENE_HEIGHT as H,
+  CREATOR_TITLE_Y as TITLE_Y,
+} from "./BaseCreatorScene";
 
-const W = PLAYER_PANEL_WIDTH + GRID_COLS * TILE_SIZE + TARGET_PANEL_WIDTH;
-const H = GRID_ROWS * TILE_SIZE + HUD_HEIGHT;
-
-const TITLE_Y = 28;
-const OUTER_TAB_Y = 92;
-const OUTER_TAB_H = 28;
 const CONTENT_TOP = 138;
 const CONTENT_BOTTOM = H - 110;
 const PANEL_PAD = 48;
@@ -41,27 +36,6 @@ const COL_GAP = 40;
 const LEFT_COL_FRACTION = 0.64;
 
 type EncounterRecord = EncounterDef & { completionFlag?: string };
-
-/** Anything the editor needs to show/hide as one and dispose on teardown.
- *  HtmlButtonHandle / HtmlTextHandle satisfy this shape natively; raw
- *  HTMLElements are wrapped via `htmlChromeHandle`. Tracked in two
- *  collections — `sceneChrome` (lives the whole scene) and `formChrome`
- *  (replaced every `rebuildForm`) — so adding a new element wires it into
- *  visibility toggling and shutdown disposal in one place. */
-interface ChromeHandle {
-  setVisible(visible: boolean): void;
-  dispose(): void;
-}
-function htmlChromeHandle(el: HTMLElement): ChromeHandle {
-  return {
-    setVisible: (v) => { el.style.display = v ? "" : "none"; },
-    dispose: () => el.remove(),
-  };
-}
-/** Sub-components expose `destroy()` instead of `dispose()` — adapt. */
-function subcomponentChromeHandle(c: { setVisible(v: boolean): void; destroy(): void }): ChromeHandle {
-  return { setVisible: c.setVisible.bind(c), dispose: c.destroy.bind(c) };
-}
 
 /** Parse an `"x,y"` zone-cell key into a `[x, y]` tuple. */
 function splitCell(key: string): [number, number] {
@@ -131,7 +105,7 @@ const EMPTY_FORM_SEED: FormSeed = {
  * and the in-list buttons receive clicks reliably. Phaser is used only for
  * the canvas-backed map thumbnail + zone overlay.
  */
-export class EncounterCreatorScene extends Phaser.Scene {
+export class EncounterCreatorScene extends BaseCreatorScene {
   private loaded: EncounterRecord | null = null;
   private acceptedMap: MapPreviewData | null = null;
 
@@ -197,22 +171,11 @@ export class EncounterCreatorScene extends Phaser.Scene {
   private isDraft = false;
   private mapSelector: MapSelectorOverlay | null = null;
 
-  // ── Outer tabs (Regular / Generative AI) ────────────────────────────────
-  // The map column + bottom paint bar are mounted in both tabs since the
-  // user authors against the same loaded map. Only the right column swaps.
-  private outerTab: "regular" | "ai" = "regular";
-  private regularTabBtn: HtmlButtonHandle | null = null;
-  private aiTabBtn: HtmlButtonHandle | null = null;
+  // Outer tabs (Regular / Generative AI) come from BaseCreatorScene. The
+  // map column + bottom paint bar are mounted in both tabs since the user
+  // authors against the same loaded map. Only the right column swaps —
+  // see the `refreshOuterTabVisibility` override.
 
-  // AI tab — right-column inputs. Rebuilt by buildAiRightColumn each time the
-  // form rebuilds, so geometry stays in sync with the loaded map.
-  private aiPromptInput: HTMLTextAreaElement | null = null;
-  private aiSubmitBtn: HtmlButtonHandle | null = null;
-  private aiResetBtn: HtmlButtonHandle | null = null;
-  private aiStatusEl: HTMLDivElement | null = null;
-  private aiDiffEl: HTMLDivElement | null = null;
-  private aiAcceptBtn: HtmlButtonHandle | null = null;
-  private aiRejectBtn: HtmlButtonHandle | null = null;
   /** The pending proposal returned by the most recent refine call.
    *  Cleared on accept / reject / new submit. */
   private aiPendingProposal: EncounterRefineResponse | null = null;
@@ -225,16 +188,13 @@ export class EncounterCreatorScene extends Phaser.Scene {
   private emptyStateText: HtmlTextHandle | null = null;
   private emptyStateHint: HtmlTextHandle | null = null;
 
-  private statusEl: HTMLDivElement | null = null;
-  private busy = false;
   private encounterPicker: EncounterPickerOverlay | null = null;
   private monsters: MonsterDef[] = [];
   private npcs: NPCDef[] = [];
 
-  /** Chrome that lives the whole scene — registered once in `create()`. */
-  private sceneChrome: ChromeHandle[] = [];
   /** Chrome rebuilt on every `rebuildForm()` — disposed wholesale at the
-   *  start of each rebuild and on scene teardown. */
+   *  start of each rebuild and on scene teardown. The scene-lifetime chrome
+   *  lives in the inherited `chrome` bucket. */
   private formChrome: ChromeHandle[] = [];
 
   constructor() {
@@ -242,6 +202,7 @@ export class EncounterCreatorScene extends Phaser.Scene {
   }
 
   init(): void {
+    this.resetCreatorScaffold();
     this.loaded = null;
     this.acceptedMap = null;
     this.formTitle = "";
@@ -254,18 +215,11 @@ export class EncounterCreatorScene extends Phaser.Scene {
     this.zonePainter = null;
     this.monsterPicker = null;
     this.triggerEditor = null;
-    this.busy = false;
-    this.outerTab = "regular";
     this.isDraft = false;
   }
 
   create(): void {
-    // Defensive: a previous scene (especially GameScene with its WASD player
-    // controls) may have left global keyboard capture on, which calls
-    // preventDefault for W/A/S/D and blocks them from reaching any HTML
-    // input on this page. Clear it so the inputs receive every key.
-    this.input.keyboard?.disableGlobalCapture();
-    this.input.keyboard?.clearCaptures();
+    this.clearKeyboardCaptureForHtmlInputs();
 
     this.monsters = (this.registry.get("monsters") as MonsterDef[] | undefined) ?? [];
     this.npcs     = (this.registry.get("npcs")     as NPCDef[]     | undefined) ?? [];
@@ -277,7 +231,7 @@ export class EncounterCreatorScene extends Phaser.Scene {
       text: "ENCOUNTER CREATOR",
       fontSize: 22, color: "#e2b96f", align: "center", letterSpacing: 1,
     });
-    this.sceneChrome.push(this.titleText);
+    this.chrome.push(this.titleText);
     this.add.rectangle(W / 2, TITLE_Y + 38, W - 64, 1, 0x334455);
 
     this.subtitleText = createHtmlText({
@@ -286,7 +240,7 @@ export class EncounterCreatorScene extends Phaser.Scene {
       text: "No encounter loaded — press OPEN ENCOUNTER or LOAD MAP",
       fontSize: 12, color: "#88aacc", align: "center",
     });
-    this.sceneChrome.push(this.subtitleText);
+    this.chrome.push(this.subtitleText);
 
     this.formContainer = this.add.container(0, 0);
 
@@ -750,7 +704,7 @@ export class EncounterCreatorScene extends Phaser.Scene {
 
     // Prompt textarea
     const promptY = topY + promptLabelH + 4;
-    this.aiPromptInput = this.buildTextarea(
+    this.aiPromptInput = this.buildScaledTextarea(
       x, promptY, w, promptH,
       "Describe what to change. e.g. \"add a wandering merchant who flees on sight\" or \"make the title more ominous\".",
       () => { /* prompt text is read at submit time */ },
@@ -922,7 +876,7 @@ export class EncounterCreatorScene extends Phaser.Scene {
 
   /** Submit the prompt + current draft to the refine endpoint. On success
    *  shows the diff and arms ACCEPT/REJECT. */
-  private async runAiGenerate(): Promise<void> {
+  protected async runAiGenerate(): Promise<void> {
     if (this.aiBusy) return;
     if (!this.loaded || !this.acceptedMap) {
       if (this.aiStatusEl) this.aiStatusEl.textContent = "Open an encounter first.";
@@ -1110,7 +1064,7 @@ export class EncounterCreatorScene extends Phaser.Scene {
    *  flow into the HTML inputs and the MonsterPicker; spawn proposals are
    *  applied to the ZonePainter (and switch the painter into exact mode);
    *  triggerObjects replace the TriggerEditor's list wholesale. */
-  private acceptAiProposal(): void {
+  protected acceptAiProposal(): void {
     if (!this.aiPendingProposal) {
       if (this.aiStatusEl) this.aiStatusEl.textContent = "Nothing to accept yet.";
       return;
@@ -1221,7 +1175,7 @@ export class EncounterCreatorScene extends Phaser.Scene {
     this.refreshButtons();
   }
 
-  private rejectAiProposal(): void {
+  protected override rejectAiProposal(): void {
     if (!this.aiPendingProposal) {
       if (this.aiStatusEl) this.aiStatusEl.textContent = "No proposal active.";
       return;
@@ -1268,7 +1222,7 @@ export class EncounterCreatorScene extends Phaser.Scene {
     pushBasicLabel(this.makeSubLabel(x, titleY, w, "TITLE"));
     const previewBtnW = 110;
     const titleInputW = w - previewBtnW - 8;
-    this.formTitleInput = trackHtmlInput(this.buildLineInput(
+    this.formTitleInput = trackHtmlInput(this.buildScaledLineInput(
       x, titleY + 22, titleInputW, oneLineH,
       "Encounter title",
       (val) => { this.formTitle = val; },
@@ -1286,7 +1240,7 @@ export class EncounterCreatorScene extends Phaser.Scene {
     // ── INTRODUCTION ──────────────────────────────────────────────────
     const introY = titleY + 22 + oneLineH + 14;
     pushBasicLabel(this.makeSubLabel(x, introY, w, "INTRODUCTION"));
-    this.formIntroInput = trackHtmlInput(this.buildTextarea(
+    this.formIntroInput = trackHtmlInput(this.buildScaledTextarea(
       x, introY + 22, w, textareaH,
       "Opening narration shown to the player…",
       (val) => { this.formIntroduction = val; },
@@ -1296,7 +1250,7 @@ export class EncounterCreatorScene extends Phaser.Scene {
     // ── DESCRIPTION (player-facing card text) ─────────────────────────
     const descY = introY + 22 + textareaH + 14;
     pushBasicLabel(this.makeSubLabel(x, descY, w, "DESCRIPTION"));
-    this.formDescriptionInput = trackHtmlInput(this.buildTextarea(
+    this.formDescriptionInput = trackHtmlInput(this.buildScaledTextarea(
       x, descY + 22, w, descShortH,
       "Short summary shown on the encounter card — what the player sees before launching.",
       (val) => { this.formDescription = val; },
@@ -1306,7 +1260,7 @@ export class EncounterCreatorScene extends Phaser.Scene {
     // ── AIGM CONTEXT (long-form scene grounding for the GM) ───────────
     const aigmY = descY + 22 + descShortH + 14;
     pushBasicLabel(this.makeSubLabel(x, aigmY, w, "AIGM CONTEXT"));
-    this.formAigmContextInput = trackHtmlInput(this.buildTextarea(
+    this.formAigmContextInput = trackHtmlInput(this.buildScaledTextarea(
       x, aigmY + 22, w, textareaH,
       "Scene context the AIGM sees silently — atmosphere, what NPCs know, what to gate behind checks, how the scene should resolve.",
       (val) => { this.formAigmContext = val; },
@@ -1317,14 +1271,14 @@ export class EncounterCreatorScene extends Phaser.Scene {
     const objFlagY = aigmY + 22 + textareaH + 14;
     const halfW = Math.floor((w - 8) / 2);
     pushBasicLabel(this.makeSubLabel(x, objFlagY, halfW, "OBJECTIVE"));
-    this.formObjectiveInput = trackHtmlInput(this.buildLineInput(
+    this.formObjectiveInput = trackHtmlInput(this.buildScaledLineInput(
       x, objFlagY + 22, halfW, oneLineH,
       "Player-facing one-liner",
       (val) => { this.formObjective = val; },
       this.formObjective,
     ));
     pushBasicLabel(this.makeSubLabel(x + halfW + 8, objFlagY, halfW, "COMPLETION FLAG"));
-    this.formCompletionFlagInput = trackHtmlInput(this.buildLineInput(
+    this.formCompletionFlagInput = trackHtmlInput(this.buildScaledLineInput(
       x + halfW + 8, objFlagY + 22, halfW, oneLineH,
       "snake_case slug",
       (val) => { this.formCompletionFlag = val; },
@@ -1334,47 +1288,11 @@ export class EncounterCreatorScene extends Phaser.Scene {
 
   // ── Outer tabs (Regular / Generative AI) ────────────────────────────────
 
-  /** Build the two outer tab buttons centred between title and content.
-   *  Scene chrome — built once in `create()` and never rebuilt. The button
-   *  only flips the outer tab; visibility is handled by `setOuterTab`. */
-  private buildOuterTabs(): void {
-    const TAB_W = 220;
-    const TAB_GAP = 8;
-    const totalW = TAB_W * 2 + TAB_GAP;
-    const startX = (W - totalW) / 2;
-    this.regularTabBtn = createHtmlButton({
-      scene: this, sceneWidth: W,
-      x: startX, y: OUTER_TAB_Y, w: TAB_W, h: OUTER_TAB_H,
-      label: "REGULAR", variant: "secondary", fontSize: 12,
-      onClick: () => this.setOuterTab("regular"),
-    });
-    this.aiTabBtn = createHtmlButton({
-      scene: this, sceneWidth: W,
-      x: startX + TAB_W + TAB_GAP, y: OUTER_TAB_Y, w: TAB_W, h: OUTER_TAB_H,
-      label: "GENERATIVE AI", variant: "secondary", fontSize: 12,
-      onClick: () => this.setOuterTab("ai"),
-    });
-    this.sceneChrome.push(this.regularTabBtn, this.aiTabBtn);
-    this.refreshOuterTabActiveState();
-  }
-
-  /** Switch outer tab and reconcile right-column visibility. Map column +
-   *  paint bar stay mounted in both tabs. */
-  private setOuterTab(tab: "regular" | "ai"): void {
-    if (this.outerTab === tab) return;
-    this.outerTab = tab;
-    this.refreshOuterTabActiveState();
-    this.refreshOuterTabVisibility();
-  }
-
-  private refreshOuterTabActiveState(): void {
-    if (this.regularTabBtn) this.regularTabBtn.setActive(this.outerTab === "regular");
-    if (this.aiTabBtn)      this.aiTabBtn.setActive(this.outerTab === "ai");
-  }
-
   /** Show one outer tab's right column and hide the other. Called after a
-   *  tab switch AND after `rebuildForm` rebuilds both right columns. */
-  private refreshOuterTabVisibility(): void {
+   *  tab switch AND after `rebuildForm` rebuilds both right columns.
+   *  Overrides the bucket-flipping default — the map column + paint bar
+   *  stay mounted in both tabs; only the right column swaps. */
+  protected override refreshOuterTabVisibility(): void {
     const isRegular = this.outerTab === "regular";
     // Regular right column = inner tab bar + the currently active sub-tab.
     if (this.basicTabBtn)    this.basicTabBtn.setVisible(isRegular);
@@ -1474,7 +1392,7 @@ export class EncounterCreatorScene extends Phaser.Scene {
       label: "BACK", variant: "ghost",
       onClick: () => this.scene.start("MainMenuScene"),
     });
-    this.sceneChrome.push(this.backBtn);
+    this.chrome.push(this.backBtn);
 
     // OPEN ENCOUNTER + LOAD MAP — left-of-center, side by side.
     this.openBtn = createHtmlButton({
@@ -1483,7 +1401,7 @@ export class EncounterCreatorScene extends Phaser.Scene {
       label: "📂 OPEN ENCOUNTER", variant: "secondary",
       onClick: () => this.openEncounterPicker(),
     });
-    this.sceneChrome.push(this.openBtn);
+    this.chrome.push(this.openBtn);
     this.loadMapBtn = createHtmlButton({
       scene: this, sceneWidth: W,
       x: 432, y: H - 54, w: 220, h: 36,
@@ -1494,7 +1412,7 @@ export class EncounterCreatorScene extends Phaser.Scene {
     this.loadMapBtn.el.style.background = "#2a1a3a";
     this.loadMapBtn.el.style.borderColor = "#5a4480";
     this.loadMapBtn.el.style.color = "#d8c8e8";
-    this.sceneChrome.push(this.loadMapBtn);
+    this.chrome.push(this.loadMapBtn);
 
     // SAVE ENCOUNTER — far right.
     this.saveBtn = createHtmlButton({
@@ -1503,7 +1421,7 @@ export class EncounterCreatorScene extends Phaser.Scene {
       label: "✓ SAVE ENCOUNTER", variant: "primary",
       onClick: () => this.runSave(),
     });
-    this.sceneChrome.push(this.saveBtn);
+    this.chrome.push(this.saveBtn);
     this.refreshButtons();
   }
 
@@ -1629,7 +1547,10 @@ export class EncounterCreatorScene extends Phaser.Scene {
     });
   }
 
-  private buildLineInput(
+  /** Scale-tracked variants of the base form-input wrappers — font size
+   *  follows the canvas zoom, and the caller tracks disposal itself
+   *  (everything here lives in `formChrome`, not the base buckets). */
+  private buildScaledLineInput(
     x: number, y: number, w: number, h: number,
     placeholder: string,
     onInput: (value: string) => void,
@@ -1644,7 +1565,7 @@ export class EncounterCreatorScene extends Phaser.Scene {
     }).el;
   }
 
-  private buildTextarea(
+  private buildScaledTextarea(
     x: number, y: number, w: number, h: number,
     placeholder: string,
     onInput: (value: string) => void,
@@ -1678,7 +1599,7 @@ export class EncounterCreatorScene extends Phaser.Scene {
     this.scale.on("resize", place);
   }
 
-  private buildStatusLine(): void {
+  protected override buildStatusLine(): void {
     const status = document.createElement("div");
     status.style.cssText = `
       position: absolute; color: #889aac; font-family: monospace;
@@ -1699,7 +1620,7 @@ export class EncounterCreatorScene extends Phaser.Scene {
     };
     place();
     this.scale.on("resize", place);
-    this.sceneChrome.push(htmlChromeHandle(status));
+    this.chrome.push(htmlChromeHandle(status));
   }
 
   /**
@@ -1731,12 +1652,12 @@ export class EncounterCreatorScene extends Phaser.Scene {
 
   /**
    * Hide / show everything the editor owns. Both the scene-lifetime chrome
-   * (`sceneChrome`) and the per-form chrome (`formChrome`) are toggled; on
+   * (`chrome`) and the per-form chrome (`formChrome`) are toggled; on
    * show, the active picker tab is re-applied so sub-components respect
    * tab-aware visibility instead of all becoming visible at once.
    */
   private setDomChromeVisible(visible: boolean): void {
-    for (const h of this.sceneChrome) h.setVisible(visible);
+    for (const h of this.chrome) h.setVisible(visible);
     for (const h of this.formChrome)  h.setVisible(visible);
     // Re-show only the elements that belong to the active outer tab so the
     // other tab's right-column content stays hidden across visibility flips.
@@ -1747,11 +1668,11 @@ export class EncounterCreatorScene extends Phaser.Scene {
    *  if it's currently open. Called on scene shutdown + destroy events. */
   private teardownDom(): void {
     this.disposeFormChrome();
-    for (const h of this.sceneChrome) h.dispose();
-    this.sceneChrome = [];
+    for (const h of this.chrome) h.dispose();
+    this.chrome = [];
     if (this.encounterPicker) { this.encounterPicker.destroy(); this.encounterPicker = null; }
     if (this.mapSelector)     { this.mapSelector.destroy();     this.mapSelector     = null; }
-    // Field refs that lived in sceneChrome — null out so any stray check
+    // Field refs that lived in scene chrome — null out so any stray check
     // fails cleanly post-teardown.
     this.zonePainter = null;
     this.monsterPicker = null;

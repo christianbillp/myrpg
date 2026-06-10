@@ -1,25 +1,20 @@
-import Phaser from "phaser";
 import { gameClient } from "../net/GameClient";
 import type { NPCDef, MonsterDef, FactionDef } from "../../../shared/types";
 import type { NpcRefineProposed } from "../net/GameClient";
-import { createHtmlButton, createHtmlText, type HtmlButtonHandle, type HtmlTextHandle } from "../ui/htmlButtons";
+import { createHtmlButton } from "../ui/htmlButtons";
 import { NpcPickerOverlay } from "../ui/generate/NpcPickerOverlay";
 import { TokenPickerOverlay } from "../ui/generate/TokenPickerOverlay";
 import { NpcTestChatOverlay } from "../ui/NpcTestChatOverlay";
+import { attachPlacement as sharedAttachPlacement } from "../ui/sceneInputs";
 import {
-  buildLineInput as sharedBuildLineInput,
-  buildSelect as sharedBuildSelect,
-  buildTextarea as sharedBuildTextarea,
-  attachPlacement as sharedAttachPlacement,
-} from "../ui/sceneInputs";
-import {
-  TILE_SIZE,
-  GRID_COLS,
-  GRID_ROWS,
-  HUD_HEIGHT,
-  PLAYER_PANEL_WIDTH,
-  TARGET_PANEL_WIDTH,
-} from "../constants";
+  BaseCreatorScene,
+  CREATOR_SCENE_WIDTH as W,
+  CREATOR_SCENE_HEIGHT as H,
+  CREATOR_CONTENT_TOP as CONTENT_TOP,
+  CREATOR_CONTENT_BOTTOM as CONTENT_BOTTOM,
+  CREATOR_PANEL_PAD as PANEL_PAD,
+  CREATOR_COL_GAP as COL_GAP,
+} from "./BaseCreatorScene";
 
 /**
  * NpcCreatorScene — author-side page for building NPCDefs.
@@ -38,19 +33,7 @@ import {
  *   • BOTTOM bar — BACK, LOAD NPC, SAVE NPC.
  */
 
-const W = PLAYER_PANEL_WIDTH + GRID_COLS * TILE_SIZE + TARGET_PANEL_WIDTH;
-const H = GRID_ROWS * TILE_SIZE + HUD_HEIGHT;
-
-const TITLE_Y = 28;
-const OUTER_TAB_Y = 92;
-const OUTER_TAB_H = 28;
-const CONTENT_TOP = 132;
-const CONTENT_BOTTOM = H - 110;
-const PANEL_PAD = 40;
-const COL_GAP = 28;
 const LEFT_FRACTION = 0.55;
-
-type Chrome = HtmlButtonHandle | HtmlTextHandle | { setVisible(v: boolean): void; dispose(): void };
 
 /** Snapshot of every NPC Creator form field. Stashed in the Phaser registry
  *  whenever the user clicks OPEN TOKEN CREATOR so the in-progress NPC survives
@@ -65,21 +48,7 @@ interface NpcCreatorFormState {
   formPersona: string;
 }
 
-export class NpcCreatorScene extends Phaser.Scene {
-  /** Scene-wide chrome — title, subtitle, tab buttons, bottom bar, status line. */
-  private chrome: Chrome[] = [];
-  /** REGULAR tab — form columns + stat preview. */
-  private regularBucket: Chrome[] = [];
-  /** GENERATIVE AI tab — prompt textarea, status, diff viewer, controls. */
-  private aiBucket: Chrome[] = [];
-  private statusEl: HTMLDivElement | null = null;
-  private busy = false;
-
-  // Outer tab state.
-  private outerTab: "regular" | "ai" = "regular";
-  private regularTabBtn: HtmlButtonHandle | null = null;
-  private aiTabBtn: HtmlButtonHandle | null = null;
-
+export class NpcCreatorScene extends BaseCreatorScene<NpcRefineProposed> {
   // Form state.
   private npcId = "";
   private formName = "";
@@ -100,16 +69,6 @@ export class NpcCreatorScene extends Phaser.Scene {
   private tokenInput: HTMLInputElement | null = null;
   private personaInput: HTMLTextAreaElement | null = null;
 
-  // AI panel state.
-  private aiPromptInput: HTMLTextAreaElement | null = null;
-  private aiStatusEl: HTMLDivElement | null = null;
-  private aiDiffEl: HTMLDivElement | null = null;
-  private aiSubmitBtn: HtmlButtonHandle | null = null;
-  private aiResetBtn: HtmlButtonHandle | null = null;
-  private aiAcceptBtn: HtmlButtonHandle | null = null;
-  private aiRejectBtn: HtmlButtonHandle | null = null;
-  private aiProposal: NpcRefineProposed | null = null;
-
   // Right-column preview.
   private previewEl: HTMLDivElement | null = null;
 
@@ -123,11 +82,7 @@ export class NpcCreatorScene extends Phaser.Scene {
   }
 
   init(data?: { presetTokenAsset?: string }): void {
-    this.chrome = [];
-    this.regularBucket = [];
-    this.aiBucket = [];
-    this.outerTab = "regular";
-    this.aiProposal = null;
+    this.resetCreatorScaffold();
     this.formPersistent = false;
     this.formConversationId = "";
     // Restore form state stashed by the OPEN TOKEN CREATOR navigation so the
@@ -152,7 +107,6 @@ export class NpcCreatorScene extends Phaser.Scene {
       this.formPersona = "";
     }
     if (data?.presetTokenAsset) this.formTokenAsset = data.presetTokenAsset;
-    this.busy = false;
   }
 
   /** Snapshot every form field so the OPEN TOKEN CREATOR navigation can
@@ -172,35 +126,24 @@ export class NpcCreatorScene extends Phaser.Scene {
   }
 
   create(): void {
-    // Same WASD-input defence the other creator scenes use. GameScene leaves
-    // global keyboard capture on for movement; not clearing it would block
-    // typing W / A / S / D into any HTML input on this page.
-    this.input.keyboard?.disableGlobalCapture();
-    this.input.keyboard?.clearCaptures();
-
-    this.add.rectangle(W / 2, H / 2, W, H, 0x0d0d1e);
-    this.add.rectangle(W / 2, TITLE_Y + 38, W - 64, 1, 0x334455);
-
-    this.chrome.push(createHtmlText({
-      scene: this, sceneWidth: W,
-      x: 0, y: TITLE_Y, w: W, h: 28,
-      text: "NPC CREATOR",
-      fontSize: 22, color: "#e2b96f", align: "center", letterSpacing: 1,
-    }));
-    this.chrome.push(createHtmlText({
-      scene: this, sceneWidth: W,
-      x: 0, y: TITLE_Y + 50, w: W, h: 16,
-      text: "Author an NPC. Pick a monster to inherit stats from; add identity + persona on top.",
-      fontSize: 11, color: "#88aacc", align: "center",
-    }));
+    this.clearKeyboardCaptureForHtmlInputs();
+    this.buildCreatorHeader(
+      "NPC CREATOR",
+      "Author an NPC. Pick a monster to inherit stats from; add identity + persona on top.",
+    );
 
     this.buildOuterTabs();
     this.buildLeftColumn();
     this.buildRightColumn();
-    this.buildAiPanel();
+    this.buildAiProposalPanel({
+      promptLabel: "PROMPT  —  describe the NPC you want. The AI sees the current draft + the available monster / faction / conversation pools.",
+      promptPlaceholder: "e.g. \"a gruff dwarven blacksmith aligned with the town guard who suspects the player on sight; tie him to the tavern_keeper_chat conversation\".",
+      diffPlaceholder:
+        "No proposal yet. Describe the NPC and press GENERATE.\n\n" +
+        "The AI sees the current draft + the monster / faction / conversation pools, and proposes edits — accept to merge, reject to discard.",
+    });
     this.buildStatusLine();
     this.buildBottomBar();
-    this.refreshOuterTabActiveState();
     this.refreshOuterTabVisibility();
     this.refreshPreview();
 
@@ -389,161 +332,12 @@ export class NpcCreatorScene extends Phaser.Scene {
     `;
   }
 
-  // ── Bottom bar ───────────────────────────────────────────────────────────
+  // ── Generative AI flow ──────────────────────────────────────────────────
 
-  // ── Outer tab bar (REGULAR / GENERATIVE AI) ─────────────────────────────
-
-  private buildOuterTabs(): void {
-    const TAB_W = 220;
-    const TAB_GAP = 8;
-    const startX = (W - (TAB_W * 2 + TAB_GAP)) / 2;
-    this.regularTabBtn = createHtmlButton({
-      scene: this, sceneWidth: W,
-      x: startX, y: OUTER_TAB_Y, w: TAB_W, h: OUTER_TAB_H,
-      label: "REGULAR", variant: "secondary", fontSize: 12,
-      onClick: () => this.setOuterTab("regular"),
-    });
-    this.aiTabBtn = createHtmlButton({
-      scene: this, sceneWidth: W,
-      x: startX + TAB_W + TAB_GAP, y: OUTER_TAB_Y, w: TAB_W, h: OUTER_TAB_H,
-      label: "GENERATIVE AI", variant: "secondary", fontSize: 12,
-      onClick: () => this.setOuterTab("ai"),
-    });
-    this.chrome.push(this.regularTabBtn, this.aiTabBtn);
-  }
-
-  private setOuterTab(tab: "regular" | "ai"): void {
-    if (this.outerTab === tab) return;
-    this.outerTab = tab;
-    this.refreshOuterTabActiveState();
-    this.refreshOuterTabVisibility();
-  }
-
-  private refreshOuterTabActiveState(): void {
-    if (this.regularTabBtn) this.regularTabBtn.setActive(this.outerTab === "regular");
-    if (this.aiTabBtn)      this.aiTabBtn.setActive(this.outerTab === "ai");
-  }
-
-  private refreshOuterTabVisibility(): void {
-    const isRegular = this.outerTab === "regular";
-    for (const c of this.regularBucket) c.setVisible(isRegular);
-    for (const c of this.aiBucket)      c.setVisible(!isRegular);
-  }
-
-  // ── Generative AI panel ─────────────────────────────────────────────────
-
-  private buildAiPanel(): void {
-    const bucket = this.aiBucket;
-    const x = PANEL_PAD;
-    const w = W - PANEL_PAD * 2;
-    const topY = CONTENT_TOP;
-    const bottomY = CONTENT_BOTTOM;
-    const totalH = bottomY - topY;
-
-    const promptLabelH = 18;
-    const buttonRowH = 32;
-    const statusH = 20;
-    const acceptRowH = 32;
-    const gap = 10;
-    const remaining = totalH - promptLabelH - buttonRowH - statusH - acceptRowH - gap * 4;
-    const promptH = Math.max(110, Math.floor(remaining * 0.35));
-    const diffH = Math.max(160, remaining - promptH);
-
-    bucket.push(createHtmlText({
-      scene: this, sceneWidth: W,
-      x, y: topY, w, h: promptLabelH,
-      text: "PROMPT  —  describe the NPC you want. The AI sees the current draft + the available monster / faction / conversation pools.",
-      fontSize: 10, color: "#7aadcc", align: "left", letterSpacing: 1,
-    }));
-
-    const promptY = topY + promptLabelH + 4;
-    this.aiPromptInput = this.buildTextarea(
-      x, promptY, w, promptH,
-      "e.g. \"a gruff dwarven blacksmith aligned with the town guard who suspects the player on sight; tie him to the tavern_keeper_chat conversation\".",
-      () => { /* read at submit */ },
-      bucket,
-    );
-
-    const btnRowY = promptY + promptH + gap;
-    const btnW = Math.floor((w - gap) / 2);
-    this.aiSubmitBtn = createHtmlButton({
-      scene: this, sceneWidth: W,
-      x, y: btnRowY, w: btnW, h: buttonRowH,
-      label: "✨ GENERATE", variant: "primary", fontSize: 13,
-      onClick: () => this.runAiGenerate(),
-    });
-    bucket.push(this.aiSubmitBtn);
-    this.aiResetBtn = createHtmlButton({
-      scene: this, sceneWidth: W,
-      x: x + btnW + gap, y: btnRowY, w: btnW, h: buttonRowH,
-      label: "RESET PROMPT", variant: "ghost", fontSize: 12,
-      onClick: () => { if (this.aiPromptInput) this.aiPromptInput.value = ""; },
-    });
-    bucket.push(this.aiResetBtn);
-
-    const statusY = btnRowY + buttonRowH + gap;
-    this.aiStatusEl = document.createElement("div");
-    this.aiStatusEl.style.cssText = `
-      position: absolute;
-      font-family: monospace; font-size: 12px; color: #88aacc;
-      display: flex; align-items: center;
-      z-index: 10; box-sizing: border-box;
-      pointer-events: none;
-    `;
-    document.body.appendChild(this.aiStatusEl);
-    bucket.push(sharedAttachPlacement(this.aiStatusEl, { scene: this, sceneWidth: W, x, y: statusY, w, h: statusH }));
-
-    const diffY = statusY + statusH + gap;
-    this.aiDiffEl = document.createElement("div");
-    this.aiDiffEl.style.cssText = `
-      position: absolute;
-      background: #0f1320; border: 1px solid #334455;
-      box-sizing: border-box; padding: 10px 12px;
-      font-family: monospace; font-size: 12px; color: #aabbcc;
-      overflow-y: auto; scrollbar-width: thin; scrollbar-color: #445566 transparent;
-      white-space: pre-wrap; line-height: 1.5;
-      z-index: 10;
-    `;
-    this.aiDiffEl.textContent =
-      "No proposal yet. Describe the NPC and press GENERATE.\n\n" +
-      "The AI sees the current draft + the monster / faction / conversation pools, and proposes edits — accept to merge, reject to discard.";
-    document.body.appendChild(this.aiDiffEl);
-    bucket.push(sharedAttachPlacement(this.aiDiffEl, { scene: this, sceneWidth: W, x, y: diffY, w, h: diffH }));
-
-    const acceptY = diffY + diffH + gap;
-    this.aiAcceptBtn = createHtmlButton({
-      scene: this, sceneWidth: W,
-      x, y: acceptY, w: btnW, h: acceptRowH,
-      label: "✓ ACCEPT PROPOSAL", variant: "primary", fontSize: 13,
-      onClick: () => this.acceptAiProposal(),
-    });
-    this.aiAcceptBtn.setDisabled(true);
-    bucket.push(this.aiAcceptBtn);
-    this.aiRejectBtn = createHtmlButton({
-      scene: this, sceneWidth: W,
-      x: x + btnW + gap, y: acceptY, w: btnW, h: acceptRowH,
-      label: "✗ REJECT", variant: "ghost", fontSize: 12,
-      onClick: () => this.rejectAiProposal(),
-    });
-    this.aiRejectBtn.setDisabled(true);
-    bucket.push(this.aiRejectBtn);
-  }
-
-  private async runAiGenerate(): Promise<void> {
-    if (this.busy) return;
-    const prompt = (this.aiPromptInput?.value ?? "").trim();
-    if (prompt.length < 4) {
-      if (this.aiStatusEl) this.aiStatusEl.textContent = "Describe the NPC (at least a few words).";
-      return;
-    }
-    this.busy = true;
-    this.aiSubmitBtn?.setDisabled(true);
-    this.aiAcceptBtn?.setDisabled(true);
-    this.aiRejectBtn?.setDisabled(true);
-    if (this.aiStatusEl) this.aiStatusEl.textContent = "Asking the GM to revise the draft…";
-
-    try {
-      const draft = {
+  protected runAiGenerate(): Promise<void> {
+    return this.runAiRefineRequest({
+      emptyPromptMessage: "Describe the NPC (at least a few words).",
+      refine: (prompt) => gameClient.refineNpc({
         id: this.npcId,
         name: this.formName,
         monsterClass: this.formMonsterClass,
@@ -553,72 +347,25 @@ export class NpcCreatorScene extends Phaser.Scene {
         persona: this.formPersona,
         persistent: this.formPersistent,
         conversationId: this.formConversationId,
-      };
-      const result = await gameClient.refineNpc(draft, prompt);
-      this.aiProposal = result.proposed;
-      this.renderProposalDiff(result.rationale, result.proposed);
-      const hasAnyChange = Object.keys(result.proposed).length > 0;
-      this.aiAcceptBtn?.setDisabled(!hasAnyChange);
-      this.aiRejectBtn?.setDisabled(!hasAnyChange);
-      if (this.aiStatusEl) {
-        this.aiStatusEl.textContent = hasAnyChange
-          ? "Proposal ready — review the diff and Accept or Reject."
-          : "The model returned no changes. Try a more specific prompt.";
-      }
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      if (this.aiStatusEl) this.aiStatusEl.textContent = `Refine failed: ${msg}`;
-      if (this.aiDiffEl) this.aiDiffEl.textContent = `Refine failed: ${msg}\n\nAdjust the prompt and try again.`;
-    } finally {
-      this.busy = false;
-      this.aiSubmitBtn?.setDisabled(false);
-    }
+      }, prompt),
+      renderDiff: (rationale, proposed) => this.renderProposalDiff(rationale, proposed),
+    });
   }
 
   private renderProposalDiff(rationale: string, p: NpcRefineProposed): void {
-    if (!this.aiDiffEl) return;
-    this.aiDiffEl.replaceChildren();
-
-    const rationaleEl = document.createElement("div");
-    rationaleEl.style.cssText = "color:#e2b96f;font-size:11px;letter-spacing:1px;padding:0 0 10px;border-bottom:1px solid #223344;margin-bottom:10px;";
-    rationaleEl.textContent = `RATIONALE  —  ${rationale}`;
-    this.aiDiffEl.appendChild(rationaleEl);
-
-    const card = (label: string, before: string, after: string): void => {
-      const wrap = document.createElement("div");
-      wrap.style.cssText = "padding:6px 0;border-bottom:1px solid #1a2a3a;margin-bottom:6px;";
-      const lbl = document.createElement("div");
-      lbl.style.cssText = "color:#7aadcc;font-size:10px;letter-spacing:2px;margin-bottom:4px;";
-      lbl.textContent = label.toUpperCase();
-      wrap.appendChild(lbl);
-      const beforeEl = document.createElement("div");
-      beforeEl.style.cssText = "color:#667788;font-size:11px;padding:2px 6px;margin:2px 0;background:#0a1018;border-left:2px solid #445566;white-space:pre-wrap;";
-      beforeEl.textContent = `– ${before || "(empty)"}`;
-      wrap.appendChild(beforeEl);
-      const afterEl = document.createElement("div");
-      afterEl.style.cssText = "color:#aaccaa;font-size:11px;padding:2px 6px;margin:2px 0;background:#0e1a10;border-left:2px solid #88aa66;white-space:pre-wrap;";
-      afterEl.textContent = `+ ${after || "(empty)"}`;
-      wrap.appendChild(afterEl);
-      this.aiDiffEl!.appendChild(wrap);
-    };
-
-    if (p.name           !== undefined) card("name",            this.formName,           p.name);
-    if (p.monsterClass   !== undefined) card("monster class",   this.formMonsterClass,   p.monsterClass);
-    if (p.factionId      !== undefined) card("faction",         this.formFactionId,      p.factionId);
-    if (p.color          !== undefined) card("color",           this.formColor,          p.color);
-    if (p.tokenAsset     !== undefined) card("token asset",     this.formTokenAsset,     p.tokenAsset);
-    if (p.persona        !== undefined) card("persona",         this.formPersona,        p.persona);
-    if (p.persistent     !== undefined) card("persistent",      String(this.formPersistent), String(p.persistent));
-    if (p.conversationId !== undefined) card("conversation id", this.formConversationId, p.conversationId);
-    if (Object.keys(p).length === 0) {
-      const none = document.createElement("div");
-      none.style.cssText = "color:#667788;font-style:italic;";
-      none.textContent = "The model proposed no field changes.";
-      this.aiDiffEl.appendChild(none);
-    }
+    this.beginProposalDiff(rationale);
+    if (p.name           !== undefined) this.appendProposalCard("name",            this.formName,           p.name);
+    if (p.monsterClass   !== undefined) this.appendProposalCard("monster class",   this.formMonsterClass,   p.monsterClass);
+    if (p.factionId      !== undefined) this.appendProposalCard("faction",         this.formFactionId,      p.factionId);
+    if (p.color          !== undefined) this.appendProposalCard("color",           this.formColor,          p.color);
+    if (p.tokenAsset     !== undefined) this.appendProposalCard("token asset",     this.formTokenAsset,     p.tokenAsset);
+    if (p.persona        !== undefined) this.appendProposalCard("persona",         this.formPersona,        p.persona);
+    if (p.persistent     !== undefined) this.appendProposalCard("persistent",      String(this.formPersistent), String(p.persistent));
+    if (p.conversationId !== undefined) this.appendProposalCard("conversation id", this.formConversationId, p.conversationId);
+    if (Object.keys(p).length === 0) this.appendProposalNoChangesNote();
   }
 
-  private acceptAiProposal(): void {
+  protected acceptAiProposal(): void {
     const p = this.aiProposal;
     if (!p) return;
     if (p.name           !== undefined) this.formName           = p.name;
@@ -640,26 +387,10 @@ export class NpcCreatorScene extends Phaser.Scene {
     if (this.tokenInput    && p.tokenAsset   !== undefined) this.tokenInput.value    = this.formTokenAsset;
     if (this.personaInput  && p.persona      !== undefined) this.personaInput.value  = this.formPersona;
 
-    this.aiProposal = null;
-    this.aiAcceptBtn?.setDisabled(true);
-    this.aiRejectBtn?.setDisabled(true);
-    if (this.aiStatusEl) this.aiStatusEl.textContent = "Proposal applied. Switch to REGULAR to fine-tune, or iterate with another prompt.";
-    if (this.aiDiffEl) {
-      this.aiDiffEl.replaceChildren();
-      this.aiDiffEl.textContent = "Proposal applied. Iterate with another prompt or switch to REGULAR to fine-tune.";
-    }
+    this.concludeAiProposalAccepted();
   }
 
-  private rejectAiProposal(): void {
-    this.aiProposal = null;
-    this.aiAcceptBtn?.setDisabled(true);
-    this.aiRejectBtn?.setDisabled(true);
-    if (this.aiStatusEl) this.aiStatusEl.textContent = "Proposal discarded. Try another prompt.";
-    if (this.aiDiffEl) {
-      this.aiDiffEl.replaceChildren();
-      this.aiDiffEl.textContent = "Proposal discarded.";
-    }
-  }
+  // ── Bottom bar ───────────────────────────────────────────────────────────
 
   private buildBottomBar(): void {
     this.add.rectangle(W / 2, H - 58, W - 64, 1, 0x334455);
@@ -831,55 +562,8 @@ export class NpcCreatorScene extends Phaser.Scene {
     }
   }
 
-  // ── DOM building blocks ─────────────────────────────────────────────────
-
-  private buildStatusLine(): void {
-    const status = document.createElement("div");
-    status.style.cssText = `
-      position: absolute;
-      color: #e2b96f; font-family: monospace; font-size: 13px;
-      text-align: center; pointer-events: none; z-index: 10;
-    `;
-    document.body.appendChild(status);
-    this.statusEl = status;
-    this.chrome.push(sharedAttachPlacement(status, { scene: this, sceneWidth: W, x: PANEL_PAD, y: CONTENT_BOTTOM + 14, w: W - PANEL_PAD * 2, h: 20 }));
-  }
-
-  private makeLabel(x: number, y: number, w: number, text: string): HtmlTextHandle {
-    return createHtmlText({
-      scene: this, sceneWidth: W,
-      x, y, w, h: 14,
-      text,
-      fontSize: 10, color: "#778899", align: "left", letterSpacing: 1,
-    });
-  }
-
-  private buildLineInput(x: number, y: number, w: number, h: number, placeholder: string, onInput: (val: string) => void, bucket: Chrome[] = this.chrome): HTMLInputElement {
-    const handle = sharedBuildLineInput({ scene: this, sceneWidth: W, x, y, w, h, placeholder, onInput });
-    bucket.push(handle);
-    return handle.el;
-  }
-
-  private buildSelect(x: number, y: number, w: number, h: number, options: Array<{ value: string; label: string }>, onChange: (val: string) => void, bucket: Chrome[] = this.chrome): HTMLSelectElement {
-    const handle = sharedBuildSelect({ scene: this, sceneWidth: W, x, y, w, h, options, onChange });
-    bucket.push(handle);
-    return handle.el;
-  }
-
-  private buildTextarea(x: number, y: number, w: number, h: number, placeholder: string, onInput: (val: string) => void, bucket: Chrome[] = this.chrome): HTMLTextAreaElement {
-    const handle = sharedBuildTextarea({ scene: this, sceneWidth: W, x, y, w, h, placeholder, onInput });
-    bucket.push(handle);
-    return handle.el;
-  }
-
   private teardown(): void {
-    for (const c of this.chrome) c.dispose();
-    for (const c of this.regularBucket) c.dispose();
-    for (const c of this.aiBucket) c.dispose();
-    this.chrome = [];
-    this.regularBucket = [];
-    this.aiBucket = [];
-    this.statusEl = null;
+    this.disposeCreatorChrome();
     if (this.picker) { this.picker.destroy(); this.picker = null; }
     if (this.tokenPicker) { this.tokenPicker.destroy(); this.tokenPicker = null; }
     if (this.testChat) { this.testChat.destroy(); this.testChat = null; }
