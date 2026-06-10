@@ -17,6 +17,7 @@ import {
   ACTION_BUTTON_CATALOG, BASIC_ACTION_IDS, readHiddenActions, writeHiddenActions, setActionHidden,
   readCompactView, writeCompactView,
 } from "./actionPanelPrefs";
+import { COMBAT_SPEEDS, getCombatSpeed, setCombatSpeed } from "../animationSpeed";
 
 const ACCENT = "#7aadcc";
 
@@ -71,6 +72,13 @@ export class PanelSetupOverlay {
       "Show action buttons as small icon-only squares (no text). Hover a button to see its name.",
       readCompactView(),
       (on) => { writeCompactView(on); this.onChange(); },
+    ));
+    configGrid.appendChild(this.choiceCard(
+      "⏩", "Combat Speed",
+      "How fast combat animations and dialogue pauses play. Story moments (fades, announcements) keep their pacing.",
+      COMBAT_SPEEDS.map((s) => ({ value: s, label: `${s}×` })),
+      getCombatSpeed(),
+      (speed) => setCombatSpeed(speed),
     ));
     scroll.appendChild(configGrid);
 
@@ -143,6 +151,54 @@ export class PanelSetupOverlay {
   /** A card with a glyph + name, a description, and a checkbox that reflects/sets
    *  an on/off state. `onToggle(on)` receives the new state; `labels` names the
    *  on/off states (e.g. Visible/Hidden for actions, Enabled/Disabled for config). */
+  /** A configuration card with a row of mutually-exclusive choice pills
+   *  (the Combat Speed selector). Same chrome as `toggleCard`. */
+  private choiceCard(
+    glyph: string, label: string, description: string,
+    options: Array<{ value: number; label: string }>,
+    current: number,
+    onPick: (value: number) => void,
+  ): HTMLElement {
+    const card = document.createElement("div");
+    card.style.cssText = `display: flex; flex-direction: column; gap: 6px; padding: 10px 12px;
+      background: #11141c; border: 1px solid #283443;`;
+
+    const name = document.createElement("span");
+    name.textContent = `${glyph}  ${label}`;
+    name.style.cssText = "font-size: 13px; color: #dfe8f2;";
+    card.appendChild(name);
+
+    const desc = document.createElement("div");
+    desc.textContent = description;
+    desc.style.cssText = "font-size: 10px; color: #8da0b3; line-height: 1.45;";
+    card.appendChild(desc);
+
+    const row = document.createElement("div");
+    row.style.cssText = "display: flex; gap: 6px;";
+    const pills: HTMLButtonElement[] = [];
+    const paint = (selected: number) => {
+      for (const [i, pill] of pills.entries()) {
+        const active = options[i].value === selected;
+        pill.style.background = active ? "#1a3a2a" : "#161b24";
+        pill.style.borderColor = active ? "#2a6655" : "#283443";
+        pill.style.color = active ? "#7ec27e" : "#8da0b3";
+      }
+    };
+    for (const opt of options) {
+      const pill = document.createElement("button");
+      pill.textContent = opt.label;
+      pill.style.cssText = `flex: 1; padding: 5px 0; font-size: 11px; cursor: pointer;
+        border: 1px solid #283443; background: #161b24; color: #8da0b3;`;
+      pill.addEventListener("click", () => { onPick(opt.value); paint(opt.value); });
+      pills.push(pill);
+      row.appendChild(pill);
+    }
+    paint(current);
+    card.appendChild(row);
+
+    return card;
+  }
+
   private toggleCard(
     glyph: string, label: string, description: string, on: boolean,
     onToggle: (on: boolean) => void,

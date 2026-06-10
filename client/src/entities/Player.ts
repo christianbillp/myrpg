@@ -1,4 +1,5 @@
 import Phaser from 'phaser';
+import { scaleDuration } from "../animationSpeed";
 import { TILE_SIZE, DEFAULT_TOKEN_COLOR } from '../constants';
 
 const MOVE_DURATION = 150;
@@ -57,9 +58,25 @@ export class Player {
       targets: this.container,
       x: tx * TILE_SIZE + TILE_SIZE / 2,
       y: ty * TILE_SIZE + TILE_SIZE / 2,
-      duration: MOVE_DURATION,
+      duration: scaleDuration(MOVE_DURATION),
       ease: 'Sine.easeInOut',
       onComplete,
+    });
+  }
+
+  /** Fire-and-forget reconcile glide — see NpcToken.glideTo. */
+  glideTo(tx: number, ty: number): void {
+    const dist = Math.max(Math.abs(tx - this.tileX), Math.abs(ty - this.tileY));
+    if (dist === 0) return;
+    this.scene.tweens.killTweensOf(this.container);
+    this.tileX = tx;
+    this.tileY = ty;
+    this.scene.tweens.add({
+      targets: this.container,
+      x: tx * TILE_SIZE + TILE_SIZE / 2,
+      y: ty * TILE_SIZE + TILE_SIZE / 2,
+      duration: scaleDuration(Math.min(420, dist * 90)),
+      ease: 'Sine.easeInOut',
     });
   }
 

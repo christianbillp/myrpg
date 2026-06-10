@@ -1,4 +1,5 @@
 import Phaser from 'phaser';
+import { scaleDuration } from "../animationSpeed";
 import { TILE_SIZE, DEFAULT_TOKEN_COLOR_HEX } from '../constants';
 import { MonsterDef } from '../../../shared/types';
 import { Disposition } from '../../../shared/types';
@@ -97,9 +98,27 @@ export class NpcToken {
       targets: this.container,
       x: tx * TILE_SIZE + TILE_SIZE / 2,
       y: ty * TILE_SIZE + TILE_SIZE / 2,
-      duration: MOVE_DURATION,
+      duration: scaleDuration(MOVE_DURATION),
       ease: 'Sine.easeInOut',
       onComplete: () => { this.moving = false; onComplete(); },
+    });
+  }
+
+  /** Fire-and-forget reconcile glide — a short distance-aware tween used when
+   *  state reconciliation finds the token off its tile (off-camera sim moves),
+   *  so neutrals stop teleporting on screen (docs/design/systems/animation-timeline.md).
+   *  Long jumps (resume, map swap) still snap via teleport(). */
+  glideTo(tx: number, ty: number): void {
+    const dist = Math.max(Math.abs(tx - this.tileX), Math.abs(ty - this.tileY));
+    if (dist === 0) return;
+    this.tileX = tx;
+    this.tileY = ty;
+    this.scene.tweens.add({
+      targets: this.container,
+      x: tx * TILE_SIZE + TILE_SIZE / 2,
+      y: ty * TILE_SIZE + TILE_SIZE / 2,
+      duration: scaleDuration(Math.min(420, dist * 90)),
+      ease: 'Sine.easeInOut',
     });
   }
 
