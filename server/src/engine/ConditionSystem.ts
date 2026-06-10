@@ -48,8 +48,16 @@ export const GRANTS_ATTACKER_DISADVANTAGE_CONDITIONS = ['invisible', 'heavily-ob
 export const AUTO_CRIT_CONDITIONS = ['paralyzed', 'unconscious'];
 
 /** Conditions that expire at the end of the creature's own turn. `hobbled`
- *  (caltrops) lasts only "until the start of its next turn" per SRD. */
-export const TURN_CONDITIONS = ['dodging', 'disengaged', 'dashing', 'slowed', 'hobbled'];
+ *  (caltrops) lasts only "until the start of its next turn" per SRD, as does
+ *  `shielded` (the Shield spell's +5 AC — see `shieldAcBonus`). */
+export const TURN_CONDITIONS = ['dodging', 'disengaged', 'dashing', 'slowed', 'hobbled', 'shielded'];
+
+/** SRD Shield (NPC-side, US-117 Protective Magic): +5 AC from the moment the
+ *  reaction is cast until the start of the creature's next turn. Applied by
+ *  every attack-resolution path on top of cover. */
+export function shieldAcBonus(conditions: string[]): number {
+  return conditions.includes('shielded') ? 5 : 0;
+}
 
 /** True when the creature cannot take actions, bonus actions, or reactions. */
 export function isIncapacitated(conditions: string[]): boolean {

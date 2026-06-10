@@ -31,7 +31,7 @@ import { canSee as visCanSee } from './Vision.js';
 import { hasModifierFlag, hasAdvantageOn } from './Modifiers.js';
 import { applySelfBuff, applyBuffTo, removeSpellBuffsFrom } from './Buffs.js';
 import { applyInvisibilityConcealment, logInvisibilityFind } from './InvisibilitySystem.js';
-import { SPEED_ZERO_CONDITIONS, isIncapacitated } from './ConditionSystem.js';
+import { SPEED_ZERO_CONDITIONS, isIncapacitated, shieldAcBonus } from './ConditionSystem.js';
 import {
   tilesInArea, playerInArea, creaturesInArea,
   sphereRadiusTiles, chebyshevDiscTiles,
@@ -82,13 +82,12 @@ function rollDamage(dice: number, sides: number, bonus = 0): { total: number; ro
   return { total: rolls.reduce((a, b) => a + b, 0) + bonus, rolls };
 }
 
-export function npcSaveMod(target: NpcState, def: MonsterDef, ability: string): number {
-  const banePenalty = npcBanePenalty(target);
-  // Use the monster's saving throw map if present; otherwise raw ability mod.
-  if (def.savingThrows && def.savingThrows[ability] !== undefined) return def.savingThrows[ability] - banePenalty;
-  const score = (def as unknown as Record<string, number>)[ability];
-  return (typeof score === 'number' ? mod(score) : 0) - banePenalty;
-}
+// `npcSaveMod` moved to CombatSystem (the pure math layer) so NPC-side
+// casters (NpcSpellcasting, US-117) can use it without importing this
+// player-centric module; re-exported here for the existing consumers.
+import { npcSaveMod } from './CombatSystem.js';
+import { tryNpcCounterspell, tryNpcShieldVsSpellAttack } from './NpcSpellcasting.js';
+export { npcSaveMod };
 
 /**
  * Apply damage to a single NPC, routing through resistMod. Idempotent on
@@ -141,7 +140,19 @@ function consumeCastingResources(ctx: GameContext, spell: SpellDef, slotLevel: n
   // US-116: spend the slot at the chosen upcast level, NOT the spell's base
   // level. `doCastSpell` has already clamped slotLevel to [spell.level, 9] and
   // verified a free slot at that level, so this consumption is always valid.
-  if (spell.level > 0 && !fromScroll) {
+  if (spell.level > 0 && !fromScroll && s.player.pactMagic) {
+    // Warlock Pact Magic — spend from the single short-rest pool. Magic Initiate
+    // free casts (rare on a Warlock) still fall back to their own resource.
+    const pact = s.player.pactMagic;
+    if (pact.remaining > 0) {
+      pact.remaining -= 1;
+      Logger.log('spell.pact_slot_consumed', { spellId: spell.id, level: spell.level, slotLevel, before: pact.remaining + 1, after: pact.remaining });
+    } else if (isMagicInitiateSpell(ctx.playerDef, spell.id)) {
+      const rid = magicInitiateResourceId(spell.id);
+      const had = s.player.resources[rid] ?? 0;
+      if (had > 0) s.player.resources[rid] = had - 1;
+    }
+  } else if (spell.level > 0 && !fromScroll) {
     const slotIdx = slotLevel - 1;
     const before = s.player.spellSlots[slotIdx] ?? 0;
     if (before > 0) {
@@ -158,6 +169,14 @@ function consumeCastingResources(ctx: GameContext, spell: SpellDef, slotLevel: n
       }
     }
   }
+  spendCastingAction(ctx, spell);
+}
+
+/** Spend only the cast's action economy (no slot) — shared by the normal
+ *  consumption path and the Counterspell waste branch (SRD 5.2.1: a countered
+ *  spell wastes the action but not the slot). */
+function spendCastingAction(ctx: GameContext, spell: SpellDef): void {
+  const s = ctx.state;
   if (s.phase === 'player_turn') {
     switch (spell.castingTime) {
       case 'action':       s.player.actionUsed = true; break;
@@ -204,7 +223,7 @@ function resolveAttackRollSpell(
     return { hit: false, damageRolls: [] };
   }
   const coverAcBonus = visionCover === 'three-quarters' ? 5 : visionCover === 'half' ? 2 : 0;
-  const effectiveAc = def.ac + coverAcBonus;
+  const effectiveAc = def.ac + coverAcBonus + shieldAcBonus(target.conditions);
 
   const bonus = spellAttackBonus(ctx) + rollDiceBonus(ctx.state.player.attackDiceBonus);
   // Shocking Grasp grants Advantage if the target wears metal armor. The
@@ -215,7 +234,10 @@ function resolveAttackRollSpell(
   const roll = applyHalflingLuck(options?.advantage ? Math.max(r1, r2) : r1, ctx.playerDef.halflingLuck).natural;
   const isCrit = roll === 20;
   const total = roll + bonus;
-  const hit = isCrit || (roll !== 1 && total >= effectiveAc);
+  let hit = isCrit || (roll !== 1 && total >= effectiveAc);
+  // US-117 Protective Magic: a hit on a stat-block caster may be met with a
+  // reaction-cast Shield (+5 AC, persists via the shielded condition).
+  if (hit && tryNpcShieldVsSpellAttack(ctx, target, def, total, effectiveAc, isCrit).deflected) hit = false;
   const coverNote = coverAcBonus > 0 ? ` (+${coverAcBonus} cover)` : '';
   const advNote = options?.advantage ? ` (advantage)` : '';
   const chainNote = options?.isChainHop ? ` [chain]` : '';
@@ -269,7 +291,10 @@ function resolveAttackRollSpell(
   const upcastBonus = Math.max(0, slotLevel - spell.level);
   const baseDice = spell.damage.dice * dieMult + upcastBonus;
   const dice = isCrit ? baseDice * 2 : baseDice;
-  const { total: dmg, rolls } = rollDamage(dice, spell.damage.sides, spell.damage.bonus ?? 0);
+  // Warlock Agonizing Blast invocation — add the Charisma modifier to Eldritch
+  // Blast's damage (a flat bonus, not doubled on a crit).
+  const agonizingBonus = spell.id === 'eldritch-blast' && hasModifierFlag(ctx.playerDef, 'agonizing-blast') ? spellMod(ctx) : 0;
+  const { total: dmg, rolls } = rollDamage(dice, spell.damage.sides, (spell.damage.bonus ?? 0) + agonizingBonus);
 
   ctx.addLog({
     left: `${ctx.playerDef.name} casts ${spell.name}${chainNote} — ${isCrit ? 'CRIT' : 'hit'}, ${dmg} ${spell.damage.type}`,
@@ -409,13 +434,16 @@ function resolveTrueStrike(ctx: GameContext, spell: SpellDef, target: NpcState, 
     return false;
   }
   const coverAcBonus = visionCover === 'three-quarters' ? 5 : visionCover === 'half' ? 2 : 0;
-  const effectiveAc = def.ac + coverAcBonus;
+  const effectiveAc = def.ac + coverAcBonus + shieldAcBonus(target.conditions);
   const sm = spellMod(ctx);
   const bonus = ctx.playerDef.proficiencyBonus + sm;
   const roll = d20();
   const isCrit = roll === 20;
   const total = roll + bonus;
-  const hit = isCrit || (roll !== 1 && total >= effectiveAc);
+  let hit = isCrit || (roll !== 1 && total >= effectiveAc);
+  // US-117 Protective Magic: a hit on a stat-block caster may be met with a
+  // reaction-cast Shield (+5 AC, persists via the shielded condition).
+  if (hit && tryNpcShieldVsSpellAttack(ctx, target, def, total, effectiveAc, isCrit).deflected) hit = false;
   const coverNote = coverAcBonus > 0 ? ` (+${coverAcBonus} cover)` : '';
   if (!hit) {
     ctx.addLog({
@@ -2159,6 +2187,14 @@ export function doCastSpell(
   // level, bailing before any resource is spent if none is available.
   if (spell.level === 0 || asRitual || scrollItemId !== undefined) {
     slotLevel = spell.level;
+  } else if (ctx.state.player.pactMagic) {
+    // Warlock Pact Magic: every levelled spell is cast at the single pact slot
+    // level (auto-upcast), spending one slot from the one pool.
+    slotLevel = ctx.state.player.pactMagic.level;
+    if (ctx.state.player.pactMagic.remaining <= 0 && !isMagicInitiateSpell(ctx.playerDef, spell.id)) {
+      ctx.addLog({ left: `${spell.name}: no Pact Magic slot remaining (Short Rest to recover)`, style: 'miss' });
+      return;
+    }
   } else {
     slotLevel = Math.max(spell.level, Math.min(9, slotLevel || spell.level));
     if ((ctx.state.player.spellSlots[slotLevel - 1] ?? 0) <= 0) {
@@ -2184,7 +2220,20 @@ export function doCastSpell(
     ctx.addLog({ left: `${ctx.playerDef.name}'s Sanctuary fades — casting at a foe breaks the ward.`, style: 'status' });
   }
 
+  // SRD 5.2.1 Counterspell (US-117 Protective Magic): a hostile stat-block
+  // caster may interrupt this cast. On a failed player CON save the spell
+  // dissipates — the action is wasted, the slot is NOT expended. Ritual
+  // casts (10 fictional minutes, out of combat) are not interruptible.
+  if (!asRitual && tryNpcCounterspell(ctx, spell, events)) {
+    spendCastingAction(ctx, spell);
+    return;
+  }
+
   consumeCastingResources(ctx, spell, slotLevel, asRitual, scrollItemId !== undefined);
+
+  // The player has used magic — let encounter triggers react (e.g. NPCs
+  // startled to see an elf cast in a land where it's suppressed).
+  ctx.publish({ type: 'spell_cast', spellId: spell.id, school: spell.school, level: spell.level });
 
   // Cast VFX — the projectile / beam / burst / glow that plays BEFORE the
   // damage / heal / condition beats (which the resolvers and the

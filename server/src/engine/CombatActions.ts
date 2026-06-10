@@ -7,7 +7,7 @@ import {
 import {
   isIncapacitated, grantsAdvantageAgainst, grantsDisadvantageAgainst,
   hasAttackDisadvantage, hasAttackAdvantage, isAutoCrit, clearHide,
-  speedAfterExhaustion,
+  speedAfterExhaustion, shieldAcBonus,
 } from './ConditionSystem.js';
 import { chebyshev } from './EnemyAI.js';
 import { makePlayerAttack } from './EquipmentSystem.js';
@@ -161,10 +161,11 @@ export function emitPhysicalAttackSound(ctx: GameContext, isHit: boolean): void 
 }
 
 /**
- * SRD Cover applied to a player attack against `target`. Returns the AC
- * bonus the target benefits from (0/2/5) or the sentinel `untargetable: true`
- * when Total Cover blocks the line — callers short-circuit on that to avoid
- * wasting Actions / spell slots.
+ * Per-target AC adjustment for a player attack against `target`: SRD Cover
+ * (0/2/5) plus any transient defensive bonus the target carries (the
+ * `shielded` condition from Protective Magic, +5 until its next turn).
+ * Returns the sentinel `untargetable: true` when Total Cover blocks the
+ * line — callers short-circuit on that to avoid wasting Actions / slots.
  */
 function coverBonusVsTarget(ctx: GameContext, target: NpcState): { bonus: number; untargetable: boolean } {
   const vision = visCanSee(
@@ -172,11 +173,12 @@ function coverBonusVsTarget(ctx: GameContext, target: NpcState): { bonus: number
     { tileX: ctx.state.player.tileX, tileY: ctx.state.player.tileY, senses: ctx.playerDef.senses },
     { tileX: target.tileX, tileY: target.tileY, conditions: target.conditions, id: target.id },
   );
+  const shieldBonus = shieldAcBonus(target.conditions);
   switch (vision.cover) {
-    case 'half':           return { bonus: 2, untargetable: false };
-    case 'three-quarters': return { bonus: 5, untargetable: false };
+    case 'half':           return { bonus: 2 + shieldBonus, untargetable: false };
+    case 'three-quarters': return { bonus: 5 + shieldBonus, untargetable: false };
     case 'total':          return { bonus: 0, untargetable: true };
-    default:               return { bonus: 0, untargetable: false };
+    default:               return { bonus: shieldBonus, untargetable: false };
   }
 }
 
@@ -737,6 +739,19 @@ export function doGrapple(ctx: GameContext, targetId: string | undefined): void 
  */
 export function doHelp(ctx: GameContext, targetId: string | undefined): void {
   const s = ctx.state;
+  // SRD Help — aid-a-creature mode: help an adjacent neutral creature (e.g. free
+  // a roped captive). Free out of combat; spends the Action on your turn.
+  // Publishes `help_used` so encounter triggers can react to who was aided.
+  const adjNeutral = (n: NpcState) => n.disposition === 'neutral' && n.hp > 0
+    && chebyshev(s.player.tileX, s.player.tileY, n.tileX, n.tileY) <= 1;
+  const aided = targetId ? (s.npcs.find((n) => n.id === targetId && adjNeutral(n)) ?? null) : null;
+  if (aided && (s.phase === 'exploring' || canSpendAction(ctx))) {
+    ctx.addLog({ left: `${ctx.playerDef.name} helps ${combatantDisplayName(aided, s.npcs)}.`, style: 'status' });
+    ctx.publish({ type: 'help_used', targetId: aided.id, targetDefId: aided.defId });
+    if (s.phase === 'player_turn') s.player.actionUsed = true;
+    return;
+  }
+  // Distract-an-enemy mode (the original Help): grants a living ally Advantage.
   if (!canSpendAction(ctx)) return;
   const adj = (n: NpcState) => n.disposition === 'enemy' && n.hp > 0
     && chebyshev(s.player.tileX, s.player.tileY, n.tileX, n.tileY) <= 1;
@@ -966,42 +981,66 @@ function tryNpcParry(
   dist: number,
   resolved: ResolvedAttack,
 ): { applied: false } | { applied: true; replaced: ResolvedAttack } {
-  if (dist > 1) return { applied: false };
   if (!resolved.isHit || resolved.isCrit) return { applied: false };
   if (target.reactionUsed) return { applied: false };
   if (isIncapacitated(target.conditions)) return { applied: false };
-  const parry = (targetDef.reactions ?? []).find((r) => r.kind === 'parry');
-  if (!parry) return { applied: false };
 
-  target.reactionUsed = true;
-  const newAc = targetDef.ac + parry.acBonus;
-  const stillHits = resolved.naturalRoll === 20 || resolved.attackTotal >= newAc;
-
-  if (stillHits) {
+  const parry = dist <= 1 ? (targetDef.reactions ?? []).find((r) => r.kind === 'parry') : undefined;
+  if (parry) {
+    target.reactionUsed = true;
+    const newAc = targetDef.ac + parry.acBonus;
+    const stillHits = resolved.naturalRoll === 20 || resolved.attackTotal >= newAc;
     return {
       applied: true,
-      replaced: {
-        ...resolved,
-        logs: [
-          ...resolved.logs,
-          { left: `${target.name} parries — +${parry.acBonus} AC, but the strike lands anyway`, style: 'status' },
-        ],
-      },
+      replaced: stillHits
+        ? {
+            ...resolved,
+            logs: [
+              ...resolved.logs,
+              { left: `${target.name} parries — +${parry.acBonus} AC, but the strike lands anyway`, style: 'status' },
+            ],
+          }
+        : {
+            ...resolved,
+            damage: 0, isHit: false, vexApplied: false, slowApplied: false, bonusComponents: [],
+            logs: [
+              { left: `${target.name} parries — +${parry.acBonus} AC turns the strike aside`, right: `vs AC ${newAc}`, style: 'miss' },
+            ],
+          },
     };
   }
 
+  // SRD Mage "Protective Magic" — Shield half (US-117, mage-monster-plan.md
+  // slice 3): a reaction-cast Shield against any attack roll, spent from the
+  // shared per-day pool. +5 AC applies to the triggering attack AND persists
+  // until the start of the NPC's next turn via the `shielded` turn-condition
+  // (every later attack path reads it through `shieldAcBonus`). Counterspell,
+  // the pool's other half, lands in slice 6.
+  const protective = (targetDef.reactions ?? []).find((r) => r.kind === 'protective-magic');
+  const poolLeft = target.reactionUses?.['protective-magic'] ?? 0;
+  if (!protective || poolLeft <= 0) return { applied: false };
+
+  target.reactionUsed = true;
+  target.reactionUses = { ...target.reactionUses, 'protective-magic': poolLeft - 1 };
+  if (!target.conditions.includes('shielded')) target.conditions.push('shielded');
+  const newAc = targetDef.ac + 5;
+  const stillHits = resolved.naturalRoll === 20 || resolved.attackTotal >= newAc;
   return {
     applied: true,
-    replaced: {
-      ...resolved,
-      damage: 0,
-      isHit: false,
-      vexApplied: false,
-      slowApplied: false,
-      bonusComponents: [],
-      logs: [
-        { left: `${target.name} parries — +${parry.acBonus} AC turns the strike aside`, right: `vs AC ${newAc}`, style: 'miss' },
-      ],
-    },
+    replaced: stillHits
+      ? {
+          ...resolved,
+          logs: [
+            ...resolved.logs,
+            { left: `${target.name} casts Shield — +5 AC, but the strike lands anyway (Protective Magic ${poolLeft - 1} left)`, style: 'status' },
+          ],
+        }
+      : {
+          ...resolved,
+          damage: 0, isHit: false, vexApplied: false, slowApplied: false, bonusComponents: [],
+          logs: [
+            { left: `${target.name} casts Shield — +5 AC turns the strike aside (Protective Magic ${poolLeft - 1} left)`, right: `vs AC ${newAc}`, style: 'miss' },
+          ],
+        },
   };
 }

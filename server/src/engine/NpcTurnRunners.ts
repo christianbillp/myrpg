@@ -30,6 +30,10 @@ import { applyNpcAttackHit } from './NpcDamage.js';
 import { applyDamageWithTempHp } from './CombatSystem.js';
 import { publishNpcDamage } from './ThresholdPublisher.js';
 import { chooseNpcBehavior, fleeFromThreat, isMapEdge } from './NpcBrain.js';
+import {
+  tryNpcOffensiveSpell, tryNpcBonusTeleport, tryNpcSelfBuff,
+  breakNpcSelfInvisibilityOnAttack,
+} from './NpcSpellcasting.js';
 import { Logger } from '../Logger.js';
 import { endConcentration } from './ConcentrationSystem.js';
 import { applyTurnStartPeriodicDamage, isAttacker } from './OngoingEffectsSystem.js';
@@ -233,6 +237,10 @@ export function pickEnemyAttackTarget(ctx: GameContext, attacker: NpcState): Ene
   for (const other of s.npcs) {
     if (calmed) break;  // becalmed: no targets at all
     if (other === attacker || other.hp <= 0) continue;
+    // A hidden NPC (authored stealth / trigger-reveal) is invisible to the
+    // whole encounter — clients, Target Panel, AIGM lists — so NPC AI must
+    // not see it either.
+    if (other.conditions.includes('hidden')) continue;
     const otherView = { id: other.id, factionId: other.factionId };
     if (!isHostileTo(s, attackerView, otherView)) continue;
     if (attackerCannotLocate(attacker.id, other)) continue; // invisible + this attacker lost track of it
@@ -366,6 +374,18 @@ export function runSingleEnemyTurn(ctx: GameContext, npc: NpcState, events: Game
   }
   // behavior === 'attack' — fall through to the existing AI loop.
 
+  // ── Stat-block spellcasting (US-117) ───────────────────────────────────
+  // Bonus action first (Misty Step escape valve — the caster can still act),
+  // then the Action choices in preference order: best offensive AoE →
+  // defensive self-buff → default weapon attack below.
+  tryNpcBonusTeleport(ctx, npc, def, events);
+  if (tryNpcOffensiveSpell(ctx, npc, def, events)
+      || tryNpcSelfBuff(ctx, npc, def, events)) {
+    finalizeNpcTurn(ctx, npc, events);
+    ctx.publish({ type: 'turn_ended', combatantId: npc.id });
+    return;
+  }
+
   const occupied: [number, number][] = s.npcs
     .filter((n) => n !== npc && n.hp > 0)
     .map((n): [number, number] => [n.tileX, n.tileY]);
@@ -398,6 +418,8 @@ export function runSingleEnemyTurn(ctx: GameContext, npc: NpcState, events: Game
       && s.player.invisibilityTargetId === npc.id) {
     endConcentration(ctx, `${combatantDisplayName(npc, s.npcs)} broke Invisibility by attacking`);
   }
+  // Same rule for an NPC caster's own self-cast Invisibility (US-117).
+  if (result.attacked) breakNpcSelfInvisibilityOnAttack(ctx, npc);
 
   // SRD Ray of Enfeeblement (fail branch): "subtracts 1d8 from all its
   // damage rolls". Roll the deduction once per landed attack and clamp
@@ -668,7 +690,9 @@ export function runSingleAllyTurn(ctx: GameContext, ally: NpcState, events: Game
   }
   const enemyTargets = (forcedTarget
     ? [forcedTarget]
-    : s.npcs.filter((n) => n !== ally && n.hp > 0 && isHostileTo(s, allyView, { id: n.id, factionId: n.factionId })))
+    : s.npcs.filter((n) => n !== ally && n.hp > 0
+        && !n.conditions.includes('hidden')  // hidden NPCs are invisible to NPC AI
+        && (n.disposition === 'enemy' || isHostileTo(s, allyView, { id: n.id, factionId: n.factionId }))))
     .map((n) => {
       const ndef = ctx.resolveMonsterDef(n.defId);
       return { id: n.id, tileX: n.tileX, tileY: n.tileY, ac: ndef?.ac ?? 10, conditions: n.conditions };

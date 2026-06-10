@@ -2,6 +2,7 @@ import type { GameContext } from './GameContext.js';
 import type { NpcState } from './types.js';
 import { d20, mod } from './Dice.js';
 import { combatantDisplayName } from './CombatFlow.js';
+import { breakNpcConcentrationOnDamage } from './NpcConcentration.js';
 
 /**
  * Publishes `hp_threshold_crossed` events when an entity's HP ratio crosses
@@ -44,6 +45,9 @@ export function publishNpcDamage(ctx: GameContext, npc: NpcState, hpBefore: numb
   ctx.publish({ type: 'damage_dealt', target: npc.id, amount: dmg });
   publishHpThresholdCrossings(ctx, npc.id, hpBefore, hpAfter, npc.maxHp);
   maybeHideousLaughterDamageSave(ctx, npc);
+  // SRD concentration (US-117): an NPC caster sustaining its own spell
+  // (self-Invisibility, Fly) checks concentration on every damage instance.
+  breakNpcConcentrationOnDamage(ctx, npc, dmg);
 }
 
 /**

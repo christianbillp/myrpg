@@ -1,0 +1,70 @@
+{
+  "id": "mage",
+  "name": "Mage",
+  "type": "Medium or Small Humanoid (Wizard), Neutral",
+  "maxHp": 81,
+  "hpFormula": "18d8",
+  "ac": 15,
+  "str": 9,
+  "dex": 14,
+  "con": 11,
+  "int": 17,
+  "wis": 12,
+  "cha": 11,
+  "proficiencyBonus": 3,
+  "savingThrows": {
+    "str": -1,
+    "dex": 2,
+    "con": 0,
+    "int": 6,
+    "wis": 4,
+    "cha": 0
+  },
+  "initiativeBonus": 2,
+  "stealthBonus": 2,
+  "passivePerception": 14,
+  "skills": {
+    "arcana": 6,
+    "history": 6,
+    "perception": 4
+  },
+  "languages": ["Common plus three other languages"],
+  "gear": ["wand"],
+  "speed": 30,
+  "attacks": [
+    {
+      "name": "Arcane Burst",
+      "attackType": "both",
+      "bonus": 6,
+      "reach": 5,
+      "rangeNormal": 120,
+      "rangeLong": 120,
+      "damageDice": 3,
+      "damageSides": 8,
+      "damageBonus": 3,
+      "damageType": "force"
+    }
+  ],
+  "multiattack": 3,
+  "spellcasting": {
+    "ability": "int",
+    "saveDC": 14,
+    "atWill": ["detect-magic", "light", "mage-armor", "mage-hand", "prestidigitation"],
+    "perDay": [
+      { "spellId": "fireball", "uses": 2, "castLevel": 4 },
+      { "spellId": "invisibility", "uses": 2 },
+      { "spellId": "cone-of-cold", "uses": 1 },
+      { "spellId": "fly", "uses": 1 }
+    ],
+    "bonusAction": [
+      { "spellId": "misty-step", "uses": 3 }
+    ]
+  },
+  "reactions": [
+    { "kind": "protective-magic", "usesPerDay": 3 }
+  ],
+  "xp": 2300,
+  "cr": "6",
+  "color": 15790320,
+  "tokenAsset": "/tokens/monster_mage.svg"
+}

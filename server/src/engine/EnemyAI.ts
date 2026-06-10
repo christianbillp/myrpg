@@ -146,7 +146,9 @@ export function runEnemyTurn(
 
   const belowHalf = enemy.hp <= enemy.maxHp / 2;
 
-  const tileSpeed = def.speed / 5;
+  // Simplified SRD Fly (US-117): +30 ft of speed while the self-cast Fly
+  // concentration holds — the engine has no elevation model.
+  const tileSpeed = (def.speed + (enemy.flying ? 30 : 0)) / 5;
   const standCost = proneStandCost(enemy.conditions, tileSpeed);
   let stepsLeft = hasSpeedZero(enemy.conditions)
     ? 0

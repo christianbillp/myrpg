@@ -89,6 +89,31 @@ export function spawnItems(
   });
 }
 
+/**
+ * Seed a spawn's limited-use pools (US-117) from its stat block: one
+ * `spellUses` entry per `spellcasting.perDay` / `.bonusAction` spell, one
+ * `reactionUses` entry per limited reaction (Protective Magic). Monsters
+ * don't rest — these are per-spawn pools, persisted on the world save so a
+ * reload doesn't refill them. Returns `{}` for non-casters so the spread at
+ * the spawn sites is a no-op.
+ */
+export function monsterLimitedUses(
+  def: MonsterDef | undefined,
+): Partial<Pick<NpcState, 'spellUses' | 'reactionUses'>> {
+  if (!def) return {};
+  const spellUses: Record<string, number> = {};
+  for (const e of def.spellcasting?.perDay ?? []) spellUses[e.spellId] = e.uses;
+  for (const e of def.spellcasting?.bonusAction ?? []) spellUses[e.spellId] = e.uses;
+  const reactionUses: Record<string, number> = {};
+  for (const r of def.reactions ?? []) {
+    if (r.kind === 'protective-magic') reactionUses[r.kind] = r.usesPerDay;
+  }
+  return {
+    ...(Object.keys(spellUses).length > 0 ? { spellUses } : {}),
+    ...(Object.keys(reactionUses).length > 0 ? { reactionUses } : {}),
+  };
+}
+
 export function spawnNpc(
   out: NpcState[], map: GameMap, npcDefs: NPCDef[], monsters: MonsterDef[],
   defId: string, px: number, py: number,
@@ -138,21 +163,22 @@ export function spawnNpc(
   //     either author a thin NPC wrapper or use a future per-spawn
   //     faction override.
   let factionId: string;
+  let resolvedMonster: MonsterDef | undefined;
   if (npcDef) {
     name = npcDef.name;
-    const monsterDef = monsters.find((m) => m.id === npcDef.monsterClass);
-    maxHp = monsterDef?.maxHp ?? 8;
-    size = monsterDef?.size;
+    resolvedMonster = monsters.find((m) => m.id === npcDef.monsterClass);
+    maxHp = resolvedMonster?.maxHp ?? 8;
+    size = resolvedMonster?.size;
     // NPC's factionId wins; if absent, fall back to the def id as a
     // faction-of-one. (MonsterDef no longer carries factionId — monsters
     // are pure stat blocks; faction membership lives on the NPC wrapper.)
     factionId = npcDef.factionId ?? defId;
   } else {
-    const monsterDef = monsters.find((m) => m.id === defId);
-    if (!monsterDef) return;
-    name = monsterDef.name;
-    maxHp = monsterDef.maxHp;
-    size = monsterDef.size;
+    resolvedMonster = monsters.find((m) => m.id === defId);
+    if (!resolvedMonster) return;
+    name = resolvedMonster.name;
+    maxHp = resolvedMonster.maxHp;
+    size = resolvedMonster.size;
     factionId = defId;
   }
 
@@ -192,6 +218,7 @@ export function spawnNpc(
         combatLabel,
         hp: maxHp, maxHp,
         ...(size ? { size } : {}),
+        ...monsterLimitedUses(resolvedMonster),
         isActive: false,
         reactionUsed: false, conditions: [], inventoryIds: [], ongoingEffects: [],
         ...(npcDef?.routine && npcDef.routine.length > 0 ? { routine: npcDef.routine } : {}),
@@ -242,6 +269,7 @@ export function spawnNpc(
     combatLabel,
     hp: maxHp, maxHp,
     ...(size ? { size } : {}),
+    ...monsterLimitedUses(resolvedMonster),
     isActive: false,
     reactionUsed: false, conditions: [], inventoryIds: [], ongoingEffects: [],
     ...(npcDef?.routine && npcDef.routine.length > 0 ? { routine: npcDef.routine } : {}),

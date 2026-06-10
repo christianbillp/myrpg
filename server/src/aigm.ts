@@ -5,7 +5,7 @@ import { applyAIGMTool, resetTurnGuards, AIGMToolContext } from './engine/AIGMTo
 import { isHostileTo, isFriendlyTo } from './engine/FactionRelations.js';
 import { isDead } from './engine/ConditionSystem.js';
 import { PLAYER_FACTION_ID, PLAYER_ID, isBloodied } from '../../shared/types.js';
-import type { NpcState } from '../../shared/types.js';
+import type { NpcState, MonsterDef } from '../../shared/types.js';
 import type { AigmMessage } from './sessions.js';
 import { getActiveSetting, settingPromptBlock } from './settings.js';
 import { Logger } from './Logger.js';
@@ -171,6 +171,40 @@ When the player attempts anything tied to a skill — Performance, Persuasion, D
 After receiving a SUCCESS from request_ability_check, if the outcome causes a creature to surrender, flee, or change behavior, you MUST call the appropriate tools to enact that outcome (set_disposition, despawn_npc, move_entity) before narrating it — exactly as the TOOL-FIRST RULE requires. A success result alone does not change the game state.`;
 }
 
+/** SRD stat-block flavour (skills / languages / gear) for a combatant line —
+ *  AIGM-facing only: lets the GM roll authentic monster checks and narrate
+ *  gear. Empty string when the def carries none of the three. */
+export function monsterStatBlockBits(def: Pick<MonsterDef, 'skills' | 'languages' | 'gear'>): string {
+  return [
+    def.skills ? `Skills: ${Object.entries(def.skills).map(([k, v]) => `${k} +${v}`).join(', ')}` : '',
+    def.languages?.length ? `Languages: ${def.languages.join(', ')}` : '',
+    def.gear?.length ? `Gear: ${def.gear.join(', ')}` : '',
+  ].filter(Boolean).join(' · ');
+}
+
+/** Stat-block Spellcasting summary with LIVE remaining uses (US-117) — e.g.
+ *  `Spells DC 14: fireball(1/2)@L4, invisibility(2/2) · Misty Step(3/3) ·
+ *  Protective Magic(2/3) · At will: light, mage-hand`. The engine resolves
+ *  these casts itself; the GM narrates them and must respect the counts.
+ *  Empty string for non-casters. */
+export function monsterSpellsLine(
+  def: Pick<MonsterDef, 'spellcasting' | 'reactions'>,
+  npc: Pick<NpcState, 'spellUses' | 'reactionUses'>,
+): string {
+  const sc = def.spellcasting;
+  if (!sc) return '';
+  const fmt = (spellId: string, max: number, castLevel?: number) =>
+    `${spellId}(${npc.spellUses?.[spellId] ?? max}/${max})${castLevel ? `@L${castLevel}` : ''}`;
+  const perDay = (sc.perDay ?? []).map((e) => fmt(e.spellId, e.uses, e.castLevel)).join(', ');
+  const bonus = (sc.bonusAction ?? []).map((e) => `${fmt(e.spellId, e.uses)} (bonus action)`).join(', ');
+  const protective = (def.reactions ?? []).find((r) => r.kind === 'protective-magic');
+  const reaction = protective
+    ? `Protective Magic(${npc.reactionUses?.['protective-magic'] ?? protective.usesPerDay}/${protective.usesPerDay})`
+    : '';
+  const atWill = sc.atWill?.length ? `At will: ${sc.atWill.join(', ')}` : '';
+  return [`Spells DC ${sc.saveDC}: ${perDay}`, bonus, reaction, atWill].filter(Boolean).join(' · ');
+}
+
 function buildStateMessage(engine: GameEngine): string {
   const s = engine.getState();
   const p = s.player;
@@ -269,7 +303,9 @@ function buildStateMessage(engine: GameEngine): string {
         const attackStr = def?.attacks.map(a =>
           `${a.name} (${a.attackType}, +${a.bonus} to hit, ${a.damageDice}d${a.damageSides}+${a.damageBonus} ${a.damageType})`
         ).join('; ') ?? 'unknown';
-        return `  [${entityRef}] ${n.defId}${knownAs} (${n.disposition} disp · ${n.attitude ?? 'indifferent'} att): ${n.hp}/${n.maxHp} HP, tile (${n.tileX},${n.tileY})${cFlags ? ` [${cFlags}]` : ''}\n    Attacks: ${attackStr}`;
+        const statBlockBits = def ? monsterStatBlockBits(def) : '';
+        const spellsLine = def ? monsterSpellsLine(def, n) : '';
+        return `  [${entityRef}] ${n.defId}${knownAs} (${n.disposition} disp · ${n.attitude ?? 'indifferent'} att): ${n.hp}/${n.maxHp} HP, tile (${n.tileX},${n.tileY})${cFlags ? ` [${cFlags}]` : ''}\n    Attacks: ${attackStr}${statBlockBits ? `\n    ${statBlockBits}` : ''}${spellsLine ? `\n    ${spellsLine}` : ''}`;
       }).join('\n')
     : '  None';
 

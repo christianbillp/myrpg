@@ -300,6 +300,17 @@ export function playerHide(player: PlayerDef, disadvantage = false): { hidden: b
 /** SRD Bane: a creature that failed Bane's save subtracts 1d4 from its attack
  *  rolls and saving throws. Returns a fresh rolled penalty (≥0) for a baned
  *  creature, else 0. Callers subtract it (attack roll mod / save mod). */
+/** Monster saving-throw bonus for an ability: the stat block's savingThrows
+ *  map when present, else the raw ability modifier — minus any active Bane
+ *  penalty. Canonical helper for every save rolled AGAINST a DC by an NPC
+ *  (player spells, traps, NPC-cast AoE, concentration checks). */
+export function npcSaveMod(target: NpcState, def: MonsterDef, ability: string): number {
+  const banePenalty = npcBanePenalty(target);
+  if (def.savingThrows && def.savingThrows[ability] !== undefined) return def.savingThrows[ability] - banePenalty;
+  const score = (def as unknown as Record<string, number>)[ability];
+  return (typeof score === 'number' ? mod(score) : 0) - banePenalty;
+}
+
 export function npcBanePenalty(npc: NpcState): number {
   return (npc.activeBuffs ?? []).some((b) => b.spellId === 'bane') ? d(4) : 0;
 }
