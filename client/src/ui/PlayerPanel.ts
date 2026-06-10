@@ -6,6 +6,7 @@ import { STATUS_TONE_COLOR } from './PlayerStatus';
 import { DevMode } from '../devMode';
 import { actionIdForLabel, glyphForActionId, readHiddenActions, readCompactView } from './actionPanelPrefs';
 import { PanelSetupOverlay } from './PanelSetupOverlay';
+import { splitGameplayTips, escapeTipHtml, TIP_COLOR, TIP_GLYPH } from './gameplayTips';
 
 const GRID_H   = GRID_ROWS * TILE_SIZE;
 const PANEL_H  = GRID_H + HUD_HEIGHT;
@@ -200,6 +201,10 @@ export class PlayerPanel {
   private readonly resourcesEl: HTMLElement;
   private readonly objectiveEl: HTMLElement;
   private readonly actionArea: HTMLElement;
+  /** The ⚙ Panel Setup toggle button — re-styled to show whether its overlay is open. */
+  private readonly setupBtn: HTMLButtonElement;
+  /** The live Panel Setup overlay, or null when closed. Drives the toggle. */
+  private setupOverlay: PanelSetupOverlay | null = null;
   /** Floating round END TURN button over the lower-left of the map (combat only). */
   private readonly endTurnFloatBtn: HTMLButtonElement;
   private readonly offResize: () => void;
@@ -281,7 +286,8 @@ export class PlayerPanel {
     this.headerSubEl = ref('header-sub');
 
     (ref('charsheet') as HTMLButtonElement).onclick = () => callbacks.onOpenCharacterSheet();
-    (ref('panel-setup') as HTMLButtonElement).onclick = () => this.openPanelSetup();
+    this.setupBtn = ref('panel-setup') as HTMLButtonElement;
+    this.setupBtn.onclick = () => this.openPanelSetup();
     // The OBJECTIVE line opens the Quest Log.
     this.objectiveEl.style.cursor = 'pointer';
     this.objectiveEl.title = 'Open Quest Log';
@@ -437,7 +443,20 @@ export class PlayerPanel {
     this.hpFill.style.background = hpColor(pct);
     this.hpText.textContent = `${hp} / ${maxHp}`;
 
-    this.objectiveEl.textContent = objective || '—';
+    this.setObjectiveText(objective);
+  }
+
+  /** Render the objective immersive-first: the in-character text in the gold
+   *  OBJECTIVE colour, with any `[[TIP: …]]` gameplay hint pulled out and shown
+   *  beneath as a clearly out-of-character tip. */
+  private setObjectiveText(objective: string): void {
+    if (!objective) { this.objectiveEl.textContent = '—'; return; }
+    const { body, tips } = splitGameplayTips(objective);
+    let html = escapeTipHtml(body);
+    for (const tip of tips) {
+      html += `<div style="margin-top:3px;color:${TIP_COLOR};font-style:italic;">${TIP_GLYPH} ${escapeTipHtml(tip)}</div>`;
+    }
+    this.objectiveEl.innerHTML = html;
   }
 
 
@@ -780,17 +799,44 @@ export class PlayerPanel {
     return b;
   }
 
-  /** Open the Panel Setup overlay — toggling an action's "Visible in panel"
-   *  persists immediately and re-renders the action stack with the new set. */
+  /** Toggle the Panel Setup overlay. Clicking the ⚙ again (or Done/Escape)
+   *  closes it; the button is re-styled to show whether the overlay is open.
+   *  Toggling an action's "Visible in panel" persists immediately and re-renders
+   *  the action stack with the new set. */
   private openPanelSetup(): void {
-    new PanelSetupOverlay(this.el, () => {
-      this.hiddenActions = readHiddenActions();
-      this.compactView = readCompactView();
-      if (this.lastActionState) this.refreshActions(this.lastActionState);
-    });
+    if (this.setupOverlay) {
+      this.setupOverlay.close();   // onClose clears the ref + restyles the button
+      return;
+    }
+    this.setupOverlay = new PanelSetupOverlay(
+      this.el,
+      () => {
+        this.hiddenActions = readHiddenActions();
+        this.compactView = readCompactView();
+        if (this.lastActionState) this.refreshActions(this.lastActionState);
+      },
+      () => {
+        this.setupOverlay = null;
+        this.updateSetupButtonState();
+      },
+    );
+    this.updateSetupButtonState();
+  }
+
+  /** Reflect whether the Panel Setup overlay is open on the ⚙ button: an open
+   *  overlay lights the button (brighter fill + accent border) and flips its
+   *  tooltip, so the control reads as a clearly-toggled state. */
+  private updateSetupButtonState(): void {
+    const open = this.setupOverlay !== null;
+    this.setupBtn.style.background = open ? '#234a63' : '#11202e';
+    this.setupBtn.style.color = open ? '#eaf4ff' : '#9bb3cc';
+    this.setupBtn.style.border = open ? '1px solid #7aadcc' : '';
+    this.setupBtn.title = open ? 'Close Player Panel setup' : 'Player Panel setup';
+    this.setupBtn.setAttribute('aria-pressed', open ? 'true' : 'false');
   }
 
   destroy(): void {
+    this.setupOverlay?.close();
     this.offResize();
     this.el.remove();
     this.endTurnFloatBtn.remove();

@@ -16,7 +16,7 @@ import { LongRestOverlay } from "../ui/LongRestOverlay";
 import { RestPromptOverlay } from "../ui/RestPromptOverlay";
 import { SpellOptionPicker } from "../ui/SpellOptionPicker";
 import { SpellTargetSelector, type SpellTargetCandidate } from "../ui/SpellTargetSelector";
-import { SpeechBubbles } from "../ui/SpeechBubbles";
+import { SpeechBubbles, speechReadMs } from "../ui/SpeechBubbles";
 import { SpellVfx } from "../ui/SpellVfx";
 import { SpeechInputBubble } from "../ui/SpeechInputBubble";
 import { ScreenEffects } from "../ui/ScreenEffects";
@@ -437,12 +437,6 @@ export class GameScene extends Phaser.Scene {
     this.gameState = state;
     const isFirst = this.awaitingFirstStateUpdate;
     this.awaitingFirstStateUpdate = false;
-    // npc_speech is normally spawned immediately so the bubble + chat line
-    // appear without an extra queue hop. When the IntroductionOverlay is
-    // about to mount (or already up), we defer them so the player isn't
-    // missing the speech behind the modal — they'll appear after dismissal
-    // in the same order they arrived.
-    const deferSpeech = this.overlays.isIntroBlocking || (isFirst && !!state.introduction && !DevMode.disableSupertitle);
     // Pin the visible-log length to the previous state's log so new lines
     // don't render until the animation queue drains. Skipped on the first
     // state (the seeded intro lines + Objective should be visible
@@ -456,14 +450,13 @@ export class GameScene extends Phaser.Scene {
     for (const ev of events) {
       if (ev.type === "entity_move") this.eventQueue.push(ev);
       else if (ev.type === "npc_speech") {
-        if (deferSpeech) {
-          // The queue handler in `processNextEvent` knows how to spawn a
-          // bubble + log the line when one of these comes back out.
-          this.eventQueue.push(ev);
-        } else {
-          this.speechBubbles.spawn(ev.entityId, ev.text);
-          this.hud.addNpcSpeech(ev.speakerName, ev.text);
-        }
+        // Speech always rides the animation queue so consecutive lines play
+        // one bubble at a time with a reading pause between them (see the
+        // `speechReadMs` dwell in `processNextEvent`) — a multi-line beat
+        // like Vane's arrest declaration would otherwise pop all at once.
+        // This also keeps speech behind the IntroductionOverlay until the
+        // player dismisses it.
+        this.eventQueue.push(ev);
       }
       else if (ev.type === "sound_ring" || ev.type === "play_sound") {
         // Audio cues are queued alongside entity_move so the swoosh / impact
@@ -596,11 +589,17 @@ export class GameScene extends Phaser.Scene {
       void this.cinematic.runUnfocusedAnnouncement(event.text, event.durationMs);
       // Fall through to default (animating = false, processNextEvent).
     } else if (event.type === "npc_speech") {
-      // Deferred-speech handler — the bubble + chat line normally fire from
-      // `handleStateUpdate`, but encounter-start speech queued behind the
-      // introduction overlay comes out via this path so it actually shows.
       this.speechBubbles.spawn(event.entityId, event.text);
       this.hud.addNpcSpeech(event.speakerName, event.text);
+      // Hold the queue long enough to read the line before the next beat
+      // plays — only when something is actually waiting behind it.
+      if (this.eventQueue.length > 0) {
+        this.time.delayedCall(speechReadMs(event.text), () => {
+          this.animating = false;
+          this.processNextEvent();
+        });
+        return;
+      }
     } else if (event.type === "play_sound") {
       playSound(event.sound);
     } else if (event.type === "sound_ring") {
@@ -1427,8 +1426,13 @@ export class GameScene extends Phaser.Scene {
     });
     const journal = (state.adventureContext?.priorChapterSummaries ?? [])
       .map((c) => ({ chapterTitle: c.chapterTitle, summary: c.summary }));
+    // Surface the live objective so trigger-driven chapters (which track progress
+    // via the objective string + flags, not a structured quest) aren't blank.
+    const objective = state.objective
+      ? { title: state.adventureContext?.chapterTitle ?? state.encounterTitle ?? '', text: state.objective }
+      : undefined;
     WorldPause.acquire('overlay:quest-log');
-    new QuestLogOverlay(this.uiScale, entries, journal, () => WorldPause.release('overlay:quest-log'));
+    new QuestLogOverlay(this.uiScale, entries, journal, () => WorldPause.release('overlay:quest-log'), objective);
   }
 
   private beginSpellCast(spellId: string, asRitual: boolean): void {

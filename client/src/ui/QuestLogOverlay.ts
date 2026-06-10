@@ -9,6 +9,7 @@
  */
 import { BaseOverlay } from "./BaseOverlay";
 import { UIScale } from "./UIScale";
+import { splitGameplayTips, TIP_COLOR, TIP_GLYPH } from "./gameplayTips";
 
 const ACCENT = "#e2b96f";
 const PANEL_W = 520;
@@ -23,6 +24,11 @@ export interface QuestLogEntry {
   steps: QuestLogStep[];
 }
 export interface QuestLogJournalEntry { chapterTitle: string; summary: string; }
+/** The live `GameState.objective` plus a heading (chapter/encounter title). Shown
+ *  at the top of the log so trigger-driven encounters — which track progress via
+ *  the objective string + flags rather than a structured quest — still surface
+ *  "what am I doing right now". */
+export interface QuestLogObjective { title: string; text: string; }
 
 function esc(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
@@ -34,6 +40,7 @@ export class QuestLogOverlay extends BaseOverlay {
     private readonly quests: QuestLogEntry[],
     private readonly journal: QuestLogJournalEntry[],
     onClose: () => void,
+    private readonly objective?: QuestLogObjective,
   ) {
     super(scale, PANEL_W, PANEL_H, ACCENT, onClose);
     this.build();
@@ -55,9 +62,14 @@ export class QuestLogOverlay extends BaseOverlay {
     const active = this.quests.filter((q) => q.status === 'active');
     const done = this.quests.filter((q) => q.status !== 'active');
 
-    if (this.quests.length === 0) {
+    if (this.objective?.text) {
+      scroll.appendChild(this.sectionLabel("CURRENT OBJECTIVE"));
+      scroll.appendChild(this.objectiveCard(this.objective));
+    }
+    if (this.quests.length === 0 && !this.objective?.text) {
       scroll.appendChild(this.note("No quests yet. The world will give you something to do."));
     }
+    if (active.length > 0 && this.objective?.text) scroll.appendChild(this.sectionLabel("QUESTS"));
     for (const q of active) scroll.appendChild(this.questCard(q));
     if (done.length > 0) {
       scroll.appendChild(this.sectionLabel("COMPLETED / FAILED"));
@@ -97,15 +109,53 @@ export class QuestLogOverlay extends BaseOverlay {
     }
 
     for (const s of q.steps) {
+      const { body, tips } = splitGameplayTips(s.text);
       const row = document.createElement("div");
       const glyph = s.done ? '✓' : s.optional ? '◇' : s.current ? '▸' : '·';
       const color = s.done ? '#7ec27e' : s.current ? ACCENT : '#667788';
       row.style.cssText = `font-size:11px;color:${s.current ? '#dfe8f2' : color};line-height:1.6;`;
       const tag = s.optional ? ` <span style="font-size:9px;letter-spacing:1px;color:#667788;">OPTIONAL</span>` : '';
-      row.innerHTML = `<span style="color:${color};display:inline-block;width:14px;">${glyph}</span>${esc(s.text)}${tag}`;
+      row.innerHTML = `<span style="color:${color};display:inline-block;width:14px;">${glyph}</span>${esc(body)}${tag}`;
       card.appendChild(row);
+      // Surface a step's gameplay tip only while it's the active step — a hint
+      // for "what do I do here", not clutter on every completed line.
+      if (s.current) for (const tip of tips) card.appendChild(this.tipBlock(tip));
     }
     return card;
+  }
+
+  private objectiveCard(o: QuestLogObjective): HTMLElement {
+    const card = document.createElement("div");
+    card.style.cssText = `background:#11141c;border:1px solid #3a4a3a;padding:10px 12px;`;
+    if (o.title) {
+      const head = document.createElement("div");
+      head.textContent = o.title;
+      head.style.cssText = "font-size:13px;color:#dfe8f2;margin-bottom:5px;";
+      card.appendChild(head);
+    }
+    // Immersive-first: the in-character objective, then any out-of-character
+    // gameplay tips as clearly-labelled blocks beneath.
+    const { body, tips } = splitGameplayTips(o.text);
+    if (body) {
+      const row = document.createElement("div");
+      row.style.cssText = `font-size:11px;color:#dfe8f2;line-height:1.6;`;
+      row.innerHTML = `<span style="color:${ACCENT};display:inline-block;width:14px;">▸</span>${esc(body)}`;
+      card.appendChild(row);
+    }
+    for (const tip of tips) card.appendChild(this.tipBlock(tip));
+    return card;
+  }
+
+  /** An out-of-character gameplay tip — visually distinct from the in-character
+   *  quest fiction (cool accent, italic, labelled) so the player can always tell
+   *  mechanics guidance apart from story. */
+  private tipBlock(text: string): HTMLElement {
+    const el = document.createElement("div");
+    el.style.cssText = `margin:6px 0 1px;padding:5px 8px;background:#0e1a22;border-left:2px solid ${TIP_COLOR};`
+      + `color:${TIP_COLOR};font-size:10px;font-style:italic;line-height:1.5;`;
+    el.innerHTML = `<span style="font-style:normal;letter-spacing:1px;opacity:0.85;">${TIP_GLYPH} GAMEPLAY TIP</span>`
+      + `<br>${esc(text)}`;
+    return el;
   }
 
   private sectionLabel(text: string): HTMLElement {

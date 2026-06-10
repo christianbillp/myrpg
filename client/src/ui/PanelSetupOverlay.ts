@@ -27,8 +27,15 @@ export class PanelSetupOverlay {
   private readonly resizeObserver: ResizeObserver;
   private readonly onKey: (e: KeyboardEvent) => void;
 
-  /** @param panelEl the Player Panel element — the overlay starts at its right edge. */
-  constructor(private readonly panelEl: HTMLElement, private readonly onChange: () => void) {
+  /** @param panelEl the Player Panel element — the overlay starts at its right edge.
+   *  @param onChange fired whenever a setting changes so the panel re-renders.
+   *  @param onClose fired once when the overlay closes (Done / Escape / toggle),
+   *         letting the opener clear its reference and update the toggle button. */
+  constructor(
+    private readonly panelEl: HTMLElement,
+    private readonly onChange: () => void,
+    private readonly onClose?: () => void,
+  ) {
     this.root = document.createElement("div");
     this.root.style.cssText = `
       position: fixed; top: 0; bottom: 0; right: 0;
@@ -190,5 +197,6 @@ export class PanelSetupOverlay {
     this.resizeObserver.disconnect();
     document.removeEventListener("keydown", this.onKey);
     this.root.remove();
+    this.onClose?.();
   }
 }

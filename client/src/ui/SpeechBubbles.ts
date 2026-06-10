@@ -11,6 +11,18 @@
  */
 const BUBBLE_LIFETIME_MS = 6000;
 const FADE_MS = 600;
+
+/**
+ * Reading dwell for a queued `npc_speech` beat — how long the animation queue
+ * holds after showing a line before playing the next event, so back-to-back
+ * authored dialogue (e.g. the four-line Vane arrest beat) arrives one bubble
+ * at a time with time to read each. Roughly 32 ms per character, clamped so
+ * short combat barks don't stall the queue and long monologues stay inside
+ * the bubble's lifetime.
+ */
+export function speechReadMs(text: string): number {
+  return Math.min(4500, Math.max(1600, 600 + text.length * 32));
+}
 /** How long a bubble waits for its speaker's token to exist before giving up.
  *  A speaker revealed on the same tick it speaks (an enemy unhidden as combat
  *  starts) has no token until the next `applyState`→`reconcileNpcs`, which can
