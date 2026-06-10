@@ -1,0 +1,42 @@
+{
+  "id": "demo_quest_generator",
+  "encounterTitle": "Demo — Quest Generator",
+  "demo": true,
+  "missionHub": true,
+  "description": "Demo of the procedural quest generator (server/src/quest/). A tiny self-contained Bureau contract desk: on entry it pays out any just-completed contract, then rolls a fresh TYPED quest (bounty / hunt / rescue / retrieve / investigate / two-stage strike), scaled to the player's level. Press TO MISSION (top bar) to play the generated encounter(s); LEAVE MISSION returns here, which rolls a different type. Multi-stage quests surface a TO MISSION 'next stage' button between their encounters. Quest steps grant XP during play; the contract pays coin on return.",
+  "mapId": "tavern_keg",
+  "npcIds": [],
+  "allyIds": [],
+  "enemyIds": [],
+  "customIntroduction": "A bare contract desk — a board of slips, a money-box, and the quiet of a room that exists only to hand out work. A slip is already waiting on the board.",
+  "customContext": "DEMO — QUEST GENERATOR. This is a contract hub. The board always has a freshly-rolled, procedurally-generated quest. The player presses TO MISSION (top bar) to play it and LEAVE MISSION to return for a new, different-typed one. Do not invent specific contract details — the engine sets the objective when the quest starts.",
+  "objective": "Press TO MISSION (top bar) to play a procedurally-generated quest. Return here for a new one of a different type.",
+  "allowsLongRest": false,
+  "placementMode": "exact",
+  "placements": [
+    { "role": "player", "x": 6, "y": 4 }
+  ],
+  "triggers": [
+    {
+      "id": "demo_payout",
+      "when": { "event": "encounter_started" },
+      "if": [{ "type": "flag_equals", "name": "mission_complete", "value": true }],
+      "then": [
+        { "type": "award_mission_reward" },
+        { "type": "set_flag", "name": "mission_complete", "value": false },
+        { "type": "set_flag", "name": "mission_reward_claimed", "value": true },
+        { "type": "show_log", "message": "Last contract paid out. A fresh slip hits the board." }
+      ],
+      "once": true
+    },
+    {
+      "id": "demo_roll",
+      "when": { "event": "encounter_started" },
+      "then": [
+        { "type": "generate_mission_contract" },
+        { "type": "show_log", "message": "A Bureau contract is on the board — press TO MISSION (top bar) to play it. Come back here afterward for a different type of quest." }
+      ],
+      "once": true
+    }
+  ]
+}
