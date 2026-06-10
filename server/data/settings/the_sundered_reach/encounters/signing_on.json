@@ -721,17 +721,29 @@
   "triggers": [
     {
       "id": "start_commission_quest",
-      "when": { "event": "encounter_started" },
+      "when": {
+        "event": "encounter_started"
+      },
       "if": [],
       "then": [
-        { "type": "start_quest", "questId": "the_commission" }
+        {
+          "type": "start_quest",
+          "questId": "the_commission"
+        }
       ],
       "once": true
     },
     {
       "id": "hub_clear_bandits",
-      "when": { "event": "encounter_started" },
-      "if": [{ "type": "flag_set", "name": "part_one_signed_on" }],
+      "when": {
+        "event": "encounter_started"
+      },
+      "if": [
+        {
+          "type": "flag_set",
+          "name": "part_one_signed_on"
+        }
+      ],
       "then": [
         {
           "type": "set_npc_hidden",
@@ -746,11 +758,24 @@
       "id": "vask_greeting",
       "when": {
         "event": "player_moved",
-        "in_area": { "x": 19, "y": 12, "w": 6, "h": 7 }
+        "in_area": {
+          "x": 19,
+          "y": 12,
+          "w": 6,
+          "h": 7
+        }
       },
       "if": [
-        { "type": "phase", "in": ["exploring"] },
-        { "type": "flag_unset", "name": "part_one_signed_on" }
+        {
+          "type": "phase",
+          "in": [
+            "exploring"
+          ]
+        },
+        {
+          "type": "flag_unset",
+          "name": "part_one_signed_on"
+        }
       ],
       "then": [
         {
@@ -767,7 +792,12 @@
         "event": "flag_set",
         "name": "vask_talked"
       },
-      "if": [{ "type": "flag_unset", "name": "part_one_signed_on" }],
+      "if": [
+        {
+          "type": "flag_unset",
+          "name": "part_one_signed_on"
+        }
+      ],
       "then": [
         {
           "type": "npc_speaks",
@@ -806,7 +836,10 @@
             "exploring"
           ]
         },
-        { "type": "flag_unset", "name": "part_one_signed_on" }
+        {
+          "type": "flag_unset",
+          "name": "part_one_signed_on"
+        }
       ],
       "then": [
         {
@@ -836,7 +869,10 @@
             "exploring"
           ]
         },
-        { "type": "flag_unset", "name": "part_one_signed_on" }
+        {
+          "type": "flag_unset",
+          "name": "part_one_signed_on"
+        }
       ],
       "then": [
         {
@@ -855,7 +891,12 @@
       "when": {
         "event": "encounter_completed"
       },
-      "if": [{ "type": "flag_unset", "name": "part_one_signed_on" }],
+      "if": [
+        {
+          "type": "flag_unset",
+          "name": "part_one_signed_on"
+        }
+      ],
       "then": [
         {
           "type": "send_aigm_message",
@@ -871,10 +912,18 @@
     },
     {
       "id": "hub_intro",
-      "when": { "event": "encounter_started" },
+      "when": {
+        "event": "encounter_started"
+      },
       "if": [
-        { "type": "flag_set", "name": "part_one_signed_on" },
-        { "type": "flag_unset", "name": "mission_complete" }
+        {
+          "type": "flag_set",
+          "name": "part_one_signed_on"
+        },
+        {
+          "type": "flag_unset",
+          "name": "mission_complete"
+        }
       ],
       "then": [
         {
@@ -886,11 +935,22 @@
     },
     {
       "id": "hub_debrief",
-      "when": { "event": "encounter_started" },
+      "when": {
+        "event": "encounter_started"
+      },
       "if": [
-        { "type": "flag_set", "name": "part_one_signed_on" },
-        { "type": "flag_set", "name": "mission_complete" },
-        { "type": "flag_unset", "name": "mission_reward_claimed" }
+        {
+          "type": "flag_set",
+          "name": "part_one_signed_on"
+        },
+        {
+          "type": "flag_set",
+          "name": "mission_complete"
+        },
+        {
+          "type": "flag_unset",
+          "name": "mission_reward_claimed"
+        }
       ],
       "then": [
         {
@@ -902,7 +962,10 @@
     },
     {
       "id": "hub_post_reward",
-      "when": { "event": "flag_set", "name": "mission_reward_claimed" },
+      "when": {
+        "event": "flag_set",
+        "name": "mission_reward_claimed"
+      },
       "if": [],
       "then": [
         {
@@ -912,5 +975,25 @@
       ],
       "once": false
     }
-  ]
+  ],
+  "factionRelations": {
+    "bandits": {
+      "party": 0,
+      "commoners": 0,
+      "bureau_of_adjustment": 0,
+      "fortune_guards": 0
+    },
+    "party": {
+      "bandits": 0
+    },
+    "commoners": {
+      "bandits": 0
+    },
+    "bureau_of_adjustment": {
+      "bandits": 0
+    },
+    "fortune_guards": {
+      "bandits": 0
+    }
+  }
 }

@@ -499,5 +499,17 @@
       ],
       "once": true
     }
-  ]
+  ],
+  "factionRelations": {
+    "bandits": {
+      "party": 0,
+      "commoners": 0
+    },
+    "party": {
+      "bandits": 0
+    },
+    "commoners": {
+      "bandits": 0
+    }
+  }
 }
