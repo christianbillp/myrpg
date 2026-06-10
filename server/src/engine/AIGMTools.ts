@@ -314,36 +314,35 @@ function buildRuntimeQuestDef(engine: GameEngine, input: Record<string, unknown>
   };
 }
 
-export function applyAIGMTool(
-  engine: GameEngine,
-  name: string,
-  input: Record<string, unknown>,
-  ctx: AIGMToolContext = {},
-): AIGMToolResult {
-  Logger.log('aigm.tool_dispatch', { tool: name, input });
-  let events: GameEvent[] = [];
-  let toolResultContent = 'Applied.';
-  let rollResult: string | undefined;
+/** Mutable accumulator each tool handler writes into — replaces the
+ *  shared switch locals so handlers are standalone, registry-dispatched
+ *  functions (same recipe as playerActions/registry.ts): adding a tool =
+ *  adding an entry here + its schema above, no central switch edit. */
+interface AIGMToolOut {
+  events: GameEvent[];
+  toolResultContent: string;
+  rollResult?: string;
+}
 
-  switch (name) {
-    case 'adjust_player_hp': {
-      const delta = input['delta'] as number;
+type AIGMToolHandler = (engine: GameEngine, input: Record<string, unknown>, ctx: AIGMToolContext, out: AIGMToolOut) => void;
+
+const AIGM_TOOL_HANDLERS: Record<string, AIGMToolHandler> = {
+  adjust_player_hp(engine, input, ctx, out) {
+    const delta = input['delta'] as number;
       const before = engine.getState().player.hp;
-      events = engine.adjustPlayerHp(delta);
+      out.events = engine.adjustPlayerHp(delta);
       const s = engine.getState();
-      toolResultContent = `Player HP ${before} → ${s.player.hp} (${delta >= 0 ? '+' : ''}${delta}).`;
-      if (s.phase === 'death_saves') toolResultContent += ' Player is now Unconscious — death saves required.';
-      if (s.phase === 'defeat') toolResultContent += ' Player has been defeated.';
-      break;
-    }
-    case 'award_xp': {
-      const amount = input['amount'] as number;
-      events = engine.awardXp(amount);
-      toolResultContent = `Awarded ${amount} XP. Total XP: ${engine.getState().player.xp}.`;
-      break;
-    }
-    case 'award_coins': {
-      const purse = {
+      out.toolResultContent = `Player HP ${before} → ${s.player.hp} (${delta >= 0 ? '+' : ''}${delta}).`;
+      if (s.phase === 'death_saves') out.toolResultContent += ' Player is now Unconscious — death saves required.';
+      if (s.phase === 'defeat') out.toolResultContent += ' Player has been defeated.';
+  },
+  award_xp(engine, input, ctx, out) {
+    const amount = input['amount'] as number;
+      out.events = engine.awardXp(amount);
+      out.toolResultContent = `Awarded ${amount} XP. Total XP: ${engine.getState().player.xp}.`;
+  },
+  award_coins(engine, input, ctx, out) {
+    const purse = {
         pp: (input['pp'] as number | undefined) ?? 0,
         gp: (input['gp'] as number | undefined) ?? 0,
         ep: (input['ep'] as number | undefined) ?? 0,
@@ -353,16 +352,15 @@ export function applyAIGMTool(
       const cpDelta = purseToCp(purse);
       const balanceCp = engine.getState().player.balanceCp;
       if (cpDelta < 0 && balanceCp + cpDelta < 0) {
-        toolResultContent = `Transaction rejected: player only has ${formatCoins(balanceCp)} and cannot pay ${formatCoins(-cpDelta)}. Do not narrate this payment as successful — inform the player they cannot afford it.`;
+        out.toolResultContent = `Transaction rejected: player only has ${formatCoins(balanceCp)} and cannot pay ${formatCoins(-cpDelta)}. Do not narrate this payment as successful — inform the player they cannot afford it.`;
       } else {
-        events = engine.awardCoins(cpDelta);
+        out.events = engine.awardCoins(cpDelta);
         const next = engine.getState().player.balanceCp;
-        toolResultContent = `${cpDelta >= 0 ? '+' : '-'}${formatCoins(Math.abs(cpDelta))}. Player now has ${formatCoins(next)}.`;
+        out.toolResultContent = `${cpDelta >= 0 ? '+' : '-'}${formatCoins(Math.abs(cpDelta))}. Player now has ${formatCoins(next)}.`;
       }
-      break;
-    }
-    case 'adjust_npc_hp': {
-      // Compute the result from before/after state directly — never slice the
+  },
+  adjust_npc_hp(engine, input, ctx, out) {
+    // Compute the result from before/after state directly — never slice the
       // event log, which may contain unrelated entries (quest fires, etc.).
       const entity = input['entity'] as string;
       const delta = input['delta'] as number;
@@ -371,13 +369,13 @@ export function applyAIGMTool(
 
       if (entity === 'player') {
         const beforeHp = stateBefore.player.hp;
-        events = engine.adjustPlayerHp(delta);
+        out.events = engine.adjustPlayerHp(delta);
         const afterState = engine.getState();
         const afterHp = afterState.player.hp;
-        toolResultContent = `Player HP ${beforeHp} → ${afterHp} (${delta >= 0 ? '+' : ''}${delta}).`;
-        if (afterState.phase === 'death_saves') toolResultContent += ' Player is now Unconscious — death saves required.';
-        if (afterState.phase === 'defeat') toolResultContent += ' Player has been defeated.';
-        break;
+        out.toolResultContent = `Player HP ${beforeHp} → ${afterHp} (${delta >= 0 ? '+' : ''}${delta}).`;
+        if (afterState.phase === 'death_saves') out.toolResultContent += ' Player is now Unconscious — death saves required.';
+        if (afterState.phase === 'defeat') out.toolResultContent += ' Player has been defeated.';
+        return;
       }
 
       const npcBefore = stateBefore.npcs.find((n) => {
@@ -386,11 +384,11 @@ export function applyAIGMTool(
         if (entity.startsWith('npc_')) return n.id === entity.slice(4);
         return false;
       });
-      if (!npcBefore) { toolResultContent = `${entity} not found.`; break; }
+      if (!npcBefore) { out.toolResultContent = `${entity} not found.`; return; }
 
       const beforeHp = npcBefore.hp;
       const monsterDef = engine.getMonsterDef(npcBefore.defId);
-      events = engine.adjustNpcHp(entity, delta, damageType);
+      out.events = engine.adjustNpcHp(entity, delta, damageType);
       const afterNpc = engine.getState().npcs.find((n) => n.id === npcBefore.id);
       const afterHp = afterNpc?.hp ?? 0;
 
@@ -401,118 +399,107 @@ export function applyAIGMTool(
         else if (monsterDef.vulnerabilities?.includes(damageType)) typeNote = ` (vulnerable to ${damageType}, ×2)`;
       }
       const killNote = afterHp === 0 && beforeHp > 0 ? ' — killed.' : '.';
-      toolResultContent = `${npcBefore.name} HP ${beforeHp} → ${afterHp}${typeNote}${killNote}`;
-      break;
-    }
-    case 'add_log_entry':
-      engine.addLog(input['text'] as string);
-      toolResultContent = `Log entry added: "${input['text']}".`;
-      break;
-    case 'move_entity': {
-      const entity = input['entity'] as string;
+      out.toolResultContent = `${npcBefore.name} HP ${beforeHp} → ${afterHp}${typeNote}${killNote}`;
+  },
+  add_log_entry(engine, input, ctx, out) {
+    engine.addLog(input['text'] as string);
+      out.toolResultContent = `Log entry added: "${input['text']}".`;
+  },
+  move_entity(engine, input, ctx, out) {
+    const entity = input['entity'] as string;
       const tx = input['tile_x'] as number;
       const ty = input['tile_y'] as number;
       const result = engine.moveEntity(entity, tx, ty);
-      events = result.events;
+      out.events = result.events;
       if (result.error) {
-        toolResultContent = `move_entity failed — ${result.error}. No state change. Pick a different tile or adjust the narration.`;
-      } else if (events.length === 0) {
+        out.toolResultContent = `move_entity failed — ${result.error}. No state change. Pick a different tile or adjust the narration.`;
+      } else if (out.events.length === 0) {
         // No-op (already at destination). Engine accepted but emitted no event.
-        toolResultContent = `${entity} is already at (${tx}, ${ty}) — no movement needed.`;
+        out.toolResultContent = `${entity} is already at (${tx}, ${ty}) — no movement needed.`;
       } else {
-        toolResultContent = `${entity} moved to (${tx}, ${ty}).`;
+        out.toolResultContent = `${entity} moved to (${tx}, ${ty}).`;
       }
-      break;
-    }
-    case 'add_item': {
-      const itemId = input['item_id'] as string;
-      events = engine.addItem(itemId);
-      toolResultContent = events.length === 0
+  },
+  add_item(engine, input, ctx, out) {
+    const itemId = input['item_id'] as string;
+      out.events = engine.addItem(itemId);
+      out.toolResultContent = out.events.length === 0
         ? `Unknown item_id "${itemId}" — nothing added.`
         : `${itemId} added to player inventory.`;
-      break;
-    }
-    case 'remove_item': {
-      const itemId = input['item_id'] as string;
+  },
+  remove_item(engine, input, ctx, out) {
+    const itemId = input['item_id'] as string;
       const had = engine.getState().player.inventoryIds.includes(itemId);
-      events = engine.removeItem(itemId);
-      toolResultContent = had
+      out.events = engine.removeItem(itemId);
+      out.toolResultContent = had
         ? `Removed one ${itemId} from player inventory.`
         : `Player does not carry "${itemId}" — nothing removed.`;
-      break;
-    }
-    case 'despawn_npc': {
-      const entity = input['entity'] as string;
+  },
+  despawn_npc(engine, input, ctx, out) {
+    const entity = input['entity'] as string;
       const npcBefore = engine.getState().npcs.length;
-      events = engine.despawnNpc(entity);
+      out.events = engine.despawnNpc(entity);
       const npcAfter = engine.getState().npcs.length;
-      toolResultContent = npcAfter < npcBefore
+      out.toolResultContent = npcAfter < npcBefore
         ? `${entity} removed from the map.`
         : `${entity} not found — nothing removed.`;
-      break;
-    }
-    case 'spawn_enemy': {
-      const monsterId = input['monster_id'] as string;
+  },
+  spawn_enemy(engine, input, ctx, out) {
+    const monsterId = input['monster_id'] as string;
       const npcBefore = engine.getState().npcs.length;
-      events = engine.spawnEnemy(monsterId);
+      out.events = engine.spawnEnemy(monsterId);
       const after = engine.getState().npcs;
       const newOne = after[after.length - 1];
-      toolResultContent = after.length > npcBefore && newOne
+      out.toolResultContent = after.length > npcBefore && newOne
         ? `Spawned ${monsterId} at tile (${newOne.tileX}, ${newOne.tileY}) as enemy_${newOne.combatLabel}.`
         : `Could not spawn ${monsterId} (unknown id or no free tile).`;
-      break;
-    }
-    case 'end_combat':
-      events = engine.endCombat();
-      toolResultContent = 'Combat ended. Phase is now "exploring".';
-      break;
-    case 'trigger_combat': {
-      const before = engine.getState().phase;
-      events = engine.triggerCombat();
+  },
+  end_combat(engine, input, ctx, out) {
+    out.events = engine.endCombat();
+      out.toolResultContent = 'Combat ended. Phase is now "exploring".';
+  },
+  trigger_combat(engine, input, ctx, out) {
+    const before = engine.getState().phase;
+      out.events = engine.triggerCombat();
       const after = engine.getState().phase;
-      toolResultContent = before !== after
+      out.toolResultContent = before !== after
         ? `Combat triggered. Phase: ${before} → ${after}.`
         : 'No combat triggered (no living enemies or already in combat).';
-      break;
-    }
-    case 'set_player_hidden': {
-      const hidden = input['hidden'] as boolean;
-      events = engine.setPlayerHidden(hidden);
-      toolResultContent = `Player is now ${hidden ? 'HIDDEN' : 'visible'}.`;
-      break;
-    }
-    case 'apply_condition': {
-      const entity = input['entity'] as string;
+  },
+  set_player_hidden(engine, input, ctx, out) {
+    const hidden = input['hidden'] as boolean;
+      out.events = engine.setPlayerHidden(hidden);
+      out.toolResultContent = `Player is now ${hidden ? 'HIDDEN' : 'visible'}.`;
+  },
+  apply_condition(engine, input, ctx, out) {
+    const entity = input['entity'] as string;
       const condition = input['condition'] as string;
-      events = engine.applyCondition(entity, condition);
-      toolResultContent = `Applied condition "${condition}" to ${entity}.`;
-      break;
-    }
-    case 'remove_condition': {
-      const entity = input['entity'] as string;
+      out.events = engine.applyCondition(entity, condition);
+      out.toolResultContent = `Applied condition "${condition}" to ${entity}.`;
+  },
+  remove_condition(engine, input, ctx, out) {
+    const entity = input['entity'] as string;
       const condition = input['condition'] as string;
-      events = engine.removeCondition(entity, condition);
-      toolResultContent = `Removed condition "${condition}" from ${entity}.`;
-      break;
-    }
-    case 'set_disposition': {
-      const entity = input['entity'] as string;
+      out.events = engine.removeCondition(entity, condition);
+      out.toolResultContent = `Removed condition "${condition}" from ${entity}.`;
+  },
+  set_disposition(engine, input, ctx, out) {
+    const entity = input['entity'] as string;
       const disposition = input['disposition'] as string;
-      events = engine.setDisposition(entity, disposition);
-      toolResultContent = `${entity} disposition set to "${disposition}".`;
+      out.events = engine.setDisposition(entity, disposition);
+      out.toolResultContent = `${entity} disposition set to "${disposition}".`;
       if (disposition === 'enemy' && engine.getState().phase === 'exploring') {
-        toolResultContent += ' Phase is still "exploring" — call trigger_combat to start the fight.';
+        out.toolResultContent += ' Phase is still "exploring" — call trigger_combat to start the fight.';
       }
-      break;
-    }
-    case 'throw_item': {
-      const stateBeforeThrow = engine.getState();
+  },
+  throw_item(engine, input, ctx, out) {
+    const stateBeforeThrow = engine.getState();
       if (stateBeforeThrow.phase === 'player_turn' && stateBeforeThrow.player.actionUsed) {
-        toolResultContent = 'Action already spent this turn — throw not performed. Inform the player their action is used and they must end their turn or use a bonus action instead.';
-        break;
+        out.toolResultContent = 'Action already spent this turn — throw not performed. Inform the player their action is used and they must end their turn or use a bonus action instead.';
+        return;
       }
       const logBefore = stateBeforeThrow.eventLog.length;
-      events = engine.throwItem(input['item_id'] as string, input['target'] as string | undefined);
+      out.events = engine.throwItem(input['item_id'] as string, input['target'] as string | undefined);
       // Filter out lines that aren't part of the throw outcome — quest progress,
       // turn-boundary markers, and quest completion can fire as side effects of
       // a kill and shouldn't be conflated with the throw result.
@@ -520,22 +507,21 @@ export function applyAIGMTool(
       const newEntries = engine.getState().eventLog
         .slice(logBefore)
         .filter((e) => !SIDE_EFFECT_PREFIXES.some((p) => e.left.startsWith(p)));
-      toolResultContent = newEntries.map((e) => e.right ? `${e.left} [${e.right}]` : e.left).join(' | ') || 'Throw resolved.';
-      break;
-    }
-    case 'cast_spell': {
-      const stateBeforeCast = engine.getState();
+      out.toolResultContent = newEntries.map((e) => e.right ? `${e.left} [${e.right}]` : e.left).join(' | ') || 'Throw resolved.';
+  },
+  cast_spell(engine, input, ctx, out) {
+    const stateBeforeCast = engine.getState();
       const spellId = input['spell_id'] as string;
       const targetId = input['target_id'] as string | undefined;
       const slotLevelInput = input['slot_level'] as number | undefined;
       const spell = engine.getSpellDef(spellId);
-      if (!spell) { toolResultContent = `Unknown spell id "${spellId}".`; break; }
+      if (!spell) { out.toolResultContent = `Unknown spell id "${spellId}".`; return; }
       // Action-economy pre-check so the player isn't surprised by a refused cast.
       if (stateBeforeCast.phase === 'player_turn'
           && spell.castingTime === 'action'
           && stateBeforeCast.player.actionUsed) {
-        toolResultContent = `Action already spent this turn — ${spell.name} not cast. Inform the player their action is used.`;
-        break;
+        out.toolResultContent = `Action already spent this turn — ${spell.name} not cast. Inform the player their action is used.`;
+        return;
       }
       // Resolve target entity ref → npc id (matching throw_item conventions).
       let targetIds: string[] | undefined;
@@ -546,91 +532,85 @@ export function applyAIGMTool(
           if (targetId.startsWith('npc_'))   return n.id === targetId.slice(4);
           return n.id === targetId;
         });
-        if (!npc) { toolResultContent = `cast_spell: target "${targetId}" not found.`; break; }
+        if (!npc) { out.toolResultContent = `cast_spell: target "${targetId}" not found.`; return; }
         targetIds = [npc.id];
       }
       const slotLevel = slotLevelInput ?? spell.level;
       const logBefore = stateBeforeCast.eventLog.length;
-      events = engine.castSpell(spellId, slotLevel, targetIds);
+      out.events = engine.castSpell(spellId, slotLevel, targetIds);
       const SIDE_EFFECT_PREFIXES = ['Quest complete:', 'Total XP:', '──'];
       const newEntries = engine.getState().eventLog
         .slice(logBefore)
         .filter((e) => !SIDE_EFFECT_PREFIXES.some((p) => e.left.startsWith(p)));
-      toolResultContent = newEntries.map((e) => e.right ? `${e.left} [${e.right}]` : e.left).join(' | ') || `${spell.name} resolved.`;
-      break;
-    }
-    case 'request_ability_check': {
-      const skill = input['skill'] as string;
+      out.toolResultContent = newEntries.map((e) => e.right ? `${e.left} [${e.right}]` : e.left).join(' | ') || `${spell.name} resolved.`;
+  },
+  request_ability_check(engine, input, ctx, out) {
+    const skill = input['skill'] as string;
       const dc = input['dc'] as number;
       const targetNpc = input['target_npc'] as string | undefined;
       const { roll, total, success, attitudeNote } = engine.rollAbilityCheck(skill, dc, targetNpc);
       engine.addLog(`Ability check (${skill})${attitudeNote ? ` ${attitudeNote}` : ''}: d20+mod = ${total} vs DC ${dc} — ${success ? 'Success!' : 'Failure'}`);
-      toolResultContent = `Roll result: d20 + ${skill} mod = ${total} vs DC ${dc}.${attitudeNote ? ` ${attitudeNote}.` : ''} ${success ? 'SUCCESS' : 'FAILURE'}.`;
-      rollResult = `${skill}${attitudeNote ? ` ${attitudeNote}` : ''}: d20(${roll}) = ${total} vs DC ${dc} — ${success ? 'SUCCESS' : 'FAILURE'}`;
-      break;
-    }
-    case 'request_saving_throw': {
-      const ability = input['ability'] as string;
+      out.toolResultContent = `Roll result: d20 + ${skill} mod = ${total} vs DC ${dc}.${attitudeNote ? ` ${attitudeNote}.` : ''} ${success ? 'SUCCESS' : 'FAILURE'}.`;
+      out.rollResult = `${skill}${attitudeNote ? ` ${attitudeNote}` : ''}: d20(${roll}) = ${total} vs DC ${dc} — ${success ? 'SUCCESS' : 'FAILURE'}`;
+  },
+  request_saving_throw(engine, input, ctx, out) {
+    const ability = input['ability'] as string;
       const dc = input['dc'] as number;
       const result = engine.rollPlayerSavingThrow(ability, dc);
       if (result.autoFail) {
         engine.addLog(`Saving throw (${ability}): auto-fail — condition prevents Str/Dex saves`);
-        toolResultContent = `Auto-fail: condition (paralyzed/unconscious) causes automatic failure on ${ability} saves.`;
-        rollResult = `${ability} save: AUTO-FAIL vs DC ${dc}`;
+        out.toolResultContent = `Auto-fail: condition (paralyzed/unconscious) causes automatic failure on ${ability} saves.`;
+        out.rollResult = `${ability} save: AUTO-FAIL vs DC ${dc}`;
       } else {
         engine.addLog(`Saving throw (${ability}): d20+mod = ${result.total} vs DC ${dc} — ${result.success ? 'Success!' : 'Failure'}`);
-        toolResultContent = `Roll result: d20 + ${ability} save mod = ${result.total} vs DC ${dc}. ${result.success ? 'SUCCESS' : 'FAILURE'}.`;
-        rollResult = `${ability} save: d20(${result.roll}) = ${result.total} vs DC ${dc} — ${result.success ? 'SUCCESS' : 'FAILURE'}`;
+        out.toolResultContent = `Roll result: d20 + ${ability} save mod = ${result.total} vs DC ${dc}. ${result.success ? 'SUCCESS' : 'FAILURE'}.`;
+        out.rollResult = `${ability} save: d20(${result.roll}) = ${result.total} vs DC ${dc} — ${result.success ? 'SUCCESS' : 'FAILURE'}`;
       }
-      break;
-    }
-    case 'award_temp_hp': {
-      const amount = input['amount'] as number;
+  },
+  award_temp_hp(engine, input, ctx, out) {
+    const amount = input['amount'] as number;
       const before = engine.getState().player.tempHp;
-      events = engine.awardTempHp(amount);
+      out.events = engine.awardTempHp(amount);
       const after = engine.getState().player.tempHp;
-      toolResultContent = after > before
+      out.toolResultContent = after > before
         ? `Player gained ${amount} Temp HP — now has ${after} Temp HP (kept higher per SRD).`
         : `Awarded ${amount} Temp HP, but player already has ${before} — kept the higher value.`;
-      break;
-    }
-    case 'grant_heroic_inspiration':
-      events = engine.grantHeroicInspiration();
-      toolResultContent = 'Heroic Inspiration granted. Player may expend it to re-roll any one die.';
-      break;
-    case 'set_exhaustion_level':
-      events = engine.setExhaustionLevel(input['level'] as number);
-      toolResultContent = `Exhaustion level set to ${input['level'] as number}.`;
-      break;
-    case 'set_attitude': {
-      const entity = String(input['entity'] ?? '').trim();
+  },
+  grant_heroic_inspiration(engine, input, ctx, out) {
+    out.events = engine.grantHeroicInspiration();
+      out.toolResultContent = 'Heroic Inspiration granted. Player may expend it to re-roll any one die.';
+  },
+  set_exhaustion_level(engine, input, ctx, out) {
+    out.events = engine.setExhaustionLevel(input['level'] as number);
+      out.toolResultContent = `Exhaustion level set to ${input['level'] as number}.`;
+  },
+  set_attitude(engine, input, ctx, out) {
+    const entity = String(input['entity'] ?? '').trim();
       const attitude = String(input['attitude'] ?? '').trim().toLowerCase();
       const valid = attitude === 'friendly' || attitude === 'indifferent' || attitude === 'hostile';
       if (!valid) {
-        toolResultContent = `set_attitude: attitude must be "friendly", "indifferent", or "hostile" (got "${attitude}").`;
-        break;
+        out.toolResultContent = `set_attitude: attitude must be "friendly", "indifferent", or "hostile" (got "${attitude}").`;
+        return;
       }
       const before = engine.setAttitude(entity, attitude as 'friendly' | 'indifferent' | 'hostile');
       if (before === null) {
-        toolResultContent = `set_attitude: unknown entity ref "${entity}". Use one from CURRENT STATE.`;
+        out.toolResultContent = `set_attitude: unknown entity ref "${entity}". Use one from CURRENT STATE.`;
       } else {
-        toolResultContent = `${entity} attitude: ${before} → ${attitude}.`;
+        out.toolResultContent = `${entity} attitude: ${before} → ${attitude}.`;
       }
-      break;
-    }
-    case 'reveal_npc_name': {
-      const entity = input['entity'] as string;
+  },
+  reveal_npc_name(engine, input, ctx, out) {
+    const entity = input['entity'] as string;
       const revealedName = input['revealed_name'] as string;
       engine.revealNpcName(entity, revealedName);
-      toolResultContent = `${entity} is now known as "${revealedName}". The player has NOT been told the name yet — they only see your narrative reply. You MUST speak the name in this reply, in-character (e.g. "'I'm ${revealedName},' she says."). Use this name for all future references to this NPC.`;
-      break;
-    }
-    case 'npc_speaks': {
-      const entity = String(input['entity'] ?? '').trim();
+      out.toolResultContent = `${entity} is now known as "${revealedName}". The player has NOT been told the name yet — they only see your narrative reply. You MUST speak the name in this reply, in-character (e.g. "'I'm ${revealedName},' she says."). Use this name for all future references to this NPC.`;
+  },
+  npc_speaks(engine, input, ctx, out) {
+    const entity = String(input['entity'] ?? '').trim();
       const text = String(input['text'] ?? '').trim();
       if (!entity || !text) {
-        toolResultContent = 'npc_speaks needs both entity and text.';
-        break;
+        out.toolResultContent = 'npc_speaks needs both entity and text.';
+        return;
       }
       // Resolve "player" → "player"; otherwise look up the NPC. Unknown
       // entity refs are a no-op (with a hint so the model corrects itself).
@@ -647,38 +627,35 @@ export function applyAIGMTool(
         }
       }
       if (!entityId || !speakerName) {
-        toolResultContent = `npc_speaks: unknown entity ref "${entity}". Use one from CURRENT STATE.`;
-        break;
+        out.toolResultContent = `npc_speaks: unknown entity ref "${entity}". Use one from CURRENT STATE.`;
+        return;
       }
       // Mirror the spoken line into the Event Log so the player has a
       // scrollable record of what each NPC said — same surfacing the
       // player-sayto path does on the server side. Prefixed with the speech
       // bubble emoji so dialogue stands out at a glance.
       engine.addLog({ left: `💬 ${speakerName}: "${text}"`, style: 'status' });
-      events = [{ type: 'npc_speech', entityId, text, speakerName }];
-      toolResultContent = `Speech bubble queued above ${entity}: "${text}".`;
-      break;
-    }
-    case 'set_npc_passive': {
-      events = engine.setNpcPassive(input['entity'] as string, input['passive'] as boolean);
-      toolResultContent = `${input['entity']} is now ${input['passive'] ? 'passive — will skip combat turns' : 'active — will act normally in combat'}.`;
-      break;
-    }
-    case 'request_attack_roll': {
-      const attacker = input['attacker'] as string;
+      out.events = [{ type: 'npc_speech', entityId, text, speakerName }];
+      out.toolResultContent = `Speech bubble queued above ${entity}: "${text}".`;
+  },
+  set_npc_passive(engine, input, ctx, out) {
+    out.events = engine.setNpcPassive(input['entity'] as string, input['passive'] as boolean);
+      out.toolResultContent = `${input['entity']} is now ${input['passive'] ? 'passive — will skip combat turns' : 'active — will act normally in combat'}.`;
+  },
+  request_attack_roll(engine, input, ctx, out) {
+    const attacker = input['attacker'] as string;
       const targetAc = input['target_ac'] as number;
       const atk = engine.rollAttackRoll(attacker, targetAc);
       const outcome = atk.isCrit ? 'CRITICAL HIT' : atk.isHit ? 'HIT' : 'MISS';
       const dmgPart = atk.isHit ? ` — ${atk.damage} damage` : '';
       engine.addLog(`Attack roll (${attacker}): ${atk.rollStr} — ${outcome}`);
-      toolResultContent = `${outcome}. ${atk.rollStr}${dmgPart}.`;
-      rollResult = `Attack: ${atk.rollStr} — ${outcome}${dmgPart}`;
-      break;
-    }
-    case 'recall_memory': {
-      const query = String(input['query'] ?? '').trim();
+      out.toolResultContent = `${outcome}. ${atk.rollStr}${dmgPart}.`;
+      out.rollResult = `Attack: ${atk.rollStr} — ${outcome}${dmgPart}`;
+  },
+  recall_memory(engine, input, ctx, out) {
+    const query = String(input['query'] ?? '').trim();
       const archive = ctx.archive ?? [];
-      if (!query) { toolResultContent = 'recall_memory needs a non-empty query.'; break; }
+      if (!query) { out.toolResultContent = 'recall_memory needs a non-empty query.'; return; }
       const lower = query.toLowerCase();
       const MAX_HITS = 8;
       const MAX_SNIPPET = 240;
@@ -695,166 +672,150 @@ export function applyAIGMTool(
         const turn = Math.floor(i / 2) + 1;
         hits.push(`turn ${turn} [${msg.role}]: ${snippet}`);
       }
-      toolResultContent = hits.length === 0
+      out.toolResultContent = hits.length === 0
         ? `No archived messages match "${query}".`
         : `Found ${hits.length} match${hits.length === 1 ? '' : 'es'} for "${query}" (newest first):\n${hits.join('\n---\n')}`;
-      break;
-    }
-    case 'adjust_faction_standing': {
-      const factionId = String(input['faction_id'] ?? '').trim();
+  },
+  adjust_faction_standing(engine, input, ctx, out) {
+    const factionId = String(input['faction_id'] ?? '').trim();
       const delta = Number(input['delta']) || 0;
-      if (!factionId) { toolResultContent = 'adjust_faction_standing requires a non-empty faction_id.'; break; }
+      if (!factionId) { out.toolResultContent = 'adjust_faction_standing requires a non-empty faction_id.'; return; }
       const before = engine.getFactionStanding(factionId);
       engine.adjustFactionStanding(factionId, delta);
       const after = engine.getFactionStanding(factionId);
-      toolResultContent = `Faction "${factionId}" standing: ${before} → ${after} (Δ ${delta >= 0 ? '+' : ''}${delta}).`;
-      break;
-    }
-    case 'adjust_faction_relation': {
-      const a = String(input['faction_a'] ?? '').trim();
+      out.toolResultContent = `Faction "${factionId}" standing: ${before} → ${after} (Δ ${delta >= 0 ? '+' : ''}${delta}).`;
+  },
+  adjust_faction_relation(engine, input, ctx, out) {
+    const a = String(input['faction_a'] ?? '').trim();
       const b = String(input['faction_b'] ?? '').trim();
       const delta = Number(input['delta']) || 0;
       const mirror = input['mirror'] === undefined ? true : !!input['mirror'];
-      if (!a || !b) { toolResultContent = 'adjust_faction_relation requires both faction_a and faction_b.'; break; }
+      if (!a || !b) { out.toolResultContent = 'adjust_faction_relation requires both faction_a and faction_b.'; return; }
       engine.fireTriggerAction({ type: 'adjust_faction_relation', a, b, delta, mirror });
       const after = engine.getFactionRelation(a, b);
-      toolResultContent = `Faction relation "${a}" ↔ "${b}" set to ${after} (Δ ${delta >= 0 ? '+' : ''}${delta}${mirror ? '' : ', one-sided'}).`;
-      break;
-    }
-    case 'set_faction_relation': {
-      const a = String(input['faction_a'] ?? '').trim();
+      out.toolResultContent = `Faction relation "${a}" ↔ "${b}" set to ${after} (Δ ${delta >= 0 ? '+' : ''}${delta}${mirror ? '' : ', one-sided'}).`;
+  },
+  set_faction_relation(engine, input, ctx, out) {
+    const a = String(input['faction_a'] ?? '').trim();
       const b = String(input['faction_b'] ?? '').trim();
       const value = Number(input['value']);
       const mirror = input['mirror'] === undefined ? true : !!input['mirror'];
-      if (!a || !b) { toolResultContent = 'set_faction_relation requires both faction_a and faction_b.'; break; }
-      if (Number.isNaN(value)) { toolResultContent = 'set_faction_relation value must be a number.'; break; }
+      if (!a || !b) { out.toolResultContent = 'set_faction_relation requires both faction_a and faction_b.'; return; }
+      if (Number.isNaN(value)) { out.toolResultContent = 'set_faction_relation value must be a number.'; return; }
       engine.fireTriggerAction({ type: 'set_faction_relation', a, b, value, mirror });
       const after = engine.getFactionRelation(a, b);
-      toolResultContent = `Faction relation "${a}" ↔ "${b}" set to ${after}${mirror ? '' : ' (one-sided)'}.`;
-      break;
-    }
-    case 'set_individual_relation': {
-      const a = String(input['a'] ?? '').trim();
+      out.toolResultContent = `Faction relation "${a}" ↔ "${b}" set to ${after}${mirror ? '' : ' (one-sided)'}.`;
+  },
+  set_individual_relation(engine, input, ctx, out) {
+    const a = String(input['a'] ?? '').trim();
       const b = String(input['b'] ?? '').trim();
       const value = Number(input['value']);
       const mirror = input['mirror'] === undefined ? true : !!input['mirror'];
-      if (!a || !b) { toolResultContent = 'set_individual_relation requires both a and b.'; break; }
-      if (Number.isNaN(value)) { toolResultContent = 'set_individual_relation value must be a number.'; break; }
+      if (!a || !b) { out.toolResultContent = 'set_individual_relation requires both a and b.'; return; }
+      if (Number.isNaN(value)) { out.toolResultContent = 'set_individual_relation value must be a number.'; return; }
       engine.fireTriggerAction({ type: 'set_individual_relation', a, b, value, mirror });
       const after = engine.getIndividualRelation(a, b);
-      toolResultContent = `Individual relation "${a}" → "${b}" set to ${after}${mirror ? '' : ' (one-sided)'}.`;
-      break;
-    }
-    case 'adjust_individual_relation': {
-      const a = String(input['a'] ?? '').trim();
+      out.toolResultContent = `Individual relation "${a}" → "${b}" set to ${after}${mirror ? '' : ' (one-sided)'}.`;
+  },
+  adjust_individual_relation(engine, input, ctx, out) {
+    const a = String(input['a'] ?? '').trim();
       const b = String(input['b'] ?? '').trim();
       const delta = Number(input['delta']) || 0;
       const mirror = input['mirror'] === undefined ? true : !!input['mirror'];
-      if (!a || !b) { toolResultContent = 'adjust_individual_relation requires both a and b.'; break; }
+      if (!a || !b) { out.toolResultContent = 'adjust_individual_relation requires both a and b.'; return; }
       engine.fireTriggerAction({ type: 'adjust_individual_relation', a, b, delta, mirror });
       const after = engine.getIndividualRelation(a, b);
-      toolResultContent = `Individual relation "${a}" → "${b}" set to ${after} (Δ ${delta >= 0 ? '+' : ''}${delta}${mirror ? '' : ', one-sided'}).`;
-      break;
-    }
-    case 'reveal_faction': {
-      const factionId = String(input['faction_id'] ?? '').trim();
-      if (!factionId) { toolResultContent = 'reveal_faction requires a non-empty faction_id.'; break; }
+      out.toolResultContent = `Individual relation "${a}" → "${b}" set to ${after} (Δ ${delta >= 0 ? '+' : ''}${delta}${mirror ? '' : ', one-sided'}).`;
+  },
+  reveal_faction(engine, input, ctx, out) {
+    const factionId = String(input['faction_id'] ?? '').trim();
+      if (!factionId) { out.toolResultContent = 'reveal_faction requires a non-empty faction_id.'; return; }
       const newly = engine.revealFaction(factionId);
-      toolResultContent = newly
+      out.toolResultContent = newly
         ? `Faction "${factionId}" is now identified — the Target Panel will show its name.`
         : `Faction "${factionId}" was already identified.`;
-      break;
-    }
-    case 'create_rumor': {
-      const id = String(input['id'] ?? '').trim();
+  },
+  create_rumor(engine, input, ctx, out) {
+    const id = String(input['id'] ?? '').trim();
       const text = String(input['text'] ?? '').trim();
       const salience = Number(input['salience']) || 5;
-      if (!id || !text) { toolResultContent = 'create_rumor requires both id and text.'; break; }
+      if (!id || !text) { out.toolResultContent = 'create_rumor requires both id and text.'; return; }
       const added = engine.recordRumor(id, text, salience);
-      toolResultContent = added
+      out.toolResultContent = added
         ? `Rumor "${id}" recorded (salience ${salience}). The world now remembers this.`
         : `Rumor "${id}" already exists — no change.`;
-      break;
-    }
-    case 'set_world_flag': {
-      const name = String(input['name'] ?? '').trim();
+  },
+  set_world_flag(engine, input, ctx, out) {
+    const name = String(input['name'] ?? '').trim();
       const rawValue = input['value'];
-      if (!name) { toolResultContent = 'set_world_flag requires a non-empty name.'; break; }
+      if (!name) { out.toolResultContent = 'set_world_flag requires a non-empty name.'; return; }
       // Only booleans, numbers, and strings are persistable as WorldFlagValue.
       if (typeof rawValue !== 'boolean' && typeof rawValue !== 'number' && typeof rawValue !== 'string') {
-        toolResultContent = 'set_world_flag value must be a boolean, number, or string.';
-        break;
+        out.toolResultContent = 'set_world_flag value must be a boolean, number, or string.';
+        return;
       }
       engine.setWorldFlag(name, rawValue);
-      toolResultContent = `World flag "${name}" set to ${JSON.stringify(rawValue)}.`;
-      break;
-    }
-    case 'set_objective': {
-      const text = String(input['text'] ?? '').trim();
-      if (!text) { toolResultContent = 'set_objective requires non-empty text.'; break; }
+      out.toolResultContent = `World flag "${name}" set to ${JSON.stringify(rawValue)}.`;
+  },
+  set_objective(engine, input, ctx, out) {
+    const text = String(input['text'] ?? '').trim();
+      if (!text) { out.toolResultContent = 'set_objective requires non-empty text.'; return; }
       engine.setObjective(text);
-      toolResultContent = `Objective updated to: "${text}".`;
-      break;
-    }
-    case 'start_quest': {
-      const questId = String(input['quest_id'] ?? '').trim();
+      out.toolResultContent = `Objective updated to: "${text}".`;
+  },
+  start_quest(engine, input, ctx, out) {
+    const questId = String(input['quest_id'] ?? '').trim();
       if (questId) {
         const def = engine.getQuestDef(questId);
-        if (!def) { toolResultContent = `No authored quest with id "${questId}".`; break; }
-        toolResultContent = engine.startQuest(def) ? `Started quest "${def.title}".` : `Quest "${def.title}" is already active.`;
-        break;
+        if (!def) { out.toolResultContent = `No authored quest with id "${questId}".`; return; }
+        out.toolResultContent = engine.startQuest(def) ? `Started quest "${def.title}".` : `Quest "${def.title}" is already active.`;
+        return;
       }
       const built = buildRuntimeQuestDef(engine, input);
-      if (!built.ok) { toolResultContent = built.error; break; }
-      toolResultContent = engine.startQuest(built.def)
+      if (!built.ok) { out.toolResultContent = built.error; return; }
+      out.toolResultContent = engine.startQuest(built.def)
         ? `Started quest "${built.def.title}" (id ${built.def.id}). Advance it with advance_quest as steps are accomplished.`
         : `Quest "${built.def.title}" is already active.`;
-      break;
-    }
-    case 'advance_quest': {
-      const id = String(input['quest_id'] ?? '').trim();
+  },
+  advance_quest(engine, input, ctx, out) {
+    const id = String(input['quest_id'] ?? '').trim();
       const stepId = input['step_id'] ? String(input['step_id']).trim() : undefined;
-      toolResultContent = engine.advanceQuest(id, stepId) ? `Advanced quest "${id}".` : `No active quest with id "${id}".`;
-      break;
-    }
-    case 'complete_quest': {
-      const id = String(input['quest_id'] ?? '').trim();
-      toolResultContent = engine.completeQuest(id) ? `Completed quest "${id}".` : `No active quest with id "${id}".`;
-      break;
-    }
-    case 'fail_quest': {
-      const id = String(input['quest_id'] ?? '').trim();
-      toolResultContent = engine.failQuest(id) ? `Failed quest "${id}".` : `No active quest with id "${id}".`;
-      break;
-    }
-    case 'fade_screen': {
-      const rawMode = input['mode'];
+      out.toolResultContent = engine.advanceQuest(id, stepId) ? `Advanced quest "${id}".` : `No active quest with id "${id}".`;
+  },
+  complete_quest(engine, input, ctx, out) {
+    const id = String(input['quest_id'] ?? '').trim();
+      out.toolResultContent = engine.completeQuest(id) ? `Completed quest "${id}".` : `No active quest with id "${id}".`;
+  },
+  fail_quest(engine, input, ctx, out) {
+    const id = String(input['quest_id'] ?? '').trim();
+      out.toolResultContent = engine.failQuest(id) ? `Failed quest "${id}".` : `No active quest with id "${id}".`;
+  },
+  fade_screen(engine, input, ctx, out) {
+    const rawMode = input['mode'];
       const mode = rawMode === 'in' || rawMode === 'out' || rawMode === 'dim' ? rawMode : null;
-      if (!mode) { toolResultContent = 'fade_screen requires mode: "in", "out", or "dim".'; break; }
+      if (!mode) { out.toolResultContent = 'fade_screen requires mode: "in", "out", or "dim".'; return; }
       const rawDuration = input['duration_ms'];
       const durationMs = typeof rawDuration === 'number' && rawDuration >= 0
         ? Math.min(10000, Math.floor(rawDuration))
         : 1200;
-      events = [{ type: 'screen_fade', mode, durationMs }];
-      toolResultContent = `Screen fade ${mode} queued (${durationMs} ms).`;
-      break;
-    }
-    case 'show_supertitle': {
-      const text = String(input['text'] ?? '').trim();
-      if (!text) { toolResultContent = 'show_supertitle requires non-empty text.'; break; }
+      out.events = [{ type: 'screen_fade', mode, durationMs }];
+      out.toolResultContent = `Screen fade ${mode} queued (${durationMs} ms).`;
+  },
+  show_supertitle(engine, input, ctx, out) {
+    const text = String(input['text'] ?? '').trim();
+      if (!text) { out.toolResultContent = 'show_supertitle requires non-empty text.'; return; }
       const rawDuration = input['duration_ms'];
       const durationMs = typeof rawDuration === 'number' && rawDuration > 0
         ? Math.min(15000, Math.floor(rawDuration))
         : undefined;
-      events = durationMs !== undefined
+      out.events = durationMs !== undefined
         ? [{ type: 'supertitle', text, durationMs }]
         : [{ type: 'supertitle', text }];
-      toolResultContent = `Supertitle queued: "${text}".`;
-      break;
-    }
-    case 'show_announcement': {
-      const text = String(input['text'] ?? '').trim();
-      if (!text) { toolResultContent = 'show_announcement requires non-empty text.'; break; }
+      out.toolResultContent = `Supertitle queued: "${text}".`;
+  },
+  show_announcement(engine, input, ctx, out) {
+    const text = String(input['text'] ?? '').trim();
+      if (!text) { out.toolResultContent = 'show_announcement requires non-empty text.'; return; }
       const rawDuration = input['duration_ms'];
       const durationMs = typeof rawDuration === 'number' && rawDuration > 0
         ? Math.min(15000, Math.floor(rawDuration))
@@ -869,43 +830,51 @@ export function applyAIGMTool(
         durationMs !== undefined
           ? { type: 'announcement', text, durationMs, mode }
           : { type: 'announcement', text, mode };
-      events = [ev];
-      toolResultContent = `Announcement queued (${mode}): "${text}" (also written to Event Log).`;
-      break;
-    }
-    case 'lookup_setting': {
-      const section = String(input['section'] ?? '').trim();
-      if (!section) { toolResultContent = 'lookup_setting requires a non-empty section id.'; break; }
+      out.events = [ev];
+      out.toolResultContent = `Announcement queued (${mode}): "${text}" (also written to Event Log).`;
+  },
+  lookup_setting(engine, input, ctx, out) {
+    const section = String(input['section'] ?? '').trim();
+      if (!section) { out.toolResultContent = 'lookup_setting requires a non-empty section id.'; return; }
       const setting = getActiveSetting();
-      if (!setting) { toolResultContent = 'No setting is active — only core SRD rules apply. There is no setting lore to look up.'; break; }
+      if (!setting) { out.toolResultContent = 'No setting is active — only core SRD rules apply. There is no setting lore to look up.'; return; }
       const body = lookupSettingSection(section);
       if (!body) {
-        toolResultContent = `Section "${section}" not found in setting "${setting.id}". Available canon sections: ${setting.sections.join(', ')}.`;
-        break;
+        out.toolResultContent = `Section "${section}" not found in setting "${setting.id}". Available canon sections: ${setting.sections.join(', ')}.`;
+        return;
       }
-      toolResultContent = body;
-      break;
-    }
-    case 'lookup_worldbook': {
-      const entryId = String(input['entry_id'] ?? '').trim();
-      if (!entryId) { toolResultContent = 'lookup_worldbook requires a non-empty entry_id.'; break; }
+      out.toolResultContent = body;
+  },
+  lookup_worldbook(engine, input, ctx, out) {
+    const entryId = String(input['entry_id'] ?? '').trim();
+      if (!entryId) { out.toolResultContent = 'lookup_worldbook requires a non-empty entry_id.'; return; }
       const setting = getActiveSetting();
-      if (!setting) { toolResultContent = 'No setting is active — only core SRD rules apply. There is no worldbook to look up.'; break; }
+      if (!setting) { out.toolResultContent = 'No setting is active — only core SRD rules apply. There is no worldbook to look up.'; return; }
       const entry = lookupWorldbookEntry(entryId);
       if (!entry) {
         const available = setting.worldbook.map((e) => e.id).sort().join(', ');
-        toolResultContent = available.length > 0
+        out.toolResultContent = available.length > 0
           ? `Worldbook entry "${entryId}" not found in setting "${setting.id}". Available entries: ${available}.`
           : `Setting "${setting.id}" has no worldbook entries.`;
-        break;
+        return;
       }
       // Prepend the title + type so the AI always knows what it's reading,
       // independent of how the entry was authored.
       const header = `# ${entry.title}${entry.type ? ` (${entry.type})` : ''}`;
-      toolResultContent = `${header}\n\n${entry.body}`;
-      break;
-    }
-  }
-  Logger.log('aigm.tool_result', { tool: name, result: toolResultContent, rollResult: rollResult ?? null, events: events.length });
-  return { events, toolResultContent, rollResult };
+      out.toolResultContent = `${header}\n\n${entry.body}`;
+  },
+};
+
+export function applyAIGMTool(
+  engine: GameEngine,
+  name: string,
+  input: Record<string, unknown>,
+  ctx: AIGMToolContext = {},
+): AIGMToolResult {
+  Logger.log('aigm.tool_dispatch', { tool: name, input });
+  const out: AIGMToolOut = { events: [], toolResultContent: 'Applied.' };
+  AIGM_TOOL_HANDLERS[name]?.(engine, input, ctx, out);
+  Logger.log('aigm.tool_result', { tool: name, result: out.toolResultContent, rollResult: out.rollResult ?? null, events: out.events.length });
+  return { events: out.events, toolResultContent: out.toolResultContent, rollResult: out.rollResult };
 }
+
