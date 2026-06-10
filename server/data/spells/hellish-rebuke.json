@@ -1,0 +1,20 @@
+{
+  "id": "hellish-rebuke",
+  "name": "Hellish Rebuke",
+  "level": 1,
+  "school": "evocation",
+  "vfx": { "style": "target-burst", "palette": "fire" },
+  "classes": ["warlock"],
+  "castingTime": "reaction",
+  "castingTimeTrigger": "which you take in response to taking damage from a creature within 60 feet that you can see",
+  "range": "60 feet",
+  "rangeFeet": 60,
+  "components": { "verbal": true, "somatic": true, "material": null },
+  "duration": "Instantaneous",
+  "concentration": false,
+  "ritual": false,
+  "save": { "ability": "dex", "halfOnSuccess": true },
+  "damage": { "dice": 2, "sides": 10, "type": "fire" },
+  "description": "You point at a creature that has damaged you, and it is momentarily surrounded by hellish flames. The target makes a Dexterity saving throw, taking 2d10 Fire damage on a failed save or half as much on a successful one.",
+  "scaling": "The damage increases by 1d10 for each spell slot level above 1."
+}

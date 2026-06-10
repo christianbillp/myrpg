@@ -1,0 +1,13 @@
+{
+  "id": "fiend-patron",
+  "classId": "warlock",
+  "name": "Fiend Patron",
+  "description": "Your pact draws on the Lower Planes. When your foes fall you draw vitality from their deaths, and your patron keeps a list of fiendish spells always ready on your tongue.",
+  "progression": [
+    {
+      "level": 3,
+      "features": ["dark-ones-blessing"],
+      "grantedSpells": ["burning-hands", "command", "scorching-ray", "suggestion"]
+    }
+  ]
+}

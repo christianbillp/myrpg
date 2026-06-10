@@ -231,6 +231,10 @@ export interface PlayerDef {
   defaultPreparedSpellIds?: string[];
   /** Starting spell slots, indexed by `spell.level − 1`. e.g. `[2]` = 2 × L1, no higher slots. */
   defaultSpellSlots?: number[];
+  /** Warlock Pact Magic pool — `{ max, level }` (e.g. L3 Warlock → `{ max: 2,
+   *  level: 2 }`: two slots that both cast at spell level 2 and recover on a
+   *  Short Rest). Seeds `PlayerState.pactMagic`. Absent for non-Warlocks. */
+  defaultPactMagic?: { max: number; level: number };
   /** SRD Magic Initiate: the level-1 spell(s) the feat grants as "always
    *  prepared" and castable once per Long Rest without a spell slot (or with a
    *  slot, if the character has any). Each id seeds a `magic-initiate:<id>`
@@ -366,6 +370,14 @@ export interface MonsterDef {
   initiativeBonus: number;
   stealthBonus: number;
   passivePerception: number;
+  /** SRD skill bonuses beyond passive Perception (e.g. the Mage's Arcana +6,
+   *  History +6). AIGM-facing: surfaced in CURRENT STATE so the GM can roll
+   *  authentic checks; the engine resolves no monster skill checks today. */
+  skills?: Record<string, number>;
+  /** SRD Languages line, verbatim entries (AIGM-facing flavour). */
+  languages?: string[];
+  /** SRD Gear line (AIGM-facing flavour — e.g. the Mage's wand). */
+  gear?: string[];
   /** Special senses (SRD): darkvision / blindsight / tremorsense / truesight.
    *  Absent means "normal sight only". Read by `Vision.canSee`. */
   senses?: Senses;
@@ -402,6 +414,13 @@ export interface MonsterDef {
    *  See CombatActions.tryNpcDefensiveReaction.
    */
   reactions?: MonsterReaction[];
+  /** SRD stat-block Spellcasting entry (US-117, mage-monster-plan.md). Spell
+   *  ids reference `server/data/spells/*.json` — the same defs the player
+   *  path reads, so dice / areas / save types have one source of truth.
+   *  `atWill` spells are narrative/utility (AIGM-facing, no engine
+   *  resolution); `perDay` and `bonusAction` casts are combat-resolved with
+   *  per-spawn use tracking on `NpcState.spellUses`. */
+  spellcasting?: MonsterSpellcasting;
   /** Path to the SVG used as this monster's token sprite. Required — every
    *  monster JSON must declare its token explicitly (no naming-convention
    *  fallback). */
@@ -418,7 +437,26 @@ export type MonsterTrait = 'pack_tactics' | 'sunlight_sensitivity';
  *     hit into a miss). One reaction per round per SRD.
  */
 export type MonsterReaction =
-  | { kind: 'parry'; acBonus: number };
+  | { kind: 'parry'; acBonus: number }
+  /** SRD Mage "Protective Magic" — casts Counterspell OR Shield as a
+   *  reaction, from ONE shared per-day pool (tracked per spawn on
+   *  `NpcState.reactionUses`). Shield: +5 AC vs the triggering attack.
+   *  Counterspell: intercepts a player cast within 60 ft (5.2.1: the caster
+   *  makes a CON save; on a failure the spell fails but the slot is kept). */
+  | { kind: 'protective-magic'; usesPerDay: number };
+
+/** SRD stat-block Spellcasting entry for a monster (see MonsterDef.spellcasting). */
+export interface MonsterSpellcasting {
+  ability: 'int' | 'wis' | 'cha';
+  saveDC: number;
+  /** Narrative/utility spells, surfaced to the AIGM only. */
+  atWill?: string[];
+  /** Combat-resolved limited casts. `castLevel` carries "level N version"
+   *  upcasts (the Mage's Fireball at level 4). */
+  perDay?: Array<{ spellId: string; uses: number; castLevel?: number }>;
+  /** Bonus-action casts resolved inside the NPC turn script (Misty Step). */
+  bonusAction?: Array<{ spellId: string; uses: number }>;
+}
 
 /**
  * Token Creator spec — the editable JSON record that backs every author-built

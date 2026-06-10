@@ -80,6 +80,23 @@ registerFeatureHandler('second-wind', (ctx, featureId) => {
 });
 
 /**
+ * Magical Cunning (Warlock L2). A 1-minute rite that regains expended Pact
+ * Magic spell slots, up to half the maximum (round up). Once per Long Rest.
+ */
+registerFeatureHandler('magical-cunning', (ctx, featureId) => {
+  const s = ctx.state;
+  const pact = s.player.pactMagic;
+  if (!pact) return;
+  const restored = Math.min(pact.max - pact.remaining, Math.ceil(pact.max / 2));
+  pact.remaining += restored;
+  s.player.resources[featureId] = Math.max(0, (s.player.resources[featureId] ?? 0) - 1);
+  ctx.addLog({
+    left: `${ctx.playerDef.name} performs an esoteric rite — regains ${restored} Pact Magic slot${restored === 1 ? '' : 's'} (${s.player.resources[featureId]} use left).`,
+    style: 'status',
+  });
+});
+
+/**
  * Action Surge (Fighter L2+). Refreshes the Action this turn — the player
  * may take one more Action (the SRD excludes the Magic action; we don't
  * model that constraint yet because the engine has no concept of "the second

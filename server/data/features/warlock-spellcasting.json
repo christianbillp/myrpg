@@ -1,0 +1,8 @@
+{
+  "id": "warlock-spellcasting",
+  "name": "Pact Magic",
+  "classId": "warlock",
+  "minLevel": 1,
+  "description": "You cast Warlock spells using Charisma. Your Pact Magic spell slots are all the same level and recover when you finish a Short or Long Rest. Your spell save DC equals 8 + your Charisma modifier + your Proficiency Bonus.",
+  "cost": { "kind": "passive" }
+}

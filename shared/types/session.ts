@@ -36,6 +36,8 @@ export interface CreateSessionRequest {
   allowsLongRest?: boolean;
   /** Mirror of `EncounterDef.completionFlag`. Seeded onto `GameState.encounterCompletionFlag` for the `encounter_completed` lifecycle event. */
   completionFlag?: string;
+  /** Mirror of `EncounterDef.completeOnFlagOnly`. Seeded onto `GameState.encounterCompleteOnFlagOnly`: when true, combat-clear alone won't complete the encounter — only the completion flag will. */
+  completeOnFlagOnly?: boolean;
   tileProperties?: EncounterTileProperty[];
   startingZones?: StartingZonesLayer;
   /** Mirrors `EncounterDef.placementMode` — see that field for the rules. */

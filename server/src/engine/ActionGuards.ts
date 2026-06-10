@@ -298,8 +298,16 @@ export function canCastSpell(ctx: GameContext, spellId: string): boolean {
   // Slot pool — cantrips skip this entirely. A Magic Initiate spell can also be
   // cast once per Long Rest without a slot (its free-cast resource).
   if (spell.level > 0) {
-    const slot = s.player.spellSlots[spell.level - 1] ?? 0;
-    if (slot <= 0 && !hasMagicInitiateFreeCast(s, ctx.playerDef, spellId)) return false;
+    const pact = s.player.pactMagic;
+    if (pact) {
+      // Warlock Pact Magic: one pool, all slots at the pact level. A spell is
+      // castable if its base level fits the pact level and a slot remains.
+      if (spell.level > pact.level) return false;
+      if (pact.remaining <= 0 && !hasMagicInitiateFreeCast(s, ctx.playerDef, spellId)) return false;
+    } else {
+      const slot = s.player.spellSlots[spell.level - 1] ?? 0;
+      if (slot <= 0 && !hasMagicInitiateFreeCast(s, ctx.playerDef, spellId)) return false;
+    }
   }
 
   // SRD components (US-116): a spell with a Somatic or Material component needs

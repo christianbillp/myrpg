@@ -1,0 +1,61 @@
+{
+  "id": "warlock",
+  "name": "Warlock",
+  "description": "A wielder of magic derived from a bargain with an extraplanar entity. SRD 5.2.1 (2024) class data. Pact Magic: a small pool of spell slots, all the same level, that recover on a Short or Long Rest. The Fiend Patron subclass lives in a separate JSON.",
+
+  "primaryAbility": ["cha"],
+  "hitDie": 8,
+  "fixedHpPerLevel": 5,
+  "savingThrows": ["wis", "cha"],
+  "skillChoices": {
+    "count": 2,
+    "options": ["arcana", "deception", "history", "intimidation", "investigation", "nature", "religion"]
+  },
+  "weaponProficiencies": ["simple"],
+  "armorTraining": ["light"],
+  "toolProficiencies": [],
+  "equipmentOptions": [
+    { "label": "A", "armorId": "leather_armor", "weaponId": "dagger", "shieldId": null, "items": [], "gold": 15 },
+    { "label": "B", "armorId": null, "weaponId": null, "shieldId": null, "items": [], "gold": 100 }
+  ],
+  "subclassLevels": [3, 6, 10, 14],
+
+  "spellcasting": {
+    "ability": "cha",
+    "slotTableKind": "pact-magic",
+    "learnModel": "known",
+    "recovery": "short-rest",
+    "focus": ["arcane-focus"],
+    "ritual": "none",
+    "cantripsKnownByLevel": [2, 2, 2, 3, 3, 3, 3, 3, 3, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4],
+    "spellsKnownByLevel": [2, 3, 4, 5, 6, 7, 8, 9, 10, 10, 11, 11, 12, 12, 13, 13, 14, 14, 15, 15],
+    "pactMagic": {
+      "slotsByLevel":      [1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 4, 4, 4, 4],
+      "slotLevelByLevel":  [1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5]
+    },
+    "mysticArcanum": { "atLevels": [11, 13, 15, 17], "spellLevels": [6, 7, 8, 9] }
+  },
+
+  "progression": [
+    { "level":  1, "features": ["warlock-spellcasting", "eldritch-invocations"], "choices": [{ "kind": "invocation-pick", "count": 1 }] },
+    { "level":  2, "features": ["magical-cunning"], "choices": [{ "kind": "invocation-pick", "count": 2 }] },
+    { "level":  3, "subclass": true, "choices": [{ "kind": "subclass-choice" }] },
+    { "level":  4, "choices": [{ "kind": "asi-or-feat" }, { "kind": "cantrip-known", "count": 1 }] },
+    { "level":  5, "choices": [{ "kind": "invocation-pick", "count": 2 }] },
+    { "level":  6, "subclass": true },
+    { "level":  7, "choices": [{ "kind": "invocation-pick", "count": 1 }] },
+    { "level":  8, "choices": [{ "kind": "asi-or-feat" }] },
+    { "level":  9, "choices": [{ "kind": "invocation-pick", "count": 1 }] },
+    { "level": 10, "subclass": true },
+    { "level": 11, "choices": [{ "kind": "mystic-arcanum-pick", "spellLevel": 6 }] },
+    { "level": 12, "choices": [{ "kind": "asi-or-feat" }, { "kind": "invocation-pick", "count": 1 }] },
+    { "level": 13, "choices": [{ "kind": "mystic-arcanum-pick", "spellLevel": 7 }] },
+    { "level": 14, "subclass": true },
+    { "level": 15, "choices": [{ "kind": "mystic-arcanum-pick", "spellLevel": 8 }, { "kind": "invocation-pick", "count": 1 }] },
+    { "level": 16, "choices": [{ "kind": "asi-or-feat" }] },
+    { "level": 17, "choices": [{ "kind": "mystic-arcanum-pick", "spellLevel": 9 }] },
+    { "level": 18, "choices": [{ "kind": "invocation-pick", "count": 1 }] },
+    { "level": 19, "features": ["epic-boon"], "choices": [{ "kind": "epic-boon-choice" }] },
+    { "level": 20 }
+  ]
+}

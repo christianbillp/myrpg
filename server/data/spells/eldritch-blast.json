@@ -1,0 +1,19 @@
+{
+  "id": "eldritch-blast",
+  "name": "Eldritch Blast",
+  "level": 0,
+  "school": "evocation",
+  "vfx": { "style": "projectile", "palette": "arcane" },
+  "classes": ["warlock"],
+  "castingTime": "action",
+  "range": "120 feet",
+  "rangeFeet": 120,
+  "components": { "verbal": true, "somatic": true, "material": null },
+  "duration": "Instantaneous",
+  "concentration": false,
+  "ritual": false,
+  "attack": "ranged-spell",
+  "damage": { "dice": 1, "sides": 10, "type": "force" },
+  "description": "You hurl a beam of crackling energy at a creature or object within range. Make a ranged spell attack against the target. On a hit, the target takes 1d10 Force damage. The Agonizing Blast invocation adds your Charisma modifier to this damage.",
+  "scaling": "You create more beams at higher levels — two at level 5, three at level 11, four at level 17. (Engine: single-beam for now; multi-beam targeting is a follow-up.)"
+}

@@ -1,0 +1,9 @@
+{
+  "id": "dark-ones-blessing",
+  "name": "Dark One's Blessing",
+  "classId": "warlock",
+  "minLevel": 3,
+  "description": "When you reduce an enemy to 0 Hit Points, you gain Temporary Hit Points equal to your Charisma modifier plus your Warlock level (minimum of 1).",
+  "cost": { "kind": "passive" },
+  "modifiers": [{ "type": "flag", "name": "dark-ones-blessing" }]
+}

@@ -1,0 +1,11 @@
+{
+  "id": "magical-cunning",
+  "name": "Magical Cunning",
+  "classId": "warlock",
+  "minLevel": 2,
+  "description": "You can perform a 1-minute rite to regain expended Pact Magic spell slots, up to half your maximum (round up). Once per Long Rest.",
+  "cost": { "kind": "action" },
+  "resource": { "kind": "uses-per-long-rest", "max": 1 },
+  "ui": { "buttonLabel": "MAGICAL CUNNING", "buttonColor": "#3a1a4a", "resourceLabel": "Magical Cunning: {remaining}/{max}" },
+  "handler": "magical-cunning"
+}

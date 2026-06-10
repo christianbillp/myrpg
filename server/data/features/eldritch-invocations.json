@@ -1,0 +1,8 @@
+{
+  "id": "eldritch-invocations",
+  "name": "Eldritch Invocations",
+  "classId": "warlock",
+  "minLevel": 1,
+  "description": "Fragments of forbidden lore that grant you lasting magical abilities. You learn invocations as you gain Warlock levels.",
+  "cost": { "kind": "passive" }
+}

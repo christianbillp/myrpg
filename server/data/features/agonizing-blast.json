@@ -1,0 +1,9 @@
+{
+  "id": "agonizing-blast",
+  "name": "Agonizing Blast (Invocation)",
+  "classId": "warlock",
+  "minLevel": 1,
+  "description": "When you cast Eldritch Blast, add your Charisma modifier to the damage it deals.",
+  "cost": { "kind": "passive" },
+  "modifiers": [{ "type": "flag", "name": "agonizing-blast" }]
+}

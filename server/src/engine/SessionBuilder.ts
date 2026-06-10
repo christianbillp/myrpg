@@ -276,6 +276,12 @@ export function buildSessionState(
           return Array.from({ length: maxLevel }, () => 4);
         })()
       : (req.resumeSpellSlots ?? [...(playerDef.defaultSpellSlots ?? [])]),
+    // Warlock Pact Magic — a single pool that recovers on a Short Rest. Seeded
+    // full from the character's baked `defaultPactMagic`; live state persists in
+    // the world save across reloads.
+    pactMagic: playerDef.defaultPactMagic
+      ? { remaining: playerDef.defaultPactMagic.max, max: playerDef.defaultPactMagic.max, level: playerDef.defaultPactMagic.level }
+      : undefined,
     // Dev mode `unlockAllSpells`: seed every L1+ spell from the caster's
     // class as prepared so the tester can invoke any spell without a
     // level-up rebuild. Cantrips are intentionally excluded — they are
@@ -486,6 +492,7 @@ export function buildSessionState(
     } : null,
     encounterComplete: false,
     encounterCompletionFlag: req.completionFlag ?? req.adventureSeed?.completionFlag,
+    encounterCompleteOnFlagOnly: req.completeOnFlagOnly,
     environment: req.encounterContext.environment ?? {},
     devFlags: req.devFlags,
   };

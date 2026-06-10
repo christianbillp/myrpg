@@ -1,0 +1,19 @@
+{
+  "id": "hex",
+  "name": "Hex",
+  "level": 1,
+  "school": "enchantment",
+  "vfx": { "style": "target-glow", "palette": "necrotic" },
+  "classes": ["warlock"],
+  "castingTime": "bonus-action",
+  "range": "90 feet",
+  "rangeFeet": 90,
+  "components": { "verbal": true, "somatic": true, "material": "the petrified eye of a newt" },
+  "duration": "Concentration, up to 1 hour",
+  "durationRounds": 600,
+  "concentration": true,
+  "ritual": false,
+  "attack": "auto-hit",
+  "effect": { "onHit": "hexed", "failNote": "is Hexed" },
+  "description": "You place a curse on a creature you can see within range. Until the spell ends, your attacks against the target deal an extra 1d6 Necrotic damage, and the target has Disadvantage on ability checks made with one ability of your choice. (Engine: the curse is tracked as the Hexed condition; the +1d6 attack rider and the ability-check Disadvantage are a follow-up pass.)"
+}

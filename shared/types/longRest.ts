@@ -128,6 +128,24 @@ export interface NpcState {
   size?: CreatureSize;
   isActive: boolean;
   reactionUsed: boolean;
+  /** Remaining limited-use casts (US-117), keyed by spell id — seeded at
+   *  spawn from `MonsterDef.spellcasting` (perDay + bonusAction). Monsters
+   *  don't rest: per-day = per-spawn, and the field persists on the world
+   *  save so a reload doesn't refill it. Absent for non-casters. */
+  spellUses?: Record<string, number>;
+  /** Remaining limited-use reactions (US-117), keyed by `MonsterReaction.kind`
+   *  — e.g. the Mage's shared 3/day Protective Magic pool. Same per-spawn /
+   *  persistence semantics as `spellUses`. */
+  reactionUses?: Record<string, number>;
+  /** Spell id this NPC caster is concentrating on (US-117 — its OWN cast:
+   *  self-Invisibility, Fly). One at a time; `breakNpcConcentrationOnDamage`
+   *  rolls the SRD CON save when the caster takes damage. Distinct from
+   *  buffs the PLAYER sustains on the NPC (those live on `buffs` and end via
+   *  the player's `endConcentration`). */
+  concentratingOn?: string;
+  /** Simplified SRD Fly (US-117): +30 ft of speed while true — the engine
+   *  has no elevation model. Set/cleared with the `fly` concentration. */
+  flying?: boolean;
   conditions: string[];
   /** Active buffs this creature carries (e.g. Invisibility cast on it by the
    *  player). Creature-agnostic — the same `ActiveBuff` shape the player uses.
@@ -148,6 +166,11 @@ export interface NpcState {
    *  no roll should be able to surface the creature early. Set via the
    *  `set_npc_hidden` action with `revealedBy: 'trigger'`. */
   revealedByTrigger?: boolean;
+  /** When true the NPC is walking off the map (set by the `npc_leaves` trigger
+   *  action). The exploration world-tick steps it toward the nearest map edge
+   *  each tick and removes it from the encounter once it reaches the edge, so
+   *  a departing NPC visibly exits rather than vanishing in place. */
+  leaving?: boolean;
   /** Last tile the player observed this NPC on. Set whenever `Vision.canSee`
    *  reports the player saw this creature. Used by the client to render the
    *  NPC's last-known position as a faded ghost when the player loses sight
@@ -613,6 +636,8 @@ export interface GameState {
   encounterComplete: boolean;
   /** Optional world-flag name that, when set, marks the encounter complete. Mirrors `EncounterDef.completionFlag` for standalone (non-adventure) encounters so the `encounter_completed` engine event can fire on flag-driven resolutions. */
   encounterCompletionFlag?: string;
+  /** When true, clearing all enemies does NOT complete the encounter — only the `completionFlag` being set does. For encounters where combat is a step, not the objective (e.g. kill the captors, THEN free the captives). Mirrors `EncounterDef.completeOnFlagOnly`. */
+  encounterCompleteOnFlagOnly?: boolean;
   /** Environmental flags consulted by combat resolvers — sourced from EncounterDef.environment at session creation. */
   environment: EncounterEnvironment;
   /** Persistent area-of-effect zones currently in play (Fog Cloud, Web,
