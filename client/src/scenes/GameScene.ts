@@ -15,8 +15,8 @@ import { LevelUpOverlay } from "../ui/LevelUpOverlay";
 import { LongRestOverlay } from "../ui/LongRestOverlay";
 import { RestPromptOverlay } from "../ui/RestPromptOverlay";
 import { SpellOptionPicker } from "../ui/SpellOptionPicker";
-import { SpellTargetSelector, type SpellTargetCandidate } from "../ui/SpellTargetSelector";
 import { SpeechBubbles, speechReadMs } from "../ui/SpeechBubbles";
+import { scaleDuration } from "../animationSpeed";
 import { SpellVfx } from "../ui/SpellVfx";
 import { SpeechInputBubble } from "../ui/SpeechInputBubble";
 import { ScreenEffects } from "../ui/ScreenEffects";
@@ -26,6 +26,11 @@ import { UIScale } from "../ui/UIScale";
 import { GridView } from "../systems/GridView";
 import { VisionMask } from "../systems/VisionMask";
 import { OverlayManager } from "../systems/OverlayManager";
+import {
+  type TargetingMode, type TargetingModeContext,
+  CreatureTargetingMode, AoeTargetingMode, MultiProjectileTargetingMode,
+  SummonDirectTargetingMode, DeployGearTargetingMode, FeatureTargetingMode,
+} from "../systems/TargetingModes";
 import {
   TILE_SIZE, GRID_COLS, GRID_ROWS, HUD_HEIGHT,
   PLAYER_PANEL_WIDTH, TARGET_PANEL_WIDTH,
@@ -48,6 +53,11 @@ import { decodeTileGid, TILE_VOID_GID } from "../../../shared/tileGid";
 const GAME_W = PLAYER_PANEL_WIDTH + GRID_COLS * TILE_SIZE + TARGET_PANEL_WIDTH;
 const GAME_H = GRID_ROWS * TILE_SIZE + HUD_HEIGHT;
 const API_URL = "http://localhost:3000";
+
+/** Breath between combatants at a turn_started beat (scaled by Combat Speed). */
+const TURN_BEAT_PAUSE_MS = 280;
+/** Dwell after a condition_changed float so stacked changes stay readable. */
+const CONDITION_BEAT_MS = 260;
 
 export class GameScene extends Phaser.Scene {
   /** Typed view over the Phaser registry. Use `this.defs.spells()` etc.
@@ -86,7 +96,7 @@ export class GameScene extends Phaser.Scene {
    *  in via the LABELS chip in the GM panel. */
   private labelsVisible = false;
 
-  private selectedEntityId: string | null = null;
+  private selectedTargetId: string | null = null;
 
   private uiScale!: UIScale;
   private playerPanel!: PlayerPanel;
@@ -114,7 +124,7 @@ export class GameScene extends Phaser.Scene {
    *  is selected or the selection is cleared. */
   private tileSelectLayer!: Phaser.GameObjects.Graphics;
   /** The tile currently selected for inspection, or null. Mutually exclusive
-   *  with `selectedEntityId`. */
+   *  with `selectedTargetId`. */
   private selectedTile: { x: number; y: number } | null = null;
   /** Fog-of-war + sound-rings overlay (Vision/Sound system). */
   private visionMask!: VisionMask;
@@ -134,72 +144,38 @@ export class GameScene extends Phaser.Scene {
    *  from `state.traps` each tick; armed traps glow, disarmed ones read faded. */
   private trapLayer!: Phaser.GameObjects.Graphics;
   private trapLabels: Phaser.GameObjects.Text[] = [];
-  /** Floating HUD panel surfaced during `multi-projectile` spell-target
-   *  mode (Magic Missile, Scorching Ray). Null when no such mode is
-   *  active. Mirrors `state.spellTargetMode.assignments` on every click. */
-  private multiProjectilePanel: HTMLDivElement | null = null;
-  /** Per-target count badges drawn over each NPC token while the player
-   *  is distributing projectiles. Cleared when the cast resolves. */
-  private multiProjectileBadges: Phaser.GameObjects.Text[] = [];
   private moveMode = false;
   private moveDist: number[][] = [];
   private movePrev: Array<Array<[number, number] | null>> = [];
   /** Companion-move-to targeting mode. Set when the player hits the
    *  "→ POSITION" chip on the Player Panel; the next tile click sends
    *  a `companionCommand` with `kind: 'move_to'`. ESC cancels. Mutually
-   *  exclusive with `moveMode` and `spellTargetMode` — entering one
-   *  exits the others. */
+   *  exclusive with `moveMode` and the spell-flavoured targeting modes —
+   *  entering one exits the others. */
   private companionMoveToMode: { npcId: string } | null = null;
-  /** Spell-targeting mode — set after CAST on a spell that needs a target.
-   *   - `kind: "creature"` waits for a creature click (attack-roll / auto-hit).
-   *   - `kind: "aoe"`      waits for a tile click. The area shape determines
-   *                       what gets highlighted as the cursor moves:
-   *                         shape "cone"  — origin = player tile, direction = cursor.
-   *                         shape "sphere"/"cube" + selfAnchored — disc on player tile.
-   *                         shape "sphere"/"cube" otherwise        — disc on cursor tile. */
-  private spellTargetMode:
-    | { kind: "creature"; spellId: string; spellName: string; asRitual: boolean; slotLevel?: number; damageTypeChoice?: string; abilityChoice?: 'str' | 'dex' | 'con' | 'int' | 'wis' | 'cha' }
-    | {
-        kind: "multi-projectile"; spellId: string; spellName: string; asRitual: boolean;
-        slotLevel: number;
-        /** Total projectiles the player must distribute (Magic Missile darts, Scorching Ray rays). */
-        total: number;
-        /** Per-target assignment count, keyed by NPC id. */
-        assignments: Map<string, number>;
-        /** Display word — "dart" / "ray". */
-        projectileNoun: string;
-        damageTypeChoice?: string;
-      }
-    | {
-        kind: "aoe"; spellId: string; spellName: string; asRitual: boolean;
-        slotLevel?: number;
-        /** For cone: the cone's max reach in tiles. For sphere/cube/line: the long-axis length of the area in tiles. */
-        sideTiles: number;
-        /** Width of the area perpendicular to the axis (Gust of Wind: 2 tiles for a 10-ft-wide line). Only consulted for `shape: 'line'`. */
-        widthTiles?: number;
-        selfAnchored: boolean;
-        shape: "cone" | "sphere" | "cube" | "line";
-        damageTypeChoice?: string;
-        abilityChoice?: 'str' | 'dex' | 'con' | 'int' | 'wis' | 'cha';
-      }
-    | {
-        kind: "summon-direct"; summonNpcId: string; summonName: string;
-        /** Movement allowance in tiles (Mage Hand 6, Unseen Servant 3). */
-        moveRangeTiles: number;
-        /** Summon's current tile — preview shows reachable tiles around this. */
-        fromTileX: number; fromTileY: number;
-      }
-    | {
-        kind: "deploy-gear"; itemId: string; gearName: string;
-        /** How far the gear can be placed (tiles) and the square it covers. */
-        rangeTiles: number; sideTiles: number;
-        /** Player's tile — preview shows reachable placement tiles around this. */
-        fromTileX: number; fromTileY: number;
-      }
-    | null = null;
-  /** Active when a tile-targeted feature (Goliath Cloud's Jaunt) is awaiting a
-   *  destination click. `rangeTiles` bounds the valid teleport disc. */
-  private featureTargetMode: { featureId: string; rangeTiles: number } | null = null;
+  /** The active click-to-target state machine (spell targeting, summon
+   *  directing, gear deployment, tile-targeted features), or null when no
+   *  targeting is in flight. Map clicks, the mouse-move preview, the Player
+   *  Panel's Spell Targeting Prompt, and ESC all delegate to it. See
+   *  [systems/TargetingModes.ts](../systems/TargetingModes.ts). */
+  private activeTargetingMode: TargetingMode | null = null;
+  /** The narrow scene-services facade handed to every targeting mode. */
+  private readonly targetingContext: TargetingModeContext = {
+    getGameState: () => this.gameState ?? null,
+    getSpells: () => this.defs.spells(),
+    sendAction: (action) => { void gameClient.sendAction(action); },
+    getPreviewLayer: () => this.spellAoeLayer,
+    getPlayerTokenTile: () => this.player ? { x: this.player.tileX, y: this.player.tileY } : null,
+    toTile: (pointer) => this.gridView.toTile(pointer),
+    toIntersectionTile: (pointer) => this.gridView.toIntersectionTile(pointer),
+    exitTargetingMode: () => this.exitTargetingMode(),
+    addMapLabel: (x, y, text, style) => {
+      const label = this.add.text(x, y, text, style);
+      this.gridView.container.add(label);
+      return label;
+    },
+    getUiScale: () => this.uiScale,
+  };
   private pendingGmHistory: ChatMessage[] = [];
   private pendingIsResume = false;
   /** Set by `init()` from scene-restart payload when a chapter-advance fade is
@@ -260,7 +236,7 @@ export class GameScene extends Phaser.Scene {
     this.mapDrawn = false;
     this.npcTokens = new Map();
     this.itemTokens = new Map();
-    this.selectedEntityId = null;
+    this.selectedTargetId = null;
     this.selectedTile = null;
     this.uiDestroyed = false;
     // Phaser reuses the same scene instance across encounters, so class-member
@@ -349,10 +325,10 @@ export class GameScene extends Phaser.Scene {
       targetPanelFadeIn:  (ms) => this.targetPanel.fadeIn(ms),
       hudFadeOut: (ms) => this.hud.fadeOut(ms),
       hudFadeIn:  (ms) => this.hud.fadeIn(ms),
-      hasTargetSelected: () => !!this.selectedEntityId,
+      hasTargetSelected: () => !!this.selectedTargetId,
       restoreTargetPanel: () => {
-        if (!this.gameState || !this.selectedEntityId) return;
-        const nState = this.gameState.npcs.find((n) => n.id === this.selectedEntityId);
+        if (!this.gameState || !this.selectedTargetId) return;
+        const nState = this.gameState.npcs.find((n) => n.id === this.selectedTargetId);
         if (!nState) return;
         const def = this.resolveMonsterDef(nState.defId);
         this.targetPanel.show(def, nState, this.getFactions(), this.gameState.discoveredFactions ?? [], nState.conditions);
@@ -594,7 +570,7 @@ export class GameScene extends Phaser.Scene {
       // Hold the queue long enough to read the line before the next beat
       // plays — only when something is actually waiting behind it.
       if (this.eventQueue.length > 0) {
-        this.time.delayedCall(speechReadMs(event.text), () => {
+        this.time.delayedCall(scaleDuration(speechReadMs(event.text)), () => {
           this.animating = false;
           this.processNextEvent();
         });
@@ -647,8 +623,43 @@ export class GameScene extends Phaser.Scene {
         return;
       }
     }
-    // condition_changed / turn_started / turn_ended carry no blocking visual yet
-    // — they fall through here, advancing the timeline without a pause.
+    else if (event.type === "turn_started") {
+      // Turn-boundary beat (docs/design/systems/animation-timeline.md): highlight the
+      // combatant's chip from the timeline — not the final state, which has
+      // already flipped `isActive` off by the time events arrive — and take
+      // a short breath between combatants so multi-NPC rounds stay readable.
+      this.animatingEntityId = event.combatantId;
+      if (this.gameState) this.updateHUD(this.gameState);
+      if (this.eventQueue.length > 0) {
+        this.time.delayedCall(scaleDuration(TURN_BEAT_PAUSE_MS), () => {
+          this.animating = false;
+          this.processNextEvent();
+        });
+        return;
+      }
+    } else if (event.type === "turn_ended") {
+      if (this.animatingEntityId === event.combatantId) {
+        this.animatingEntityId = null;
+        if (this.gameState) this.updateHUD(this.gameState);
+      }
+    } else if (event.type === "condition_changed") {
+      // Condition beat: float the change at the entity's tile (gold for
+      // applied, grey for removed) with a short dwell so stacked changes
+      // don't overprint each other.
+      const condTile = this.tileOf(event.entityId);
+      if (condTile) {
+        const sign = event.change === 'applied' ? '+' : '−';
+        const color = event.change === 'applied' ? '#ffd166' : '#9aa7b5';
+        this.spawnFloatingNumber(condTile.x, condTile.y, `${sign}${event.condition}`, color);
+        if (this.eventQueue.length > 0) {
+          this.time.delayedCall(scaleDuration(CONDITION_BEAT_MS), () => {
+            this.animating = false;
+            this.processNextEvent();
+          });
+          return;
+        }
+      }
+    }
     this.animating = false;
     this.processNextEvent();
   }
@@ -696,7 +707,12 @@ export class GameScene extends Phaser.Scene {
       );
       this.gridView.container.add(this.player.gameObject);
     } else {
-      this.player.teleport(state.player.tileX, state.player.tileY);
+      // Reconcile movement (docs/design/systems/animation-timeline.md): short corrections
+      // glide so the player token never visibly teleports; long jumps
+      // (resume, chapter transition) still snap.
+      const pdist = Math.max(Math.abs(state.player.tileX - this.player.tileX), Math.abs(state.player.tileY - this.player.tileY));
+      if (pdist > 0 && pdist <= 6) this.player.glideTo(state.player.tileX, state.player.tileY);
+      else this.player.teleport(state.player.tileX, state.player.tileY);
     }
     this.player.setHp(state.player.hp, this.playerDef.maxHp);
 
@@ -733,8 +749,8 @@ export class GameScene extends Phaser.Scene {
       if (!allIds.has(id)) {
         token.destroy();
         this.npcTokens.delete(id);
-        if (this.selectedEntityId === id) {
-          this.selectedEntityId = null;
+        if (this.selectedTargetId === id) {
+          this.selectedTargetId = null;
           this.targetPanel.hide();
         }
       }
@@ -753,7 +769,11 @@ export class GameScene extends Phaser.Scene {
         this.npcTokens.set(nState.id, token);
         this.gridView.container.add(token.gameObject);
       } else if (nState.disposition === "neutral" && nState.hp > 0) {
-        token.teleport(nState.tileX, nState.tileY);
+        // Off-camera sim moves glide instead of teleporting (Phase 3); big
+        // relocations (authored move_npc teleports, map swaps) still snap.
+        const ndist = Math.max(Math.abs(nState.tileX - token.tileX), Math.abs(nState.tileY - token.tileY));
+        if (ndist > 0 && ndist <= 6) token.glideTo(nState.tileX, nState.tileY);
+        else token.teleport(nState.tileX, nState.tileY);
       }
       token.disposition = nState.disposition;
       token.setHp(nState.hp);
@@ -790,24 +810,24 @@ export class GameScene extends Phaser.Scene {
 
   private reconcileSelection(state: GameState): void {
     const serverId = state.selectedTargetId;
-    if (serverId === this.selectedEntityId) {
-      if (this.selectedEntityId) {
-        const nState = state.npcs.find(n => n.id === this.selectedEntityId);
+    if (serverId === this.selectedTargetId) {
+      if (this.selectedTargetId) {
+        const nState = state.npcs.find(n => n.id === this.selectedTargetId);
         if (nState) this.targetPanel.refresh(nState, nState.maxHp, this.getFactions(), state.discoveredFactions ?? []);
       }
       return;
     }
 
-    if (this.selectedEntityId) {
-      this.npcTokens.get(this.selectedEntityId)?.setSelected(false);
-      this.selectedEntityId = null;
+    if (this.selectedTargetId) {
+      this.npcTokens.get(this.selectedTargetId)?.setSelected(false);
+      this.selectedTargetId = null;
     }
 
     if (!serverId) { this.targetPanel.hide(); return; }
 
     const nState = state.npcs.find(n => n.id === serverId);
     if (nState) {
-      this.selectedEntityId = serverId;
+      this.selectedTargetId = serverId;
       this.npcTokens.get(serverId)?.setSelected(true);
       const def = this.resolveMonsterDef(nState.defId);
       this.targetPanel.show(def, nState, this.getFactions(), state.discoveredFactions ?? [], nState.conditions);
@@ -830,8 +850,8 @@ export class GameScene extends Phaser.Scene {
     this.input.on("pointermove", (p: Phaser.Input.Pointer) => {
       this.gridView.pointerMove(p);
       this.drawMovePreview(p);
-      this.drawSpellAoePreview(p);
-      this.drawFeatureRangePreview(p);
+      this.spellAoeLayer.clear();
+      this.activeTargetingMode?.drawPreview(p);
     });
     this.input.on("pointerup",   (p: Phaser.Input.Pointer) => {
       if (this.gridView.pointerUp(p)) this.handleMapClick(p);
@@ -875,79 +895,14 @@ export class GameScene extends Phaser.Scene {
     const nState = npcs.find(n => n.hp > 0 && n.tileX === tileX && n.tileY === tileY)
       ?? npcs.find(n => n.tileX === tileX && n.tileY === tileY);
 
-    // Feature-target mode (Cloud's Jaunt) — the click is the teleport
-    // destination. Dispatch only when it's an in-range, passable, unoccupied
-    // tile (the server re-validates); any click exits the mode.
-    if (this.featureTargetMode) {
-      const ftm = this.featureTargetMode;
-      this.exitFeatureTargetMode();
-      const dist = Math.max(Math.abs(tileX - ps.tileX), Math.abs(tileY - ps.tileY));
-      const passable = !this.gameState.map.blocksMovement[tileY]?.[tileX];
-      const occupied = !!nState && nState.hp > 0;
-      const isSelf = tileX === ps.tileX && tileY === ps.tileY;
-      if (dist >= 1 && dist <= ftm.rangeTiles && passable && !occupied && !isSelf) {
-        gameClient.sendAction({ type: "useFeature", featureId: ftm.featureId, tile: { x: tileX, y: tileY } });
-      }
-      return;
-    }
-
-    // Spell-target mode swallows the click. For creature-target spells, a
-    // creature click resolves and anything else cancels. For AOE spells, ANY
-    // tile click resolves at that tile (self-anchored spells ignore the tile
-    // and re-center on the player).
-    if (this.spellTargetMode) {
-      if (this.spellTargetMode.kind === "summon-direct") {
-        this.finishSummonDirectClick(tileX, tileY);
-        return;
-      }
-      if (this.spellTargetMode.kind === "deploy-gear") {
-        this.finishDeployGearClick(tileX, tileY);
-        return;
-      }
-      if (this.spellTargetMode.kind === "multi-projectile") {
-        // Click on an in-range hostile/neutral creature → assign one more
-        // projectile to it. Click anywhere else → ignored (the panel's
-        // CANCEL button is the way out). Clicking past the cap is a no-op
-        // so the player can't over-commit.
-        const stm = this.spellTargetMode;
-        if (!nState || nState.hp <= 0 || nState.disposition === 'ally') return;
-        const allSpells = this.defs.spells();
-        const spell = allSpells.find((sp) => sp.id === stm.spellId);
-        if (!spell) return;
-        const rangeTiles = Math.max(1, Math.ceil(spell.rangeFeet / 5));
-        const dist = Math.max(Math.abs(nState.tileX - ps.tileX), Math.abs(nState.tileY - ps.tileY));
-        if (dist > rangeTiles) return;
-        const used = [...stm.assignments.values()].reduce((a, b) => a + b, 0);
-        if (used >= stm.total) return;
-        stm.assignments.set(nState.id, (stm.assignments.get(nState.id) ?? 0) + 1);
-        this.refreshMultiProjectilePanel();
-        this.refreshMultiProjectileBadges();
-        return;
-      }
-      if (this.spellTargetMode.kind === "creature") {
-        // Self-click during creature-target mode resolves as self-target so
-        // touch-range buff spells (Longstrider, Jump, …) work via the
-        // existing target picker. The Player Panel toggle is suppressed
-        // while in spell-target mode so clicking yourself never silently
-        // closes the panel.
-        const isSelfClick = tileX === ps.tileX && tileY === ps.tileY;
-        // Spare the Dying targets a creature at 0 HP, so it accepts a downed
-        // (hp === 0) click; every other creature-target spell needs a living one.
-        const allowDowned = this.spellTargetMode.spellId === 'spare-the-dying';
-        const validTarget = isSelfClick ? 'player' : (nState && (nState.hp > 0 || allowDowned) ? nState.id : null);
-        this.finishSpellTargetClick(validTarget, tileX, tileY);
-      } else {
-        // Placed sphere: the AoE centres on a grid-line intersection — snap to
-        // the one nearest the cursor so the centre tracks the pointer (matches
-        // the preview + `placedSphereTiles`).
-        const stm = this.spellTargetMode;
-        if (stm.kind === "aoe" && stm.shape === "sphere" && !stm.selfAnchored && stm.sideTiles > 0) {
-          const c = this.gridView.toIntersectionTile(pointer);
-          this.finishSpellTargetClick(null, c.tileX, c.tileY);
-        } else {
-          this.finishSpellTargetClick(null, tileX, tileY);
-        }
-      }
+    // An active targeting mode swallows the click. Each mode decides what a
+    // creature click vs an empty-tile click means (resolve / assign /
+    // cancel); the Player Panel toggle below is suppressed while targeting
+    // so clicking yourself never silently closes the panel.
+    if (this.activeTargetingMode) {
+      const mode = this.activeTargetingMode;
+      if (nState) mode.onEntityClick(nState, tileX, tileY, pointer);
+      else mode.onTileClick(tileX, tileY, pointer);
       return;
     }
 
@@ -956,7 +911,7 @@ export class GameScene extends Phaser.Scene {
       return;
     }
 
-    if (nState && this.selectedEntityId !== nState.id) {
+    if (nState && this.selectedTargetId !== nState.id) {
       this.selectEntity(nState.id);
     } else {
       // Empty tile, or a re-click on the already-selected creature's tile:
@@ -967,10 +922,10 @@ export class GameScene extends Phaser.Scene {
   }
 
   private selectEntity(id: string): void {
-    if (this.selectedEntityId === id) return;
-    if (this.selectedEntityId) this.npcTokens.get(this.selectedEntityId)?.setSelected(false);
+    if (this.selectedTargetId === id) return;
+    if (this.selectedTargetId) this.npcTokens.get(this.selectedTargetId)?.setSelected(false);
     this.clearTileSelection();
-    this.selectedEntityId = id;
+    this.selectedTargetId = id;
     this.npcTokens.get(id)?.setSelected(true);
     const nState = this.gameState.npcs.find(n => n.id === id);
     if (nState) {
@@ -982,9 +937,9 @@ export class GameScene extends Phaser.Scene {
   }
 
   private clearSelection(): void {
-    if (this.selectedEntityId) {
-      this.npcTokens.get(this.selectedEntityId)?.setSelected(false);
-      this.selectedEntityId = null;
+    if (this.selectedTargetId) {
+      this.npcTokens.get(this.selectedTargetId)?.setSelected(false);
+      this.selectedTargetId = null;
     }
     this.clearTileSelection();
     this.targetPanel.hide();
@@ -1001,9 +956,9 @@ export class GameScene extends Phaser.Scene {
       this.clearSelection();
       return;
     }
-    if (this.selectedEntityId) {
-      this.npcTokens.get(this.selectedEntityId)?.setSelected(false);
-      this.selectedEntityId = null;
+    if (this.selectedTargetId) {
+      this.npcTokens.get(this.selectedTargetId)?.setSelected(false);
+      this.selectedTargetId = null;
       gameClient.sendAction({ type: "selectTarget", entityId: null });
     }
     this.selectedTile = { x, y };
@@ -1090,10 +1045,8 @@ export class GameScene extends Phaser.Scene {
 
     if (this.moveMode && Phaser.Input.Keyboard.JustDown(this.escKey))
       this.exitMoveMode();
-    if (this.spellTargetMode && Phaser.Input.Keyboard.JustDown(this.escKey))
-      this.exitSpellTargetMode();
-    if (this.featureTargetMode && Phaser.Input.Keyboard.JustDown(this.escKey))
-      this.exitFeatureTargetMode();
+    if (this.activeTargetingMode && Phaser.Input.Keyboard.JustDown(this.escKey))
+      this.exitTargetingMode();
     if (this.companionMoveToMode && Phaser.Input.Keyboard.JustDown(this.escKey))
       this.exitCompanionMoveToMode();
 
@@ -1195,7 +1148,7 @@ export class GameScene extends Phaser.Scene {
       getHud:              () => this.hud,
       speechBubbles:       this.speechBubbles,
       client:              gameClient,
-      getSelectedTargetId: () => this.selectedEntityId,
+      getSelectedTargetId: () => this.selectedTargetId,
     });
     this.hud = new HUD(this.uiScale, {
       onSendAIGM:        (msg, persona) => this.aigm.onSendAIGM(msg, persona),
@@ -1341,13 +1294,7 @@ export class GameScene extends Phaser.Scene {
       concentratingOn:   state.player.concentratingOn,
       concentratingOnName: concSpell?.name ?? null,
       features,
-      spellTargetPrompt: this.spellTargetMode
-        ? (this.spellTargetMode.kind === "summon-direct"
-            ? { spellName: `Direct ${this.spellTargetMode.summonName}`, asRitual: false }
-            : this.spellTargetMode.kind === "deploy-gear"
-              ? { spellName: `Place ${this.spellTargetMode.gearName}`, asRitual: false }
-              : { spellName: this.spellTargetMode.spellName, asRitual: this.spellTargetMode.asRitual })
-        : null,
+      spellTargetPrompt: this.activeTargetingMode?.hint ?? null,
       summons: state.npcs
         .filter((n) => n.summonSpellId && n.summonOwnerId === 'player' && n.hp > 0)
         .map((n) => ({
@@ -1397,7 +1344,7 @@ export class GameScene extends Phaser.Scene {
 
   /**
    * Entry point from the Character Sheet's CAST / RITUAL CAST buttons. If the
-   * spell needs a target (attack-roll spell), we enter `spellTargetMode` and
+   * spell needs a target (attack-roll spell), we enter a targeting mode and
    * wait for the next creature click; otherwise the spell fires immediately
    * against the player tile.
    */
@@ -1436,7 +1383,7 @@ export class GameScene extends Phaser.Scene {
   }
 
   private beginSpellCast(spellId: string, asRitual: boolean): void {
-    if (this.featureTargetMode) this.exitFeatureTargetMode();
+    if (this.activeTargetingMode instanceof FeatureTargetingMode) this.exitTargetingMode();
     const allSpells = this.defs.spells();
     const spell = allSpells.find(sp => sp.id === spellId);
     if (!spell) return;
@@ -1546,14 +1493,12 @@ export class GameScene extends Phaser.Scene {
       const upcast = spell.level > 0 ? Math.max(0, slotLevel - spell.level) : 0;
       const total = baseProjectiles + upcast;
       const projectileNoun = spell.attack === 'auto-hit' ? 'dart' : 'ray';
-      this.spellTargetMode = {
-        kind: 'multi-projectile', spellId, spellName: spell.name, asRitual,
-        slotLevel, total, assignments: new Map(), projectileNoun,
+      this.setTargetingMode(new MultiProjectileTargetingMode(this.targetingContext, {
+        spellId, spellName: spell.name, asRitual,
+        slotLevel, total, projectileNoun,
         damageTypeChoice,
-      };
-      this.openMultiProjectilePanel();
+      }));
       if (this.gameState) this.playerPanel.refreshActions(this.buildActionState(this.gameState));
-      this.refreshMultiProjectileBadges();
       return;
     }
 
@@ -1586,17 +1531,17 @@ export class GameScene extends Phaser.Scene {
     const isSelfTeleport = !!spell.selfTeleport;
 
     if (needsCreatureTarget || isTouchBuff) {
-      this.spellTargetMode = { kind: "creature", spellId, spellName: spell.name, asRitual, slotLevel, damageTypeChoice, abilityChoice };
+      this.setTargetingMode(new CreatureTargetingMode(this.targetingContext, { spellId, spellName: spell.name, asRitual, slotLevel, damageTypeChoice, abilityChoice }));
     } else if (isSelfTeleport) {
       // Misty Step — caster picks a destination tile within `selfTeleport.rangeFeet`.
       // Reuse the AOE targeting machinery with a synthetic 1-tile sphere so the
       // cursor paints a small disc on the chosen tile. The server validates
       // the actual range; this preview is just a visual cue. The spell-resolver
       // case routes the click tile into `s.player.tileX/tileY`.
-      this.spellTargetMode = {
-        kind: "aoe", spellId, spellName: spell.name, asRitual, slotLevel,
+      this.setTargetingMode(new AoeTargetingMode(this.targetingContext, {
+        spellId, spellName: spell.name, asRitual, slotLevel,
         sideTiles: 1, selfAnchored: false, shape: "sphere", damageTypeChoice, abilityChoice,
-      };
+      }));
     } else if (isAoe) {
       // Mirror server `tilesInArea`: sphere uses a chebyshev-disc radius
       // (`ceil(sizeFeet / 5)`), cube uses a tile-side length, cone uses a
@@ -1613,7 +1558,7 @@ export class GameScene extends Phaser.Scene {
         : Math.max(1, Math.ceil(sizeFeet / 5));
       const widthTiles = Math.max(1, Math.ceil((spell.area?.widthFeet ?? 5) / 5));
       const selfAnchored = spell.range === 'self' || spell.rangeFeet === 0;
-      this.spellTargetMode = { kind: "aoe", spellId, spellName: spell.name, asRitual, slotLevel, sideTiles, widthTiles, selfAnchored, shape, damageTypeChoice, abilityChoice };
+      this.setTargetingMode(new AoeTargetingMode(this.targetingContext, { spellId, spellName: spell.name, asRitual, slotLevel, sideTiles, widthTiles, selfAnchored, shape, damageTypeChoice, abilityChoice }));
     } else {
       // Self / utility: fire immediately. `abilityChoice` rides along when
       // the spell offered an Enhance-Ability-style picker.
@@ -1624,12 +1569,18 @@ export class GameScene extends Phaser.Scene {
     if (this.gameState) this.playerPanel.refreshActions(this.buildActionState(this.gameState));
   }
 
-  private exitSpellTargetMode(): void {
-    if (!this.spellTargetMode) return;
-    this.spellTargetMode = null;
+  /** Swap in a new targeting mode, releasing the previous one's resources
+   *  (multi-projectile panel/badges) so a replaced mode never leaks DOM. */
+  private setTargetingMode(mode: TargetingMode): void {
+    this.activeTargetingMode?.cancel();
+    this.activeTargetingMode = mode;
+  }
+
+  private exitTargetingMode(): void {
+    if (!this.activeTargetingMode) return;
+    this.activeTargetingMode.cancel();
+    this.activeTargetingMode = null;
     this.spellAoeLayer.clear();
-    this.closeMultiProjectilePanel();
-    this.clearMultiProjectileBadges();
     if (this.gameState) this.playerPanel.refreshActions(this.buildActionState(this.gameState));
   }
 
@@ -1639,19 +1590,12 @@ export class GameScene extends Phaser.Scene {
     const def = this.defs.features().find((f) => f.id === featureId);
     if (def?.targetsTile) {
       if (this.moveMode) this.exitMoveMode();
-      if (this.spellTargetMode) this.exitSpellTargetMode();
-      this.featureTargetMode = { featureId, rangeTiles: 6 };  // 30 ft
+      if (this.activeTargetingMode && !(this.activeTargetingMode instanceof FeatureTargetingMode)) this.exitTargetingMode();
+      this.setTargetingMode(new FeatureTargetingMode(this.targetingContext, { featureId, rangeTiles: 6 }));  // 30 ft
       if (this.gameState) this.playerPanel.refreshActions(this.buildActionState(this.gameState));
       return;
     }
     gameClient.sendAction({ type: "useFeature", featureId });
-  }
-
-  private exitFeatureTargetMode(): void {
-    if (!this.featureTargetMode) return;
-    this.featureTargetMode = null;
-    this.spellAoeLayer.clear();
-    if (this.gameState) this.playerPanel.refreshActions(this.buildActionState(this.gameState));
   }
 
   /** STUDY pressed with authored study points present: resolve the NEAREST one
@@ -1685,35 +1629,12 @@ export class GameScene extends Phaser.Scene {
     else this.speechBubbles.spawn('player', 'Move closer to perform the rite.');
   }
 
-  /** Tint the in-range teleport disc for an active feature-target mode and
-   *  highlight the hovered destination. Shares `spellAoeLayer`, which the spell
-   *  AOE preview clears first when no spell mode is active. */
-  private drawFeatureRangePreview(pointer: Phaser.Input.Pointer): void {
-    if (!this.featureTargetMode || !this.gameState) return;
-    const { rangeTiles } = this.featureTargetMode;
-    const ps = this.gameState.player;
-    const { cols, rows, blocksMovement } = this.gameState.map;
-    this.spellAoeLayer.fillStyle(0x55aaff, 0.14);
-    for (let y = Math.max(0, ps.tileY - rangeTiles); y <= Math.min(rows - 1, ps.tileY + rangeTiles); y++) {
-      for (let x = Math.max(0, ps.tileX - rangeTiles); x <= Math.min(cols - 1, ps.tileX + rangeTiles); x++) {
-        if ((x === ps.tileX && y === ps.tileY) || blocksMovement[y]?.[x]) continue;
-        this.spellAoeLayer.fillRect(x * TILE_SIZE + 1, y * TILE_SIZE + 1, TILE_SIZE - 2, TILE_SIZE - 2);
-      }
-    }
-    const { tileX, tileY } = this.gridView.toTile(pointer);
-    const dist = Math.max(Math.abs(tileX - ps.tileX), Math.abs(tileY - ps.tileY));
-    if (dist >= 1 && dist <= rangeTiles && tileX >= 0 && tileX < cols && tileY >= 0 && tileY < rows && !blocksMovement[tileY]?.[tileX]) {
-      this.spellAoeLayer.fillStyle(0x88ccff, 0.35);
-      this.spellAoeLayer.fillRect(tileX * TILE_SIZE + 1, tileY * TILE_SIZE + 1, TILE_SIZE - 2, TILE_SIZE - 2);
-    }
-  }
-
   /** Enter companion-move-to mode. Cancels the other targeting modes
    *  so they don't conflict. Re-renders the Player Panel so the chip
    *  flips to its "PICK TILE" state. */
   private enterCompanionMoveToMode(npcId: string): void {
     if (this.moveMode) this.exitMoveMode();
-    if (this.spellTargetMode) this.exitSpellTargetMode();
+    if (this.activeTargetingMode && !(this.activeTargetingMode instanceof FeatureTargetingMode)) this.exitTargetingMode();
     this.companionMoveToMode = { npcId };
     if (this.gameState) this.playerPanel.refreshActions(this.buildActionState(this.gameState));
   }
@@ -1808,280 +1729,6 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
-  /** Build the floating "Select Targets" HUD shown during
-   *  `multi-projectile` spell-target mode. Lists the per-target assignment
-   *  counts plus a running "X / N" tally; FIRE submits the cast and
-   *  CANCEL aborts without consuming the slot. */
-  private openMultiProjectilePanel(): void {
-    this.closeMultiProjectilePanel();
-    const root = document.createElement('div');
-    root.style.cssText = `
-      position: fixed; left: 50%; top: 14px; transform: translateX(-50%);
-      background: #1a1a22; border: 2px solid #ffaa66; color: #ffe4b3;
-      font-family: monospace; font-size: 12px; padding: 10px 14px;
-      display: flex; flex-direction: column; gap: 6px; z-index: 9050;
-      min-width: 280px;
-    `;
-    document.body.appendChild(root);
-    this.multiProjectilePanel = root;
-    this.refreshMultiProjectilePanel();
-  }
-
-  private refreshMultiProjectilePanel(): void {
-    const root = this.multiProjectilePanel;
-    const stm = this.spellTargetMode;
-    if (!root || !stm || stm.kind !== 'multi-projectile') return;
-    const used = [...stm.assignments.values()].reduce((a, b) => a + b, 0);
-    const ready = used === stm.total;
-    root.replaceChildren();
-
-    const header = document.createElement('div');
-    header.textContent = `${stm.spellName.toUpperCase()} — select targets`;
-    header.style.cssText = 'font-size: 12px; letter-spacing: 2px;';
-    root.appendChild(header);
-
-    const help = document.createElement('div');
-    help.textContent = `Click a creature to add a ${stm.projectileNoun}. ESC or CANCEL aborts.`;
-    help.style.cssText = 'font-size: 10px; color: #cc9966; line-height: 1.5;';
-    root.appendChild(help);
-
-    const tally = document.createElement('div');
-    tally.textContent = `${used} / ${stm.total} ${stm.projectileNoun}${stm.total === 1 ? '' : 's'} assigned`;
-    tally.style.cssText = `font-size: 11px; color: ${ready ? '#aaff99' : '#cc9966'};`;
-    root.appendChild(tally);
-
-    // Per-target rows — only show creatures that have at least one
-    // projectile assigned, sorted by id for a stable layout.
-    if (stm.assignments.size > 0) {
-      const list = document.createElement('div');
-      list.style.cssText = 'display: flex; flex-direction: column; gap: 2px; max-height: 120px; overflow-y: auto;';
-      const ids = [...stm.assignments.keys()].sort();
-      for (const id of ids) {
-        const count = stm.assignments.get(id) ?? 0;
-        if (count === 0) continue;
-        const npc = this.gameState?.npcs.find((n) => n.id === id);
-        if (!npc) continue;
-        const label = (npc.combatLabel ? `${npc.revealedName ?? npc.name} (${npc.combatLabel})` : (npc.revealedName ?? npc.name));
-        const row = document.createElement('div');
-        row.style.cssText = 'display: flex; justify-content: space-between; align-items: center; gap: 8px; font-size: 11px;';
-        const name = document.createElement('span');
-        name.textContent = label;
-        name.style.color = '#cce4ff';
-        row.appendChild(name);
-        const right = document.createElement('span');
-        right.style.cssText = 'display: flex; align-items: center; gap: 6px;';
-        const countEl = document.createElement('span');
-        countEl.textContent = `×${count}`;
-        countEl.style.color = '#ffd699';
-        right.appendChild(countEl);
-        const minus = document.createElement('button');
-        minus.textContent = '−';
-        minus.style.cssText = 'width: 22px; height: 20px; background: #2a1a1a; border: 1px solid #aa5533; color: #ffd699; cursor: pointer; font-family: monospace;';
-        minus.addEventListener('click', () => {
-          const cur = stm.assignments.get(id) ?? 0;
-          if (cur <= 1) stm.assignments.delete(id);
-          else stm.assignments.set(id, cur - 1);
-          this.refreshMultiProjectilePanel();
-          this.refreshMultiProjectileBadges();
-        });
-        right.appendChild(minus);
-        row.appendChild(right);
-        list.appendChild(row);
-      }
-      root.appendChild(list);
-    }
-
-    const actions = document.createElement('div');
-    actions.style.cssText = 'display: flex; justify-content: flex-end; gap: 6px; margin-top: 4px;';
-    const cancel = document.createElement('button');
-    cancel.textContent = 'CANCEL';
-    cancel.style.cssText = 'background: #222233; border: 2px solid #556677; color: #aabbcc; font-family: monospace; font-size: 11px; padding: 5px 10px; cursor: pointer;';
-    cancel.addEventListener('click', () => this.exitSpellTargetMode());
-    actions.appendChild(cancel);
-    const fire = document.createElement('button');
-    fire.textContent = 'FIRE';
-    fire.disabled = !ready;
-    fire.style.cssText = `background: #3a1a1a; border: 2px solid #aa5533; color: #ffd699; font-family: monospace; font-size: 11px; padding: 5px 10px; cursor: ${ready ? 'pointer' : 'not-allowed'}; opacity: ${ready ? '1' : '0.45'};`;
-    fire.addEventListener('click', () => {
-      if (!ready) return;
-      this.fireMultiProjectile();
-    });
-    actions.appendChild(fire);
-    root.appendChild(actions);
-  }
-
-  private closeMultiProjectilePanel(): void {
-    if (this.multiProjectilePanel) {
-      this.multiProjectilePanel.remove();
-      this.multiProjectilePanel = null;
-    }
-  }
-
-  /** Stamp a small "×N" badge next to each targeted creature's token,
-   *  re-drawn on every assignment change. */
-  private refreshMultiProjectileBadges(): void {
-    this.clearMultiProjectileBadges();
-    const stm = this.spellTargetMode;
-    if (!stm || stm.kind !== 'multi-projectile') return;
-    for (const [id, count] of stm.assignments.entries()) {
-      if (count === 0) continue;
-      const npc = this.gameState?.npcs.find((n) => n.id === id);
-      if (!npc) continue;
-      const text = this.add.text(
-        npc.tileX * TILE_SIZE + TILE_SIZE - 4,
-        npc.tileY * TILE_SIZE + 2,
-        `×${count}`,
-        { fontFamily: 'monospace', fontSize: '12px', color: '#ffd699', backgroundColor: '#3a1a1aee', padding: { x: 3, y: 1 } },
-      ).setOrigin(1, 0);
-      this.gridView.container.add(text);
-      this.multiProjectileBadges.push(text);
-    }
-  }
-
-  private clearMultiProjectileBadges(): void {
-    for (const b of this.multiProjectileBadges) b.destroy();
-    this.multiProjectileBadges = [];
-  }
-
-  private fireMultiProjectile(): void {
-    const stm = this.spellTargetMode;
-    if (!stm || stm.kind !== 'multi-projectile') return;
-    const ids: string[] = [];
-    for (const [id, n] of stm.assignments.entries()) {
-      for (let i = 0; i < n; i++) ids.push(id);
-    }
-    gameClient.sendAction({
-      type: 'castSpell',
-      spellId: stm.spellId,
-      slotLevel: stm.slotLevel,
-      asRitual: stm.asRitual,
-      targetIds: ids,
-      damageTypeChoice: stm.damageTypeChoice,
-    });
-    this.exitSpellTargetMode();
-  }
-
-  /** Resolve a click while in spell-target mode. Single-target spells take a creature id; AOE spells take a tile. Any other click cancels. */
-  private finishSpellTargetClick(targetNpcId: string | null, tileX: number, tileY: number): void {
-    const stm = this.spellTargetMode;
-    if (!stm || stm.kind === "summon-direct" || stm.kind === "deploy-gear") return;
-    const allSpells = this.defs.spells();
-    const spell = allSpells.find(sp => sp.id === stm.spellId);
-    if (!spell) { this.exitSpellTargetMode(); return; }
-    // US-116: honour the upcast level chosen in beginSpellCast (stored on the
-    // target mode); fall back to the spell's base level.
-    const slotLevel = spell.level === 0 ? 0 : (stm.slotLevel ?? spell.level);
-
-    if (stm.kind === "creature") {
-      if (!targetNpcId) { this.exitSpellTargetMode(); return; }
-      // Self-target click: fire the cast with no targetIds. The engine
-      // routes the cast through `resolveUtilitySpell` (or its specific case)
-      // which applies the buff to the caster. Only valid for touch-range
-      // buff spells; clicking self for a Charm Person or Chill Touch
-      // cancels (it's not a legal self-target).
-      if (targetNpcId === 'player') {
-        const isTouchBuff = spell.range === 'touch' &&
-          !spell.attack && !spell.save && !spell.area && !spell.summon && !spell.darts;
-        // Ranged self-targetable utility (Sanctuary wards, Enlarge/Reduce in
-        // its Enlarge mode buffs the caster) also accepts a self-click; a
-        // Charm Person / Chill Touch self-click cancels.
-        const selfTargetable = isTouchBuff || stm.spellId === 'sanctuary' || stm.spellId === 'enlarge-reduce';
-        if (!selfTargetable) { this.exitSpellTargetMode(); return; }
-        gameClient.sendAction({ type: "castSpell", spellId: stm.spellId, slotLevel, asRitual: stm.asRitual, damageTypeChoice: stm.damageTypeChoice, abilityChoice: stm.abilityChoice });
-        this.exitSpellTargetMode();
-        return;
-      }
-      gameClient.sendAction({ type: "castSpell", spellId: stm.spellId, slotLevel, targetIds: [targetNpcId], asRitual: stm.asRitual, damageTypeChoice: stm.damageTypeChoice, abilityChoice: stm.abilityChoice });
-      this.exitSpellTargetMode();
-      return;
-    }
-
-    // AOE: the `tile` payload is the cursor click. For cones it tells the
-    // server the direction; for spheres/cubes it's the centre. Self-anchored
-    // sphere spells ignore the tile server-side but we still pass cursor —
-    // server resolves correctly either way.
-    const tile = { x: tileX, y: tileY };
-
-    // SRD "creature of your choice" spells (Sleep) get a second-step picker
-    // listing the creatures actually inside the area, defaulting to every
-    // non-ally. Confirm fires the cast with the chosen ids; cancel aborts.
-    if (spell.area?.creaturesOfYourChoice) {
-      const candidates = this.creaturesInPlacedArea(spell, tile);
-      this.exitSpellTargetMode();
-      new SpellTargetSelector(
-        this.uiScale,
-        spell.name,
-        candidates,
-        (selectedIds) => {
-          gameClient.sendAction({
-            type: "castSpell",
-            spellId: stm.spellId,
-            slotLevel,
-            tile,
-            targetIds: selectedIds,
-            asRitual: stm.asRitual,
-            damageTypeChoice: stm.damageTypeChoice,
-          });
-        },
-        () => { /* cancelled — no slot consumed */ },
-      );
-      return;
-    }
-
-    // `multi-projectile` mode handles its own dispatch via FIRE in the HUD
-    // panel — it has no `abilityChoice`/AOE flow to fall through to.
-    if (stm.kind === "multi-projectile") return;
-    gameClient.sendAction({ type: "castSpell", spellId: stm.spellId, slotLevel, tile, asRitual: stm.asRitual, damageTypeChoice: stm.damageTypeChoice, abilityChoice: stm.abilityChoice });
-    this.exitSpellTargetMode();
-  }
-
-  /**
-   * Mirror server `tilesInArea` to enumerate the creatures the AOE actually
-   * covers, so the SpellTargetSelector can list them. Non-ally creatures are
-   * tagged for the picker's default-checked state.
-   *
-   * Sphere placed at a click follows the SRD grid-intersection rule —
-   * 2*r tiles per side anchored at the click. Cube uses tile-side length,
-   * centred for odd sizes, extends right+down for even sizes. Sleep is the
-   * currently-shipped consumer.
-   */
-  private creaturesInPlacedArea(spell: SpellDef, tile: { x: number; y: number }): SpellTargetCandidate[] {
-    if (!this.gameState) return [];
-    const sizeFeet = spell.area?.sizeFeet ?? 5;
-    const r = Math.max(1, Math.ceil(sizeFeet / 5));
-    let xMin: number, xMax: number, yMin: number, yMax: number;
-    if (spell.area?.shape === 'sphere') {
-      // Match `placedSphereTiles` on the server: 2r-wide square centered on
-      // the cursor (`r` tiles on each side of the click). The pre-centering
-      // version of this code anchored the square top-left at the cursor,
-      // which made the picker miss creatures that the server-side AOE
-      // actually covered.
-      const sideTiles = 2 * r;
-      const halfLow = r;
-      xMin = tile.x - halfLow; xMax = tile.x + (sideTiles - halfLow) - 1;
-      yMin = tile.y - halfLow; yMax = tile.y + (sideTiles - halfLow) - 1;
-    } else {
-      const side = r;
-      if (side % 2 === 1) {
-        const rr = (side - 1) / 2;
-        xMin = tile.x - rr; xMax = tile.x + rr; yMin = tile.y - rr; yMax = tile.y + rr;
-      } else {
-        const offset = side - 1;
-        xMin = tile.x; xMax = tile.x + offset; yMin = tile.y; yMax = tile.y + offset;
-      }
-    }
-    const out: SpellTargetCandidate[] = [];
-    for (const npc of this.gameState.npcs) {
-      if (npc.hp <= 0) continue;
-      if (npc.tileX < xMin || npc.tileX > xMax || npc.tileY < yMin || npc.tileY > yMax) continue;
-      const label = npc.combatLabel
-        ? `${npc.revealedName ?? npc.name} (${npc.combatLabel})`
-        : (npc.revealedName ?? npc.name);
-      out.push({ id: npc.id, label, isAlly: npc.disposition === 'ally' });
-    }
-    return out;
-  }
-
   /**
    * Enter the "click to move the summon" mode. The summon's spell carries
    * the movement allowance (Mage Hand 30 ft = 6 tiles, Unseen Servant 15 ft
@@ -2095,14 +1742,13 @@ export class GameScene extends Phaser.Scene {
     const spell = allSpells.find((sp) => sp.id === summon.summonSpellId);
     const rangeFeet = spell?.summon?.moveRangeFeet ?? 30;
     const moveRangeTiles = Math.max(1, Math.ceil(rangeFeet / 5));
-    this.spellTargetMode = {
-      kind: "summon-direct",
+    this.setTargetingMode(new SummonDirectTargetingMode(this.targetingContext, {
       summonNpcId,
       summonName: summon.name,
       moveRangeTiles,
       fromTileX: summon.tileX,
       fromTileY: summon.tileY,
-    };
+    }));
     this.playerPanel.refreshActions(this.buildActionState(this.gameState));
   }
 
@@ -2113,44 +1759,15 @@ export class GameScene extends Phaser.Scene {
     const def = this.defs.equipment().find((i) => i.id === itemId);
     if (!def || def.type !== 'gear' || !def.areaDenial) return;
     const ad = def.areaDenial;
-    this.spellTargetMode = {
-      kind: "deploy-gear",
+    this.setTargetingMode(new DeployGearTargetingMode(this.targetingContext, {
       itemId,
       gearName: def.name,
       rangeTiles: Math.max(1, Math.ceil(ad.rangeFeet / 5)),
       sideTiles: Math.max(1, Math.ceil(ad.sizeFeet / 5)),
       fromTileX: this.gameState.player.tileX,
       fromTileY: this.gameState.player.tileY,
-    };
+    }));
     this.playerPanel.refreshActions(this.buildActionState(this.gameState));
-  }
-
-  /** Resolve a click while in deploy-gear mode. Out-of-range clicks cancel; in-range clicks fire `deployGear`. */
-  private finishDeployGearClick(tileX: number, tileY: number): void {
-    const stm = this.spellTargetMode;
-    if (!stm || stm.kind !== "deploy-gear") return;
-    const dx = Math.abs(tileX - stm.fromTileX);
-    const dy = Math.abs(tileY - stm.fromTileY);
-    if (Math.max(dx, dy) > stm.rangeTiles) {
-      this.exitSpellTargetMode();
-      return;
-    }
-    gameClient.sendAction({ type: "deployGear", itemId: stm.itemId, tileX, tileY });
-    this.exitSpellTargetMode();
-  }
-
-  /** Resolve a click while in summon-direct mode. Out-of-range clicks cancel; in-range clicks fire `commandSummon`. */
-  private finishSummonDirectClick(tileX: number, tileY: number): void {
-    const stm = this.spellTargetMode;
-    if (!stm || stm.kind !== "summon-direct") return;
-    const dx = Math.abs(tileX - stm.fromTileX);
-    const dy = Math.abs(tileY - stm.fromTileY);
-    if (Math.max(dx, dy) > stm.moveRangeTiles) {
-      this.exitSpellTargetMode();
-      return;
-    }
-    gameClient.sendAction({ type: "commandSummon", summonNpcId: stm.summonNpcId, tile: { x: tileX, y: tileY } });
-    this.exitSpellTargetMode();
   }
 
   private levelUpOverlay: LevelUpOverlay | null = null;
@@ -2489,8 +2106,8 @@ export class GameScene extends Phaser.Scene {
     // back to Adventure Setup.
     this.devToolsPanel?.setInAdventure(!!state.adventureContext?.adventureId);
 
-    if (this.selectedEntityId) {
-      const nState = state.npcs.find(n => n.id === this.selectedEntityId);
+    if (this.selectedTargetId) {
+      const nState = state.npcs.find(n => n.id === this.selectedTargetId);
       if (nState && nState.hp > 0) this.targetPanel.refresh(nState, nState.maxHp, this.getFactions(), state.discoveredFactions ?? []);
     }
 
@@ -2723,196 +2340,6 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
-  /**
-   * AOE preview during spell-targeting mode. The shape of the highlight
-   * matches the spell's `area.shape` and the same tile-set logic the server
-   * uses to find affected creatures, so what you see is what gets hit.
-   *
-   *   - cone   → origin = player tile, direction = cursor. Tiles within the
-   *             53°-half-angle expanding triangle out to `radiusTiles`.
-   *   - sphere/cube + selfAnchored → chebyshev disc centred on player.
-   *   - sphere/cube otherwise       → chebyshev disc centred on cursor.
-   */
-  private drawSpellAoePreview(pointer: Phaser.Input.Pointer): void {
-    this.spellAoeLayer.clear();
-    const stm = this.spellTargetMode;
-    if (!stm || !this.gameState || !this.player) return;
-
-    const { tileX, tileY } = this.gridView.toTile(pointer);
-    const { cols, rows } = this.gameState.map;
-
-    const paintRect = (x: number, y: number): void => {
-      if (x < 0 || y < 0 || x >= cols || y >= rows) return;
-      this.spellAoeLayer.fillRect(x * TILE_SIZE + 1, y * TILE_SIZE + 1, TILE_SIZE - 2, TILE_SIZE - 2);
-    };
-
-    // Summon-direct mode: paint the chebyshev reach disc around the summon's
-    // current tile in a softer blue tint. Out-of-range cursor clicks cancel,
-    // matching the existing spell-target mode UX.
-    if (stm.kind === "summon-direct") {
-      this.spellAoeLayer.fillStyle(0x66aaff, 0.24);
-      const r = stm.moveRangeTiles;
-      for (let dy = -r; dy <= r; dy++) {
-        for (let dx = -r; dx <= r; dx++) {
-          paintRect(stm.fromTileX + dx, stm.fromTileY + dy);
-        }
-      }
-      return;
-    }
-
-    // Deploy-gear mode: amber reach disc for valid placement tiles, plus the
-    // square the gear will cover under the cursor (when in range).
-    if (stm.kind === "deploy-gear") {
-      this.spellAoeLayer.fillStyle(0xc9a23b, 0.18);
-      const r = stm.rangeTiles;
-      for (let dy = -r; dy <= r; dy++) {
-        for (let dx = -r; dx <= r; dx++) paintRect(stm.fromTileX + dx, stm.fromTileY + dy);
-      }
-      if (Math.max(Math.abs(tileX - stm.fromTileX), Math.abs(tileY - stm.fromTileY)) <= r) {
-        this.spellAoeLayer.fillStyle(0xd24a3a, 0.34);
-        const side = stm.sideTiles;
-        const rr = side % 2 === 1 ? (side - 1) / 2 : 0;
-        const x0 = tileX - rr, y0 = tileY - rr;
-        for (let yy = 0; yy < side; yy++) {
-          for (let xx = 0; xx < side; xx++) paintRect(x0 + xx, y0 + yy);
-        }
-      }
-      return;
-    }
-
-    // Range underlay: every tile within the spell's range from the caster,
-    // painted before the AOE shape so AOE colour wins on overlap. Cool teal
-    // tint (distinct from move highlight + AOE orange + summon blue).
-    const allSpells = this.defs.spells();
-    const spell = allSpells.find((sp) => sp.id === stm.spellId);
-    if (spell && spell.rangeFeet > 0) {
-      const rangeTiles = Math.max(1, Math.ceil(spell.rangeFeet / 5));
-      this.spellAoeLayer.fillStyle(0x44aacc, 0.14);
-      for (let dy = -rangeTiles; dy <= rangeTiles; dy++) {
-        for (let dx = -rangeTiles; dx <= rangeTiles; dx++) {
-          if (dx === 0 && dy === 0) continue;  // caster's own tile
-          paintRect(this.player.tileX + dx, this.player.tileY + dy);
-        }
-      }
-    }
-
-    if (stm.kind !== "aoe") return;
-    const side = stm.sideTiles;
-    this.spellAoeLayer.fillStyle(0xff8844, 0.28);
-
-    const paintTile = (x: number, y: number): void => {
-      if (x < 0 || y < 0 || x >= cols || y >= rows) return;
-      this.spellAoeLayer.fillRect(x * TILE_SIZE + 1, y * TILE_SIZE + 1, TILE_SIZE - 2, TILE_SIZE - 2);
-    };
-
-    if (stm.shape === "cone") {
-      // Cone semantic: `sideTiles` is the cone's reach in tiles.
-      const r = side;
-      const ox = this.player.tileX, oy = this.player.tileY;
-      let dx = tileX - ox, dy = tileY - oy;
-      const len = Math.hypot(dx, dy);
-      if (len === 0) { dx = 1; dy = 0; } else { dx /= len; dy /= len; }
-      for (let ry = -r; ry <= r; ry++) {
-        for (let rx = -r; rx <= r; rx++) {
-          if (rx === 0 && ry === 0) continue;
-          const along = rx * dx + ry * dy;
-          if (along <= 0 || along > r + 0.5) continue;
-          const perp = Math.abs(-rx * dy + ry * dx);
-          if (perp > along * 0.5 + 0.5) continue;
-          paintTile(ox + rx, oy + ry);
-        }
-      }
-    } else if (stm.shape === "line") {
-      // Line preview — mirrors the continuous-direction
-      // `lineFromCasterTiles` on the server. Any angle around the caster
-      // works; the line follows the exact cursor direction with a
-      // perpendicular width band.
-      const length = side;
-      const width = Math.max(1, stm.widthTiles ?? 1);
-      const ox = this.player.tileX, oy = this.player.tileY;
-      const dirX = tileX - ox;
-      const dirY = tileY - oy;
-      const len = Math.hypot(dirX, dirY);
-      if (len > 0) {
-        const ux = dirX / len;
-        const uy = dirY / len;
-        const perpX = -uy;
-        const perpY = ux;
-        const halfLow = Math.floor((width - 1) / 2);
-        const halfHigh = Math.ceil((width - 1) / 2);
-        for (let step = 1; step <= length; step++) {
-          for (let off = -halfLow; off <= halfHigh; off++) {
-            const fx = ox + ux * step + perpX * off;
-            const fy = oy + uy * step + perpY * off;
-            paintTile(Math.round(fx), Math.round(fy));
-          }
-        }
-      }
-    } else if (stm.shape === "sphere") {
-      // Sphere preview:
-      //   single-tile (r=0) → just the cursor tile (Flaming Sphere).
-      //   self-anchored     → chebyshev disc on the caster's tile centre.
-      //   placed            → SRD grid-intersection rule: 2*r tiles per
-      //                       side, centered on the cursor (matches
-      //                       `placedSphereTiles` in SpellSystem).
-      const r = side;
-      if (r === 0) {
-        paintTile(tileX, tileY);
-        return;
-      }
-      if (stm.selfAnchored) {
-        const cx = this.player.tileX, cy = this.player.tileY;
-        for (let dy = -r; dy <= r; dy++) {
-          for (let dx = -r; dx <= r; dx++) paintTile(cx + dx, cy + dy);
-        }
-      } else {
-        // Placed sphere centres on the grid intersection NEAREST the cursor
-        // (round, not floor) so the highlight tracks the pointer.
-        const c = this.gridView.toIntersectionTile(pointer);
-        const sideTiles = 2 * r;
-        const halfLow = r;
-        for (let dy = -halfLow; dy < sideTiles - halfLow; dy++) {
-          for (let dx = -halfLow; dx < sideTiles - halfLow; dx++) paintTile(c.tileX + dx, c.tileY + dy);
-        }
-      }
-    } else {
-      // Cube preview. Self-anchored (Thunderwave) extends FROM the caster
-      // in the cursor direction — caster's tile is NOT in the cube.
-      // Click-anchored (Grease) extends from the clicked tile.
-      if (stm.selfAnchored) {
-        let ddx = Math.sign(tileX - this.player.tileX);
-        let ddy = Math.sign(tileY - this.player.tileY);
-        if (ddx === 0 && ddy === 0) ddx = 1;
-        const halfLow  = Math.floor((side - 1) / 2);
-        const halfHigh = Math.ceil((side - 1) / 2);
-        const cx0 = this.player.tileX, cy0 = this.player.tileY;
-        let xMin: number, xMax: number, yMin: number, yMax: number;
-        if (ddx === 0)      { xMin = cx0 - halfLow; xMax = cx0 + halfHigh; }
-        else if (ddx > 0)   { xMin = cx0 + 1;       xMax = cx0 + side; }
-        else                { xMin = cx0 - side;    xMax = cx0 - 1; }
-        if (ddy === 0)      { yMin = cy0 - halfLow; yMax = cy0 + halfHigh; }
-        else if (ddy > 0)   { yMin = cy0 + 1;       yMax = cy0 + side; }
-        else                { yMin = cy0 - side;    yMax = cy0 - 1; }
-        for (let y = yMin; y <= yMax; y++) {
-          for (let x = xMin; x <= xMax; x++) paintTile(x, y);
-        }
-      } else {
-        const cx = tileX, cy = tileY;
-        let xMin: number, xMax: number, yMin: number, yMax: number;
-        if (side % 2 === 1) {
-          const r = (side - 1) / 2;
-          xMin = cx - r; xMax = cx + r; yMin = cy - r; yMax = cy + r;
-        } else {
-          const offset = side - 1;
-          xMin = cx; xMax = cx + offset; yMin = cy; yMax = cy + offset;
-        }
-        for (let y = yMin; y <= yMax; y++) {
-          for (let x = xMin; x <= xMax; x++) paintTile(x, y);
-        }
-      }
-    }
-  }
-
   private drawMovePreview(pointer: Phaser.Input.Pointer): void {
     this.movePathLayer.clear();
     if (!this.moveMode || !this.player || !this.moveDist.length) return;
@@ -2941,7 +2368,7 @@ export class GameScene extends Phaser.Scene {
 
   private enterMoveMode(): void {
     this.moveMode = true;
-    if (this.featureTargetMode) this.exitFeatureTargetMode();
+    if (this.activeTargetingMode instanceof FeatureTargetingMode) this.exitTargetingMode();
     if (this.gameState) {
       this.drawHighlights(this.gameState);
       this.playerPanel.refreshActions(this.buildActionState(this.gameState));
@@ -3023,13 +2450,13 @@ export class GameScene extends Phaser.Scene {
    * AIGM, and visualised as a player speech bubble.
    */
   private openSpeechInput(): void {
-    if (!this.gameState || !this.selectedEntityId) return;
+    if (!this.gameState || !this.selectedTargetId) return;
     // Conversation-system path: when the selected NPC has a `conversationId`
     // and the engine isn't in combat, the TALK button opens the
     // ConversationOverlay instead of the AIGM speech bubble. The AIGM
     // remains the fallback for combat sayto and for NPCs without a
     // scripted conversation.
-    const target = this.gameState.npcs.find((n) => n.id === this.selectedEntityId);
+    const target = this.gameState.npcs.find((n) => n.id === this.selectedTargetId);
     if (target && this.gameState.phase === "exploring") {
       // Effective conversation id is resolved server-side at spawn time
       // (encounter override → NPCDef.conversationId) and stored on the

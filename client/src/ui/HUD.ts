@@ -133,7 +133,7 @@ export interface HUDCallbacks {
   /** Fires when the player sends a `sayto` chat message (either through the
    *  HUD's chat input while the GM-mode dropup is set to `sayto`, or through
    *  the TALK button on the Player Panel which routes through
-   *  `HUD.sendSayto`). The scene reads its own `selectedEntityId` to find
+   *  `HUD.sendSayto`). The scene reads its own `selectedTargetId` to find
    *  the avoid-target so the bubble flips below the player when it would
    *  otherwise cover the target token. */
   onPlayerSays?: (text: string) => void;
