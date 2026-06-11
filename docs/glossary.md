@@ -52,6 +52,17 @@ data shapes in [design/data-model.md](./design/data-model.md).
   engine actions (spawn, reveal, set flag, narrate) without GM intervention.
 - **Action economy** — the per-turn Action / Bonus Action / Reaction / free object
   interaction budget.
+- **Improvised Action** — a free-text player attempt to change the world that no
+  button or dedicated tool covers, resolved first-class by
+  `ImprovisedActionSystem` via the AIGM's `resolve_improvised_action` tool.
+  Spec: [systems/improvised-actions.md](./design/systems/improvised-actions.md).
+- **Difficulty Band** — the named difficulty the AIGM passes instead of a DC
+  number (`very_easy` … `nearly_impossible`); the engine maps it to the SRD DC
+  via `DIFFICULTY_BAND_DC`.
+- **Ruling** — one adjudicated Improvised Action (`ImprovisedRuling`: description,
+  skill, band, DC, outcome), recorded on `GameState.improvisedRulings` and
+  surfaced to the AIGM as the RECENT RULINGS block so repeat attempts keep a
+  consistent difficulty.
 
 ## UI regions (canonical — see ui-reference.md)
 

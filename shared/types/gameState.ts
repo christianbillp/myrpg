@@ -310,6 +310,18 @@ import type { NpcState, NpcPersona } from "./npcState.js";
 
 export type DayPhase = 'morning' | 'noon' | 'evening' | 'night';
 
+/** One adjudicated improvised action (US-121) — written by
+ *  `ImprovisedActionSystem` per `resolve_improvised_action` call. `difficulty`
+ *  is the band name the GM passed (`very_easy` … `nearly_impossible`); `dc`
+ *  the engine-mapped value. See docs/design/systems/improvised-actions.md. */
+export interface ImprovisedRuling {
+  description: string;
+  skill: string;
+  difficulty: string;
+  dc: number;
+  success: boolean;
+}
+
 /** NPC awareness state.
  *
  *   • `calm`       — default. Follows routine. Default-RAM 0.
@@ -608,6 +620,11 @@ export interface GameState {
   discoveredFactions: string[];
   /** World memory log of significant events, recorded by AIGM `create_rumor` tool or trigger `record_rumor` action. Surfaced to the GM in CURRENT STATE. */
   rumors: Rumor[];
+  /** Adjudicated improvised actions (US-121), newest last, capped to the most
+   *  recent 10 by `ImprovisedActionSystem`. Surfaced to the GM as the RECENT
+   *  RULINGS block so repeated attempts keep a consistent difficulty band.
+   *  Persisted with the world save. */
+  improvisedRulings: ImprovisedRuling[];
   /** Set when the current session is a chapter of an adventure. Drives the END CHAPTER button and the chapter-advance flow. Null for single-encounter sessions. */
   adventureContext: AdventureSessionContext | null;
   /** Set true when the active chapter has been resolved (combat-ended or `completionFlag` set). Drives the END CHAPTER button. */

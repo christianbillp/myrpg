@@ -272,6 +272,7 @@ export async function loadWorldState(): Promise<{
     relationships: worldSave.relationships ?? deriveRelationshipsFromDispositions(worldSave.npcs ?? []),
     discoveredFactions: worldSave.discoveredFactions ?? [],
     rumors: worldSave.rumors ?? [],
+    improvisedRulings: worldSave.improvisedRulings ?? [],
     adventureContext: worldSave.adventureContext ?? null,
     // Save-shape migration: older saves stored this as `chapterComplete`
     // before the field was renamed to `encounterComplete` (the same flag

@@ -43,11 +43,11 @@ Grants the player Temporary Hit Points. Temporary HP deplete before real HP and 
 
 ### D20 tests
 
-All three D20 test types are resolved server-side. The engine rolls, applies the relevant modifier and any condition modifiers, compares against DC, and returns the outcome to the model as a tool result. The model then narrates the in-world consequence — never the dice mechanic.
+All D20 tests are resolved server-side. The engine rolls, applies the relevant modifier and any condition modifiers, compares against DC, and returns the outcome to the model as a tool result. The model then narrates the in-world consequence — never the dice mechanic.
 
 #### `request_ability_check`
 
-Rolls `d20 + skill modifier` vs DC. Active conditions modify the roll automatically:
+Rolls `d20 + skill modifier` vs DC, for **informational and social** attempts — perception sweeps, insight reads, recalling lore, searching, and Influence checks. The check itself changes nothing physical and costs no Action. For physical/creative attempts to change the world, use `resolve_improvised_action` instead. Active conditions modify the roll automatically:
 
 - **Disadvantage**: `poisoned`, `frightened`
 
@@ -93,6 +93,29 @@ The tool logs the roll to the Event Log and returns the outcome string. It does 
 | `target_ac` | integer | yes      | AC to roll against             |
 | `reason`    | string  | yes      |                                |
 
+#### `resolve_improvised_action`
+
+First-class resolution for a free-text player attempt to **change the world** that no button or dedicated tool covers — kicking a brazier onto an enemy, wedging a door shut, swinging from a beam. The model picks the skill and a difficulty **band**; the engine owns the fairness: it maps the band to the DC (table below), spends the player's Action during combat exactly like Study/Utilize (paid *before* the roll — a failed stunt is still a spent turn), rolls through the same path as `request_ability_check` (all condition/attitude/buff modifiers apply), and writes a uniform `Improvised (skill): "description" …` line to the Event Log. If the Action is unavailable the tool returns `Not performed` and no state changes — the model refuses in-fiction. After any result the model must enact the outcome with state tools before narrating, on failure too. Spec: [systems/improvised-actions.md](./systems/improvised-actions.md).
+
+| Parameter     | Type   | Required | Notes                                                                                                  |
+| ------------- | ------ | -------- | ------------------------------------------------------------------------------------------------------ |
+| `description` | string | yes      | Short paraphrase of the attempt; appears verbatim in the Event Log                                      |
+| `skill`       | string | yes      | Same skill vocabulary as `request_ability_check`                                                        |
+| `difficulty`  | string | yes      | `very_easy` \| `easy` \| `medium` \| `hard` \| `very_hard` \| `nearly_impossible` — engine maps to DC |
+| `target_npc`  | string | no       | Entity ref when the attempt directly targets a creature (enables attitude modifiers)                    |
+| `reason`      | string | yes      |                                                                                                        |
+
+#### `request_npc_saving_throw`
+
+Rolls a saving throw for an **NPC** against a difficulty band — the SRD-fair way to resolve an effect imposed *on* a creature (blinding sand, a shove, a toppled brazier) instead of applying it by fiat. The engine maps the band to the DC (same ladder as `resolve_improvised_action`) and rolls `d20 + the creature's stat-block save modifier` via `npcSaveMod` (Bane applies). Mirrors the player save path's condition rules: `paralyzed`/`unconscious` auto-fail Str and Dex saves. Typical target-resisted improvised attempt in combat: `resolve_improvised_action` for the player's execution first; on success, this tool for the target's resistance; then `apply_condition` / `adjust_npc_hp` / `move_entity` to enact the result.
+
+| Parameter    | Type   | Required | Notes                                                                                                  |
+| ------------ | ------ | -------- | ------------------------------------------------------------------------------------------------------ |
+| `entity`     | string | yes      | `"enemy_A"` / `"ally_A"` (by combat label) or `"npc_[id]"`                                              |
+| `ability`    | string | yes      | `"str"`, `"dex"`, `"con"`, `"int"`, `"wis"`, `"cha"`                                                   |
+| `difficulty` | string | yes      | `very_easy` \| `easy` \| `medium` \| `hard` \| `very_hard` \| `nearly_impossible` — engine maps to DC |
+| `reason`     | string | yes      |                                                                                                        |
+
 **DC difficulty guidelines** (SRD):
 
 | Difficulty | DC  |
@@ -102,6 +125,9 @@ The tool logs the roll to the Event Log and returns the outcome string. It does 
 | Medium     | 15  |
 | Hard       | 20  |
 | Very hard  | 25  |
+| Nearly impossible | 30 |
+
+For `resolve_improvised_action` and `request_npc_saving_throw` the model passes the band name and the engine applies this table; for `request_ability_check`, `request_saving_throw`, and `request_attack_roll` the model passes the DC/AC directly.
 
 ---
 

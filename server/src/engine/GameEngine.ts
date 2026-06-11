@@ -8,9 +8,9 @@ import {
 import type { EncounterContext } from '../encounterService.js';
 import {
   rollSkillCheck, rollSavingThrow,
-  rollPlayerAttackVsAc, rollNpcAttackVsAc,
+  rollPlayerAttackVsAc, rollNpcAttackVsAc, npcSaveMod,
 } from './CombatSystem.js';
-import { rollDiceBonus } from './Dice.js';
+import { rollDiceBonus, d20 } from './Dice.js';
 import { applyEquipment, computeEquippedSlotLabels } from './EquipmentSystem.js';
 import { hasRelentlessEndurance, RELENTLESS_ENDURANCE_ID } from './SpeciesAbilities.js';
 import { applyStoneEndurance } from './GiantGifts.js';
@@ -45,6 +45,8 @@ import {
 } from './ExplorationActions.js';
 import { doEquip as ivDoEquip, doUnequip as ivDoUnequip } from './InventoryActions.js';
 import { doCastSpell as spDoCastSpell } from './SpellSystem.js';
+import { resolveImprovisedAction as iaResolveImprovisedAction } from './ImprovisedActionSystem.js';
+import type { ImprovisedActionInput, ImprovisedActionResult } from './ImprovisedActionSystem.js';
 import { isDeployableGear } from './TrapSystem.js';
 import { doCommandSummon, checkSummonTether, registerSummonHooks } from './SummonSystem.js';
 import { registerSoundHooks } from './Sound.js';
@@ -932,6 +934,14 @@ export class GameEngine {
     return { ...result, attitudeNote: [attitudeNote, enhanceNote].filter(Boolean).join(' ') };
   }
 
+  /** First-class improvised-action resolution (resolve_improvised_action tool)
+   *  — band → DC, Action spend in combat, and the roll all live in
+   *  ImprovisedActionSystem; the roll routes back through `rollAbilityCheck`
+   *  so every active check modifier applies. */
+  resolveImprovisedAction(input: ImprovisedActionInput): ImprovisedActionResult {
+    return iaResolveImprovisedAction(this.ctx, input, (skill, dc, target) => this.rollAbilityCheck(skill, dc, target));
+  }
+
   rollPlayerSavingThrow(ability: string, dc: number): { roll: number; total: number; success: boolean; autoFail: boolean } {
     const { conditions, exhaustionLevel } = this.state.player;
     if ((ability === 'str' || ability === 'dex') && autoFailsStrDexSave(conditions)) {
@@ -945,6 +955,26 @@ export class GameEngine {
     const saveBonus = rollDiceBonus(this.state.player.saveDiceBonus);
     const total = base.total + saveBonus;
     return { roll: base.roll, total, success: total >= dc, autoFail: false };
+  }
+
+  /** Roll a saving throw for an NPC against a DC (request_npc_saving_throw
+   *  tool) — the stat block's save modifier via `npcSaveMod` (Bane applies),
+   *  with the same Str/Dex auto-fail conditions as the player path. */
+  rollNpcSavingThrow(entity: string, ability: string, dc: number):
+    | { found: false }
+    | { found: true; name: string; roll: number; total: number; success: boolean; autoFail: boolean } {
+    const npc = this.resolveNpcByEntity(entity);
+    const def = npc ? this.resolveMonsterDef(npc.defId) : undefined;
+    if (!npc || !def) return { found: false };
+    const name = npc.revealedName ?? npc.name;
+    if ((ability === 'str' || ability === 'dex') && autoFailsStrDexSave(npc.conditions)) {
+      return { found: true, name, roll: 0, total: 0, success: false, autoFail: true };
+    }
+    const saveBonus = npcSaveMod(npc, def, ability);
+    const roll = d20();
+    const total = roll + saveBonus;
+    Logger.log('check.npc_saving_throw', { entity, defId: npc.defId, ability, dc, saveBonus, roll, total, success: total >= dc });
+    return { found: true, name, roll, total, success: total >= dc, autoFail: false };
   }
 
   rollAttackRoll(attacker: string, targetAc: number): { roll: number; total: number; isHit: boolean; isCrit: boolean; damage: number; rollStr: string } {

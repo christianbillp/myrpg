@@ -128,7 +128,7 @@ TOOL-FIRST RULE: Every game effect you describe must be enacted via the correspo
   • Player tells an ally to stay back, not fight, or stand down → call set_npc_passive (passive: true). Call set_npc_passive (passive: false) if the player later asks the ally to fight. A passive ally skips their combat turn automatically — do not narrate them acting or attacking.
 If you cannot enact an effect with the available tools, do not narrate it as happening.
 
-ACTION ECONOMY: During the player's turn, each character has one Action and one Bonus Action per round. Action-consuming activities: attack, throw_item, dash, dodge, disengage, cast a spell, study, influence, utilize, hide (default — see exception below). Bonus-action-consuming activities: second wind, drink potion (in combat), hide IF the character is a Rogue of level 2+ (Cunning Action). A Level 1 Rogue's Hide still costs the Action. Server enforces these strictly.
+ACTION ECONOMY: During the player's turn, each character has one Action and one Bonus Action per round. Action-consuming activities: attack, throw_item, dash, dodge, disengage, cast a spell, study, influence, utilize, improvised actions (resolve_improvised_action), hide (default — see exception below). Bonus-action-consuming activities: second wind, drink potion (in combat), hide IF the character is a Rogue of level 2+ (Cunning Action). A Level 1 Rogue's Hide still costs the Action. Server enforces these strictly.
 
 CURRENT STATE shows the player's action economy as literal fields: "Action: AVAILABLE" or "Action: USED", "Bonus: AVAILABLE" or "Bonus: USED", and "N moves left". These fields are AUTHORITATIVE for the current turn — they reset every time a new player turn begins (you will see a line like "── Aldric's turn — Action & Bonus refreshed ──" in RECENT EVENT LOG marking each transition). Do not infer from conversation history that the player has already acted this turn; only the current flags matter. If "Action: AVAILABLE" is shown, the action IS available — do not refuse it.
 
@@ -167,7 +167,15 @@ PROHIBITED — reject these and suggest a realistic in-world alternative instead
   • add_item or spawn_enemy simply because the player requests an item or creature (they must exist in the world).
   • Any action requiring magic the player does not possess, teleportation, or instantaneous creation from nothing.
 
-When the player attempts anything tied to a skill — Performance, Persuasion, Deception, Athletics, Stealth, Investigation, etc. — call request_ability_check. The roll determines quality and narrative colour, not just success or failure; even an action that cannot catastrophically fail still benefits from a die (a low Performance roll is an awkward tune, a high one is moving). Only skip the check for purely declarative statements ("I walk north") that involve no skill and no uncertainty.
+IMPROVISED ACTIONS: When the player commits to a creative action that no button or dedicated tool covers — kicking a brazier onto an enemy, wedging a door shut, swinging from a beam, cutting a rope, hurling sand into eyes — resolve it as a first-class action with a die and real stakes, never as pure narration and never as an automatic success or refusal.
+  1. GATE — if it is impossible in-fiction (the PROHIBITED list), refuse once with a realistic in-world alternative. If it is a question, the QUESTION vs COMMIT rule applies: advise, don't roll.
+  2. CLASSIFY — a purely informational attempt that changes nothing in the world (looking, listening, recalling, reading a person, searching) uses request_ability_check and costs nothing. A social Influence attempt (persuasion / deception / intimidation / performance / animalHandling against an NPC) also uses request_ability_check with target_npc. An attempt to CHANGE the world physically routes through resolve_improvised_action — the engine owns the DC and spends the Action in combat. When the attempt imposes an effect ON a creature (blinding sand, a shove, a trip), the creature gets to resist: resolve the player's execution with resolve_improvised_action first; on SUCCESS, call request_npc_saving_throw (same band, the ability that fits the resistance) before applying the effect — the effect lands only if the save fails.
+  3. BAND the difficulty, never invent a DC number: very_easy / easy / medium / hard / very_hard / nearly_impossible. medium is the default for a risky-but-reasonable stunt; hard when circumstances actively oppose it (a watching guard, bad footing, no tools); very_hard and above for feats at the edge of mortal ability. Pick the skill that genuinely governs the attempt.
+  4. RESOLVE — call the tool and read the result before writing a word of outcome. If it returns "Not performed", the Action was unavailable: refuse in-fiction per the action-economy flavour rules above.
+  5. CONSEQUENCE ON BOTH OUTCOMES — on SUCCESS, enact every effect with state tools (adjust_npc_hp, apply_condition, move_entity, remove_item, set_world_flag, set_attitude, …) before narrating, exactly as the TOOL-FIRST RULE requires; the roll result alone changes nothing. On FAILURE, the Action is still spent and the fiction still moves — noise draws attention, footing worsens, an attitude sours, the object breaks the wrong way — enact those with tools too. A flat "nothing happens" failure is acceptable only out of combat for a zero-stakes attempt.
+  6. CONSISTENCY — CURRENT STATE carries a RECENT RULINGS block listing every improvised action already adjudicated this session (description, skill, band, outcome). Honor it: the same task keeps the same difficulty band across attempts. A retry after failure needs changed circumstances (new leverage, a tool, an ally's help) or escalates one band; some failures close the approach entirely — say so in the narration.
+
+For informational and social skill attempts (request_ability_check), the roll determines quality and narrative colour, not just success or failure; even an action that cannot catastrophically fail still benefits from a die (a low Performance roll is an awkward tune, a high one is moving). Only skip the check for purely declarative statements ("I walk north") that involve no skill and no uncertainty.
 After receiving a SUCCESS from request_ability_check, if the outcome causes a creature to surrender, flee, or change behavior, you MUST call the appropriate tools to enact that outcome (set_disposition, despawn_npc, move_entity) before narrating it — exactly as the TOOL-FIRST RULE requires. A success result alone does not change the game state.`;
 }
 
@@ -366,6 +374,9 @@ function buildStateMessage(engine: GameEngine): string {
   const rumorsBlock = s.rumors.length > 0
     ? `\nRUMORS (world memory, newest first — reference when narratively apt):\n${[...s.rumors].sort((a, b) => b.recordedAt - a.recordedAt).slice(0, 8).map((r) => `  • [${r.id}] (sal ${r.salience}) ${r.text}`).join('\n')}\n`
     : '';
+  const rulingsBlock = s.improvisedRulings.length > 0
+    ? `\nRECENT RULINGS (improvised actions already adjudicated, newest last — the same task keeps the same difficulty band; a retry after failure needs changed circumstances or escalates one band):\n${s.improvisedRulings.map((r) => `  • "${r.description}" — ${r.skill}, ${r.difficulty} (DC ${r.dc}) — ${r.success ? 'succeeded' : 'failed'}`).join('\n')}\n`
+    : '';
 
   // World clock — surfaces the off-camera tick counter + current day phase
   // from the NPC sim layer (US-094). Helps the GM let time-of-day inflect
@@ -410,7 +421,7 @@ function buildStateMessage(engine: GameEngine): string {
     : '';
 
   return `SETTING: ${s.mapName} | PHASE: ${s.phase}
-CONTEXT: ${s.encounterContext}${adventureBlock}${questsBlock}${scriptedEvents}${factionsBlock}${rumorsBlock}${worldClockBlock}${alertnessBlock}
+CONTEXT: ${s.encounterContext}${adventureBlock}${questsBlock}${scriptedEvents}${factionsBlock}${rumorsBlock}${rulingsBlock}${worldClockBlock}${alertnessBlock}
 
 PLAYER: tile (${p.tileX},${p.tileY}) · HP ${p.hp}/${playerDef.maxHp}${isBloodied(p.hp, playerDef.maxHp) ? ' (BLOODIED)' : ''} · ${formatCoins(p.balanceCp)} · ${flags || 'no flags'}
   ${classLine}

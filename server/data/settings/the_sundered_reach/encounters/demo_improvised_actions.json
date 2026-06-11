@@ -1,0 +1,38 @@
+{
+  "id": "demo_improvised_actions",
+  "encounterTitle": "Demo — Improvised Actions",
+  "demo": true,
+  "description": "Demo of first-class improvised-action resolution (resolve_improvised_action + request_npc_saving_throw, US-121). A cellar tavern staged with improvisation bait — a blocking three-barrel stack, a plank bar with a money-box and a hanging lantern, a low ceiling beam, loose tables and chairs — and a surly road-bandit as a live target for imposed effects. Verify: the engine maps the GM's difficulty band to the DC, the roll lands in the AIGM Overlay and Event Log, the Action is spent in combat (provoke the bandit to test), retries keep their band (RECENT RULINGS survives save/load), failures still move the scene, and an effect imposed on a creature (grit in the eyes, a shove into the barrels) gives the target a stat-block saving throw before it lands.",
+  "mapId": "tavern_keg",
+  "npcIds": [
+    "tavern_keeper",
+    "villager",
+    "bandit"
+  ],
+  "allyIds": [],
+  "enemyIds": [],
+  "customIntroduction": "The stair drops you through the south door into the Hidden Keg, a cellar room low enough that the single beam running its length brushes your hair. To your right a plank counter hugs the north wall, an oil lantern swinging over it on a short chain and a strong-box tucked behind it; the keeper polishes a tankard and watches you arrive. In the far left corner three stacked barrels sweat against the stone. A road-worn man in a patched leather jack leans beside them, thumbing the rim of his cup, and a lone villager sits hunched at the near table, careful not to look at him.",
+  "customContext": "DEMO — IMPROVISED ACTIONS (US-121). This room exists so the player can test creative free-text attempts and the GM's improvised-action resolution. Geography is authoritative: the three-barrel stack fills the north-west corner (a blocking obstacle — toppling it is noise, spilled ale, and anyone beside it diving clear); the plank bar runs along the north-east with the keeper Bram behind it, a strong-box (his money-box) at his feet and an oil lantern hanging over the counter on a chain; one low beam runs the room's length overhead (climbable, traversable, something to swing from); four small plank tables with chairs crowd the floor; the only exit is the two-tile south doorway. The patched-leather man beside the barrels is a road-bandit (npc bandit, neutral, attitude indifferent) nursing a grudge and a drink — he is the intended live target for imposed-effect tests. PROCEDURE: resolve every committed physical attempt with resolve_improvised_action per the IMPROVISED ACTIONS rule — band the difficulty, never invent a DC, honor RECENT RULINGS on retries, and enact consequences with tools on success AND failure. When an attempt imposes an effect ON a creature (grit flicked in the bandit's eyes, a shove into the barrel stack, kicking a chair into his shins), resolve the player's execution first, then give the target its save with request_npc_saving_throw before applying the effect. Informational and social attempts stay on request_ability_check. ESCALATION: the bandit has a short fuse — if the player's stunt humiliates or injures him, or the player turns openly violent, call set_disposition (npc bandit → enemy) then trigger_combat so improvised actions can be tested in combat, where they must spend the Action. If more pressure is needed mid-fight, spawn_enemy once with defId \"bandit\" (a crony from the stair). Bram and the villager stay out of any fight (neutral) but react vocally.",
+  "objective": "Type creative free-text actions at the GM — topple the barrels, swing from the beam, flick grit in the bandit's eyes — and watch each get a banded DC, a visible roll, a saving throw where the target resists, and a real consequence.",
+  "allowsLongRest": false,
+  "placementMode": "exact",
+  "placements": [
+    { "role": "player", "x": 5, "y": 6 },
+    { "role": "neutral", "index": 0, "x": 7, "y": 1 },
+    { "role": "neutral", "index": 1, "x": 2, "y": 6 },
+    { "role": "neutral", "index": 2, "x": 2, "y": 2 }
+  ],
+  "environment": {
+    "lightLevel": "dim"
+  },
+  "triggers": [
+    {
+      "id": "demo_improv_hint",
+      "when": { "event": "encounter_started" },
+      "then": [
+        { "type": "show_log", "message": "DEMO: type a creative action at the GM (chat, not sayto) — e.g. 'I topple the barrel stack toward the man beside it', 'I swing from the beam over the tables', 'I flick grit from the floor into his eyes', 'I palm the money-box while Bram is distracted'. Each should resolve with a banded DC, a visible roll, and a real consequence; effects imposed on the bandit give him a saving throw. Provoke him into a fight to verify improvised actions spend the Action in combat." }
+      ],
+      "once": true
+    }
+  ]
+}

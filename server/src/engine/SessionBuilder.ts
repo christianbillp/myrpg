@@ -479,6 +479,7 @@ export function buildSessionState(
     factionStandings: projectFactionStandings(factionRelations),
     discoveredFactions: req.adventureSeed?.seedDiscoveredFactions ?? [],
     rumors: req.adventureSeed?.seedRumors ?? [],
+    improvisedRulings: [],
     adventureContext: req.adventureSeed ? {
       adventureId: req.adventureSeed.adventureId,
       adventureTitle: req.adventureSeed.adventureTitle,

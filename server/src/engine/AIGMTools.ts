@@ -3,6 +3,8 @@ import { GameEvent } from './types.js';
 import type { QuestDef, QuestScope } from '../../../shared/types.js';
 import { getActiveSetting, lookupSettingSection, lookupWorldbookEntry } from '../settings.js';
 import { purseToCp, formatCoins } from '../../../shared/currency.js';
+import { DIFFICULTY_BAND_DC } from './ImprovisedActionSystem.js';
+import type { DifficultyBand } from './ImprovisedActionSystem.js';
 import { Logger } from '../Logger.js';
 
 export interface AIGMToolResult {
@@ -118,7 +120,7 @@ function buildToolList() { return [
   },
   {
     name: 'request_ability_check',
-    description: "Ask the player to make an ability check. The server rolls d20 + the relevant skill modifier automatically. Set DC using SRD guidelines: Very Easy 5, Easy 10, Medium 15, Hard 20, Very Hard 25. For Influence checks (deception, intimidation, performance, persuasion, animalHandling), set `target_npc` to the NPC entity ref so the server applies the SRD attitude modifier: Friendly → Advantage, Hostile → Disadvantage, Indifferent → normal (US-092).",
+    description: "Ask the player to make an ability check for an INFORMATIONAL or SOCIAL attempt — perception sweeps, insight reads, recalling lore, searching, and Influence checks. The server rolls d20 + the relevant skill modifier automatically. Set DC using SRD guidelines: Very Easy 5, Easy 10, Medium 15, Hard 20, Very Hard 25. For Influence checks (deception, intimidation, performance, persuasion, animalHandling), set `target_npc` to the NPC entity ref so the server applies the SRD attitude modifier: Friendly → Advantage, Hostile → Disadvantage, Indifferent → normal (US-092). For a physical/creative attempt to CHANGE the world (a stunt, a sabotage, a climb-and-leap), use resolve_improvised_action instead — it owns the DC and the Action cost.",
     input_schema: { type: 'object' as const, properties: { skill: { type: 'string' }, dc: { type: 'integer' }, target_npc: { type: 'string' }, reason: { type: 'string' } }, required: ['skill', 'dc', 'reason'] },
   },
   {
@@ -283,6 +285,35 @@ function buildToolList() { return [
     name: 'lookup_worldbook',
     description: 'Fetch a worldbook entry — a supplementary dossier for one specific faction, named NPC, location, or world event. The list of available entry ids (grouped by type) is in the system prompt under "Available worldbook entries". Use this when you need detail beyond the summary on a specific topic: who the Concordat are, what the Quota does, who runs the Silver Service, what is happening at Stillweir. For broader foundational worldbuilding (history, politics, peoples) use `lookup_setting`. Returns the raw markdown body of the entry, or an "entry not found" message.',
     input_schema: { type: 'object' as const, properties: { entry_id: { type: 'string' }, reason: { type: 'string' } }, required: ['entry_id', 'reason'] },
+  },
+  {
+    name: 'resolve_improvised_action',
+    description: 'Resolve a free-text player attempt to CHANGE the world that no button or dedicated tool covers — kicking a brazier onto an enemy, wedging a door shut, swinging from a beam, hurling sand into someone\'s eyes. You pick the skill and a difficulty BAND; the engine owns the rest: it maps the band to the SRD DC (very_easy 5, easy 10, medium 15, hard 20, very_hard 25, nearly_impossible 30), rolls d20 + skill modifier with every active modifier applied (conditions, exhaustion, Influence attitude when target_npc is set, Guidance), and during combat spends the player\'s Action exactly like Study/Utilize — a failed stunt is still a spent turn. If the result says "Not performed", the Action was unavailable: refuse in-fiction without naming mechanics. After ANY result, enact the outcome with state tools before narrating: on SUCCESS apply the effects (adjust_npc_hp, apply_condition, move_entity, set_world_flag, …); on FAILURE the scene still moves (noise, attention, a worse position, a soured attitude) — enact that too. Use request_ability_check instead for purely informational checks (perception, insight, recalling lore) and social Influence attempts — those change nothing physical and cost no Action.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        description: { type: 'string', description: 'Short paraphrase of the attempt, e.g. "kick the brazier onto the cultist". Appears verbatim in the Event Log.' },
+        skill: { type: 'string', description: 'The skill that governs the attempt (athletics, acrobatics, sleightOfHand, stealth, …) — same vocabulary as request_ability_check.' },
+        difficulty: { type: 'string', enum: ['very_easy', 'easy', 'medium', 'hard', 'very_hard', 'nearly_impossible'], description: 'Difficulty band; the engine maps it to the DC. medium is the default for a risky-but-reasonable stunt.' },
+        target_npc: { type: 'string', description: 'Entity ref when the attempt directly targets a creature ("enemy_A", "ally_A", "npc_[id]").' },
+        reason: { type: 'string' },
+      },
+      required: ['description', 'skill', 'difficulty', 'reason'],
+    },
+  },
+  {
+    name: 'request_npc_saving_throw',
+    description: 'Roll a saving throw for an NPC against a difficulty band — the SRD-fair way to resolve an effect imposed ON a creature (blinding sand, a shove, a toppled brazier) instead of applying it by fiat. The engine maps the band to the DC (same ladder as resolve_improvised_action), rolls d20 + the creature\'s stat-block save modifier (Bane applies), and auto-fails Str/Dex saves for paralyzed/unconscious targets. Typical target-resisted improvised attempt in combat: resolve_improvised_action for the player\'s execution first; on SUCCESS, call this for the target\'s resistance; then enact the result with apply_condition / adjust_npc_hp / move_entity. Ability names: "str", "dex", "con", "int", "wis", "cha". Entity: "enemy_A" (by label), "ally_A" (by combat label), or "npc_[id]" (any NPC by id).',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        entity: { type: 'string' },
+        ability: { type: 'string' },
+        difficulty: { type: 'string', enum: ['very_easy', 'easy', 'medium', 'hard', 'very_hard', 'nearly_impossible'], description: 'Difficulty band; the engine maps it to the DC.' },
+        reason: { type: 'string' },
+      },
+      required: ['entity', 'ability', 'difficulty', 'reason'],
+    },
   },
 ]; }
 
@@ -862,6 +893,56 @@ const AIGM_TOOL_HANDLERS: Record<string, AIGMToolHandler> = {
       // independent of how the entry was authored.
       const header = `# ${entry.title}${entry.type ? ` (${entry.type})` : ''}`;
       out.toolResultContent = `${header}\n\n${entry.body}`;
+  },
+  resolve_improvised_action(engine, input, ctx, out) {
+    const description = String(input['description'] ?? '').trim();
+      const skill = String(input['skill'] ?? '').trim();
+      const difficulty = String(input['difficulty'] ?? '').trim().toLowerCase();
+      const targetNpc = (input['target_npc'] as string | undefined)?.trim() || undefined;
+      if (!description || !skill) {
+        out.toolResultContent = 'resolve_improvised_action requires both a non-empty `description` and a `skill`.';
+        return;
+      }
+      if (!(difficulty in DIFFICULTY_BAND_DC)) {
+        out.toolResultContent = `Unknown difficulty band "${difficulty}". Valid bands: ${Object.keys(DIFFICULTY_BAND_DC).join(', ')}.`;
+        return;
+      }
+      const result = engine.resolveImprovisedAction({ description, skill, difficulty: difficulty as DifficultyBand, targetNpcEntity: targetNpc });
+      if (!result.performed) {
+        out.toolResultContent = result.refusal;
+        return;
+      }
+      const spentNote = result.actionSpent ? ' The Action is spent for this turn.' : '';
+      out.toolResultContent = `Roll result: d20 + ${skill} mod = ${result.total} vs DC ${result.dc} (${difficulty}).${result.attitudeNote ? ` ${result.attitudeNote}.` : ''} ${result.success ? 'SUCCESS' : 'FAILURE'}.${spentNote} Now enact the outcome with state tools before narrating — on FAILURE too: the attempt still changes the scene.`;
+      out.rollResult = `improvised ${skill}${result.attitudeNote ? ` ${result.attitudeNote}` : ''}: d20(${result.roll}) = ${result.total} vs DC ${result.dc} — ${result.success ? 'SUCCESS' : 'FAILURE'}`;
+  },
+  request_npc_saving_throw(engine, input, ctx, out) {
+    const entity = String(input['entity'] ?? '').trim();
+      const ability = String(input['ability'] ?? '').trim().toLowerCase();
+      const difficulty = String(input['difficulty'] ?? '').trim().toLowerCase();
+      if (!['str', 'dex', 'con', 'int', 'wis', 'cha'].includes(ability)) {
+        out.toolResultContent = `Unknown ability "${ability}". Valid abilities: str, dex, con, int, wis, cha.`;
+        return;
+      }
+      if (!(difficulty in DIFFICULTY_BAND_DC)) {
+        out.toolResultContent = `Unknown difficulty band "${difficulty}". Valid bands: ${Object.keys(DIFFICULTY_BAND_DC).join(', ')}.`;
+        return;
+      }
+      const dc = DIFFICULTY_BAND_DC[difficulty as DifficultyBand];
+      const result = engine.rollNpcSavingThrow(entity, ability, dc);
+      if (!result.found) {
+        out.toolResultContent = `Unknown entity "${entity}" — use "enemy_A", "ally_A", or "npc_[id]" from CURRENT STATE.`;
+        return;
+      }
+      if (result.autoFail) {
+        engine.addLog(`${result.name} saving throw (${ability}): auto-fail — condition prevents Str/Dex saves`);
+        out.toolResultContent = `Auto-fail: ${result.name}'s condition (paralyzed/unconscious) causes automatic failure on ${ability} saves. Enact the effect with state tools before narrating.`;
+        out.rollResult = `${result.name} ${ability} save: AUTO-FAIL vs DC ${dc}`;
+        return;
+      }
+      engine.addLog(`${result.name} saving throw (${ability}): d20+mod = ${result.total} vs DC ${dc} — ${result.success ? 'Success!' : 'Failure'}`);
+      out.toolResultContent = `Roll result: ${result.name} d20 + ${ability} save mod = ${result.total} vs DC ${dc} (${difficulty}). ${result.success ? 'SUCCESS — the creature resists; do not apply the effect' : 'FAILURE — the creature fails to resist; enact the effect with state tools before narrating'}.`;
+      out.rollResult = `${result.name} ${ability} save: d20(${result.roll}) = ${result.total} vs DC ${dc} — ${result.success ? 'SUCCESS' : 'FAILURE'}`;
   },
 };
 
