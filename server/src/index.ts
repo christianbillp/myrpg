@@ -361,8 +361,10 @@ interface TiledMapFile {
   tilesets: TiledTileset[];
   layers: TiledLayer[];
   /** Author-time named tile regions. Sibling field, NOT a Tiled object-
-   *  group. The map editor reads / writes these via the SavedMapDef. */
-  zones?: Array<{ id: string; name: string; color: string; cells: string[] }>;
+   *  group. The map editor reads / writes these via the SavedMapDef. A zone
+   *  with a `lightLevel` bakes per-tile ambient light at session build
+   *  (US-126 — dark cave regions on otherwise bright maps). */
+  zones?: Array<{ id: string; name: string; color: string; cells: string[]; lightLevel?: 'bright' | 'dim' | 'dark' }>;
 }
 
 // Tileset metadata surfaced to the client so it can preload the image and

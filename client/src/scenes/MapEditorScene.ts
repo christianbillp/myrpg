@@ -16,6 +16,7 @@ import {
 } from "../ui/sceneInputs";
 import { MapPalette } from "../ui/edit/MapPalette";
 import { StructureList, type StructureSpec } from "../ui/edit/StructureList";
+import { RegionList, type RegionRowSpec, type BigMapSize } from "../ui/edit/RegionList";
 import {
   TILE_SIZE,
   GRID_COLS,
@@ -158,6 +159,11 @@ export class MapEditorScene extends Phaser.Scene {
    *  and connected-room count. Authored via the STRUCTURES list editor. */
   private structures: StructureSpec[] = [];
   private structureList: StructureList | null = null;
+  /** BIG MAP mode (US-126): 2+ regions switch GENERATE to the multi-region
+   *  composer; the single-terrain controls are ignored while active. */
+  private regions: RegionRowSpec[] = [];
+  private bigMapSize: BigMapSize = { width: 60, height: 28 };
+  private regionList: RegionList | null = null;
 
   // Generative AI tab state.
   private genPromptInput: HTMLTextAreaElement | null = null;
@@ -541,7 +547,7 @@ export class MapEditorScene extends Phaser.Scene {
     const featuresEndY = featuresRowY + Math.ceil(allFeatures.length / 2) * 32;
 
     // Structures section — an add-and-configure list (small buildings / ruins,
-    // each with a connected-room count). Fills the rest of the column.
+    // each with a connected-room count).
     const structLabelY = featuresEndY + 14;
     this.addToBucket("det", createHtmlText({
       scene: this, sceneWidth: W,
@@ -550,7 +556,9 @@ export class MapEditorScene extends Phaser.Scene {
       fontSize: 10, color: "#778899", letterSpacing: 1,
     }));
     const listY = structLabelY + 20;
-    const listH = Math.max(96, y + h - listY);
+    // Split the remaining column between STRUCTURES and BIG MAP — REGIONS.
+    const remaining = Math.max(220, y + h - listY);
+    const listH = Math.max(96, Math.floor(remaining * 0.45) - 34);
     this.structureList = new StructureList({
       scene: this, sceneWidth: W,
       get: () => this.structures,
@@ -558,6 +566,25 @@ export class MapEditorScene extends Phaser.Scene {
     });
     this.addToBucket("det", this.structureList.build(x, listY, w, listH));
     this.structureList.setApplicable(this.selectedTerrain !== null && STRUCTURE_TERRAINS.includes(this.selectedTerrain));
+
+    // BIG MAP — REGIONS (US-126): 2-5 biome bands composed as one large map.
+    const regionLabelY = listY + listH + 14;
+    this.addToBucket("det", createHtmlText({
+      scene: this, sceneWidth: W,
+      x, y: regionLabelY, w, h: 14,
+      text: "BIG MAP — REGIONS",
+      fontSize: 10, color: "#778899", letterSpacing: 1,
+    }));
+    const regionListY = regionLabelY + 20;
+    const regionListH = Math.max(96, y + h - regionListY);
+    this.regionList = new RegionList({
+      scene: this, sceneWidth: W,
+      get: () => this.regions,
+      set: (next) => { this.regions = next; this.refreshButtons(); },
+      getSize: () => this.bigMapSize,
+      setSize: (next) => { this.bigMapSize = next; },
+    });
+    this.addToBucket("det", this.regionList.build(x, regionListY, w, regionListH));
   }
 
   // ── Generative AI right-column controls ────────────────────────────────
@@ -900,7 +927,7 @@ export class MapEditorScene extends Phaser.Scene {
   private refreshButtons(): void {
     let genReady: boolean;
     if (this.tab === "deterministic") {
-      genReady = !!this.selectedTerrain && !this.busy;
+      genReady = (!!this.selectedTerrain || this.regions.length >= 2) && !this.busy;
     } else {
       const promptLen = this.genPromptInput?.value.trim().length ?? 0;
       genReady = promptLen >= 8 && !this.busy;
@@ -935,17 +962,26 @@ export class MapEditorScene extends Phaser.Scene {
   }
 
   private async runComposeMap(): Promise<void> {
-    if (!this.selectedTerrain) return;
+    const bigMap = this.regions.length >= 2;
+    if (!bigMap && !this.selectedTerrain) return;
     this.busy = true;
     this.refreshButtons();
-    if (this.statusEl) this.statusEl.textContent = "Composing map…";
+    if (this.statusEl) this.statusEl.textContent = bigMap ? "Composing big map…" : "Composing map…";
     if (this.preview) this.preview.setBusy(true);
     try {
-      const data = await gameClient.composeMap({
-        terrain: this.selectedTerrain,
-        features: Array.from(this.selectedFeatures),
-        structures: this.structures.length > 0 ? this.structures : undefined,
-      });
+      // BIG MAP mode (US-126): 2+ regions route to the multi-region composer;
+      // the single-terrain chips/features/structures are ignored.
+      const data = bigMap
+        ? await gameClient.composeMap({
+            regions: this.regions,
+            width: this.bigMapSize.width,
+            height: this.bigMapSize.height,
+          })
+        : await gameClient.composeMap({
+            terrain: this.selectedTerrain!,
+            features: Array.from(this.selectedFeatures),
+            structures: this.structures.length > 0 ? this.structures : undefined,
+          });
       if (this.statusEl) this.statusEl.textContent = "";
       this.applyPreviewData(data as MapPreviewData);
     } catch (err) {

@@ -396,11 +396,18 @@ function chebyshevTiles(a: { tileX: number; tileY: number }, b: { tileX: number;
  * Ambient obscurance from the encounter's lightLevel, modulated by the
  * observer's Darkvision range. Darkvision converts Dark → Dim within range
  * (so the result is `lightly` instead of `heavily`).
+ *
+ * Per-tile light (US-126, multi-region maps): the TARGET's tile decides
+ * the baseline when `GameMap.light` declares one — a creature standing in
+ * a dark cave region is hard to see regardless of where the observer
+ * stands, while a creature out in bright grassland is plainly visible even
+ * to an observer inside the cave mouth.
  */
 function ambientObscurance(
   state: GameState, observer: Observer, target: VisionTarget, distFt: number, senses: Senses,
 ): Obscurance {
-  const baseline = state.environment.lightLevel ?? 'bright';
+  const tileLight = state.map.light?.[target.tileY]?.[target.tileX] ?? null;
+  const baseline = tileLight ?? state.environment.lightLevel ?? 'bright';
   if (baseline === 'bright') return 'none';
   if (baseline === 'dim') return 'lightly';
   // baseline === 'dark'

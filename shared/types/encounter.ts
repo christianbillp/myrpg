@@ -66,10 +66,12 @@ export interface SavedMapDef {
   /** Tileset metadata for client-side rendering. */
   tilesets: MapTilesetInfo[];
   /** Author-time named tile regions saved with the map. Consumed by the
-   *  Map Editor and (future) encounter-generation passes that want to
-   *  describe "the altar / guardtower / road" by location. Optional —
-   *  hand-authored maps that pre-date the feature simply omit it. */
-  zones?: Array<{ id: string; name: string; color: string; cells: string[] }>;
+   *  Map Editor, the session light bake (US-126 — a zone's `lightLevel`
+   *  becomes the per-tile ambient light of its cells), and encounter-
+   *  generation passes that want to describe "the altar / guardtower /
+   *  road" by location. Optional — hand-authored maps that pre-date the
+   *  feature simply omit it. */
+  zones?: Array<{ id: string; name: string; color: string; cells: string[]; lightLevel?: 'bright' | 'dim' | 'dark' }>;
 }
 
 /**

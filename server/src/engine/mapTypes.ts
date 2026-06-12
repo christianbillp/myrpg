@@ -75,6 +75,35 @@ export interface MapZone {
   color: string;
   /** Cell coordinates as `"x,y"` strings. */
   cells: string[];
+  /** Ambient light inside this zone (US-126). When set, the session bake
+   *  writes it into `GameMap.light` for every cell, overriding the
+   *  encounter-wide `environment.lightLevel` — how a cave region stays dark
+   *  on a map whose grassland is bright. Omitted = no override. */
+  lightLevel?: 'bright' | 'dim' | 'dark';
+}
+
+/** One region of a multi-biome map (US-126) — see `composeRegions`. */
+export interface RegionSpec {
+  /** Biome of this band. Open biomes (grassland/forest/urban) fill their
+   *  band with palette ground; enclosed biomes (cave/dungeon) start as solid
+   *  rock and get an interior carved, entered through a carved mouth. */
+  terrain: 'grassland' | 'forest' | 'urban' | 'cave' | 'dungeon';
+  /** Relative share of the map's long axis (default 1). */
+  share?: number;
+  /** Zone display name (defaults to the biome name). */
+  name?: string;
+  /** Ambient light for the region's zone. Defaults: `dark` for cave/dungeon,
+   *  no override (encounter-wide light) for open biomes. */
+  light?: 'bright' | 'dim' | 'dark';
+}
+
+export interface ComposeRegionsOptions {
+  width: number;
+  height: number;
+  /** 2–5 regions, laid out as bands along the map's long axis in order. */
+  regions: RegionSpec[];
+  /** Same seed + same options → byte-identical map. */
+  seed?: number;
 }
 
 export interface ComposedMap {

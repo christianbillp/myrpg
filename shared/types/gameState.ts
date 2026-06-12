@@ -402,6 +402,13 @@ export interface GameMap {
    *  layered on top at read time so darkvision can override them per
    *  observer. */
   obscurance?: (null | 'lightly' | 'heavily')[][];
+  /** Per-tile ambient light (US-126, multi-region maps). Baked at session
+   *  build from map zones that declare a `lightLevel` (a cave region is
+   *  `dark` while the grassland outside stays bright). `null` = no zone
+   *  override — `Vision.ambientObscurance` falls back to the encounter-wide
+   *  `EncounterEnvironment.lightLevel`. Darkvision applies per observer at
+   *  read time exactly as it does for the global level. */
+  light?: (null | 'bright' | 'dim' | 'dark')[][];
   /** Ground-layer tile GIDs for rendering. Optional: procedural maps may omit. */
   gidGrid?: number[][];
   /** Object-layer tile GIDs (drawn over the ground layer). 0 = empty cell. */

@@ -19,7 +19,7 @@ import type Anthropic from "@anthropic-ai/sdk";
 import { mkdir, writeFile, readFile, readdir, unlink } from "fs/promises";
 import { join } from "path";
 import { Logger } from "../Logger.js";
-import { composeMap, type Terrain, type Feature, type StructureSpec } from "../engine/MapComposer.js";
+import { composeMap, composeRegions, type Terrain, type Feature, type StructureSpec, type RegionSpec } from "../engine/MapComposer.js";
 import { writeMapJson, isGeneratedId } from "../engine/MapPersistence.js";
 import { generateEncounter } from "../encounterGenerator.js";
 import { generateMapAgentic } from "../engine/maps/mapAgent.js";
@@ -264,12 +264,43 @@ export function registerGenerateRoutes(server: FastifyInstance, ctx: GenerateRou
    * Adjudicator-layer alternative to the AI map generator. Pure preview —
    * the result is NOT persisted. Call `/generate/map/save` to write the
    * preview to disk and assign it a stable id.
+   *
+   * Multi-region big maps (US-126): pass `regions: [{terrain, share?, name?,
+   * light?}, …]` (2-5 entries) instead of `terrain` to compose one large map
+   * whose biomes transition band-to-band (ecotone blends between open biomes,
+   * a carved mouth into cave/dungeon regions). Size up to 96×64.
    */
   server.post<{
-    Body: { terrain: Terrain; features: Feature[]; width?: number; height?: number; seed?: number; structures?: StructureSpec[] };
+    Body: { terrain?: Terrain; features?: Feature[]; width?: number; height?: number; seed?: number; structures?: StructureSpec[]; regions?: RegionSpec[] };
   }>("/generate/map/composed", async (req, reply) => {
-    const { terrain, features, width = 30, height = 22, seed, structures } = req.body;
+    const { terrain, features, width = 30, height = 22, seed, structures, regions } = req.body;
     const VALID_TERRAINS = ['grassland', 'forest', 'dungeon', 'tavern', 'cave', 'urban'];
+    const VALID_REGION_TERRAINS = ['grassland', 'forest', 'urban', 'cave', 'dungeon'];
+    if (regions && regions.length > 0) {
+      const bad = regions.find((r) => !VALID_REGION_TERRAINS.includes(r.terrain));
+      if (bad) {
+        return reply.code(400).send({ error: `region terrain must be one of ${VALID_REGION_TERRAINS.join(', ')}` });
+      }
+      try {
+        const composed = composeRegions({ width, height, seed, regions });
+        return reply.send({
+          mapId: null,
+          width: composed.width,
+          height: composed.height,
+          terrainData: composed.terrainData,
+          objectData: composed.objectData,
+          name: composed.name,
+          description: composed.description,
+          tilesets: composed.tilesets,
+          anchors: composed.anchors,
+          zones: composed.zones ?? [],
+        });
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        Logger.log("anomaly.generate_map_composed_failed", { error: msg }, "error");
+        return reply.code(400).send({ error: msg });
+      }
+    }
     if (!terrain || !VALID_TERRAINS.includes(terrain)) {
       return reply.code(400).send({ error: `terrain must be one of ${VALID_TERRAINS.join(', ')}` });
     }
@@ -309,7 +340,7 @@ export function registerGenerateRoutes(server: FastifyInstance, ctx: GenerateRou
       objectData: number[];
       tilesets?: Array<{ firstgid: number; source: string }>;
       /** Author-time named tile regions — see `MapZoneJson`. */
-      zones?: Array<{ id: string; name: string; color: string; cells: string[] }>;
+      zones?: Array<{ id: string; name: string; color: string; cells: string[]; lightLevel?: 'bright' | 'dim' | 'dark' }>;
       /** When set, overwrite an existing map instead of allocating a fresh
        *  `gen_<stamp>_<slug>` id. Used by the Map Editor's LOAD MAP → edit
        *  → SAVE MAP flow. */

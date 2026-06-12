@@ -171,6 +171,21 @@ function buildGameMapFromSaved(
       return tileObsFor(effectiveGid(groundGid, objectGid));
     }),
   );
+  // Per-tile ambient light (US-126): map zones that declare a `lightLevel`
+  // bake it into their cells — a cave region stays dark while the grassland
+  // around it follows the encounter-wide light. Omitted entirely when no
+  // zone carries a light level, so ordinary maps pay nothing.
+  let lightGrid: (null | 'bright' | 'dim' | 'dark')[][] | undefined;
+  for (const zone of saved.zones ?? []) {
+    if (!zone.lightLevel) continue;
+    lightGrid ??= saved.gidGrid.map((row) => row.map(() => null));
+    for (const cell of zone.cells) {
+      const [x, y] = cell.split(',').map(Number);
+      if (Number.isInteger(x) && Number.isInteger(y) && lightGrid[y]?.[x] !== undefined) {
+        lightGrid[y][x] = zone.lightLevel;
+      }
+    }
+  }
   return {
     cols: saved.cols,
     rows: saved.rows,
@@ -178,6 +193,7 @@ function buildGameMapFromSaved(
     blocksSight,
     cover: coverGrid,
     obscurance: obscuranceGrid,
+    ...(lightGrid ? { light: lightGrid } : {}),
     // Carry rendering info through to the client.
     gidGrid: saved.gidGrid,
     objectGidGrid: saved.objectGidGrid,

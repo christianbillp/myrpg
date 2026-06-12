@@ -46,6 +46,20 @@ export class GridView {
     this.clamp();
   }
 
+  /** Camera follow for big maps (US-126): recenter on the player when they
+   *  wander outside the middle ~60% of the viewport. No-op when the whole
+   *  map already fits (clamp pins it), so small maps never jump. */
+  follow(tileX: number, tileY: number): void {
+    if (this.mapCols * TILE_SIZE * this.zoom <= GRID_W && this.mapRows * TILE_SIZE * this.zoom <= GRID_H) return;
+    const screenX = this.container.x + (tileX * TILE_SIZE + TILE_SIZE / 2) * this.zoom;
+    const screenY = this.container.y + (tileY * TILE_SIZE + TILE_SIZE / 2) * this.zoom;
+    const marginX = GRID_W * 0.2;
+    const marginY = GRID_H * 0.2;
+    const outside = screenX < PLAYER_PANEL_WIDTH + marginX || screenX > PLAYER_PANEL_WIDTH + GRID_W - marginX
+      || screenY < marginY || screenY > GRID_H - marginY;
+    if (outside) this.centerOn(tileX, tileY);
+  }
+
   isPointerInBounds(pointer: Phaser.Input.Pointer): boolean {
     return pointer.x >= PLAYER_PANEL_WIDTH && pointer.x < PLAYER_PANEL_WIDTH + GRID_W
       && pointer.y >= 0 && pointer.y < GRID_H;

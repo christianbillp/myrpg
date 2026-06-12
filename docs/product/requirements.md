@@ -57,6 +57,8 @@ locations — is in the linked design doc.
 
 *Full specification: [design/systems/content-generation.md](../design/systems/content-generation.md).*
 
+- **US-126** As a player, I want big generated maps whose terrain genuinely changes as I cross them — a grassland that thickens into forest and ends at a cave mouth in a rock face — so that one map can hold a whole journey instead of a single scene. Maps up to 96×64 are composed from 2-5 biome regions laid out as bands: open biomes blend into each other across a natural ecotone, enclosed biomes (cave/dungeon) are carved into the rock and entered through a real choke-point mouth, every region is a named map zone, connectivity from the first region to the last is guaranteed, and cave regions are genuinely **dark** — per-tile ambient light that makes Darkvision and carried light matter mid-map. The camera follows my character across maps larger than the screen. Available deterministically (`POST /generate/map/composed` with `regions`) and through the AI encounter generator, which plans the biome sequence + per-region creature placement (`regionPlan`) while the engine renders the tiles.
+
 - **US-002** As a player, I want to choose a character from the available roster before the encounter begins so that I can experience different combat styles.
 - **US-003** As a player, I want to see my character's stats in a toggleable sidebar so that I can inspect my current HP, AC, speed, ability scores, and XP without interrupting play.
 - **US-006** As a player, I want to pick up, manage, and use items in an inventory so that I can equip myself for challenges.

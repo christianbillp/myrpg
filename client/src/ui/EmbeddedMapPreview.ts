@@ -35,6 +35,9 @@ export interface MapZone {
   color: string;
   /** Tile coordinates belonging to this zone, as `"x,y"` strings. */
   cells: string[];
+  /** Ambient light baked per tile at session build (US-126) — multi-region
+   *  maps mark cave/dungeon regions `dark`. Carried through save unchanged. */
+  lightLevel?: 'bright' | 'dim' | 'dark';
 }
 
 export interface MapPreviewData {

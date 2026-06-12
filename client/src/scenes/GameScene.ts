@@ -713,6 +713,8 @@ export class GameScene extends Phaser.Scene {
       const pdist = Math.max(Math.abs(state.player.tileX - this.player.tileX), Math.abs(state.player.tileY - this.player.tileY));
       if (pdist > 0 && pdist <= 6) this.player.glideTo(state.player.tileX, state.player.tileY);
       else this.player.teleport(state.player.tileX, state.player.tileY);
+      // Big maps (US-126): keep the player in frame as they cross the map.
+      if (pdist > 0) this.gridView.follow(state.player.tileX, state.player.tileY);
     }
     this.player.setHp(state.player.hp, this.playerDef.maxHp);
 

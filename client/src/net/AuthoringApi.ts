@@ -94,12 +94,19 @@ export async function refineNpc(
  * by the rule-based composer in `engine/MapComposer.ts`.
  */
 export async function composeMap(args: {
-  terrain: 'grassland' | 'forest' | 'dungeon' | 'tavern' | 'cave' | 'urban';
-  features: Array<'campsites' | 'coastline' | 'path' | 'intersection' | '3-room' | '5-room' | 'stairs'>;
+  terrain?: 'grassland' | 'forest' | 'dungeon' | 'tavern' | 'cave' | 'urban';
+  features?: Array<'campsites' | 'coastline' | 'path' | 'intersection' | '3-room' | '5-room' | 'stairs'>;
   seed?: number;
   /** Outdoor structures (small buildings / ruins), each with a type and a
    *  connected-room count (1..5). Used on grassland / forest terrain. */
   structures?: Array<{ type: 'building' | 'ruin'; rooms: number }>;
+  /** BIG multi-region map mode (US-126): 2-5 biome bands in travel order.
+   *  When present, the server composes via the multi-region composer and
+   *  `terrain`/`features`/`structures` are ignored. */
+  regions?: Array<{ terrain: 'grassland' | 'forest' | 'urban' | 'cave' | 'dungeon'; share?: number; name?: string; light?: 'bright' | 'dim' | 'dark' }>;
+  /** Map size — used by the regions mode (24×16 up to 96×64). */
+  width?: number;
+  height?: number;
 }): Promise<{
   /** Always null for /generate/map/composed — the preview is not persisted. Call `saveMap` to persist. */
   mapId: null;
@@ -114,7 +121,7 @@ export async function composeMap(args: {
   anchors: ComposedMapAnchors;
   /** Named tile regions emitted by feature placers (currently `path` and
    *  `intersection`). Empty array when the chosen features produced none. */
-  zones: Array<{ id: string; name: string; color: string; cells: string[] }>;
+  zones: Array<{ id: string; name: string; color: string; cells: string[]; lightLevel?: 'bright' | 'dim' | 'dark' }>;
 }> {
   const res = await fetch(`${API_URL}/generate/map/composed`, {
     method: 'POST',
@@ -131,7 +138,7 @@ export async function composeMap(args: {
     name: string; description: string;
     tilesets: Array<{ firstgid: number; source: string }>;
     anchors: ComposedMapAnchors;
-    zones: Array<{ id: string; name: string; color: string; cells: string[] }>;
+    zones: Array<{ id: string; name: string; color: string; cells: string[]; lightLevel?: 'bright' | 'dim' | 'dark' }>;
   }>;
 }
 
@@ -151,7 +158,7 @@ export async function saveMap(args: {
   tilesets?: Array<{ firstgid: number; source: string }>;
   /** Author-time named tile regions. Persists alongside the map; optional
    *  — omit if the map has none. */
-  zones?: Array<{ id: string; name: string; color: string; cells: string[] }>;
+  zones?: Array<{ id: string; name: string; color: string; cells: string[]; lightLevel?: 'bright' | 'dim' | 'dark' }>;
   existingMapId?: string;
 }): Promise<{ mapId: string }> {
   const res = await fetch(`${API_URL}/generate/map/save`, {

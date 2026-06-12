@@ -6,6 +6,8 @@ import { z } from "zod";
 import type { GameDefs } from "./engine/types.js";
 import { buildMapJson as sharedBuildMapJson } from "./engine/MapPersistence.js";
 import { AI_PALETTE_TILESETS, tilesetsForGids, ownerTilesetName } from "./engine/maps/shared.js";
+import { composeRegions } from "./engine/maps/regions.js";
+import type { ComposedMap } from "./engine/mapTypes.js";
 import { settingPromptBlock } from "./settings.js";
 import { safeId } from "./util/requestValidation.js";
 
@@ -13,6 +15,21 @@ import { safeId } from "./util/requestValidation.js";
  *  narrowed back to the inferred interface so the rest of the file keeps using
  *  the same name. A schema mismatch surfaces as a clear `ZodError` at the call
  *  site instead of a downstream undefined-field crash during validation. */
+const RegionPlanSchema = z.object({
+  width:  z.number().int(),
+  height: z.number().int(),
+  regions: z.array(z.object({
+    terrain: z.enum(['grassland', 'forest', 'urban', 'cave', 'dungeon']),
+    share:   z.number().optional(),
+    name:    z.string().optional(),
+    light:   z.enum(['bright', 'dim', 'dark']).optional(),
+  })).min(2).max(5),
+  playerRegion:   z.number().int().optional(),
+  hostileRegions: z.array(z.number().int()).optional(),
+  neutralRegions: z.array(z.number().int()).optional(),
+  allyRegions:    z.array(z.number().int()).optional(),
+});
+
 const GeneratedPayloadSchema = z.object({
   encounterTitle:     z.string(),
   description:        z.string(),
@@ -25,11 +42,15 @@ const GeneratedPayloadSchema = z.object({
   npcIds:             z.array(z.string()).optional(),
   allyIds:            z.array(z.string()).optional(),
   enemyIds:           z.array(z.string()).optional(),
-  width:              z.number().int(),
-  height:             z.number().int(),
-  terrainData:        z.array(z.number()),
-  objectData:         z.array(z.number()),
-  startingZonesData:  z.array(z.number()),
+  width:              z.number().int().optional(),
+  height:             z.number().int().optional(),
+  terrainData:        z.array(z.number()).optional(),
+  objectData:         z.array(z.number()).optional(),
+  startingZonesData:  z.array(z.number()).optional(),
+  /** Big multi-region map mode (US-126): the model plans biome bands instead
+   *  of authoring tiles; `composeRegions` synthesizes the map. Exactly one of
+   *  regionPlan / the direct tile arrays must be present. */
+  regionPlan:         RegionPlanSchema.optional(),
 });
 
 /**
@@ -92,14 +113,51 @@ export async function generateEncounter(
     throw new Error("Model did not return a tool_use block.");
   }
   const payload = GeneratedPayloadSchema.parse(block.input) as GeneratedPayload;
-  validate(payload, validMonsterIds, validNpcIds, validTileGids, groundLayerGids, objectLayerGids);
+  validateCommon(payload, validMonsterIds, validNpcIds);
 
   const stamp = Date.now();
   const slug = slugify(payload.encounterTitle).slice(0, 32) || "scene";
   const generatedId = safeId(`gen_${stamp}_${slug}`);
 
-  const mapJson = buildMapJson(generatedId, payload);
-  const encounterJson = buildEncounterJson(generatedId, payload);
+  let mapJson: unknown;
+  let encounterJson: unknown;
+  if (payload.regionPlan) {
+    // Multi-region big map (US-126): synthesize the tiles deterministically
+    // from the model's biome plan, then derive spawn zones from the
+    // per-region map zones the composer emitted.
+    const plan = payload.regionPlan;
+    const composed = composeRegions({
+      width: plan.width,
+      height: plan.height,
+      seed: stamp & 0xffffffff,
+      regions: plan.regions,
+    });
+    const startingZonesData = buildRegionStartingZones(composed, plan, legend);
+    mapJson = sharedBuildMapJson({
+      id: generatedId,
+      name: payload.mapName,
+      description: payload.mapdescription,
+      width: composed.width,
+      height: composed.height,
+      terrainData: composed.terrainData,
+      objectData: composed.objectData,
+      tilesets: composed.tilesets,
+      zones: composed.zones,
+    });
+    encounterJson = buildEncounterJson(generatedId, payload, {
+      width: composed.width,
+      height: composed.height,
+      data: startingZonesData,
+    });
+  } else {
+    validateDirectMap(payload, validTileGids, groundLayerGids, objectLayerGids);
+    mapJson = buildMapJson(generatedId, payload as DirectMapPayload);
+    encounterJson = buildEncounterJson(generatedId, payload, {
+      width: payload.width!,
+      height: payload.height!,
+      data: payload.startingZonesData!,
+    });
+  }
 
   await mkdir(join(DATA_DIR, "maps"), { recursive: true });
   await mkdir(join(DATA_DIR, "encounters"), { recursive: true });
@@ -146,14 +204,18 @@ VARIATION — sprinkle ground variants from the palette so the floor reads as na
 
 BIOME FLOORS — for caverns and settlements, prefer the themed floor families in the palette over the default scribble floors: the cave floors (cave_dust / cave_gravel / cave_rocky, plus impassable cave_pool water and sight-blocking chasm pits) for underground scenes, and the urban floors (urban_cobbles / urban_bricks / urban_large_slabs / plazas) for paved streets, courtyards, and interiors. Pick ONE primary floor family per region and accent with scribble objects on top.
 
-MAP RULES:
+TWO MAP MODES — pick exactly one:
+1. DIRECT (default, single-scene maps up to 30×22): author the tile arrays yourself per MAP RULES below.
+2. REGION PLAN (big multi-biome maps, 24×16 up to 96×64): when the scene calls for a JOURNEY across changing terrain — "a grassland that becomes a forest and ends in a cave", "the road through the wood to the mine" — submit \`regionPlan\` INSTEAD of width/height/terrainData/objectData/startingZonesData. List 2-5 regions in travel order; the engine lays them out as bands with natural blended transitions (open biomes) or a carved rock-face mouth (cave/dungeon regions), names a map zone per region, makes cave/dungeon regions genuinely dark, and guarantees connectivity. Give regions evocative zone names, put the player in the entry region (\`playerRegion\`), and assign \`hostileRegions\` so different creatures hold different regions (goblins in the forest, undead in the cave). Spawn zones are derived for you — do NOT send tile arrays in this mode.
+
+MAP RULES (direct mode):
 - Width × height must be between 12×8 and 30×22 inclusive.
 - Both arrays must have length exactly width*height, row-major (top row first, left to right).
 - A cell is passable iff BOTH its terrain tile and its object tile (if non-zero) are passable.
 - Map perimeter should be impassable unless you specifically want the player to be able to exit (used by the flee mechanic).
 - At least one connected region of 12+ passable cells must exist for the player and NPCs to occupy.
 
-STARTING ZONES (encounter.startingZones):
+STARTING ZONES (encounter.startingZones — direct mode only; region-plan maps derive these):
 - Same width/height as the map.
 - Flat data array of zone GIDs (length width*height).
 - Zone GIDs: 0 = no zone, 1 = player start, 2 = ally start, 3 = neutral NPC start, 4 = enemy start.
@@ -203,20 +265,49 @@ function buildResponseTool() {
         npcIds:   { type: "array", items: { type: "string" } },
         allyIds:  { type: "array", items: { type: "string" } },
         enemyIds: { type: "array", items: { type: "string" } },
-        width:  { type: "integer", minimum: 12, maximum: 30 },
-        height: { type: "integer", minimum: 8,  maximum: 22 },
-        terrainData: { type: "array", items: { type: "integer" } },
-        objectData:  { type: "array", items: { type: "integer" } },
-        startingZonesData: { type: "array", items: { type: "integer", minimum: 0, maximum: 4 } },
+        width:  { type: "integer", minimum: 12, maximum: 30, description: "Direct map mode only." },
+        height: { type: "integer", minimum: 8,  maximum: 22, description: "Direct map mode only." },
+        terrainData: { type: "array", items: { type: "integer" }, description: "Direct map mode only." },
+        objectData:  { type: "array", items: { type: "integer" }, description: "Direct map mode only." },
+        startingZonesData: { type: "array", items: { type: "integer", minimum: 0, maximum: 4 }, description: "Direct map mode only." },
+        regionPlan: {
+          type: "object",
+          description: "BIG MULTI-REGION MAP MODE — provide this INSTEAD of width/height/terrainData/objectData/startingZonesData. The engine synthesizes the tiles from your biome plan.",
+          properties: {
+            width:  { type: "integer", minimum: 24, maximum: 96 },
+            height: { type: "integer", minimum: 16, maximum: 64 },
+            regions: {
+              type: "array",
+              minItems: 2,
+              maxItems: 5,
+              items: {
+                type: "object",
+                properties: {
+                  terrain: { type: "string", enum: ["grassland", "forest", "urban", "cave", "dungeon"] },
+                  share:   { type: "number", description: "Relative share of the map's long axis (default 1)." },
+                  name:    { type: "string", description: "Zone display name (e.g. 'the Wardwood')." },
+                  light:   { type: "string", enum: ["bright", "dim", "dark"], description: "Ambient light in this region. Cave/dungeon default to dark." },
+                },
+                required: ["terrain"],
+              },
+            },
+            playerRegion:   { type: "integer", description: "Region index (0-based) where the player starts. Default 0." },
+            hostileRegions: { type: "array", items: { type: "integer" }, description: "Region indexes that get enemy spawn zones. Default: every region except the player's." },
+            neutralRegions: { type: "array", items: { type: "integer" }, description: "Region indexes that get neutral-NPC spawn zones." },
+            allyRegions:    { type: "array", items: { type: "integer" }, description: "Region indexes that get ally spawn zones. Default: the player's region." },
+          },
+          required: ["width", "height", "regions"],
+        },
       },
       required: [
         "encounterTitle", "description", "mapName", "mapdescription", "objective",
         "customIntroduction", "customContext",
-        "width", "height", "terrainData", "objectData", "startingZonesData",
       ],
     },
   };
 }
+
+type RegionPlan = z.infer<typeof RegionPlanSchema>;
 
 interface GeneratedPayload {
   encounterTitle: string;
@@ -230,23 +321,74 @@ interface GeneratedPayload {
   npcIds?: string[];
   allyIds?: string[];
   enemyIds?: string[];
+  width?: number;
+  height?: number;
+  terrainData?: number[];
+  objectData?: number[];
+  startingZonesData?: number[];
+  regionPlan?: RegionPlan;
+}
+
+/** Direct-map mode payload — the five tile fields verified present. */
+type DirectMapPayload = GeneratedPayload & {
   width: number;
   height: number;
   terrainData: number[];
   objectData: number[];
   startingZonesData: number[];
-}
+};
 
 // ── Validation ──────────────────────────────────────────────────────────────
 
-function validate(
+/** Mode-independent checks: roster ids + the completion-flag rule, plus the
+ *  exactly-one-map-mode invariant. */
+function validateCommon(
   p: GeneratedPayload,
   validMonsterIds: Set<string>,
   validNpcIds: Set<string>,
+): void {
+  const hasDirect = !!p.terrainData || !!p.objectData || !!p.startingZonesData;
+  if (p.regionPlan && hasDirect) throw new Error("Provide either regionPlan OR the direct tile arrays — not both");
+  if (!p.regionPlan && !hasDirect) throw new Error("Provide regionPlan or the direct tile arrays");
+  if (p.regionPlan) {
+    const { width, height, regions } = p.regionPlan;
+    if (width < 24 || width > 96 || height < 16 || height > 64) {
+      throw new Error(`regionPlan size ${width}×${height} out of range (24×16 to 96×64)`);
+    }
+    const max = regions.length;
+    for (const idx of [p.regionPlan.playerRegion ?? 0, ...(p.regionPlan.hostileRegions ?? []), ...(p.regionPlan.neutralRegions ?? []), ...(p.regionPlan.allyRegions ?? [])]) {
+      if (idx < 0 || idx >= max) throw new Error(`regionPlan references region index ${idx}, but only ${max} regions are declared`);
+    }
+  }
+
+  // Combine NPC + ally + enemy id validation against both rosters.
+  const allReferencedIds = [...(p.npcIds ?? []), ...(p.allyIds ?? []), ...(p.enemyIds ?? [])];
+  for (const id of allReferencedIds) {
+    if (!validNpcIds.has(id) && !validMonsterIds.has(id)) {
+      throw new Error(`Unknown NPC id "${id}" — not in npcs/ or monsters/`);
+    }
+  }
+
+  // Non-combat encounters (no hand-picked enemies) must declare a completionFlag
+  // since they can't auto-complete on enemy defeat.
+  if ((p.enemyIds ?? []).length === 0 && !p.completionFlag) {
+    throw new Error("Non-combat encounters must declare a completionFlag");
+  }
+}
+
+/** Direct-tile-mode checks — every GID validated against the live legend. */
+function validateDirectMap(
+  p: GeneratedPayload,
   validTileGids: Set<number>,
   groundLayerGids: Set<number>,
   objectLayerGids: Set<number>,
-): void {
+): asserts p is DirectMapPayload {
+  if (p.width === undefined || p.height === undefined || !p.terrainData || !p.objectData || !p.startingZonesData) {
+    throw new Error("Direct map mode requires width, height, terrainData, objectData, and startingZonesData");
+  }
+  if (p.width < 12 || p.width > 30 || p.height < 8 || p.height > 22) {
+    throw new Error(`Direct map size ${p.width}×${p.height} out of range (12×8 to 30×22) — use regionPlan for bigger maps`);
+  }
   const cells = p.width * p.height;
   if (p.terrainData.length !== cells) throw new Error(`terrainData length ${p.terrainData.length} ≠ width*height (${cells})`);
   if (p.objectData.length !== cells)  throw new Error(`objectData length ${p.objectData.length} ≠ width*height (${cells})`);
@@ -267,25 +409,65 @@ function validate(
 
   const playerZoneCount = p.startingZonesData.filter((z) => z === 1).length;
   if (playerZoneCount === 0) throw new Error("startingZonesData has no player-spawn (zone 1) tiles");
+}
 
-  // Combine NPC + ally + enemy id validation against both rosters.
-  const allReferencedIds = [...(p.npcIds ?? []), ...(p.allyIds ?? []), ...(p.enemyIds ?? [])];
-  for (const id of allReferencedIds) {
-    if (!validNpcIds.has(id) && !validMonsterIds.has(id)) {
-      throw new Error(`Unknown NPC id "${id}" — not in npcs/ or monsters/`);
+/**
+ * Derive `startingZones` data for a composed multi-region map: the player
+ * spawns near the centroid of their region, hostiles/neutrals/allies get a
+ * spread of passable cells across each assigned region's zone. Passability
+ * is resolved from the same global tile legend the validators use.
+ */
+function buildRegionStartingZones(composed: ComposedMap, plan: RegionPlan, legend: GlobalTile[]): number[] {
+  const blocks = new Map<number, boolean>();
+  for (const t of legend) blocks.set(t.gid, t.blocksMovement);
+  const W = composed.width;
+  const passable = (x: number, y: number): boolean => {
+    const i = y * W + x;
+    const ground = composed.terrainData[i] & 0x1fffffff;
+    const obj = composed.objectData[i] & 0x1fffffff;
+    if (ground === 0 || (blocks.get(ground) ?? true)) return false;
+    return obj === 0 || !(blocks.get(obj) ?? true);
+  };
+  const regionZones = composed.zones ?? [];
+  const cellsOf = (regionIdx: number): Array<{ x: number; y: number }> => {
+    const zone = regionZones[regionIdx];
+    if (!zone) return [];
+    return zone.cells
+      .map((cell) => { const [x, y] = cell.split(',').map(Number); return { x, y }; })
+      .filter((p) => passable(p.x, p.y));
+  };
+
+  const data = new Array<number>(W * composed.height).fill(0);
+  const mark = (regionIdx: number, code: number, count: number, nearCentroid: boolean): void => {
+    const cells = cellsOf(regionIdx);
+    if (cells.length === 0) return;
+    if (nearCentroid) {
+      const cx = cells.reduce((s, p) => s + p.x, 0) / cells.length;
+      const cy = cells.reduce((s, p) => s + p.y, 0) / cells.length;
+      cells.sort((a, b) => (Math.abs(a.x - cx) + Math.abs(a.y - cy)) - (Math.abs(b.x - cx) + Math.abs(b.y - cy)));
+      for (const p of cells.slice(0, count)) data[p.y * W + p.x] = code;
+      return;
     }
-  }
+    // Spread: take evenly-spaced cells across the zone so a region's spawns
+    // aren't all bunched in one corner.
+    const step = Math.max(1, Math.floor(cells.length / count));
+    for (let i = 0, marked = 0; i < cells.length && marked < count; i += step, marked++) {
+      const p = cells[i];
+      if (data[p.y * W + p.x] === 0) data[p.y * W + p.x] = code;
+    }
+  };
 
-  // Non-combat encounters (no hand-picked enemies) must declare a completionFlag
-  // since they can't auto-complete on enemy defeat.
-  if ((p.enemyIds ?? []).length === 0 && !p.completionFlag) {
-    throw new Error("Non-combat encounters must declare a completionFlag");
-  }
+  mark(plan.playerRegion ?? 0, 1, 5, true);
+  for (const r of plan.allyRegions ?? [plan.playerRegion ?? 0]) mark(r, 2, 4, true);
+  for (const r of plan.neutralRegions ?? []) mark(r, 3, 6, false);
+  const hostiles = plan.hostileRegions ?? composed.zones?.map((_, i) => i).filter((i) => i !== (plan.playerRegion ?? 0)) ?? [];
+  for (const r of hostiles) mark(r, 4, 8, false);
+  return data;
 }
 
 // ── File-shape builders ─────────────────────────────────────────────────────
 
-function buildMapJson(id: string, p: GeneratedPayload): unknown {
+function buildMapJson(id: string, p: DirectMapPayload): unknown {
   // Delegates to the shared `MapPersistence.buildMapJson` for the Tiled-shape
   // layout. The generator's `GeneratedPayload` carries both map and encounter
   // fields; only the map subset matters here.
@@ -301,7 +483,11 @@ function buildMapJson(id: string, p: GeneratedPayload): unknown {
   });
 }
 
-function buildEncounterJson(id: string, p: GeneratedPayload): unknown {
+function buildEncounterJson(
+  id: string,
+  p: GeneratedPayload,
+  startingZones: { width: number; height: number; data: number[] },
+): unknown {
   return {
     id,
     encounterTitle: p.encounterTitle,
@@ -315,11 +501,7 @@ function buildEncounterJson(id: string, p: GeneratedPayload): unknown {
     objective: p.objective,
     completionFlag: p.completionFlag,
     generated: true,
-    startingZones: {
-      width: p.width,
-      height: p.height,
-      data: p.startingZonesData,
-    },
+    startingZones,
   };
 }
 

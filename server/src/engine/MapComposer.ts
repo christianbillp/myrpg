@@ -27,8 +27,11 @@ import type { ComposedMap, ComposeOptions } from './mapTypes.js';
 
 // Re-export the types so existing call sites that import from
 // `engine/MapComposer.js` keep working without rerouting.
-export type { Terrain, Feature, StructureSpec, ComposeOptions, ComposedMap, MapAnchors, MapZone, ComposedTilesetRef } from './mapTypes.js';
+export type { Terrain, Feature, StructureSpec, ComposeOptions, ComposedMap, MapAnchors, MapZone, ComposedTilesetRef, RegionSpec, ComposeRegionsOptions } from './mapTypes.js';
 export { WATER_FIRSTGID } from './mapTiles.js';
+// Multi-region big maps (US-126) — bands of biomes with ecotone blends and
+// carved cave mouths. Separate entry point because its options differ.
+export { composeRegions } from './maps/regions.js';
 
 export function composeMap(opts: ComposeOptions): ComposedMap {
   const { width, height, terrain } = opts;
