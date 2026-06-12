@@ -70,6 +70,11 @@ export interface BonusDamage {
   sides: number;
   bonus: number;
   damageType: string;
+  /** SRD 2024 goblin-style rider: the extra damage applies only when the
+   *  attack roll was made WITH Advantage (US-125, Goblin Warrior/Boss
+   *  "+1d4 if the attack roll had Advantage"). Advantage cancelled by
+   *  Disadvantage does not count. */
+  onAdvantageOnly?: boolean;
 }
 
 /**
@@ -277,6 +282,9 @@ export interface MonsterAttack {
   bonusDamage?: BonusDamage[];
   /** Optional on-hit effects applied after damage lands (attach, grapple, etc.). */
   onHit?: AttackOnHitEffect[];
+  /** SRD Bugbear Light Hammer (US-125): the attack rolls with Advantage when
+   *  the target is currently Grappled by this attacker. */
+  advantageVsGrappledTarget?: boolean;
 }
 
 /**
@@ -285,9 +293,42 @@ export interface MonsterAttack {
  *     attacker's turn begins, the target takes the `dot` damage. While
  *     attached, the attacker skips its normal attack action. The effect ends
  *     when the target (or an adjacent ally) takes the Detach action.
+ *   - `save` — the target makes a saving throw or gains `condition` until the
+ *     end of its next turn (SRD Ghoul Claw → Paralyzed). `exemptTypes` names
+ *     creature kinds the effect skips entirely, matched case-insensitively
+ *     against the target's stat-block `type` / the player's species ("undead",
+ *     "elf"). Condition immunities apply before the roll.
+ *   - `ability_drain` — the target's ability score decreases by the rolled
+ *     dice (SRD Shadow Draining Swipe: Strength −1d4). The target dies if the
+ *     score reaches 0. Player scores recover on a Long Rest; NPC targets track
+ *     the drain per spawn.
  */
 export type AttackOnHitEffect =
-  | { kind: 'attach'; dot: PeriodicDamage };
+  | { kind: 'attach'; dot: PeriodicDamage }
+  | {
+      kind: 'save';
+      ability: 'str' | 'dex' | 'con' | 'int' | 'wis' | 'cha';
+      dc: number;
+      condition: string;
+      exemptTypes?: string[];
+      /** When true the condition also expires at the START of the source's
+       *  next turn (Enthralling Panache) instead of only at the end of the
+       *  target's next turn. */
+      untilSourceTurnStart?: boolean;
+    }
+  | { kind: 'ability_drain'; ability: 'str'; dice: number; sides: number }
+  | {
+      /** SRD 2024 monster grapple (US-125, Bugbear Grab): the condition
+       *  auto-applies on a hit — no save — and the target escapes with an
+       *  Athletics/Acrobatics check vs `escapeDc` (the player's Escape
+       *  action). `maxTargetSize` gates by creature size ("Medium or
+       *  smaller"). The grapple also ends when the grappler dies or is
+       *  incapacitated. */
+      kind: 'condition';
+      condition: string;
+      escapeDc: number;
+      maxTargetSize?: CreatureSize;
+    };
 
 export interface PeriodicDamage {
   dice: number;
@@ -334,6 +375,14 @@ export type OngoingEffect =
        *  the Blinded condition lifts on the caster's next end-of-turn (i.e.
        *  end of the round the spell was cast in). */
       turnsRemaining: number;
+      /** NPC that imposed the condition (monster on-hit saves and save
+       *  actions). Lets "until the start of the source's next turn"
+       *  durations expire on that NPC's turn start. */
+      sourceNpcId?: string;
+      /** When true the condition ALSO expires at the start of
+       *  `sourceNpcId`'s next turn (SRD Pirate Enthralling Panache),
+       *  whichever boundary comes first. */
+      untilSourceTurnStart?: boolean;
     };
 
 /**
@@ -361,6 +410,11 @@ export interface MonsterDef {
   id: string;
   name: string;
   type: string;
+  /** Player-facing flavour text — one or two immersive sentences describing
+   *  how the creature looks and carries itself. Rendered on the Target Panel
+   *  and surfaced to the AIGM as appearance context. `NPCDef.description`
+   *  overrides this for named/wrapped NPCs. */
+  description?: string;
   maxHp: number;
   hpFormula?: string;
   ac: number;
@@ -407,6 +461,10 @@ export interface MonsterDef {
    *      attacker's allies is within 5 ft of the target and not incapacitated.
    *    - 'sunlight_sensitivity' — Disadvantage on attacks while in direct
    *      sunlight (governed by EncounterDef.environment.sunlit).
+   *    - 'undead_fortitude' — when damage would reduce the creature to 0 HP,
+   *      it makes a CON save (DC 5 + the damage taken) and drops to 1 HP
+   *      instead on a success, unless the damage is Radiant or from a
+   *      Critical Hit (SRD Zombie; see CombatSystem.tryUndeadFortitude).
    */
   traits?: MonsterTrait[];
   /** Authored defensive reactions the creature may trigger when targeted.
@@ -421,13 +479,29 @@ export interface MonsterDef {
    *  resolution); `perDay` and `bonusAction` casts are combat-resolved with
    *  per-spawn use tracking on `NpcState.spellUses`. */
   spellcasting?: MonsterSpellcasting;
+  /** Attack-replacement save actions (US-125, SRD Pirate "Enthralling
+   *  Panache"): as part of its Multiattack the creature may replace ONE
+   *  attack with a saving-throw effect — the target rolls `ability` vs `dc`
+   *  or gains `condition` until the start of this creature's next turn. The
+   *  AI replaces an attack whenever the target lacks the condition and is
+   *  within `rangeFeet`. */
+  saveActions?: MonsterSaveAction[];
   /** Path to the SVG used as this monster's token sprite. Required — every
    *  monster JSON must declare its token explicitly (no naming-convention
    *  fallback). */
   tokenAsset: string;
 }
 
-export type MonsterTrait = 'pack_tactics' | 'sunlight_sensitivity';
+/** See `MonsterDef.saveActions`. */
+export interface MonsterSaveAction {
+  name: string;
+  ability: 'str' | 'dex' | 'con' | 'int' | 'wis' | 'cha';
+  dc: number;
+  condition: string;
+  rangeFeet: number;
+}
+
+export type MonsterTrait = 'pack_tactics' | 'sunlight_sensitivity' | 'undead_fortitude';
 
 /**
  * A defensive reaction the engine may trigger on behalf of an NPC. The
@@ -438,6 +512,12 @@ export type MonsterTrait = 'pack_tactics' | 'sunlight_sensitivity';
  */
 export type MonsterReaction =
   | { kind: 'parry'; acBonus: number }
+  /** SRD Goblin Boss "Redirect Attack" (US-125): when an attack roll is made
+   *  against the creature, it swaps places with a Small or Medium ally
+   *  within 5 ft and the ally becomes the target instead. The engine
+   *  triggers it when the attack would hit; the swapped attack re-checks
+   *  against the ally's AC (a nat 20 still hits). */
+  | { kind: 'redirect-attack' }
   /** SRD Mage "Protective Magic" — casts Counterspell OR Shield as a
    *  reaction, from ONE shared per-day pool (tracked per spawn on
    *  `NpcState.reactionUses`). Shield: +5 AC vs the triggering attack.
@@ -511,6 +591,10 @@ export interface NPCDef {
   monsterClass: string;
   color: number;
   persona?: string;
+  /** Player-facing flavour text — how this specific NPC looks. Shown on the
+   *  Target Panel and given to the AIGM as appearance context. Falls back to
+   *  the `monsterClass`'s `MonsterDef.description` when omitted. */
+  description?: string;
   /** Optional per-NPC SVG override. When unset, the NPC falls back to the
    *  token of its `monsterClass`. */
   tokenAsset?: string;

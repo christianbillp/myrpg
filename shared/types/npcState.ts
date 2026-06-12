@@ -85,6 +85,10 @@ export interface NpcState {
   /** Simplified SRD Fly (US-117): +30 ft of speed while true — the engine
    *  has no elevation model. Set/cleared with the `fly` concentration. */
   flying?: boolean;
+  /** Id of the NPC currently grappling this creature via a monster `onHit`
+   *  grapple (US-125) — the `grappled` condition is stripped when that
+   *  grappler dies or is incapacitated. NPCs make no escape attempts. */
+  grappledBy?: string;
   conditions: string[];
   /** Active buffs this creature carries (e.g. Invisibility cast on it by the
    *  player). Creature-agnostic — the same `ActiveBuff` shape the player uses.

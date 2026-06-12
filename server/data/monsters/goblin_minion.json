@@ -23,7 +23,9 @@
   "initiativeBonus": 2,
   "stealthBonus": 6,
   "passivePerception": 9,
-  "senses": { "darkvision": 60 },
+  "senses": {
+    "darkvision": 60
+  },
   "speed": 30,
   "attacks": [
     {
@@ -43,5 +45,13 @@
   "cr": "1/8",
   "color": 15158332,
   "nimbleEscape": true,
-  "tokenAsset": "/tokens/monster_goblin_minion.svg"
+  "tokenAsset": "/tokens/monster_goblin_minion.svg",
+  "languages": [
+    "Common",
+    "Goblin"
+  ],
+  "gear": [
+    "daggers (3)"
+  ],
+  "description": "A scrawny goblin in rags and a too-big helmet, clutching a dagger it holds more like a kitchen knife than a weapon. It bares needle teeth when cornered but its wide eyes spend most of their time looking for the exit."
 }

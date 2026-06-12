@@ -37,9 +37,11 @@ function rollDice(count: number, sides: number): { total: number; rolls: number[
  * Roll every bonus-damage rider attached to an attack. Crits double the
  * dice (matching SRD); the flat bonus is never doubled.
  */
-function rollAllBonusDamage(riders: BonusDamage[] | undefined, isCrit: boolean): RolledBonusDamage[] {
+function rollAllBonusDamage(riders: BonusDamage[] | undefined, isCrit: boolean, withAdvantage = false): RolledBonusDamage[] {
   if (!riders || riders.length === 0) return [];
-  return riders.map((r) => {
+  // SRD 2024 goblin-style riders fire only when the roll was actually made
+  // with Advantage (US-125) — Advantage cancelled by Disadvantage doesn't count.
+  return riders.filter((r) => !r.onAdvantageOnly || withAdvantage).map((r) => {
     const diceCount = isCrit ? r.dice * 2 : r.dice;
     const { total: diceTot, rolls } = rollDice(diceCount, r.sides);
     const damage = Math.max(0, diceTot + r.bonus);
@@ -305,14 +307,21 @@ export function playerHide(player: PlayerDef, disadvantage = false): { hidden: b
  *  penalty. Canonical helper for every save rolled AGAINST a DC by an NPC
  *  (player spells, traps, NPC-cast AoE, concentration checks). */
 export function npcSaveMod(target: NpcState, def: MonsterDef, ability: string): number {
-  const banePenalty = npcBanePenalty(target);
-  if (def.savingThrows && def.savingThrows[ability] !== undefined) return def.savingThrows[ability] - banePenalty;
+  const adjustment = npcBlessBonus(target) - npcBanePenalty(target);
+  if (def.savingThrows && def.savingThrows[ability] !== undefined) return def.savingThrows[ability] + adjustment;
   const score = (def as unknown as Record<string, number>)[ability];
-  return (typeof score === 'number' ? mod(score) : 0) - banePenalty;
+  return (typeof score === 'number' ? mod(score) : 0) + adjustment;
 }
 
 export function npcBanePenalty(npc: NpcState): number {
   return (npc.activeBuffs ?? []).some((b) => b.spellId === 'bane') ? d(4) : 0;
+}
+
+/** SRD Bless: a blessed creature adds 1d4 to its attack rolls and saving
+ *  throws (US-125 — the Priest Acolyte casts it on its allies). Returns a
+ *  fresh rolled bonus (≥0) for a blessed creature, else 0. */
+export function npcBlessBonus(npc: NpcState): number {
+  return (npc.activeBuffs ?? []).some((b) => b.spellId === 'bless') ? d(4) : 0;
 }
 
 /** SRD Enlarge/Reduce (Reduce): a reduced creature's weapon attacks deal 1d4
@@ -320,6 +329,41 @@ export function npcBanePenalty(npc: NpcState): number {
  *  a fresh rolled penalty (≥0) for a `reduced` creature, else 0. */
 export function npcReducedPenalty(npc: NpcState): number {
   return npc.conditions.includes('reduced') ? d(4) : 0;
+}
+
+/**
+ * SRD Undead Fortitude (Zombie): when damage reduces the creature to 0 HP it
+ * makes a CON save, DC 5 + the damage taken, unless the damage is Radiant or
+ * from a Critical Hit. On a success it drops to 1 HP instead. Called by every
+ * NPC damage sink right after the HP mutation, before the kill check; on
+ * `survived` the caller skips the kill and the creature stands back up at 1.
+ */
+export function tryUndeadFortitude(
+  target: NpcState,
+  def: MonsterDef,
+  damageTaken: number,
+  damageType: string,
+  isCrit: boolean,
+): { survived: boolean; log?: LogEntry } {
+  if (target.hp > 0 || damageTaken <= 0) return { survived: false };
+  if (!def.traits?.includes('undead_fortitude')) return { survived: false };
+  if (isCrit || damageType.toLowerCase() === 'radiant') return { survived: false };
+  const dc = 5 + damageTaken;
+  const saveMod = npcSaveMod(target, def, 'con');
+  const roll = d20();
+  const total = roll + saveMod;
+  const survived = total >= dc;
+  if (survived) target.hp = 1;
+  return {
+    survived,
+    log: {
+      left: survived
+        ? `${target.name}'s Undead Fortitude holds — it staggers up at 1 HP`
+        : `${target.name}'s Undead Fortitude fails`,
+      right: `CON d20(${roll})${saveMod >= 0 ? '+' : ''}${saveMod}=${total} vs DC ${dc}`,
+      style: survived ? 'status' : 'normal',
+    },
+  };
 }
 
 export function enemyAttack(
@@ -375,7 +419,7 @@ export function enemyAttack(
     logs.push({ left: `Miss with ${attack.name}`, right: atkPart, style: 'miss' });
   }
 
-  const bonusComponents = isHit ? rollAllBonusDamage(attack.bonusDamage, isCrit) : [];
+  const bonusComponents = isHit ? rollAllBonusDamage(attack.bonusDamage, isCrit, effAdv) : [];
 
   return { damage, isHit, isCrit, attackTotal, naturalRoll, logs, bonusComponents };
 }

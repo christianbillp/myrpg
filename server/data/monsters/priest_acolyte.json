@@ -1,0 +1,94 @@
+{
+  "id": "priest_acolyte",
+  "name": "Priest Acolyte",
+  "type": "Medium or Small Humanoid (Cleric), Neutral",
+  "maxHp": 11,
+  "hpFormula": "2d8+2",
+  "ac": 13,
+  "str": 14,
+  "dex": 10,
+  "con": 12,
+  "int": 10,
+  "wis": 14,
+  "cha": 11,
+  "proficiencyBonus": 2,
+  "savingThrows": {
+    "str": 2,
+    "dex": 0,
+    "con": 1,
+    "int": 0,
+    "wis": 2,
+    "cha": 0
+  },
+  "initiativeBonus": 0,
+  "stealthBonus": 0,
+  "passivePerception": 12,
+  "skills": {
+    "medicine": 4,
+    "religion": 2
+  },
+  "languages": [
+    "Common"
+  ],
+  "gear": [
+    "chain shirt",
+    "holy symbol",
+    "mace"
+  ],
+  "speed": 30,
+  "attacks": [
+    {
+      "name": "Mace",
+      "attackType": "melee",
+      "bonus": 4,
+      "reach": 5,
+      "damageDice": 1,
+      "damageSides": 6,
+      "damageBonus": 2,
+      "damageType": "bludgeoning",
+      "bonusDamage": [
+        {
+          "dice": 1,
+          "sides": 4,
+          "bonus": 0,
+          "damageType": "radiant"
+        }
+      ]
+    },
+    {
+      "name": "Radiant Flame",
+      "attackType": "ranged",
+      "bonus": 4,
+      "reach": 5,
+      "rangeNormal": 60,
+      "rangeLong": 60,
+      "damageDice": 2,
+      "damageSides": 6,
+      "damageBonus": 0,
+      "damageType": "radiant"
+    }
+  ],
+  "spellcasting": {
+    "ability": "wis",
+    "saveDC": 12,
+    "atWill": [
+      "light",
+      "thaumaturgy"
+    ],
+    "bonusAction": [
+      {
+        "spellId": "healing-word",
+        "uses": 1
+      },
+      {
+        "spellId": "bless",
+        "uses": 1
+      }
+    ]
+  },
+  "xp": 50,
+  "cr": "1/4",
+  "color": 15392968,
+  "tokenAsset": "/tokens/monster_priest_acolyte.svg",
+  "description": "A young cleric in a chapel's grey vestments over a chain shirt, a worn holy symbol on a cord and a mace carried like a duty rather than a desire. Candle-light seems to linger on them a moment too long, and their eyes go first to whoever is bleeding."
+}

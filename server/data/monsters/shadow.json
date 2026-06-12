@@ -1,0 +1,87 @@
+{
+  "id": "shadow",
+  "name": "Shadow",
+  "type": "Medium Undead, Chaotic Evil",
+  "maxHp": 27,
+  "hpFormula": "5d8+5",
+  "ac": 12,
+  "str": 6,
+  "dex": 14,
+  "con": 13,
+  "int": 6,
+  "wis": 10,
+  "cha": 8,
+  "proficiencyBonus": 2,
+  "savingThrows": {
+    "str": -2,
+    "dex": 2,
+    "con": 1,
+    "int": -2,
+    "wis": 0,
+    "cha": -1
+  },
+  "initiativeBonus": 2,
+  "stealthBonus": 6,
+  "passivePerception": 10,
+  "skills": {
+    "stealth": 6
+  },
+  "senses": {
+    "darkvision": 60
+  },
+  "speed": 40,
+  "attacks": [
+    {
+      "name": "Draining Swipe",
+      "attackType": "melee",
+      "bonus": 4,
+      "reach": 5,
+      "damageDice": 1,
+      "damageSides": 6,
+      "damageBonus": 2,
+      "damageType": "necrotic",
+      "onHit": [
+        {
+          "kind": "ability_drain",
+          "ability": "str",
+          "dice": 1,
+          "sides": 4
+        }
+      ]
+    }
+  ],
+  "vulnerabilities": [
+    "radiant"
+  ],
+  "resistances": [
+    "acid",
+    "cold",
+    "fire",
+    "lightning",
+    "thunder"
+  ],
+  "immunities": [
+    "necrotic",
+    "poison"
+  ],
+  "conditionImmunities": [
+    "exhaustion",
+    "frightened",
+    "grappled",
+    "paralyzed",
+    "petrified",
+    "poisoned",
+    "prone",
+    "restrained",
+    "unconscious"
+  ],
+  "traits": [
+    "sunlight_sensitivity"
+  ],
+  "nimbleEscape": true,
+  "xp": 100,
+  "cr": "1/2",
+  "color": 3880263,
+  "tokenAsset": "/tokens/monster_shadow.svg",
+  "description": "A patch of darkness in the wrong place — a man-shaped stain that slides along walls and pools under doors, thin as smoke where light touches it. Where it passes, lamps gutter, and the cold of it reaches into muscle and pulls."
+}

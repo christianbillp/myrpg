@@ -19,6 +19,7 @@ import { combatantDisplayName } from './DisplayNames.js';
 import type { GameEvent, NpcState } from './types.js';
 import { chebyshev } from './EnemyAI.js';
 import { d, d20, mod } from './Dice.js';
+import { applyNpcDamageInstance } from './NpcDamage.js';
 
 
 /**
@@ -183,7 +184,7 @@ function rollFlamingSphereSaveAgainst(
     style: success ? 'normal' : 'hit',
   });
   if (finalDamage > 0 && npc.hp > 0) {
-    npc.hp = Math.max(0, npc.hp - finalDamage);
+    applyNpcDamageInstance(ctx, npc, def, finalDamage, spell.damage.type);
     if (npc.hp <= 0) ctx.killWithReward(npc, def, `☠ ${combatantDisplayName(npc, s.npcs)} is incinerated!`);
   }
 }
@@ -277,7 +278,7 @@ export function resolveSpiritualWeaponAttack(
     style: 'hit',
   });
   if (finalDamage > 0 && target.hp > 0) {
-    target.hp = Math.max(0, target.hp - finalDamage);
+    applyNpcDamageInstance(ctx, target, def, finalDamage, spell.damage.type, crit);
     if (target.hp <= 0) ctx.killWithReward(target, def, `☠ ${combatantDisplayName(target, s.npcs)} is struck down!`);
   }
 }

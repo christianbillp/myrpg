@@ -32,7 +32,7 @@ import { canSee as visCanSee } from './Vision.js';
 import { hasModifierFlag, hasAdvantageOn } from './Modifiers.js';
 import { applySelfBuff, applyBuffTo, removeSpellBuffsFrom } from './Buffs.js';
 import { applyInvisibilityConcealment, logInvisibilityFind } from './InvisibilitySystem.js';
-import { SPEED_ZERO_CONDITIONS, isIncapacitated, shieldAcBonus } from './ConditionSystem.js';
+import { SPEED_ZERO_CONDITIONS, isIncapacitated, shieldAcBonus, npcConditionImmune } from './ConditionSystem.js';
 import {
   tilesInArea, playerInArea, creaturesInArea,
   sphereRadiusTiles, chebyshevDiscTiles,
@@ -587,16 +587,18 @@ function resolveHpPoolSpell(
       continue;
     }
     remaining -= t.hp;
-    for (const c of conds) {
+    const tDef = ctx.resolveMonsterDef(t.defId);
+    const applicable = tDef ? conds.filter((c) => !npcConditionImmune(tDef, c)) : conds;
+    for (const c of applicable) {
       if (!t.conditions.includes(c)) t.conditions.push(c);
     }
     // SRD Color Spray: "until the end of your next turn". Schedule the
     // condition strip via the existing ongoingEffects pipeline so the
     // end-of-player-turn tick in CombatFlow lifts it after two end-of-turn
     // hooks fire (this turn's end → 2→1, next turn's end → 1→0 → strip).
-    if (spell.durationRounds === 1 && conds.length > 0) {
+    if (spell.durationRounds === 1 && applicable.length > 0) {
       t.ongoingEffects = t.ongoingEffects ?? [];
-      for (const c of conds) {
+      for (const c of applicable) {
         t.ongoingEffects.push({
           id: ctx.uid(),
           kind: 'spell-condition',
@@ -704,7 +706,9 @@ function resolveSaveSpell(
     } else if (spell.effect) {
       // Pure condition save (Sleep). `onFail` may be a single condition or an
       // array — Hideous Laughter applies both Prone and Incapacitated.
-      const conds = !success ? normaliseConditionList(spell.effect.onFail) : [];
+      const targetDef = ctx.resolveMonsterDef(target.defId);
+      const immuneFilter = (c: string) => !targetDef || !npcConditionImmune(targetDef, c);
+      const conds = !success ? normaliseConditionList(spell.effect.onFail).filter(immuneFilter) : [];
       for (const c of conds) {
         if (!target.conditions.includes(c)) target.conditions.push(c);
       }
@@ -712,7 +716,7 @@ function resolveSaveSpell(
       // without counting toward `anyAffected`, so a fully-saved AOE still won't
       // start concentration.
       if (success) {
-        for (const c of normaliseConditionList(spell.effect.onSuccess)) {
+        for (const c of normaliseConditionList(spell.effect.onSuccess).filter(immuneFilter)) {
           if (!target.conditions.includes(c)) target.conditions.push(c);
         }
       }
@@ -817,7 +821,9 @@ function resolveSingleTargetSaveSpell(
     applyDamageToNpc(ctx, target, dmg, spell.damage.type);
     return dmg > 0;
   } else if (spell.effect) {
-    const conds = !success ? normaliseConditionList(spell.effect.onFail) : [];
+    const targetDef = ctx.resolveMonsterDef(target.defId);
+    const immuneFilter = (c: string) => !targetDef || !npcConditionImmune(targetDef, c);
+    const conds = !success ? normaliseConditionList(spell.effect.onFail).filter(immuneFilter) : [];
     for (const c of conds) {
       if (!target.conditions.includes(c)) target.conditions.push(c);
     }
@@ -837,7 +843,7 @@ function resolveSingleTargetSaveSpell(
     // Applied from `effect.onSuccess`; the failure return value is unchanged so
     // a fully-saved cast still doesn't trip concentration.
     if (success) {
-      for (const c of normaliseConditionList(spell.effect.onSuccess)) {
+      for (const c of normaliseConditionList(spell.effect.onSuccess).filter(immuneFilter)) {
         if (!target.conditions.includes(c)) target.conditions.push(c);
       }
     }

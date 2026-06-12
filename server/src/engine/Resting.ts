@@ -201,6 +201,13 @@ export function applyLongRest(
   player.hitDiceUsed = 0;
   // SRD: Temporary HP is lost at the end of a Long Rest (US-109).
   player.tempHp = 0;
+  // Strength drained by Shadow attacks recovers on a Long Rest. (The SRD
+  // 5.2.1 stat block gives no recovery clause; without Greater Restoration
+  // in scope, a Long Rest is the deliberate house-rule recovery point.)
+  if (player.strengthDrained) {
+    playerDef.str += player.strengthDrained;
+    player.strengthDrained = 0;
+  }
 
   const maxSlots = playerDef.defaultSpellSlots ?? [];
   player.spellSlots = maxSlots.map((m) => m);

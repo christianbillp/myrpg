@@ -18,7 +18,8 @@ import type { GameContext } from './GameContext.js';
 import { combatantDisplayName } from './DisplayNames.js';
 import type { GameEvent } from './types.js';
 import { canUseFeature, playerArmorSpeedPenaltyFt } from './ActionGuards.js';
-import { speedAfterExhaustion } from './ConditionSystem.js';
+import { speedAfterExhaustion, npcConditionImmune } from './ConditionSystem.js';
+import { applyNpcDamageInstance } from './NpcDamage.js';
 import { applySelfBuff } from './Buffs.js';
 import { applyCloudsJaunt } from './GiantGifts.js';
 import { playerSecondWind } from './CombatSystem.js';
@@ -236,10 +237,11 @@ registerFeatureHandler('turn-undead', (ctx) => {
     const total = roll + bonus;
     const right = `WIS d20(${roll})+${bonus}=${total} vs DC ${dc}`;
     if (total < dc) {
-      for (const c of ['frightened', 'incapacitated']) {
+      const applied = ['frightened', 'incapacitated'].filter((c) => !npcConditionImmune(def, c));
+      for (const c of applied) {
         if (!npc.conditions.includes(c)) npc.conditions.push(c);
       }
-      ctx.addLog({ left: `${combatantDisplayName(npc, s.npcs)} is turned — Frightened & Incapacitated`, right, style: 'status' });
+      ctx.addLog({ left: `${combatantDisplayName(npc, s.npcs)} is turned — ${applied.length ? applied.join(' & ') : 'shaken but immune'}`, right, style: 'status' });
     } else {
       ctx.addLog({ left: `${combatantDisplayName(npc, s.npcs)} resists`, right, style: 'normal' });
     }
@@ -297,7 +299,7 @@ registerFeatureHandler('divine-spark', (ctx) => {
   const saved = total >= dc;
   const { finalDamage, log } = ctx.resistMod(saved ? Math.floor(amount / 2) : amount, 'radiant', def, enemy.name);
   const before = enemy.hp;
-  enemy.hp = Math.max(0, enemy.hp - finalDamage);
+  applyNpcDamageInstance(ctx, enemy, def, finalDamage, 'radiant');
   ctx.addLog({ left: `Divine Spark sears ${combatantDisplayName(enemy, s.npcs)} for ${finalDamage} radiant${saved ? ' (save)' : ''}`, right: `CON d20(${roll})+${bonus}=${total} vs DC ${dc}`, style: 'hit' });
   if (log) ctx.addLog(log);
   if (enemy.hp <= 0 && before > 0) ctx.killWithReward(enemy, def, `☠ ${combatantDisplayName(enemy, s.npcs)} is unmade by radiant fire!`);

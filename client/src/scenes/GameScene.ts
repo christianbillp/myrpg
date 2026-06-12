@@ -1099,6 +1099,7 @@ export class GameScene extends Phaser.Scene {
       onStudyFeature:   () => this.beginStudyFeature(),
       onMagicFeature:   () => this.beginMagicFeature(),
       onDetach:         () => gameClient.sendAction({ type: "detach" }),
+      onEscape:         () => gameClient.sendAction({ type: "escape" }),
       onUseFeature:     (featureId) => this.beginUseFeature(featureId),
       onHide:           () => gameClient.sendAction({ type: "hide" }),
       onDeathSave:      () => gameClient.sendAction({ type: "rollDeathSave" }),
@@ -2421,8 +2422,8 @@ export class GameScene extends Phaser.Scene {
     const npcDef = npcs.find(n => n.id === defId);
     if (npcDef) {
       // NPCs inherit stats from their monsterClass but can override id, name,
-      // colour, and (optionally) the token SVG. Token resolution: explicit
-      // `npc.tokenAsset` if set, else fall back to the monsterClass's token.
+      // colour, description, and (optionally) the token SVG. Token resolution:
+      // explicit `npc.tokenAsset` if set, else the monsterClass's token.
       const base = monsters.find(m => m.id === npcDef.monsterClass) ?? monsters[0];
       const npcPath = tokenAssetForNpc(npcDef);
       return {
@@ -2431,6 +2432,7 @@ export class GameScene extends Phaser.Scene {
         name: npcDef.name,
         color: npcDef.color,
         tokenAsset: npcPath ?? tokenAssetForMonster(base),
+        description: npcDef.description ?? base.description,
       };
     }
     return monsters[0];

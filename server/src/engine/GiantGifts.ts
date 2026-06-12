@@ -22,6 +22,8 @@ import { d, mod } from './Dice.js';
 import { sizeRank, parseCreatureSize } from '../../../shared/types.js';
 import { chebyshev } from './EnemyAI.js';
 import { publishNpcDamage } from './ThresholdPublisher.js';
+import { npcConditionImmune } from './ConditionSystem.js';
+import { applyNpcDamageInstance } from './NpcDamage.js';
 import type { GameContext } from './GameContext.js';
 import type { NpcState, MonsterDef, PlayerDef, SpeciesDef } from './types.js';
 
@@ -88,7 +90,7 @@ export function applyGiantGiftOnHit(ctx: GameContext, target: NpcState, targetDe
   if (effect.bonusDamageOnHit) {
     const { total, label } = rollDiceString(effect.bonusDamageOnHit.dice);
     const { finalDamage, log } = ctx.resistMod(total, effect.bonusDamageOnHit.damageType, targetDef, target.name);
-    target.hp = Math.max(0, target.hp - finalDamage);
+    applyNpcDamageInstance(ctx, target, targetDef, finalDamage, effect.bonusDamageOnHit.damageType);
     ctx.state.player.resources[GIANT_GIFT_ID] -= 1;
     const chillNote = effect.speedReduction ? ', speed reduced' : '';
     ctx.addLog({ left: `Giant's gift — +${finalDamage} ${effect.bonusDamageOnHit.damageType}${chillNote}`, right: label, style: 'hit' });
@@ -99,6 +101,10 @@ export function applyGiantGiftOnHit(ctx: GameContext, target: NpcState, targetDe
 
   if (effect.conditionOnHit) {
     if (target.hp <= 0) return;  // no point knocking a corpse Prone
+    if (npcConditionImmune(targetDef, effect.conditionOnHit.condition)) {
+      ctx.addLog({ left: `Giant's gift — ${target.name} cannot be ${effect.conditionOnHit.condition}`, style: 'normal' });
+      return;  // immune — don't spend the use
+    }
     const maxSize = effect.conditionOnHit.targetSizeMax;
     const targetSize = target.size ?? parseCreatureSize(targetDef.size as string | undefined);
     if (maxSize && sizeRank(targetSize) > sizeRank(parseCreatureSize(maxSize))) return;  // too big — gift can't fire
@@ -190,7 +196,7 @@ export function applyStormsThunder(ctx: GameContext, attacker: NpcState): void {
   const { total, label } = rollDiceString(rt.dice);
   const { finalDamage, log } = ctx.resistMod(total, rt.damageType, attackerDef, attacker.name);
   const before = attacker.hp;
-  attacker.hp = Math.max(0, attacker.hp - finalDamage);
+  applyNpcDamageInstance(ctx, attacker, attackerDef, finalDamage, rt.damageType);
   s.player.resources[GIANT_GIFT_ID] -= 1;
   s.player.reactionUsed = true;
   ctx.addLog({ left: `Storm's Thunder — ${finalDamage} thunder lashes back at ${attacker.name}`, right: label, style: 'hit' });

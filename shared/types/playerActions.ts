@@ -42,6 +42,8 @@ export type PlayerAction =
   | { type: 'dodge' }
   | { type: 'disengage' }
   | { type: 'detach' }
+  /** Escape a monster grapple — Athletics/Acrobatics vs the escape DC (US-125). */
+  | { type: 'escape' }
   | { type: 'endTurn' }
   | { type: 'rollDeathSave' }
   | { type: 'shortRest' }

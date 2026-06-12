@@ -16,7 +16,8 @@ import websocket from "@fastify/websocket";
 import { z } from "zod";
 import Anthropic from "@anthropic-ai/sdk";
 import { readFile, readdir, writeFile, mkdir, unlink, access, rm } from "fs/promises";
-import { join, dirname } from "path";
+import { existsSync } from "fs";
+import { join, dirname, basename } from "path";
 import { fileURLToPath } from "url";
 import { randomUUID } from "crypto";
 import { buildEncounter } from "./encounterService.js";
@@ -239,6 +240,14 @@ async function loadDefs(): Promise<void> {
   // free-text `type` string ("Medium or Small Humanoid" → 'medium'), keeping
   // `type` for display. Done once at load so spawned NpcStates can inherit it.
   for (const m of defs.monsters) m.size = parseCreatureSize(m.type);
+  // `tokenAsset` is required and convention-free — a monster whose declared
+  // SVG is absent renders broken in the client, so surface it loudly at load.
+  for (const m of defs.monsters) {
+    const tokenFile = m.tokenAsset ? join(DATA_DIR, "tokens", basename(m.tokenAsset)) : null;
+    if (!tokenFile || !existsSync(tokenFile)) {
+      console.warn(`[loadDefs] monster "${m.id}" tokenAsset ${m.tokenAsset ?? "(missing field)"} has no file under data/tokens/`);
+    }
+  }
   defs.npcs = npcs;
   defs.equipment = equipment;
   defs.feats = feats;

@@ -64,6 +64,26 @@ export function isIncapacitated(conditions: string[]): boolean {
   return INCAPACITATING_CONDITIONS.some((c) => conditions.includes(c));
 }
 
+/** SRD stat-block Immunities (condition half): true when the monster's
+ *  `conditionImmunities` list names `condition` (case-insensitive). Every
+ *  path that imposes a condition on an NPC — spells, zones, masteries,
+ *  shoves/grapples, monster on-hit riders, AIGM apply_condition — checks
+ *  this before pushing, so a Zombie can't be Poisoned and an Animated
+ *  Armor can't be Frightened. */
+export function npcConditionImmune(def: { conditionImmunities?: string[] }, condition: string): boolean {
+  return (def.conditionImmunities ?? []).some((c) => c.toLowerCase() === condition.toLowerCase());
+}
+
+/** True when any of an on-hit effect's `exemptTypes` ("undead", "elf")
+ *  appears in the target's creature-type text (a monster's `type` line or
+ *  the player's species name/id). Case-insensitive substring match so
+ *  "Medium Undead, Neutral Evil" and "High Elf" both qualify. */
+export function onHitExempt(exemptTypes: string[] | undefined, targetTypeText: string): boolean {
+  if (!exemptTypes || exemptTypes.length === 0) return false;
+  const text = targetTypeText.toLowerCase();
+  return exemptTypes.some((t) => text.includes(t.toLowerCase()));
+}
+
 /**
  * True when the creature is observable to others. Hidden and invisible creatures
  * cannot be the target of reactions (e.g. Opportunity Attacks) — the SRD's

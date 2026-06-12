@@ -51,5 +51,15 @@
   "xp": 25,
   "cr": "1/8",
   "color": 15105570,
-  "tokenAsset": "/tokens/monster_bandit.svg"
+  "tokenAsset": "/tokens/monster_bandit.svg",
+  "languages": [
+    "Common",
+    "Thieves' Cant"
+  ],
+  "gear": [
+    "leather armor",
+    "light crossbow",
+    "scimitar"
+  ],
+  "description": "A road-worn cutthroat in a patched leather jack, scarf pulled up to the eyes, scimitar at the hip and a light crossbow slung across the back. Everything about them — the stance, the boots, the appraising stare — belongs to someone who weighs strangers by the value of their luggage."
 }

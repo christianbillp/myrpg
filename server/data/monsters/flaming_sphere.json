@@ -12,7 +12,14 @@
   "wis": 1,
   "cha": 1,
   "proficiencyBonus": 0,
-  "savingThrows": { "str": 0, "dex": 0, "con": 0, "int": -5, "wis": -5, "cha": -5 },
+  "savingThrows": {
+    "str": 0,
+    "dex": 0,
+    "con": 0,
+    "int": -5,
+    "wis": -5,
+    "cha": -5
+  },
   "initiativeBonus": 0,
   "stealthBonus": 0,
   "passivePerception": 10,
@@ -21,5 +28,8 @@
   "xp": 0,
   "cr": "0",
   "color": 16744448,
-  "immunities": ["fire"]
+  "immunities": [
+    "fire"
+  ],
+  "description": "A rolling globe of roaring flame the size of a cart wheel, scorching a black trail across the ground and throwing heat that can be felt three paces away."
 }

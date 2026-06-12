@@ -1,0 +1,55 @@
+{
+  "id": "tough",
+  "name": "Tough",
+  "type": "Medium or Small Humanoid, Neutral",
+  "maxHp": 32,
+  "hpFormula": "5d8+10",
+  "ac": 12,
+  "str": 15,
+  "dex": 12,
+  "con": 14,
+  "int": 10,
+  "wis": 10,
+  "cha": 11,
+  "proficiencyBonus": 2,
+  "savingThrows": {
+    "str": 2,
+    "dex": 1,
+    "con": 2,
+    "int": 0,
+    "wis": 0,
+    "cha": 0
+  },
+  "initiativeBonus": 1,
+  "stealthBonus": 1,
+  "passivePerception": 10,
+  "languages": [
+    "Common"
+  ],
+  "gear": [
+    "heavy crossbow",
+    "leather armor",
+    "mace"
+  ],
+  "speed": 30,
+  "traits": [
+    "pack_tactics"
+  ],
+  "attacks": [
+    {
+      "name": "Mace",
+      "attackType": "melee",
+      "bonus": 4,
+      "reach": 5,
+      "damageDice": 1,
+      "damageSides": 6,
+      "damageBonus": 2,
+      "damageType": "bludgeoning"
+    }
+  ],
+  "xp": 100,
+  "cr": "1/2",
+  "color": 6968642,
+  "tokenAsset": "/tokens/monster_tough.svg",
+  "description": "A slab of hired muscle in a creaking leather jerkin, mace hanging from a fist like a closing argument. The broken nose and flattened knuckles say the trade is old; the patient stare says the price has already been paid."
+}

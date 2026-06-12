@@ -1,0 +1,89 @@
+{
+  "id": "ghoul",
+  "name": "Ghoul",
+  "type": "Medium Undead, Chaotic Evil",
+  "maxHp": 22,
+  "hpFormula": "5d8",
+  "ac": 12,
+  "str": 13,
+  "dex": 15,
+  "con": 10,
+  "int": 7,
+  "wis": 10,
+  "cha": 6,
+  "proficiencyBonus": 2,
+  "savingThrows": {
+    "str": 1,
+    "dex": 2,
+    "con": 0,
+    "int": -2,
+    "wis": 0,
+    "cha": -2
+  },
+  "initiativeBonus": 2,
+  "stealthBonus": 2,
+  "passivePerception": 10,
+  "languages": [
+    "Common"
+  ],
+  "senses": {
+    "darkvision": 60
+  },
+  "speed": 30,
+  "attacks": [
+    {
+      "name": "Bite",
+      "attackType": "melee",
+      "bonus": 4,
+      "reach": 5,
+      "damageDice": 1,
+      "damageSides": 6,
+      "damageBonus": 2,
+      "damageType": "piercing",
+      "bonusDamage": [
+        {
+          "dice": 1,
+          "sides": 6,
+          "bonus": 0,
+          "damageType": "necrotic"
+        }
+      ]
+    },
+    {
+      "name": "Claw",
+      "attackType": "melee",
+      "bonus": 4,
+      "reach": 5,
+      "damageDice": 1,
+      "damageSides": 4,
+      "damageBonus": 2,
+      "damageType": "slashing",
+      "onHit": [
+        {
+          "kind": "save",
+          "ability": "con",
+          "dc": 10,
+          "condition": "paralyzed",
+          "exemptTypes": [
+            "undead",
+            "elf"
+          ]
+        }
+      ]
+    }
+  ],
+  "multiattack": 2,
+  "immunities": [
+    "poison"
+  ],
+  "conditionImmunities": [
+    "charmed",
+    "exhaustion",
+    "poisoned"
+  ],
+  "xp": 200,
+  "cr": "1",
+  "color": 11248026,
+  "tokenAsset": "/tokens/monster_ghoul.svg",
+  "description": "A hairless, grave-pale thing crouched on legs that bend a little wrong, all sinew and stretched skin over a swollen belly. Its tongue is too long, its nails are black claws, and it watches living flesh with an undisguised, drooling appetite."
+}

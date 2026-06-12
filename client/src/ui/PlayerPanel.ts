@@ -118,6 +118,8 @@ export interface PlayerPanelCallbacks {
   /** Attune to a magic item (US-124). */
   onAttune: (itemId: string) => void;
   onDetach: () => void;
+  /** Escape a monster grapple — Athletics/Acrobatics vs the escape DC (US-125). */
+  onEscape: () => void;
   onHide: () => void;
   onDeathSave: () => void;
   onShortRest: () => void;
@@ -564,6 +566,7 @@ export class PlayerPanel {
     add(this.makeBtn('HELP', GREEN, this.callbacks.onHelp), !aa.canHelp);
     add(this.makeBtn('READY', GREEN, this.callbacks.onReady), !aa.canReady);
     add(this.makeBtn('DETACH', GREEN, this.callbacks.onDetach), !aa.canDetach);
+    add(this.makeBtn('ESCAPE', GREEN, this.callbacks.onEscape), !aa.canEscapeGrapple);
     add(this.makeBtn('KNOCK OUT', state.nonLethal ? '#5a4800' : '#2a2a1a', () => this.callbacks.onToggleNonLethal(!state.nonLethal)), !combat);
     add(this.makeBtn('HIDE', BLUE, this.callbacks.onHide), !aa.canHide);
     add(this.makeBtn('SEARCH', GREEN, this.callbacks.onSearch), !aa.canSearch);

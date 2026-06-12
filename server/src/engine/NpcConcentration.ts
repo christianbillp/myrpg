@@ -24,6 +24,12 @@ export function dropNpcConcentration(ctx: GameContext, npc: NpcState): void {
   if (spellId === 'fly') {
     npc.flying = false;
   }
+  // Buffs this caster sustained on OTHER creatures (US-125 — the Priest
+  // Acolyte's Bless on its allies) end with the concentration.
+  for (const other of ctx.state.npcs) {
+    if (!other.activeBuffs?.length) continue;
+    other.activeBuffs = other.activeBuffs.filter((b) => !(b.spellId === spellId && b.sourceNpcId === npc.id));
+  }
   ctx.addLog({ left: `${combatantDisplayName(npc, ctx.state.npcs)}'s ${spellId} ends`, style: 'status' });
 }
 

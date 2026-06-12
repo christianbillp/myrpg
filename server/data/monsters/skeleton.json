@@ -23,7 +23,9 @@
   "initiativeBonus": 3,
   "stealthBonus": 3,
   "passivePerception": 9,
-  "senses": { "darkvision": 60 },
+  "senses": {
+    "darkvision": 60
+  },
   "speed": 30,
   "attacks": [
     {
@@ -55,5 +57,20 @@
   "xp": 50,
   "cr": "1/4",
   "color": 13421755,
-  "tokenAsset": "/tokens/monster_skeleton.svg"
+  "tokenAsset": "/tokens/monster_skeleton.svg",
+  "immunities": [
+    "poison"
+  ],
+  "conditionImmunities": [
+    "exhaustion",
+    "poisoned"
+  ],
+  "languages": [
+    "Understands Common plus one other language but can't speak"
+  ],
+  "gear": [
+    "shortbow",
+    "shortsword"
+  ],
+  "description": "Bare bones the colour of old parchment, held together by nothing visible and moving with a dry, clicking precision. Rusted scraps of its last uniform still hang from its frame, and pinpoints of pale light burn where eyes should be."
 }

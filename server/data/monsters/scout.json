@@ -1,0 +1,71 @@
+{
+  "id": "scout",
+  "name": "Scout",
+  "type": "Medium or Small Humanoid, Neutral",
+  "maxHp": 16,
+  "hpFormula": "3d8+3",
+  "ac": 13,
+  "str": 11,
+  "dex": 14,
+  "con": 12,
+  "int": 11,
+  "wis": 13,
+  "cha": 11,
+  "proficiencyBonus": 2,
+  "savingThrows": {
+    "str": 0,
+    "dex": 2,
+    "con": 1,
+    "int": 0,
+    "wis": 1,
+    "cha": 0
+  },
+  "initiativeBonus": 2,
+  "stealthBonus": 6,
+  "passivePerception": 15,
+  "skills": {
+    "nature": 4,
+    "perception": 5,
+    "stealth": 6,
+    "survival": 5
+  },
+  "languages": [
+    "Common plus one other language"
+  ],
+  "gear": [
+    "leather armor",
+    "longbow",
+    "shortsword"
+  ],
+  "speed": 30,
+  "attacks": [
+    {
+      "name": "Shortsword",
+      "attackType": "melee",
+      "bonus": 4,
+      "reach": 5,
+      "damageDice": 1,
+      "damageSides": 6,
+      "damageBonus": 2,
+      "damageType": "piercing"
+    },
+    {
+      "name": "Longbow",
+      "attackType": "ranged",
+      "bonus": 4,
+      "reach": 5,
+      "rangeNormal": 150,
+      "rangeLong": 600,
+      "damageDice": 1,
+      "damageSides": 8,
+      "damageBonus": 2,
+      "damageType": "piercing"
+    }
+  ],
+  "multiattack": 2,
+  "xp": 100,
+  "cr": "1/2",
+  "color": 5468449,
+  "tokenAsset": "/tokens/monster_scout.svg",
+  "description": "A weathered tracker in oiled leathers the colour of dead bracken, longbow strung and a shortsword worn for trouble rather than ceremony. They stand where the sightlines are longest, and their gaze never stops walking the horizon."
+}

@@ -1,0 +1,9 @@
+{
+  "id": "spy",
+  "name": "Spy",
+  "monsterClass": "spy",
+  "color": 4868682,
+  "persona": "You are a spy — and if you are doing your work properly, that sentence is the last honest one you will speak today. In the Reach you might be anyone's: a Concordat ear counting elves for the Quota, a White Cape informant cataloguing unlicensed sparks, a halfling syndicate's auditor of other people's secrets. You are an excellent listener, a better liar, and a patient climber of drainpipes. Violence is a failure state — but a failure state you have prepared for thoroughly: poisoned steel, a hand crossbow, and three exits you scouted before you said hello.",
+  "tokenAsset": "/tokens/monster_spy.svg",
+  "factionId": "concordat"
+}

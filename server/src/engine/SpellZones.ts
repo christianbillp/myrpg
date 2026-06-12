@@ -24,7 +24,7 @@ import { canSee as visCanSee } from './Vision.js';
 import { hasModifierFlag, hasAdvantageOn } from './Modifiers.js';
 import { applySelfBuff, applyBuffTo, removeSpellBuffsFrom } from './Buffs.js';
 import { applyInvisibilityConcealment, logInvisibilityFind } from './InvisibilitySystem.js';
-import { SPEED_ZERO_CONDITIONS, isIncapacitated, shieldAcBonus } from './ConditionSystem.js';
+import { SPEED_ZERO_CONDITIONS, isIncapacitated, shieldAcBonus, npcConditionImmune } from './ConditionSystem.js';
 import {
   tilesInArea, playerInArea, creaturesInArea,
   sphereRadiusTiles, chebyshevDiscTiles,
@@ -62,6 +62,8 @@ export function applyZoneCondition(
   }
   const inArea = creaturesInArea(ctx, spell, tile);
   for (const t of inArea) {
+    const def = ctx.resolveMonsterDef(t.defId);
+    if (def && npcConditionImmune(def, condition)) continue;
     if (!t.conditions.includes(condition)) t.conditions.push(condition);
   }
   const casterIn = playerInArea(ctx, spell, tile);
@@ -115,6 +117,10 @@ export function applyZoneSave(
   for (const t of inArea) {
     const def = ctx.resolveMonsterDef(t.defId);
     if (!def) continue;
+    if (npcConditionImmune(def, condition)) {
+      ctx.addLog({ left: `${combatantDisplayName(t, ctx.state.npcs)} is immune to ${condition}`, style: 'normal' });
+      continue;
+    }
     const saveBonus = npcSaveMod(t, def, saveAbility);
     const roll = d20();
     const total = roll + saveBonus;
@@ -256,6 +262,7 @@ export function tickZoneEnterSaves(ctx: GameContext, subjectId: 'player' | strin
     const inside = new Set(z.tiles.map(([x, y]) => `${x},${y}`));
     if (!inside.has(`${subject.tileX},${subject.tileY}`)) continue;
     if (subject.conditions.includes(z.condition)) continue;
+    if (!subject.isPlayer && subject.def && npcConditionImmune(subject.def, z.condition)) continue;
     const ability = z.enterSave.ability;
     const dc = z.enterSave.dc;
     let saveBonus: number;

@@ -28,8 +28,12 @@
     "history": 6,
     "perception": 4
   },
-  "languages": ["Common plus three other languages"],
-  "gear": ["wand"],
+  "languages": [
+    "Common plus three other languages"
+  ],
+  "gear": [
+    "wand"
+  ],
   "speed": 30,
   "attacks": [
     {
@@ -49,22 +53,48 @@
   "spellcasting": {
     "ability": "int",
     "saveDC": 14,
-    "atWill": ["detect-magic", "light", "mage-armor", "mage-hand", "prestidigitation"],
+    "atWill": [
+      "detect-magic",
+      "light",
+      "mage-armor",
+      "mage-hand",
+      "prestidigitation"
+    ],
     "perDay": [
-      { "spellId": "fireball", "uses": 2, "castLevel": 4 },
-      { "spellId": "invisibility", "uses": 2 },
-      { "spellId": "cone-of-cold", "uses": 1 },
-      { "spellId": "fly", "uses": 1 }
+      {
+        "spellId": "fireball",
+        "uses": 2,
+        "castLevel": 4
+      },
+      {
+        "spellId": "invisibility",
+        "uses": 2
+      },
+      {
+        "spellId": "cone-of-cold",
+        "uses": 1
+      },
+      {
+        "spellId": "fly",
+        "uses": 1
+      }
     ],
     "bonusAction": [
-      { "spellId": "misty-step", "uses": 3 }
+      {
+        "spellId": "misty-step",
+        "uses": 3
+      }
     ]
   },
   "reactions": [
-    { "kind": "protective-magic", "usesPerDay": 3 }
+    {
+      "kind": "protective-magic",
+      "usesPerDay": 3
+    }
   ],
   "xp": 2300,
   "cr": "6",
   "color": 15790320,
-  "tokenAsset": "/tokens/monster_mage.svg"
+  "tokenAsset": "/tokens/monster_mage.svg",
+  "description": "A robed scholar past their first youth, ink-stained fingers wrapped around a wand of polished hawthorn, eyes glittering with catalogued spells. The plain travelling robe is cut to hide how expensive it is — and how many components are sewn into the lining."
 }

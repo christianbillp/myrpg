@@ -21,11 +21,6 @@ function hpColor(pct: number): string {
   return pct > 0.5 ? '#27ae60' : pct > 0.25 ? '#f39c12' : '#e74c3c';
 }
 
-function statMod(v: number): string {
-  const m = Math.floor((v - 10) / 2);
-  return (m >= 0 ? '+' : '') + m;
-}
-
 function escapeHtml(s: string): string {
   return s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]!));
 }
@@ -89,8 +84,8 @@ export class TargetPanel {
   private readonly typeEl: HTMLElement;
   private readonly hpFill: HTMLElement;
   private readonly hpText: HTMLElement;
-  private readonly statsEl: HTMLElement;
-  private readonly abilitiesEl: HTMLElement;
+  private readonly descriptionEl: HTMLElement;
+  private readonly descriptionEndSepEl: HTMLElement;
   private readonly conditionsEl: HTMLElement;
   private readonly conditionsLabelEl: HTMLElement;
   private readonly factionEl: HTMLElement;
@@ -137,13 +132,10 @@ export class TargetPanel {
       <div class="gui-label">HP</div>
       <div class="gui-hp-track"><div class="gui-hp-fill" data-hp-fill></div></div>
       <div style="padding:2px 12px;font-size:10px;color:#cccccc;" data-hp-text></div>
-      <div class="gui-sep"></div>
+      <div class="gui-sep" data-description-sep></div>
 
-      <div style="padding:4px 12px;font-size:10px;color:#aabbcc;line-height:1.8;white-space:pre;" data-stats></div>
-      <div class="gui-sep"></div>
-
-      <div style="padding:4px 12px;font-size:10px;color:#99aabb;line-height:1.8;white-space:pre;" data-abilities></div>
-      <div class="gui-sep" style="margin-top:2px;"></div>
+      <div style="padding:6px 12px;font-size:10px;color:#9aa8b8;line-height:1.5;font-style:italic;display:none;" data-description></div>
+      <div class="gui-sep" style="margin-top:2px;" data-description-end-sep></div>
 
       <div class="gui-label" data-conditions-label style="display:none;">CONDITIONS</div>
       <div style="padding:4px 12px;font-size:10px;color:#cc8844;line-height:1.6;display:flex;flex-wrap:wrap;gap:4px;" data-conditions></div>
@@ -177,8 +169,8 @@ export class TargetPanel {
     this.typeEl       = ref('type');
     this.hpFill       = ref('hp-fill');
     this.hpText       = ref('hp-text');
-    this.statsEl      = ref('stats');
-    this.abilitiesEl  = ref('abilities');
+    this.descriptionEl = ref('description');
+    this.descriptionEndSepEl = ref('description-end-sep');
     this.conditionsEl = ref('conditions');
     this.conditionsLabelEl = ref('conditions-label');
     this.factionEl    = ref('faction');
@@ -220,15 +212,19 @@ export class TargetPanel {
     const colorHex = '#' + def.color.toString(16).padStart(6, '0');
     this.renderName(def, npcState, colorHex);
     this.typeEl.textContent = `${def.type}  CR ${def.cr}`;
-    this.statsEl.textContent = `AC     ${def.ac}\nSpeed  ${def.speed} ft`;
 
-    const abilities: [string, number][] = [
-      ['STR', def.str], ['DEX', def.dex], ['CON', def.con],
-      ['INT', def.int], ['WIS', def.wis], ['CHA', def.cha],
-    ];
-    this.abilitiesEl.textContent = abilities
-      .map(([n, v]) => `${n}  ${String(v).padStart(2)}  (${statMod(v)})`)
-      .join('\n');
+    // Flavour description — the NPC's own when authored, the monster's as a
+    // fallback (resolved by GameScene's merged def). Hidden when neither
+    // exists so the panel carries no dead vertical space.
+    const description = def.description?.trim();
+    if (description) {
+      this.descriptionEl.textContent = description;
+      this.descriptionEl.style.display = 'block';
+      this.descriptionEndSepEl.style.display = 'block';
+    } else {
+      this.descriptionEl.style.display = 'none';
+      this.descriptionEndSepEl.style.display = 'none';
+    }
 
     this.refresh(npcState, def.maxHp, factions, discoveredFactions);
     this.el.style.display = 'block';

@@ -7,5 +7,6 @@
   "tokenAsset": "/tokens/npc_wandering_sage.svg",
   "factionId": "white_capes",
   "conversationId": "sages_council_chat",
-  "persistent": true
+  "persistent": true,
+  "description": "A gaunt woman in the weather-ruined remnants of a White Cape's robe, the white long since gone to grey, silver hair cropped short with a knife. She moves slowly among her ruins, decades of rough living written on her hands — but when she looks up, it is with the level, measuring gaze of someone who once held real authority."
 }

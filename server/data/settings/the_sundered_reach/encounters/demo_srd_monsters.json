@@ -1,0 +1,44 @@
+{
+  "id": "demo_srd_monsters",
+  "encounterTitle": "Demo — SRD Monsters",
+  "demo": true,
+  "description": "Demo of the five SRD monsters added in US-123 — Zombie, Ghoul, Shadow, Animated Armor, Bandit Captain — staged across the Dead Waystation. Verify each signature mechanic: the zombie's Undead Fortitude (drops to 1 HP on a successful CON save unless radiant/crit), the ghoul's paralyzing Claw (CON save DC 10, then two Bites with Advantage and adjacent auto-crits), the shadow's Strength drain / necrotic immunity / radiant vulnerability / hide-in-shadows, the armor's Multiattack and condition immunities (try Poison Spray, Topple, or apply_condition — they should bounce), and the captain's Multiattack + Parry reaction.",
+  "mapId": "the_dead_waystation",
+  "npcIds": [],
+  "allyIds": [],
+  "enemyIds": [
+    "zombie",
+    "zombie",
+    "ghoul",
+    "shadow",
+    "animated_armor",
+    "bandit_captain"
+  ],
+  "customIntroduction": "The waystation is dead twice over. In the ruined great hall ahead, two bodies the ground refused shamble between the fallen columns, and something gaunt and quick crouches over a burst grave-niche, watching you the way a starving dog watches a butcher's cart. The light in the hall is wrong — one of the long shadows between the columns is moving against the sun. South-east, past the rubble, a suit of imperial wardplate stands sentinel before the warren arch as it has for three hundred years. And lounging against the colonnade with a pistol on his hip, a road-captain in a good coat counts the heads of his dead competition and decides you're the more interesting prospect.",
+  "customContext": "DEMO — SRD MONSTERS (US-123). This encounter exists so the player can test the five new SRD stat blocks; run every creature exactly per its stat block and do not soften outcomes. THE ROSTER: two zombies and a ghoul in the great hall (faction undead), a shadow among the columns (undead — keep the fiction of it sliding along the walls), an animated armor holding the warren arch (it does not pursue beyond the arch — it guards a boundary, per its persona), and a bandit captain by the colonnade who is hostile but professional — he'll monologue, then fight with scimitar, pistol, and Parry. MECHANICS UNDER TEST (engine-owned — do not duplicate them with tools): Undead Fortitude saves fire automatically when a zombie hits 0 HP; the ghoul's Claw forces the CON save and applies Paralyzed by itself; the shadow's Draining Swipe reduces Strength by itself; condition immunities are enforced automatically (an apply_condition on the armor with charmed/frightened/paralyzed etc. will be refused with a log line — that is correct behaviour, narrate the resistance). Encourage the player to test: radiant or fire vs the shadow (vulnerability vs resistance logs), bludgeoning a zombie to 0 repeatedly, getting clawed by the ghoul (paralysis should expire at the end of their next turn), shoving or poisoning the armor, and melee vs the captain to trigger Parry. The groups are mutually hostile factions — undead, the armor, and the bandit captain do not cooperate; let faction hostility play out if they cross paths.",
+  "objective": "Fight (or observe) each of the five new monsters and watch its signature SRD mechanic resolve in the Event Log.",
+  "allowsLongRest": false,
+  "placementMode": "exact",
+  "placements": [
+    { "role": "player", "x": 4, "y": 16 },
+    { "role": "enemy", "index": 0, "x": 12, "y": 11 },
+    { "role": "enemy", "index": 1, "x": 14, "y": 13 },
+    { "role": "enemy", "index": 2, "x": 17, "y": 12 },
+    { "role": "enemy", "index": 3, "x": 19, "y": 13 },
+    { "role": "enemy", "index": 4, "x": 25, "y": 16 },
+    { "role": "enemy", "index": 5, "x": 9, "y": 4 }
+  ],
+  "environment": {
+    "lightLevel": "dim"
+  },
+  "triggers": [
+    {
+      "id": "demo_srd_monsters_hint",
+      "when": { "event": "encounter_started" },
+      "then": [
+        { "type": "show_log", "message": "DEMO: five new SRD monsters. Zombies — knock them to 0 and watch Undead Fortitude. Ghoul — its Claw paralyzes on a failed CON save (DC 10), then it bites with Advantage. Shadow — drains Strength on hit; immune to necrotic, resistant to fire/cold/lightning, vulnerable to radiant. Animated Armor — Multiattack, immune to poison/psychic and most conditions. Bandit Captain — two attacks and a Parry reaction against melee." }
+      ],
+      "once": true
+    }
+  ]
+}

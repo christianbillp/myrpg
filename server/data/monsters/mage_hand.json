@@ -11,7 +11,14 @@
   "wis": 1,
   "cha": 1,
   "proficiencyBonus": 0,
-  "savingThrows": { "str": -5, "dex": 0, "con": 0, "int": -5, "wis": -5, "cha": -5 },
+  "savingThrows": {
+    "str": -5,
+    "dex": 0,
+    "con": 0,
+    "int": -5,
+    "wis": -5,
+    "cha": -5
+  },
   "initiativeBonus": 0,
   "stealthBonus": 0,
   "passivePerception": 10,
@@ -20,5 +27,6 @@
   "xp": 0,
   "cr": "0",
   "color": 7785471,
-  "tokenAsset": "/tokens/spell_mage_hand.svg"
+  "tokenAsset": "/tokens/spell_mage_hand.svg",
+  "description": "A faint, translucent hand of pale shimmer, drifting at shoulder height and flexing its fingers with eerie, disembodied politeness."
 }

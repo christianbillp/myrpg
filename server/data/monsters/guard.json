@@ -41,5 +41,17 @@
   "xp": 25,
   "cr": "1/8",
   "color": 7833753,
-  "tokenAsset": "/tokens/monster_guard.svg"
+  "tokenAsset": "/tokens/monster_guard.svg",
+  "skills": {
+    "perception": 2
+  },
+  "languages": [
+    "Common"
+  ],
+  "gear": [
+    "chain shirt",
+    "shield",
+    "spear"
+  ],
+  "description": "A professional in a clean chain shirt and town colours, spear held with the easy competence of a thousand watch shifts, shield blazoned with a faded crest. The expression is bored; the posture is not."
 }

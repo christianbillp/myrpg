@@ -444,6 +444,7 @@ export function buildSessionState(
       canDodge: false, canDisengage: false, canShortRest: false,
       castableSpellIds: [],
       canDetach: false,
+      canEscapeGrapple: false,
       canLevelUp: false,
       canLongRest: false,
       disarmableTrapTiles: [],

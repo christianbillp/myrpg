@@ -23,7 +23,7 @@ import { PLAYER_FACTION_ID, PLAYER_ID, INFLUENCE_SKILLS } from '../../../shared/
 import { SKILL_ABILITY } from './Leveling.js';
 import { Logger } from '../Logger.js';
 import * as Guard from './ActionGuards.js';
-import { clearHide, isDead, autoFailsStrDexSave, resistsAllDamage } from './ConditionSystem.js';
+import { clearHide, isDead, autoFailsStrDexSave, resistsAllDamage, npcConditionImmune } from './ConditionSystem.js';
 import type { GameContext } from './GameContext.js';
 import {
   endCombat as cfEndCombat, autoEndCombatIfNoEnemies as cfAutoEndCombat,
@@ -38,7 +38,9 @@ import {
   doHide as caDoHide, doDash as caDoDash, doDodge as caDoDodge,
   doDisengage as caDoDisengage, doDetach as caDoDetach,
   doPlayerOpportunityAttack as caDoPlayerOA, withinShoveGrappleSize,
+  releaseGrappleFrom,
 } from './CombatActions.js';
+import { dropNpcConcentration } from './NpcConcentration.js';
 import {
   doMove as exDoMove, doMoveTo as exDoMoveTo,
   doSearch as exDoSearch, doShortRest as exDoShortRest, doUsePotion as exDoUsePotion,
@@ -135,6 +137,13 @@ export class GameEngine {
     // character got to this level (fresh build, level-up replay, AIGM
     // forced advancement). Idempotent — safe to run after the replay above.
     syncCharacterTracks(this.playerDef, defs.classes);
+    // Re-apply persisted Strength drain (SRD Shadow Draining Swipe) — the
+    // drain mutates only the per-session clone, so it's recorded as a delta
+    // on the player state and replayed here, same pattern as the level-up
+    // history above.
+    if (state.player.strengthDrained) {
+      this.playerDef.str = Math.max(0, this.playerDef.str - state.player.strengthDrained);
+    }
     // Dev mode `unlockAllSpells` — widen the cloned playerDef's spellbook
     // and cantrip list so `castableSpellIds` treats every spell of the
     // character's class as known. Cantrips need explicit treatment because
@@ -360,6 +369,14 @@ export class GameEngine {
     if (direct) return direct;
     const npcDef = this.defs.npcs.find((n) => n.id === defId);
     return npcDef ? this.defs.monsters.find((m) => m.id === npcDef.monsterClass) : undefined;
+  }
+
+  /** Flavour description for a spawned creature — the NPC wrapper's own when
+   *  authored, the monster class's as a fallback. Shown on the Target Panel
+   *  (client-side resolution) and surfaced to the AIGM as appearance context. */
+  getCreatureDescription(defId: string): string | undefined {
+    const npcDef = this.defs.npcs.find((n) => n.id === defId);
+    return npcDef?.description ?? this.resolveMonsterDef(defId)?.description;
   }
 
   processAction(action: PlayerAction): ActionResult {
@@ -839,6 +856,12 @@ export class GameEngine {
       if (!npc) {
         Logger.warn('anomaly.unknown_entity', { tool: 'apply_condition', entity });
       }
+      const def = npc ? this.resolveMonsterDef(npc.defId) : undefined;
+      if (npc && def && npcConditionImmune(def, condition)) {
+        this.addLog({ left: `${npc.name} is immune to ${condition}`, style: 'normal' });
+        Logger.log('combat.condition_immune', { entity: npc.id, defId: npc.defId, condition, reason });
+        return [];
+      }
       if (npc && !npc.conditions.includes(condition)) {
         npc.conditions.push(condition);
         Logger.log('combat.condition_added', { entity: npc.id, defId: npc.defId, condition, reason });
@@ -1226,6 +1249,11 @@ export class GameEngine {
     for (const n of s.npcs) {
       n.ongoingEffects = n.ongoingEffects.filter((oe) => oe.kind !== 'attach' || oe.sourceNpcId !== id);
     }
+    // SRD: a grapple ends when the grappler dies (US-125, Bugbear Grab).
+    releaseGrappleFrom(this.ctx, id, `${dying.name} is down`);
+    // An NPC caster's concentration (and the buffs it sustains — the Priest
+    // Acolyte's Bless) ends with it.
+    if (dying.concentratingOn) dropNpcConcentration(this.ctx, dying);
     // NOTE: do NOT remove from turnOrderIds. The advance loop in CombatFlow
     // skips any combatant whose hp <= 0; mutating the array mid-iteration
     // would shift indices and could cause a still-alive combatant to skip
@@ -1396,6 +1424,7 @@ export class GameEngine {
       canShortRest: Guard.canShortRest(this.ctx),
       castableSpellIds: Guard.castableSpellIds(this.ctx),
       canDetach: Guard.canDetach(this.ctx),
+      canEscapeGrapple: Guard.canEscapeGrapple(this.ctx),
       // LEVEL UP is offered in exploration only — the overlay opens a modal
       // dialogue and applies HP / feature changes that shouldn't land mid-turn.
       canLevelUp: phase === 'exploring' && canLevelUp(this.playerDef.level, p.xp),

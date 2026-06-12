@@ -1,0 +1,80 @@
+{
+  "id": "bugbear_warrior",
+  "name": "Bugbear Warrior",
+  "type": "Medium Fey (Goblinoid), Chaotic Evil",
+  "maxHp": 33,
+  "hpFormula": "6d8+6",
+  "ac": 14,
+  "str": 15,
+  "dex": 14,
+  "con": 13,
+  "int": 8,
+  "wis": 11,
+  "cha": 9,
+  "proficiencyBonus": 2,
+  "savingThrows": {
+    "str": 2,
+    "dex": 2,
+    "con": 1,
+    "int": -1,
+    "wis": 0,
+    "cha": -1
+  },
+  "initiativeBonus": 2,
+  "stealthBonus": 6,
+  "passivePerception": 10,
+  "skills": {
+    "stealth": 6,
+    "survival": 2
+  },
+  "languages": [
+    "Common",
+    "Goblin"
+  ],
+  "gear": [
+    "hide armor",
+    "light hammers (3)"
+  ],
+  "senses": {
+    "darkvision": 60
+  },
+  "speed": 30,
+  "attacks": [
+    {
+      "name": "Light Hammer",
+      "attackType": "both",
+      "bonus": 4,
+      "reach": 10,
+      "rangeNormal": 20,
+      "rangeLong": 60,
+      "damageDice": 3,
+      "damageSides": 4,
+      "damageBonus": 2,
+      "damageType": "bludgeoning",
+      "advantageVsGrappledTarget": true
+    },
+    {
+      "name": "Grab",
+      "attackType": "melee",
+      "bonus": 4,
+      "reach": 10,
+      "damageDice": 2,
+      "damageSides": 6,
+      "damageBonus": 2,
+      "damageType": "bludgeoning",
+      "onHit": [
+        {
+          "kind": "condition",
+          "condition": "grappled",
+          "escapeDc": 12,
+          "maxTargetSize": "medium"
+        }
+      ]
+    }
+  ],
+  "xp": 200,
+  "cr": "1",
+  "color": 9332552,
+  "tokenAsset": "/tokens/monster_bugbear_warrior.svg",
+  "description": "Seven feet of matted fur and stale-sweat muscle, hunched so its long arms hang past its knees, a light hammer dangling from each fist. For all its bulk it stands unnervingly still and silent — a thing built for waiting beside dark roads."
+}

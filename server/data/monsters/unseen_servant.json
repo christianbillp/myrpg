@@ -11,7 +11,14 @@
   "wis": 1,
   "cha": 1,
   "proficiencyBonus": 0,
-  "savingThrows": { "str": -4, "dex": 0, "con": 0, "int": -5, "wis": -5, "cha": -5 },
+  "savingThrows": {
+    "str": -4,
+    "dex": 0,
+    "con": 0,
+    "int": -5,
+    "wis": -5,
+    "cha": -5
+  },
   "initiativeBonus": 0,
   "stealthBonus": 0,
   "passivePerception": 10,
@@ -20,5 +27,6 @@
   "xp": 0,
   "cr": "0",
   "color": 11187677,
-  "tokenAsset": "/tokens/spell_unseen_servant.svg"
+  "tokenAsset": "/tokens/spell_unseen_servant.svg",
+  "description": "Nothing at all — except the tray that lifts itself, the door that opens unasked, and the faint impression of footsteps crossing a dusty floor."
 }

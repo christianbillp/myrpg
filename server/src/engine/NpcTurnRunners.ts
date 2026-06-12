@@ -23,17 +23,18 @@ import { attackerCannotLocate } from './InvisibilitySystem.js';
 import { PLAYER_FACTION_ID, PLAYER_ID } from '../../../shared/types.js';
 import { isIncapacitated, isVisible, TURN_CONDITIONS } from './ConditionSystem.js';
 import { doNpcOpportunityAttack } from './CombatActions.js';
-import { applyNpcAttackHit } from './NpcDamage.js';
-import { applyDamageWithTempHp } from './CombatSystem.js';
+import { applyNpcAttackHit, applyNpcDamageInstance } from './NpcDamage.js';
+import { canSee as visCanSee } from './Vision.js';
 import { publishNpcDamage } from './ThresholdPublisher.js';
 import { chooseNpcBehavior, fleeFromThreat, isMapEdge } from './NpcBrain.js';
 import {
   tryNpcOffensiveSpell, tryNpcBonusTeleport, tryNpcSelfBuff,
-  breakNpcSelfInvisibilityOnAttack,
+  tryNpcSupportCast, breakNpcSelfInvisibilityOnAttack,
 } from './NpcSpellcasting.js';
 import { Logger } from '../Logger.js';
 import { endConcentration } from './ConcentrationSystem.js';
-import { applyTurnStartPeriodicDamage, isAttacker } from './OngoingEffectsSystem.js';
+import { applyTurnStartPeriodicDamage, isAttacker, applyMonsterOnHitToPlayer, expireSourceTurnStartConditions } from './OngoingEffectsSystem.js';
+import { applyOnHitSaveToNpc } from './NpcDamage.js';
 import { tickZoneEnterSaves, spellSaveDC } from './SpellSystem.js';
 import { d20, mod } from './Dice.js';
 
@@ -106,7 +107,7 @@ function applyTrapZoneDamageToNpc(ctx: GameContext, npc: NpcState, amount: numbe
   const { finalDamage, log } = ctx.resistMod(amount, damageType, def, npc.name);
   if (log) ctx.addLog(log);
   const hpBefore = npc.hp;
-  applyDamageWithTempHp(npc, finalDamage);
+  applyNpcDamageInstance(ctx, npc, def, finalDamage, damageType);
   publishNpcDamage(ctx, npc, hpBefore, npc.hp);
   if (npc.hp <= 0) ctx.killWithReward(npc, def, `☠ ${combatantDisplayName(npc, ctx.state.npcs)} is slain!`);
 }
@@ -225,6 +226,7 @@ export function pickEnemyAttackTarget(ctx: GameContext, attacker: NpcState): Ene
         dodging: s.player.conditions.includes('dodging'),
         invisible: s.player.conditions.includes('invisible'),
         conditions: s.player.conditions,
+        grappledByAttacker: s.player.grappledBy?.npcId === attacker.id,
         passivePerception: 10 + (ctx.playerDef.skills['perception'] ?? 0),
       },
       dist: chebyshev(attacker.tileX, attacker.tileY, s.player.tileX, s.player.tileY),
@@ -254,6 +256,7 @@ export function pickEnemyAttackTarget(ctx: GameContext, attacker: NpcState): Ene
         dodging: other.conditions.includes('dodging'),
         invisible: other.conditions.includes('invisible'),
         conditions: other.conditions,
+        grappledByAttacker: other.grappledBy === attacker.id,
         passivePerception: 10,
       },
       dist: chebyshev(attacker.tileX, attacker.tileY, other.tileX, other.tileY),
@@ -316,6 +319,9 @@ export function runSingleEnemyTurn(ctx: GameContext, npc: NpcState, events: Game
   // actually protect the NPC against incoming attacks during the round.
   npc.reactionUsed = false;
   npc.conditions = npc.conditions.filter((c) => !TURN_CONDITIONS.includes(c));
+  // Conditions this NPC imposed "until the start of its next turn"
+  // (Enthralling Panache) expire now — player and NPC victims alike.
+  expireSourceTurnStartConditions(ctx, npc.id);
   Logger.log('combat.turn_started', { combatantId: npc.id, defId: npc.defId, kind: 'enemy', hp: npc.hp });
   ctx.publish({ type: 'turn_started', combatantId: npc.id });
 
@@ -371,11 +377,14 @@ export function runSingleEnemyTurn(ctx: GameContext, npc: NpcState, events: Game
   }
   // behavior === 'attack' — fall through to the existing AI loop.
 
-  // ── Stat-block spellcasting (US-117) ───────────────────────────────────
-  // Bonus action first (Misty Step escape valve — the caster can still act),
+  // ── Stat-block spellcasting (US-117 / US-125) ──────────────────────────
+  // ONE bonus action: support casting (the Priest Acolyte's Divine Aid —
+  // Healing Word / Bless) takes priority over the Misty Step escape valve;
   // then the Action choices in preference order: best offensive AoE →
   // defensive self-buff → default weapon attack below.
-  tryNpcBonusTeleport(ctx, npc, def, events);
+  if (!tryNpcSupportCast(ctx, npc, def)) {
+    tryNpcBonusTeleport(ctx, npc, def, events);
+  }
   if (tryNpcOffensiveSpell(ctx, npc, def, events)
       || tryNpcSelfBuff(ctx, npc, def, events)) {
     finalizeNpcTurn(ctx, npc, events);
@@ -404,6 +413,21 @@ export function runSingleEnemyTurn(ctx: GameContext, npc: NpcState, events: Game
     traitAdvantage,
     traitDisadvantage,
     onStep: (tx, ty) => applyZoneStepEffects(ctx, npc, tx, ty),
+    // Cover the target benefits from against this NPC's ranged shot (US-045)
+    // — the Vision walk from the shooter's (possibly moved) tile.
+    coverFor: (fromX, fromY) => {
+      const vision = visCanSee(
+        s,
+        { tileX: fromX, tileY: fromY, senses: def.senses },
+        { tileX: target.tileX, tileY: target.tileY, conditions: target.conditions, id: target.id },
+      );
+      switch (vision.cover) {
+        case 'half': return 2;
+        case 'three-quarters': return 5;
+        case 'total': return 99;
+        default: return 0;
+      }
+    },
   });
 
   // SRD Invisibility — "the spell ends early immediately after the target
@@ -489,6 +513,22 @@ export function runSingleEnemyTurn(ctx: GameContext, npc: NpcState, events: Game
 
   ctx.addLogs(result.logs);
 
+  // ── Attack-replacement save action (US-125, Enthralling Panache) ───────
+  // Resolved independently of the weapon attacks' outcomes — the creature
+  // traded one Multiattack swing for it inside `runEnemyTurn`.
+  if (result.saveAction && result.attacked) {
+    const sa = result.saveAction;
+    if (result.attackedTargetId === 'player') {
+      applyMonsterOnHitToPlayer(ctx, npc, [{ kind: 'save', ability: sa.ability, dc: sa.dc, condition: sa.condition, untilSourceTurnStart: true }]);
+    } else {
+      const saTarget = s.npcs.find((n) => n.id === result.attackedTargetId);
+      const saTargetDef = saTarget ? ctx.resolveMonsterDef(saTarget.defId) : undefined;
+      if (saTarget && saTargetDef) {
+        applyOnHitSaveToNpc(ctx, npc, saTarget, saTargetDef, { ability: sa.ability, dc: sa.dc, condition: sa.condition, untilSourceTurnStart: true });
+      }
+    }
+  }
+
   // ── Shield reaction ────────────────────────────────────────────────────
   // Only triggers when the attack targets the player — NPC-vs-NPC attacks
   // bypass the Shield prompt. SRD: Shield's +5 AC can't convert a crit
@@ -521,7 +561,7 @@ export function runSingleEnemyTurn(ctx: GameContext, npc: NpcState, events: Game
     // other lunge too; the hit/whiff SOUND stays player-facing only.
     const beatTargetId = targetedPlayer ? 'player' : result.attackedTargetId;
     if (beatTargetId) {
-      events.push({ type: 'attack', attackerId: npc.id, targetId: beatTargetId, kind: 'melee', outcome: result.isCrit ? 'crit' : result.isHit ? 'hit' : 'miss' });
+      events.push({ type: 'attack', attackerId: npc.id, targetId: beatTargetId, kind: result.attackKind ?? 'melee', outcome: result.isCrit ? 'crit' : result.isHit ? 'hit' : 'miss' });
     }
     if (targetedPlayer) {
       events.push({ type: 'play_sound', sound: result.isHit ? 'physical_hit' : 'physical_miss' });

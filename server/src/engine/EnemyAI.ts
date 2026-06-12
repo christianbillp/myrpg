@@ -1,5 +1,5 @@
-import { NpcState, MonsterDef, GameEvent, LogEntry, AttackOnHitEffect, ExtraAttack } from './types.js';
-import { tryNimbleEscape, enemyAttack, npcBanePenalty, npcReducedPenalty, type RolledBonusDamage } from './CombatSystem.js';
+import { NpcState, MonsterDef, GameEvent, LogEntry, AttackOnHitEffect, ExtraAttack, MonsterSaveAction } from './types.js';
+import { tryNimbleEscape, enemyAttack, npcBanePenalty, npcBlessBonus, npcReducedPenalty, type RolledBonusDamage } from './CombatSystem.js';
 import { isIncapacitated, hasAttackDisadvantage, hasAttackAdvantage, hasSpeedZero, proneStandCost, grantsDisadvantageAgainst, grantsAdvantageAgainst } from './ConditionSystem.js';
 
 /**
@@ -25,6 +25,10 @@ export interface EnemyAttackTarget {
    *  Disadv-imposing condition (blurred, heavily-obscured, …) lands on the
    *  attacker without each one needing its own discrete flag here. */
   conditions: string[];
+  /** True when this target is currently grappled BY the attacking NPC — set
+   *  by the caller from `grappledBy` tracking. Grants Advantage to attacks
+   *  flagged `advantageVsGrappledTarget` (US-125, Bugbear Light Hammer). */
+  grappledByAttacker?: boolean;
   passivePerception: number;
   /** Set on the synthesised "no reachable/locatable target" snapshot — the
    *  attacker has no one it can attack (e.g. its only foe is an Invisible
@@ -54,6 +58,10 @@ export interface EnemyTurnConfig {
    *  side effect zeroes the NPC's speed, the movement loop breaks on the
    *  next iteration via `hasSpeedZero`. */
   onStep?: (tx: number, ty: number) => number;
+  /** Cover AC bonus the target benefits from against a shot taken from
+   *  (fromX, fromY) — the caller walks the Vision line (US-045). Consulted
+   *  for ranged attacks only; ≥ 99 means Total Cover (no shot is taken). */
+  coverFor?: (fromX: number, fromY: number) => number;
 }
 
 export interface EnemyTurnResult {
@@ -85,6 +93,14 @@ export interface EnemyTurnResult {
   /** On-hit effects authored on the attack (attach, etc.). The caller applies
    *  these only when the attack actually lands. */
   attackOnHit?: AttackOnHitEffect[];
+  /** Whether the resolved attack was a melee swing or a ranged shot (US-124)
+   *  — drives the caller's attack beat + sound. Undefined when no attack. */
+  attackKind?: 'melee' | 'ranged';
+  /** Attack-replacement save action used this turn (US-125, Enthralling
+   *  Panache) — one Multiattack swing was traded for it. The caller resolves
+   *  the target's save and applies the condition; it lasts until the start
+   *  of this creature's next turn. */
+  saveAction?: MonsterSaveAction;
 }
 
 export interface AllyTurnConfig {
@@ -146,6 +162,28 @@ export function runEnemyTurn(
 
   const belowHalf = enemy.hp <= enemy.maxHp / 2;
 
+  // SRD attack choice (US-124): a creature with a save-rider attack (Ghoul
+  // Claw → Paralyzed) opens with it while the target lacks the condition —
+  // the rider is its own single-attack action, not part of Multiattack. Once
+  // the condition lands (or the attack has no rider) the creature uses its
+  // first melee attack with full Multiattack (the Ghoul's two Bites, now with
+  // Advantage and adjacent auto-crits against a paralyzed target). A ranged
+  // option (Skeleton's Shortbow, Bandit Captain's Pistol) is used whenever
+  // melee can't be reached this turn — charge when you can engage, shoot
+  // when you can't.
+  const meleeAttacks = def.attacks.filter((a) => a.attackType === 'melee' || a.attackType === 'both');
+  const riderAttack = meleeAttacks.find((a) =>
+    a.onHit?.some((e) => (e.kind === 'save' || e.kind === 'condition') && !target.conditions.includes(e.condition)),
+  );
+  const meleeAttack = riderAttack ?? meleeAttacks[0];
+  const rangedAttack = def.attacks.find((a) => (a.attackType === 'ranged' || a.attackType === 'both') && (a.rangeNormal ?? 0) > 0);
+  if (!meleeAttack && !rangedAttack) {
+    logs.push({ left: `${config.displayName} has no attack`, style: 'normal' });
+    return skip();
+  }
+  const rangeNormalTiles = rangedAttack ? Math.max(1, Math.floor((rangedAttack.rangeNormal ?? 5) / 5)) : 0;
+  const rangeLongTiles = rangedAttack ? Math.max(rangeNormalTiles, Math.floor((rangedAttack.rangeLong ?? rangedAttack.rangeNormal ?? 5) / 5)) : 0;
+
   // Simplified SRD Fly (US-117): +30 ft of speed while the self-cast Fly
   // concentration holds — the engine has no elevation model.
   const tileSpeed = (def.speed + (enemy.flying ? 30 : 0)) / 5;
@@ -154,7 +192,14 @@ export function runEnemyTurn(
     ? 0
     : Math.max(0, tileSpeed - (enemy.conditions.includes('slowed') ? 2 : 0) - standCost);
 
-  while (stepsLeft > 0 && chebyshev(tileX, tileY, target.tileX, target.tileY) > 1) {
+  // Movement intent: close to melee when this turn's budget can plausibly
+  // reach adjacency; otherwise a shooter advances only to normal range (or
+  // holds position if already inside it) instead of marching into reach.
+  const startDist = chebyshev(tileX, tileY, target.tileX, target.tileY);
+  const canReachMelee = !!meleeAttack && startDist - stepsLeft <= 1;
+  const desiredDist = rangedAttack && !canReachMelee ? Math.min(rangeNormalTiles, Math.max(1, startDist)) : 1;
+
+  while (stepsLeft > 0 && chebyshev(tileX, tileY, target.tileX, target.tileY) > desiredDist) {
     const next = nextStepToward(
       tileX, tileY,
       target.tileX, target.tileY,
@@ -175,37 +220,70 @@ export function runEnemyTurn(
     if (hasSpeedZero(enemy.conditions)) break;
   }
 
+  // Resolve which attack actually fires from the final position: melee when
+  // adjacent (avoiding the SRD point-blank Disadvantage), the ranged option
+  // for anything farther that is still within long range.
   const dist = chebyshev(tileX, tileY, target.tileX, target.tileY);
+  let chosenAttack = meleeAttack;
+  let attackKind: 'melee' | 'ranged' = 'melee';
   if (dist > 1) {
-    logs.push({ left: `${config.displayName} is out of reach`, style: 'normal' });
-    return skip();
+    if (rangedAttack && dist <= rangeLongTiles) {
+      chosenAttack = rangedAttack;
+      attackKind = 'ranged';
+    } else {
+      logs.push({ left: `${config.displayName} is out of reach`, style: 'normal' });
+      return skip();
+    }
+  } else if (!meleeAttack && rangedAttack) {
+    chosenAttack = rangedAttack;
+    attackKind = 'ranged';
   }
-
-  const meleeAttack = def.attacks.find((a) => a.attackType === 'melee' || a.attackType === 'both');
-  if (!meleeAttack) {
+  if (!chosenAttack) {
     logs.push({ left: `${config.displayName} has no attack`, style: 'normal' });
     return skip();
   }
 
+  // SRD ranged-attack modifiers: Disadvantage beyond normal range (long
+  // shot) and within 5 ft of the target (point-blank); the target's Cover
+  // bonus applies (US-045) — Total Cover means no shot at all.
+  const longShot = attackKind === 'ranged' && dist > rangeNormalTiles;
+  const pointBlank = attackKind === 'ranged' && dist <= 1;
+  const coverAc = attackKind === 'ranged' ? (config.coverFor?.(tileX, tileY) ?? 0) : 0;
+  if (attackKind === 'ranged' && coverAc >= 99) {
+    logs.push({ left: `${config.displayName} has no clear shot — ${target.displayName} is behind Total Cover`, style: 'normal' });
+    return skip();
+  }
+
   const targetUnconscious = target.hp <= 0;
-  const withAdvantage = enemyHidden || targetUnconscious || hasAttackAdvantage(enemy.conditions) || !!config.traitAdvantage;
+  const grappleAdvantage = !!chosenAttack.advantageVsGrappledTarget && !!target.grappledByAttacker;
+  const withAdvantage = enemyHidden || targetUnconscious || hasAttackAdvantage(enemy.conditions) || !!config.traitAdvantage || grappleAdvantage;
   // `grantsDisadvantageAgainst` consolidates the per-condition Disadv sources
   // (blurred, heavily-obscured, invisible, prone-at-distance) so adding a new
   // one is a single edit in ConditionSystem, not every attack resolver.
   const targetGrantsDisadv = grantsDisadvantageAgainst(target.conditions, dist);
-  const withDisadvantage = target.hidden || targetGrantsDisadv || hasAttackDisadvantage(enemy.conditions) || target.dodging || !!config.traitDisadvantage;
-  const { damage, isHit, isCrit, attackTotal, logs: attackLogs, bonusComponents } = enemyAttack(meleeAttack, target.ac, withAdvantage, withDisadvantage, 0, -npcBanePenalty(enemy), npcReducedPenalty(enemy));
+  const withDisadvantage = target.hidden || targetGrantsDisadv || hasAttackDisadvantage(enemy.conditions) || target.dodging || !!config.traitDisadvantage || longShot || pointBlank;
+  const attackRollMod = npcBlessBonus(enemy) - npcBanePenalty(enemy);
+  const { damage, isHit, isCrit, attackTotal, logs: attackLogs, bonusComponents } = enemyAttack(chosenAttack, target.ac, withAdvantage, withDisadvantage, coverAc, attackRollMod, npcReducedPenalty(enemy));
   logs.push(...attackLogs);
 
   // SRD Multiattack (US-112): roll the remaining attacks now, with the same
   // weapon and Advantage state. Each is a separate roll; the caller applies
   // them after the primary (and after any Shield reaction the primary triggers).
+  // A save action (US-125, Enthralling Panache) replaces ONE of the attacks
+  // when the target doesn't already carry its condition and is in range.
   const extraAttacks: ExtraAttack[] = [];
-  const totalAttacks = Math.max(1, def.multiattack ?? 1);
+  let totalAttacks = chosenAttack === riderAttack ? 1 : Math.max(1, def.multiattack ?? 1);
+  let saveAction: MonsterSaveAction | undefined;
+  if (totalAttacks > 1) {
+    saveAction = (def.saveActions ?? []).find((sa) =>
+      !target.conditions.includes(sa.condition) && dist * 5 <= sa.rangeFeet,
+    );
+    if (saveAction) totalAttacks -= 1;
+  }
   for (let i = 1; i < totalAttacks; i++) {
-    const ea = enemyAttack(meleeAttack, target.ac, withAdvantage, withDisadvantage, 0, -npcBanePenalty(enemy), npcReducedPenalty(enemy));
+    const ea = enemyAttack(chosenAttack, target.ac, withAdvantage, withDisadvantage, coverAc, npcBlessBonus(enemy) - npcBanePenalty(enemy), npcReducedPenalty(enemy));
     logs.push(...ea.logs);
-    extraAttacks.push({ damage: ea.damage, isHit: ea.isHit, isCrit: ea.isCrit, damageType: meleeAttack.damageType, bonusComponents: ea.bonusComponents });
+    extraAttacks.push({ damage: ea.damage, isHit: ea.isHit, isCrit: ea.isCrit, damageType: chosenAttack.damageType, bonusComponents: ea.bonusComponents });
   }
 
   // Making an attack gives away an unseen attacker's position — a hidden enemy
@@ -229,10 +307,12 @@ export function runEnemyTurn(
 
   return {
     damage, isHit, isCrit, attackTotal, attacked: true,
-    attackedTargetId: target.id, damageType: meleeAttack.damageType,
+    attackedTargetId: target.id, damageType: chosenAttack.damageType,
     logs, events, finalTileX: tileX, finalTileY: tileY, hidden: enemyHidden, bonusComponents,
     extraAttacks,
-    attackOnHit: meleeAttack.onHit,
+    attackOnHit: chosenAttack.onHit,
+    attackKind,
+    saveAction,
   };
 }
 
@@ -274,15 +354,26 @@ export function runAllyTurn(
     stepsLeft--;
   }
 
+  // Melee when adjacent; otherwise fall back to a ranged option within long
+  // range (US-124) — with the SRD long-shot Disadvantage beyond normal range.
   const dist = chebyshev(tileX, tileY, nearest.tileX, nearest.tileY);
-  if (dist > 1) {
-    logs.push({ left: `${config.displayName} moves but cannot reach the enemy`, style: 'normal' });
-    return { attackedTargetId: null, damage: 0, isHit: false, isCrit: false, attacked: false, logs, events, finalTileX: tileX, finalTileY: tileY, bonusComponents: [] };
-  }
-
   const meleeAttack = def.attacks.find((a) => a.attackType === 'melee' || a.attackType === 'both');
-  if (!meleeAttack) {
-    logs.push({ left: `${config.displayName} has no melee attack`, style: 'normal' });
+  const rangedAttack = def.attacks.find((a) => (a.attackType === 'ranged' || a.attackType === 'both') && (a.rangeNormal ?? 0) > 0);
+  let chosenAttack = meleeAttack;
+  let longShot = false;
+  if (dist > 1) {
+    const rangeNormalTiles = rangedAttack ? Math.max(1, Math.floor((rangedAttack.rangeNormal ?? 5) / 5)) : 0;
+    const rangeLongTiles = rangedAttack ? Math.max(rangeNormalTiles, Math.floor((rangedAttack.rangeLong ?? rangedAttack.rangeNormal ?? 5) / 5)) : 0;
+    if (rangedAttack && dist <= rangeLongTiles) {
+      chosenAttack = rangedAttack;
+      longShot = dist > rangeNormalTiles;
+    } else {
+      logs.push({ left: `${config.displayName} moves but cannot reach the enemy`, style: 'normal' });
+      return { attackedTargetId: null, damage: 0, isHit: false, isCrit: false, attacked: false, logs, events, finalTileX: tileX, finalTileY: tileY, bonusComponents: [] };
+    }
+  }
+  if (!chosenAttack) {
+    logs.push({ left: `${config.displayName} has no attack`, style: 'normal' });
     return { attackedTargetId: null, damage: 0, isHit: false, isCrit: false, attacked: false, logs, events, finalTileX: tileX, finalTileY: tileY, bonusComponents: [] };
   }
 
@@ -292,8 +383,8 @@ export function runAllyTurn(
   // single-use marker is consumed by the caller after the attack.)
   const nearestConditions = nearest.conditions ?? [];
   const allyAdvantage = grantsAdvantageAgainst(nearestConditions, dist);
-  const allyDisadvantage = grantsDisadvantageAgainst(nearestConditions, dist);
-  const { damage, isHit, isCrit, logs: attackLogs, bonusComponents } = enemyAttack(meleeAttack, nearest.ac, allyAdvantage, allyDisadvantage);
+  const allyDisadvantage = grantsDisadvantageAgainst(nearestConditions, dist) || longShot;
+  const { damage, isHit, isCrit, logs: attackLogs, bonusComponents } = enemyAttack(chosenAttack, nearest.ac, allyAdvantage, allyDisadvantage);
   logs.push(...attackLogs);
 
   return { attackedTargetId: nearest.id, damage, isHit, isCrit, attacked: true, logs, events, finalTileX: tileX, finalTileY: tileY, bonusComponents };

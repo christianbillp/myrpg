@@ -179,6 +179,13 @@ export function canDetach(ctx: GameContext): boolean {
   return canSpendAction(ctx) && ctx.state.player.ongoingEffects.some((oe) => oe.kind === 'attach');
 }
 
+/** Can the player attempt to Escape a monster grapple this turn (US-125)?
+ *  Costs the Action: Athletics or Acrobatics (whichever is better) vs the
+ *  grapple's escape DC. */
+export function canEscapeGrapple(ctx: GameContext): boolean {
+  return canSpendAction(ctx) && !!ctx.state.player.grappledBy;
+}
+
 /** Can the player take a Short Rest right now (always in exploring phase)? */
 export function canShortRest(ctx: GameContext): boolean {
   const s = ctx.state;

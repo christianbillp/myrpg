@@ -45,5 +45,18 @@
       "acBonus": 2
     }
   ],
-  "tokenAsset": "/tokens/monster_noble.svg"
+  "tokenAsset": "/tokens/monster_noble.svg",
+  "skills": {
+    "deception": 5,
+    "insight": 4,
+    "persuasion": 5
+  },
+  "languages": [
+    "Common plus two other languages"
+  ],
+  "gear": [
+    "breastplate",
+    "rapier"
+  ],
+  "description": "A personage in riding silks and a breastplate polished for show, rapier hilt worked in silver, chin set at the angle of someone accustomed to being obeyed. The voice is the true weapon; the blade is for punctuation."
 }

@@ -12,15 +12,25 @@ every value from the SRD 5.2.1 stat block (`/dnd.srd.5.2.1/11_Monsters/`):
 
 - Identity: `id`, `name`, `type`, `tokenAsset`.
 - Defences: `maxHp`, `ac`, optional `resistances` / `vulnerabilities` /
-  `immunities` / `conditionImmunities`.
+  `immunities` / `conditionImmunities` (enforced — spells, shoves, on-hit
+  riders, and AIGM `apply_condition` all respect the list).
 - Stats: the six ability scores, `proficiencyBonus`, `savingThrows`,
   `initiativeBonus`, `passivePerception`, `stealthBonus`, `speed`.
-- Offence: `attacks[]` (name, bonus, reach/range, damage dice + type), optional
-  `multiattack`, trait flags (e.g. `nimbleEscape`).
+- Offence: `attacks[]` (name, bonus, reach/range, damage dice + type, optional
+  `bonusDamage` riders and `onHit` effects — `attach` / `save` /
+  `ability_drain`), optional `multiattack`, trait flags (`traits:
+  ["pack_tactics" | "sunlight_sensitivity" | "undead_fortitude"]`,
+  `nimbleEscape`).
 - `xp`, `cr`, `color`.
 
-The combat engine selects the correct attack by range; resistance/immunity are
-read from the lists — any combination works without code.
+The combat engine selects the correct attack by range (US-124): melee when the
+creature can close to adjacency this turn, the ranged option otherwise — with
+SRD long-shot/point-blank Disadvantage and Cover applied. Resistance/immunity
+are read from the lists — any combination works without code. See the worked
+SRD examples: `zombie.json` (Undead Fortitude), `ghoul.json` (paralyzing
+on-hit save + necrotic rider), `shadow.json` (Strength drain),
+`skeleton.json` (melee + shortbow by range), `bandit_captain.json`
+(Multiattack + Parry reaction).
 
 ## 2. Token
 

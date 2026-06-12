@@ -22,6 +22,10 @@ export interface ActiveBuff {
   conditions?: string[];
   charges?: number;
   concentration?: boolean;
+  /** NPC caster sustaining this buff (US-125, Priest Acolyte's Bless on its
+   *  allies) — `dropNpcConcentration` strips every buff it sourced. Absent
+   *  for player-cast buffs (the player's `endConcentration` owns those). */
+  sourceNpcId?: string;
 }
 
 export type CombatMode = 'exploring' | 'player_turn' | 'enemy_turn' | 'death_saves' | 'defeat';
@@ -231,6 +235,18 @@ export interface PlayerState {
   steadyAim?: boolean;
   /** Currently active periodic effects (DoTs, attach bites, …). Each fires at the start of its `sourceNpcId`'s turn — see OngoingEffectsSystem. */
   ongoingEffects: OngoingEffect[];
+  /** Total Strength drained by monster `ability_drain` attacks (SRD Shadow).
+   *  The session's cloned playerDef has its `str` reduced by this amount at
+   *  engine construction (mirroring the level-up-history replay pattern) and
+   *  again at hit time; the player dies if Strength reaches 0. Restored — and
+   *  this counter reset — by a Long Rest. Absent means 0. */
+  strengthDrained?: number;
+  /** Set while a monster `onHit` grapple (US-125, Bugbear Grab) holds the
+   *  player: the grappler's NPC id + the SRD escape DC for the player's
+   *  Escape action (Athletics/Acrobatics check). Cleared on a successful
+   *  escape or when the grappler dies / is incapacitated / disappears. The
+   *  `grappled` condition itself lives in `conditions`. */
+  grappledBy?: { npcId: string; escapeDc: number };
 }
 
 export interface AvailableActions {
@@ -253,6 +269,11 @@ export interface AvailableActions {
    *  Detach as an action (consumes the action and removes the attach effects
    *  from that source). */
   canDetach: boolean;
+  /** True when a monster grapple holds the player (`PlayerState.grappledBy`)
+   *  and they can spend the Action on an Escape attempt — Athletics or
+   *  Acrobatics (whichever is better) vs the grapple's escape DC (US-125).
+   *  Drives the ESCAPE button. */
+  canEscapeGrapple: boolean;
   /** True when the player's XP has reached the threshold to advance to the next level (per SRD Character Advancement). The Player Panel surfaces this as a `LEVEL UP` button. */
   canLevelUp: boolean;
   /** True when the current encounter permits Long Rest (`GameState.allowsLongRest`) AND the player is in the exploration phase. */

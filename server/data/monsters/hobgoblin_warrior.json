@@ -1,0 +1,80 @@
+{
+  "id": "hobgoblin_warrior",
+  "name": "Hobgoblin Warrior",
+  "type": "Medium Fey (Goblinoid), Lawful Evil",
+  "maxHp": 11,
+  "hpFormula": "2d8+2",
+  "ac": 18,
+  "str": 13,
+  "dex": 12,
+  "con": 12,
+  "int": 10,
+  "wis": 10,
+  "cha": 9,
+  "proficiencyBonus": 2,
+  "savingThrows": {
+    "str": 1,
+    "dex": 1,
+    "con": 1,
+    "int": 0,
+    "wis": 0,
+    "cha": -1
+  },
+  "initiativeBonus": 3,
+  "stealthBonus": 1,
+  "passivePerception": 10,
+  "languages": [
+    "Common",
+    "Goblin"
+  ],
+  "gear": [
+    "half plate armor",
+    "longbow",
+    "longsword",
+    "shield"
+  ],
+  "senses": {
+    "darkvision": 60
+  },
+  "speed": 30,
+  "traits": [
+    "pack_tactics"
+  ],
+  "attacks": [
+    {
+      "name": "Longsword",
+      "attackType": "melee",
+      "bonus": 3,
+      "reach": 5,
+      "damageDice": 2,
+      "damageSides": 10,
+      "damageBonus": 1,
+      "damageType": "slashing"
+    },
+    {
+      "name": "Longbow",
+      "attackType": "ranged",
+      "bonus": 3,
+      "reach": 5,
+      "rangeNormal": 150,
+      "rangeLong": 600,
+      "damageDice": 1,
+      "damageSides": 8,
+      "damageBonus": 1,
+      "damageType": "piercing",
+      "bonusDamage": [
+        {
+          "dice": 3,
+          "sides": 4,
+          "bonus": 0,
+          "damageType": "poison"
+        }
+      ]
+    }
+  ],
+  "xp": 100,
+  "cr": "1/2",
+  "color": 12352297,
+  "tokenAsset": "/tokens/monster_hobgoblin_warrior.svg",
+  "description": "A tall, ash-skinned goblinoid in immaculate half plate, longsword and longbow maintained to a parade standard no living legion ever issued. It moves with drilled economy, holds its line without being told, and regards everything smaller and louder than itself with cold contempt."
+}

@@ -1,0 +1,60 @@
+{
+  "id": "zombie",
+  "name": "Zombie",
+  "type": "Medium Undead, Neutral Evil",
+  "maxHp": 15,
+  "hpFormula": "2d8+6",
+  "ac": 8,
+  "str": 13,
+  "dex": 6,
+  "con": 16,
+  "int": 3,
+  "wis": 6,
+  "cha": 5,
+  "proficiencyBonus": 2,
+  "savingThrows": {
+    "str": 1,
+    "dex": -2,
+    "con": 3,
+    "int": -4,
+    "wis": 0,
+    "cha": -3
+  },
+  "initiativeBonus": -2,
+  "stealthBonus": -2,
+  "passivePerception": 8,
+  "languages": [
+    "Understands Common plus one other language but can't speak"
+  ],
+  "senses": {
+    "darkvision": 60
+  },
+  "speed": 20,
+  "attacks": [
+    {
+      "name": "Slam",
+      "attackType": "melee",
+      "bonus": 3,
+      "reach": 5,
+      "damageDice": 1,
+      "damageSides": 8,
+      "damageBonus": 1,
+      "damageType": "bludgeoning"
+    }
+  ],
+  "immunities": [
+    "poison"
+  ],
+  "conditionImmunities": [
+    "exhaustion",
+    "poisoned"
+  ],
+  "traits": [
+    "undead_fortitude"
+  ],
+  "xp": 50,
+  "cr": "1/4",
+  "color": 7048782,
+  "tokenAsset": "/tokens/monster_zombie.svg",
+  "description": "A corpse that did not stay one — grey-fleshed, slack-jawed, dragging one ruined leg with terrible patience. Grave dirt still clings to it, the smell arrives before it does, and the wounds that should have ended it simply gape and are ignored."
+}

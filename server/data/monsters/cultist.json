@@ -47,5 +47,17 @@
   "xp": 25,
   "cr": "1/8",
   "color": 9118293,
-  "tokenAsset": "/tokens/monster_cultist.svg"
+  "tokenAsset": "/tokens/monster_cultist.svg",
+  "skills": {
+    "deception": 2,
+    "religion": 2
+  },
+  "languages": [
+    "Common"
+  ],
+  "gear": [
+    "leather armor",
+    "sickle"
+  ],
+  "description": "A gaunt figure in travel-stained robes the colour of old ash, a curved ritual sickle tucked into a rope belt. Sigils are inked along the wrists, and the eyes have the fixed, fevered calm of someone who has already been promised something."
 }

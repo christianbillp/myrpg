@@ -313,7 +313,8 @@ function buildStateMessage(engine: GameEngine): string {
         ).join('; ') ?? 'unknown';
         const statBlockBits = def ? monsterStatBlockBits(def) : '';
         const spellsLine = def ? monsterSpellsLine(def, n) : '';
-        return `  [${entityRef}] ${n.defId}${knownAs} (${n.disposition} disp · ${n.attitude ?? 'indifferent'} att): ${n.hp}/${n.maxHp} HP, tile (${n.tileX},${n.tileY})${cFlags ? ` [${cFlags}]` : ''}\n    Attacks: ${attackStr}${statBlockBits ? `\n    ${statBlockBits}` : ''}${spellsLine ? `\n    ${spellsLine}` : ''}`;
+        const looks = engine.getCreatureDescription(n.defId);
+        return `  [${entityRef}] ${n.defId}${knownAs} (${n.disposition} disp · ${n.attitude ?? 'indifferent'} att): ${n.hp}/${n.maxHp} HP, tile (${n.tileX},${n.tileY})${cFlags ? ` [${cFlags}]` : ''}\n    Attacks: ${attackStr}${statBlockBits ? `\n    ${statBlockBits}` : ''}${spellsLine ? `\n    ${spellsLine}` : ''}${looks ? `\n    Looks: ${looks}` : ''}`;
       }).join('\n')
     : '  None';
 
@@ -321,7 +322,8 @@ function buildStateMessage(engine: GameEngine): string {
   const neutralNpcLines = livingNeutrals.length > 0
     ? livingNeutrals.map((n) => {
         const knownAs = n.revealedName ? ` (known as: ${n.revealedName})` : '';
-        return `  ${n.defId} [npc_${n.id}] (${n.attitude ?? 'indifferent'} att) at tile (${n.tileX},${n.tileY})${knownAs}`;
+        const looks = engine.getCreatureDescription(n.defId);
+        return `  ${n.defId} [npc_${n.id}] (${n.attitude ?? 'indifferent'} att) at tile (${n.tileX},${n.tileY})${knownAs}${looks ? `\n    Looks: ${looks}` : ''}`;
       }).join('\n')
     : '  None';
 

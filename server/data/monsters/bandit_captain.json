@@ -1,0 +1,76 @@
+{
+  "id": "bandit_captain",
+  "name": "Bandit Captain",
+  "type": "Medium or Small Humanoid, Neutral",
+  "maxHp": 52,
+  "hpFormula": "8d8+16",
+  "ac": 15,
+  "str": 15,
+  "dex": 16,
+  "con": 14,
+  "int": 14,
+  "wis": 11,
+  "cha": 14,
+  "proficiencyBonus": 2,
+  "savingThrows": {
+    "str": 4,
+    "dex": 5,
+    "con": 2,
+    "int": 2,
+    "wis": 2,
+    "cha": 2
+  },
+  "initiativeBonus": 3,
+  "stealthBonus": 3,
+  "passivePerception": 10,
+  "skills": {
+    "athletics": 4,
+    "deception": 4
+  },
+  "languages": [
+    "Common",
+    "Thieves' Cant"
+  ],
+  "gear": [
+    "pistol",
+    "scimitar",
+    "studded leather armor"
+  ],
+  "speed": 30,
+  "attacks": [
+    {
+      "name": "Scimitar",
+      "attackType": "melee",
+      "bonus": 5,
+      "reach": 5,
+      "damageDice": 1,
+      "damageSides": 6,
+      "damageBonus": 3,
+      "damageType": "slashing"
+    },
+    {
+      "name": "Pistol",
+      "attackType": "ranged",
+      "bonus": 5,
+      "reach": 5,
+      "rangeNormal": 30,
+      "rangeLong": 90,
+      "damageDice": 1,
+      "damageSides": 10,
+      "damageBonus": 3,
+      "damageType": "piercing"
+    }
+  ],
+  "multiattack": 2,
+  "reactions": [
+    {
+      "kind": "parry",
+      "acBonus": 2
+    }
+  ],
+  "xp": 450,
+  "cr": "2",
+  "color": 10896687,
+  "tokenAsset": "/tokens/monster_bandit_captain.svg",
+  "description": "A veteran freebooter in a good coat gone shabby at the cuffs, scimitar worn high and a flintlock pistol worth more than most farms riding the other hip. Scarred, unhurried, and smiling like the toll is already agreed — the eyes do the counting while the mouth does the charm."
+}

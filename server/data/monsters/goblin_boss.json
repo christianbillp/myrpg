@@ -1,0 +1,97 @@
+{
+  "id": "goblin_boss",
+  "name": "Goblin Boss",
+  "type": "Small Fey (Goblinoid), Chaotic Neutral",
+  "maxHp": 21,
+  "hpFormula": "6d6",
+  "ac": 17,
+  "str": 10,
+  "dex": 15,
+  "con": 10,
+  "int": 10,
+  "wis": 8,
+  "cha": 10,
+  "proficiencyBonus": 2,
+  "savingThrows": {
+    "str": 0,
+    "dex": 2,
+    "con": 0,
+    "int": 0,
+    "wis": -1,
+    "cha": 0
+  },
+  "initiativeBonus": 2,
+  "stealthBonus": 6,
+  "passivePerception": 9,
+  "skills": {
+    "stealth": 6
+  },
+  "languages": [
+    "Common",
+    "Goblin"
+  ],
+  "gear": [
+    "chain shirt",
+    "scimitar",
+    "shield",
+    "shortbow"
+  ],
+  "senses": {
+    "darkvision": 60
+  },
+  "speed": 30,
+  "attacks": [
+    {
+      "name": "Scimitar",
+      "attackType": "melee",
+      "bonus": 4,
+      "reach": 5,
+      "damageDice": 1,
+      "damageSides": 6,
+      "damageBonus": 2,
+      "damageType": "slashing",
+      "bonusDamage": [
+        {
+          "dice": 1,
+          "sides": 4,
+          "bonus": 0,
+          "damageType": "slashing",
+          "onAdvantageOnly": true
+        }
+      ]
+    },
+    {
+      "name": "Shortbow",
+      "attackType": "ranged",
+      "bonus": 4,
+      "reach": 5,
+      "rangeNormal": 80,
+      "rangeLong": 320,
+      "damageDice": 1,
+      "damageSides": 6,
+      "damageBonus": 2,
+      "damageType": "piercing",
+      "bonusDamage": [
+        {
+          "dice": 1,
+          "sides": 4,
+          "bonus": 0,
+          "damageType": "piercing",
+          "onAdvantageOnly": true
+        }
+      ]
+    }
+  ],
+  "multiattack": 2,
+  "nimbleEscape": true,
+  "reactions": [
+    {
+      "kind": "redirect-attack"
+    }
+  ],
+  "xp": 200,
+  "cr": "1",
+  "color": 5535788,
+  "tokenAsset": "/tokens/monster_goblin_boss.svg",
+  "description": "A goblin gone fat on other goblins' work, swaggering in a looted chain shirt with a crown of bent imperial coins wired into its topknot. It keeps a warrior between itself and danger at all times, and its quick yellow eyes are always measuring who can be spent next."
+}

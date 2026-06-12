@@ -530,3 +530,75 @@ export function tryNpcCounterspell(ctx: GameContext, spell: SpellDef, _events: G
   }
   return false;
 }
+
+/**
+ * Bonus-action support casting (US-125, the Priest Acolyte's Divine Aid).
+ * The stat block reads "casts Bless, Healing Word, or Sanctuary" from ONE
+ * shared per-day pool — a support cast therefore spends a use from EVERY
+ * support entry. AI choice (SRD-legal "one of"): Healing Word on the most
+ * wounded bloodied friend (self included), else Bless on itself + up to two
+ * allies (Sanctuary is never picked). Returns true when a cast happened.
+ */
+export function tryNpcSupportCast(
+  ctx: GameContext,
+  caster: NpcState,
+  def: MonsterDef,
+): boolean {
+  const sc = def.spellcasting;
+  if (!sc?.bonusAction) return false;
+  const SUPPORT_SPELL_IDS = ['healing-word', 'bless'];
+  const support = sc.bonusAction.filter((e) => SUPPORT_SPELL_IDS.includes(e.spellId));
+  if (support.length === 0) return false;
+  if (support.some((e) => usesLeft(caster, e.spellId) <= 0)) return false;
+
+  const s = ctx.state;
+  const friends = [caster, ...s.npcs.filter((n) =>
+    n !== caster && n.hp > 0 && n.disposition === caster.disposition
+    && chebyshev(caster.tileX, caster.tileY, n.tileX, n.tileY) * 5 <= 60,
+  )];
+  const spendSupportUse = (): void => { for (const e of support) spendUse(caster, e.spellId); };
+  const casterName = combatantDisplayName(caster, s.npcs);
+
+  // Healing Word — the most wounded bloodied friend within 60 ft.
+  if (support.some((e) => e.spellId === 'healing-word')) {
+    const wounded = friends
+      .filter((n) => n.hp > 0 && n.hp <= n.maxHp / 2)
+      .sort((a, b) => a.hp / a.maxHp - b.hp / b.maxHp)[0];
+    if (wounded) {
+      const spell = ctx.defs.spells.find((sp) => sp.id === 'healing-word');
+      const dice = spell?.heal?.dice ?? 2;
+      const sides = spell?.heal?.sides ?? 4;
+      const rolls: number[] = [];
+      for (let i = 0; i < dice; i++) rolls.push(d(sides));
+      const abilityMod = mod((def as unknown as Record<string, number>)[sc.ability] ?? 10);
+      const healed = Math.max(1, rolls.reduce((a, b) => a + b, 0) + abilityMod);
+      const before = wounded.hp;
+      wounded.hp = Math.min(wounded.maxHp, wounded.hp + healed);
+      spendSupportUse();
+      ctx.addLog({
+        left: `${casterName} casts Healing Word — ${wounded === caster ? 'it' : combatantDisplayName(wounded, s.npcs)} regains ${wounded.hp - before} HP`,
+        right: `${dice}d${sides}[${rolls.join(',')}]+${abilityMod}`,
+        style: 'heal',
+      });
+      Logger.log('ai.support_cast', { casterId: caster.id, spellId: 'healing-word', targetId: wounded.id, healed: wounded.hp - before });
+      return true;
+    }
+  }
+
+  // Bless — self + up to two nearest allies, sustained by concentration.
+  if (support.some((e) => e.spellId === 'bless') && !caster.concentratingOn) {
+    const targets = friends.slice(0, 3);
+    for (const t of targets) {
+      t.activeBuffs = [...(t.activeBuffs ?? []).filter((b) => b.spellId !== 'bless'), { spellId: 'bless', concentration: true, sourceNpcId: caster.id }];
+    }
+    caster.concentratingOn = 'bless';
+    spendSupportUse();
+    ctx.addLog({
+      left: `${casterName} casts Bless — ${targets.map((t) => (t === caster ? 'itself' : combatantDisplayName(t, s.npcs))).join(', ')} gain +1d4 to attacks and saves`,
+      style: 'status',
+    });
+    Logger.log('ai.support_cast', { casterId: caster.id, spellId: 'bless', targetIds: targets.map((t) => t.id) });
+    return true;
+  }
+  return false;
+}

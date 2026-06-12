@@ -1,0 +1,89 @@
+{
+  "id": "spy",
+  "name": "Spy",
+  "type": "Medium or Small Humanoid, Neutral",
+  "maxHp": 27,
+  "hpFormula": "6d8",
+  "ac": 12,
+  "str": 10,
+  "dex": 15,
+  "con": 10,
+  "int": 12,
+  "wis": 14,
+  "cha": 16,
+  "proficiencyBonus": 2,
+  "savingThrows": {
+    "str": 0,
+    "dex": 2,
+    "con": 0,
+    "int": 1,
+    "wis": 2,
+    "cha": 3
+  },
+  "initiativeBonus": 4,
+  "stealthBonus": 6,
+  "passivePerception": 16,
+  "skills": {
+    "deception": 5,
+    "insight": 4,
+    "investigation": 5,
+    "perception": 6,
+    "sleightOfHand": 4,
+    "stealth": 6
+  },
+  "languages": [
+    "Common plus one other language"
+  ],
+  "gear": [
+    "hand crossbow",
+    "shortsword",
+    "thieves' tools"
+  ],
+  "speed": 30,
+  "attacks": [
+    {
+      "name": "Shortsword",
+      "attackType": "melee",
+      "bonus": 4,
+      "reach": 5,
+      "damageDice": 1,
+      "damageSides": 6,
+      "damageBonus": 2,
+      "damageType": "piercing",
+      "bonusDamage": [
+        {
+          "dice": 2,
+          "sides": 6,
+          "bonus": 0,
+          "damageType": "poison"
+        }
+      ]
+    },
+    {
+      "name": "Hand Crossbow",
+      "attackType": "ranged",
+      "bonus": 4,
+      "reach": 5,
+      "rangeNormal": 30,
+      "rangeLong": 120,
+      "damageDice": 1,
+      "damageSides": 6,
+      "damageBonus": 2,
+      "damageType": "piercing",
+      "bonusDamage": [
+        {
+          "dice": 2,
+          "sides": 6,
+          "bonus": 0,
+          "damageType": "poison"
+        }
+      ]
+    }
+  ],
+  "nimbleEscape": true,
+  "xp": 200,
+  "cr": "1",
+  "color": 4868682,
+  "tokenAsset": "/tokens/monster_spy.svg",
+  "description": "Unremarkable on purpose: travelling clothes of no particular origin, a face you will struggle to describe tomorrow, hands that are never quite where you last saw them. Only the eyes give anything away — they have already counted the exits, twice."
+}

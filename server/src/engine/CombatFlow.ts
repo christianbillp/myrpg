@@ -13,7 +13,8 @@ import { runSpiritGuardiansEndOfTurnSaves, recenterSpiritGuardians } from './Spi
 import { runPerceptionSweep } from './Vision.js';
 import { mod, d20 as d20Local, d } from './Dice.js';
 import { runSingleEnemyTurn, runSingleAllyTurn } from './NpcTurnRunners.js';
-import { applyMonsterAttachToPlayer } from './OngoingEffectsSystem.js';
+import { applyMonsterOnHitToPlayer } from './OngoingEffectsSystem.js';
+import { applyNpcDamageInstance } from './NpcDamage.js';
 import { hasAdvantageOn } from './Modifiers.js';
 import { tickActiveZones, tickZoneEnterSaves, runGustOfWindEndOfTurnSaves } from './SpellSystem.js';
 import { endConcentration } from './ConcentrationSystem.js';
@@ -291,6 +292,16 @@ export function enterPlayerTurn(ctx: GameContext): void {
   // SRD Sneak Attack — "Once per turn". Reset at the start of every player
   // turn so the next eligible hit can ride.
   s.player.sneakAttackUsedThisTurn = false;
+  // SRD: a grapple ends when the grappler is incapacitated (death is handled
+  // by killNpc; this catches a grappler paralyzed / stunned mid-fight).
+  if (s.player.grappledBy) {
+    const grappler = s.npcs.find((n) => n.id === s.player.grappledBy!.npcId);
+    if (!grappler || grappler.hp <= 0 || isIncapacitated(grappler.conditions)) {
+      s.player.grappledBy = undefined;
+      s.player.conditions = s.player.conditions.filter((c) => c !== 'grappled');
+      ctx.addLog({ left: `${ctx.playerDef.name} slips free — the grip has gone slack.`, style: 'status' });
+    }
+  }
   // SRD Shield: the +5 AC bonus ends at the start of the caster's next
   // turn. Drop the flag and recompute AC so the bonus disappears before
   // anything reads it this turn.
@@ -379,6 +390,20 @@ export function endPlayerTurn(ctx: GameContext, events: GameEvent[]): void {
 
 export function tickSpellConditionExpiries(ctx: GameContext): void {
   const s = ctx.state;
+  // Player-side expiries — conditions a monster's on-hit save imposed "until
+  // the end of its next turn" (Ghoul Claw → Paralyzed). Same decrement
+  // discipline as the NPC loop below.
+  if ((s.player.ongoingEffects ?? []).some((oe) => oe.kind === 'spell-condition')) {
+    const remaining: typeof s.player.ongoingEffects = [];
+    for (const oe of s.player.ongoingEffects) {
+      if (oe.kind !== 'spell-condition') { remaining.push(oe); continue; }
+      const next = oe.turnsRemaining - 1;
+      if (next > 0) { remaining.push({ ...oe, turnsRemaining: next }); continue; }
+      s.player.conditions = s.player.conditions.filter((c) => c !== oe.condition);
+      ctx.addLog({ left: `${ctx.playerDef.name} recovers from ${oe.spellId} (${oe.condition})`, style: 'status' });
+    }
+    s.player.ongoingEffects = remaining;
+  }
   for (const npc of s.npcs) {
     if (!npc.ongoingEffects || npc.ongoingEffects.length === 0) continue;
     const remaining: typeof npc.ongoingEffects = [];
@@ -548,8 +573,9 @@ export function applyEnemyHitToPlayer(
       ctx.addLog({ left: `+ ${bd.damage} ${bd.damageType}`, right: bd.rollStr, style: 'hit' });
       ctx.applyDamageToPlayer(bd.damage, events, bd.damageType);
     }
-    // Apply on-hit effects (attach, etc.) authored on the attack.
-    applyMonsterAttachToPlayer(ctx, npc, result.attackOnHit);
+    // Apply on-hit effects (attach, save-or-condition, ability drain)
+    // authored on the attack.
+    applyMonsterOnHitToPlayer(ctx, npc, result.attackOnHit);
     // SRD Goliath Storm's Thunder: a Reaction retaliating against the attacker
     // (within 60 ft) for thunder damage when the player takes the hit.
     applyStormsThunder(ctx, npc);
@@ -606,7 +632,8 @@ export function finalizeNpcTurn(ctx: GameContext, npc: NpcState, events?: GameEv
         if (log) ctx.addLog(log);
       }
       if (npc.hp > 0 && finalDamage > 0) {
-        npc.hp = Math.max(0, npc.hp - finalDamage);
+        if (def) applyNpcDamageInstance(ctx, npc, def, finalDamage, oe.damageType);
+        else npc.hp = Math.max(0, npc.hp - finalDamage);
         ctx.addLog({
           left: `${npc.name} suffers lingering ${oe.spellId} — ${finalDamage} ${oe.damageType}`,
           right: `${oe.dice}d${oe.sides}${oe.bonus ? `+${oe.bonus}` : ''}[${rolls.join(',')}]=${rawTotal}`,

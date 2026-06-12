@@ -23,7 +23,9 @@
   "initiativeBonus": 3,
   "stealthBonus": 3,
   "passivePerception": 9,
-  "senses": { "darkvision": 60 },
+  "senses": {
+    "darkvision": 60
+  },
   "speed": 40,
   "attacks": [
     {
@@ -51,5 +53,6 @@
   "xp": 25,
   "cr": "1/8",
   "color": 10040268,
-  "tokenAsset": "/tokens/monster_stirge.svg"
+  "tokenAsset": "/tokens/monster_stirge.svg",
+  "description": "A cat-sized horror on membranous wings — half bat, half mosquito — trailing a needle proboscis longer than its body. It flies in drunken loops until it smells blood, and then it flies very straight indeed."
 }

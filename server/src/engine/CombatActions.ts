@@ -5,10 +5,11 @@ import type { GameContext } from './GameContext.js';
 import {
   playerMeleeAttack, playerThrowAttack, playerHide, playerSecondWind, enemyAttack,
 } from './CombatSystem.js';
+import { applyNpcDamageInstance } from './NpcDamage.js';
 import {
   isIncapacitated, grantsAdvantageAgainst, grantsDisadvantageAgainst,
   hasAttackDisadvantage, hasAttackAdvantage, isAutoCrit, clearHide,
-  speedAfterExhaustion, shieldAcBonus,
+  speedAfterExhaustion, shieldAcBonus, npcConditionImmune,
 } from './ConditionSystem.js';
 import { chebyshev } from './EnemyAI.js';
 import { makePlayerAttack } from './EquipmentSystem.js';
@@ -16,7 +17,8 @@ import {
   canSpendAction, canDash as guardCanDash, canDodge as guardCanDodge,
   canDisengage as guardCanDisengage, canHide as guardCanHide,
   canAttackTarget, playerAttackReachTiles, hasCunningAction,
-  canDetach as guardCanDetach, playerArmorSpeedPenaltyFt, playerHasStealthDisadvantage,
+  canDetach as guardCanDetach, canEscapeGrapple as guardCanEscapeGrapple,
+  playerArmorSpeedPenaltyFt, playerHasStealthDisadvantage,
 } from './ActionGuards.js';
 import { publishNpcDamage } from './ThresholdPublisher.js';
 import { applyGiantGiftOnHit } from './GiantGifts.js';
@@ -137,6 +139,10 @@ function applyPushMastery(ctx: GameContext, target: NpcState): void {
  */
 function applyToppleMastery(ctx: GameContext, target: NpcState, def: MonsterDef): void {
   if (target.conditions.includes('prone')) return;
+  if (npcConditionImmune(def, 'prone')) {
+    ctx.addLog({ left: `↪ Topple mastery — ${combatantDisplayName(target, ctx.state.npcs)} cannot be knocked Prone`, style: 'normal' });
+    return;
+  }
   const dc = 8 + mod(ctx.playerDef.str) + ctx.playerDef.proficiencyBonus;
   const saveMod = def.savingThrows?.['con'] ?? mod(def.con);
   const roll = d20();
@@ -235,6 +241,15 @@ export function doAttack(ctx: GameContext, targetId: string | undefined, events:
 
   const targetDef = ctx.resolveMonsterDef(target.defId);
   if (!targetDef) return;
+
+  // SRD Charmed (US-125, Enthralling Panache): the charmed player can't
+  // attack the charmer. Other targets stay fair game.
+  const charmedByTarget = s.player.conditions.includes('charmed')
+    && s.player.ongoingEffects.some((oe) => oe.kind === 'spell-condition' && oe.condition === 'charmed' && oe.sourceNpcId === target.id);
+  if (charmedByTarget) {
+    ctx.addLog({ left: `${ctx.playerDef.name} can't bring themself to strike ${combatantDisplayName(target, s.npcs)} — Charmed`, style: 'miss' });
+    return;
+  }
 
   // SRD Sanctuary ends when the warded creature makes an attack roll. The
   // attack is now committed (target + def resolved), so drop the ward.
@@ -339,6 +354,16 @@ function applyAttackOutcome(
   if (target.conditions.includes('helped')) target.conditions = target.conditions.filter((c) => c !== 'helped');
   clearHide(s.player);
 
+  // SRD Goblin Boss "Redirect Attack" (US-125): the boss swaps places with an
+  // adjacent Small/Medium ally, who takes the attack instead. The ally now
+  // stands in the boss's old tile, so `dist` and reach are unchanged.
+  const redirect = tryNpcRedirectAttack(ctx, target, targetDef, resolved, events);
+  if (redirect.applied) {
+    target = redirect.newTarget;
+    targetDef = redirect.newTargetDef;
+    resolved = { ...resolved, ...redirect.replaced };
+  }
+
   // Defensive reactions (e.g. Noble's Parry): trigger when the NPC was hit by
   // a melee attack roll. If the +AC bump turns the hit into a miss, suppress
   // the resolver's hit log and emit a clean parry-miss line. Crits ignore
@@ -363,12 +388,12 @@ function applyAttackOutcome(
     const { finalDamage, log: resistLog } = ctx.resistMod(damage, atk.damageType, targetDef, target.name);
     if (resistLog) ctx.addLog(resistLog);
     const hpBeforeAtk = target.hp;
-    target.hp = Math.max(0, target.hp - finalDamage);
+    applyNpcDamageInstance(ctx, target, targetDef, finalDamage, atk.damageType, resolved.isCrit);
     for (const bd of bonusComponents) {
       const { finalDamage: bdFinal, log: bdResistLog } = ctx.resistMod(bd.damage, bd.damageType, targetDef, target.name);
       ctx.addLog({ left: `+ ${bdFinal} ${bd.damageType}`, right: bd.rollStr, style: 'hit' });
       if (bdResistLog) ctx.addLog(bdResistLog);
-      target.hp = Math.max(0, target.hp - bdFinal);
+      applyNpcDamageInstance(ctx, target, targetDef, bdFinal, bd.damageType, resolved.isCrit);
     }
     // Goliath Giant Ancestry on-hit boon (Fire's Burn / Frost's Chill /
     // Hill's Tumble) — folds its extra damage / condition in before the single
@@ -569,12 +594,12 @@ function executeThrowOnTarget(
   const { finalDamage, log: resistLog } = ctx.resistMod(damage, attack.damageType, targetDef, target.name);
   if (resistLog) ctx.addLog(resistLog);
   const hpBeforeThr = target.hp;
-  target.hp = Math.max(0, target.hp - finalDamage);
+  applyNpcDamageInstance(ctx, target, targetDef, finalDamage, attack.damageType);
   for (const bd of bonusComponents) {
     const { finalDamage: bdFinal, log: bdResistLog } = ctx.resistMod(bd.damage, bd.damageType, targetDef, target.name);
     ctx.addLog({ left: `+ ${bdFinal} ${bd.damageType}`, right: bd.rollStr, style: 'hit' });
     if (bdResistLog) ctx.addLog(bdResistLog);
-    target.hp = Math.max(0, target.hp - bdFinal);
+    applyNpcDamageInstance(ctx, target, targetDef, bdFinal, bd.damageType);
   }
   if (isHit) applyGiantGiftOnHit(ctx, target, targetDef);
   publishNpcDamage(ctx, target, hpBeforeThr, target.hp);
@@ -697,6 +722,11 @@ export function doShove(ctx: GameContext, targetId: string | undefined, effect: 
   const total = roll + saveMod;
   const right = `save d20(${roll})+${saveMod}=${total} vs DC ${dc}`;
   const label = combatantDisplayName(target, s.npcs);
+  if (effect === 'prone' && npcConditionImmune(def, 'prone')) {
+    ctx.addLog({ left: `${ctx.playerDef.name} shoves ${label} — it cannot be knocked Prone`, style: 'normal' });
+    s.player.actionUsed = true;
+    return;
+  }
   if (total >= dc) {
     ctx.addLog({ left: `${ctx.playerDef.name} tries to shove ${label} — it holds firm`, right, style: 'normal' });
   } else if (effect === 'prone') {
@@ -716,6 +746,11 @@ export function doGrapple(ctx: GameContext, targetId: string | undefined): void 
   if (!target || target.conditions.includes('grappled')) return;
   const def = ctx.resolveMonsterDef(target.defId);
   if (!def) return;
+  if (npcConditionImmune(def, 'grappled')) {
+    ctx.addLog({ left: `${ctx.playerDef.name} tries to grapple ${combatantDisplayName(target, s.npcs)} — it cannot be Grappled`, style: 'normal' });
+    s.player.actionUsed = true;
+    return;
+  }
   const dc = unarmedStrikeDC(ctx);
   const saveMod = bestStrDexSaveMod(def);
   const roll = d20();
@@ -846,6 +881,58 @@ export function doDetach(ctx: GameContext): void {
   ctx.addLog({ left: `${ctx.playerDef.name} pries off ${what}`, style: 'status' });
 }
 
+/**
+ * SRD Escape action vs a monster grapple (US-125, Bugbear Grab): spend the
+ * Action on an Athletics or Acrobatics check — whichever bonus is better —
+ * against the grapple's escape DC. Success strips the `grappled` condition;
+ * failure spends the turn in the creature's grip.
+ */
+export function doEscapeGrapple(ctx: GameContext): void {
+  const s = ctx.state;
+  if (!guardCanEscapeGrapple(ctx)) return;
+  const grapple = s.player.grappledBy!;
+  const grappler = s.npcs.find((n) => n.id === grapple.npcId);
+  const grapplerName = grappler ? combatantDisplayName(grappler, s.npcs) : 'its captor';
+  const athletics = ctx.playerDef.skills['athletics'] ?? mod(ctx.playerDef.str);
+  const acrobatics = ctx.playerDef.skills['acrobatics'] ?? mod(ctx.playerDef.dex);
+  const useAthletics = athletics >= acrobatics;
+  const bonus = useAthletics ? athletics : acrobatics;
+  const skillName = useAthletics ? 'Athletics' : 'Acrobatics';
+  const roll = d20();
+  const total = roll + bonus;
+  const success = total >= grapple.escapeDc;
+  s.player.actionUsed = true;
+  ctx.addLog({
+    left: success
+      ? `${ctx.playerDef.name} wrenches free of ${grapplerName}'s grip`
+      : `${ctx.playerDef.name} strains against ${grapplerName}'s grip — held fast`,
+    right: `${skillName} d20(${roll})${bonus >= 0 ? '+' : ''}${bonus}=${total} vs DC ${grapple.escapeDc}`,
+    style: success ? 'status' : 'miss',
+  });
+  if (success) {
+    s.player.conditions = s.player.conditions.filter((c) => c !== 'grappled');
+    s.player.grappledBy = undefined;
+  }
+}
+
+/** Release the player / NPC victims of `grapplerId`'s grapple — called when
+ *  the grappler dies, is removed, or is found incapacitated (SRD: the
+ *  grapple ends when the grappler is incapacitated). */
+export function releaseGrappleFrom(ctx: GameContext, grapplerId: string, reason: string): void {
+  const s = ctx.state;
+  if (s.player.grappledBy?.npcId === grapplerId) {
+    s.player.grappledBy = undefined;
+    s.player.conditions = s.player.conditions.filter((c) => c !== 'grappled');
+    ctx.addLog({ left: `${ctx.playerDef.name} is released — ${reason}`, style: 'status' });
+  }
+  for (const npc of s.npcs) {
+    if (npc.grappledBy !== grapplerId) continue;
+    npc.grappledBy = undefined;
+    npc.conditions = npc.conditions.filter((c) => c !== 'grappled');
+    ctx.addLog({ left: `${combatantDisplayName(npc, s.npcs)} is released — ${reason}`, style: 'status' });
+  }
+}
+
 export function doEnemyOpportunityAttack(ctx: GameContext, npc: NpcState, events: GameEvent[]): void {
   const s = ctx.state;
   const def = ctx.resolveMonsterDef(npc.defId);
@@ -894,12 +981,12 @@ export function doPlayerOpportunityAttack(ctx: GameContext, npc: NpcState): void
   const { finalDamage, log: oaResistLog } = ctx.resistMod(damage, ctx.playerDef.mainAttack.damageType, targetDef, npc.name);
   if (oaResistLog) ctx.addLog(oaResistLog);
   const hpBeforeOa = npc.hp;
-  npc.hp = Math.max(0, npc.hp - finalDamage);
+  applyNpcDamageInstance(ctx, npc, targetDef, finalDamage, ctx.playerDef.mainAttack.damageType);
   for (const bd of bonusComponents) {
     const { finalDamage: bdFinal, log: bdResistLog } = ctx.resistMod(bd.damage, bd.damageType, targetDef, npc.name);
     ctx.addLog({ left: `+ ${bdFinal} ${bd.damageType}`, right: bd.rollStr, style: 'hit' });
     if (bdResistLog) ctx.addLog(bdResistLog);
-    npc.hp = Math.max(0, npc.hp - bdFinal);
+    applyNpcDamageInstance(ctx, npc, targetDef, bdFinal, bd.damageType);
   }
   publishNpcDamage(ctx, npc, hpBeforeOa, npc.hp);
   ctx.applyMasteryConditions(npc, vexApplied, slowApplied);
@@ -942,17 +1029,16 @@ export function doNpcOpportunityAttack(
     const { finalDamage, log: resistLog } = ctx.resistMod(damage, meleeAtk.damageType, targetDef, target.name);
     if (resistLog) ctx.addLog(resistLog);
     const hpBeforeNpcOa = target.hp;
-    target.hp = Math.max(0, target.hp - finalDamage);
+    applyNpcDamageInstance(ctx, target, targetDef, finalDamage, meleeAtk.damageType, isCrit);
     for (const bd of bonusComponents) {
       const { finalDamage: bdFinal, log: bdResistLog } = ctx.resistMod(bd.damage, bd.damageType, targetDef, target.name);
       ctx.addLog({ left: `+ ${bdFinal} ${bd.damageType}`, right: bd.rollStr, style: 'hit' });
       if (bdResistLog) ctx.addLog(bdResistLog);
-      target.hp = Math.max(0, target.hp - bdFinal);
+      applyNpcDamageInstance(ctx, target, targetDef, bdFinal, bd.damageType, isCrit);
     }
     publishNpcDamage(ctx, target, hpBeforeNpcOa, target.hp);
     if (target.hp <= 0) ctx.killWithReward(target, targetDef, `☠ ${target.name} slain by Opportunity Attack!`, false);
   }
-  void isCrit;
 }
 
 interface ResolvedAttack {
@@ -976,6 +1062,62 @@ interface ResolvedAttack {
  * a miss, the caller substitutes a clean parry-miss log; otherwise it logs that
  * the parry was attempted but the strike still landed.
  */
+/**
+ * SRD Goblin Boss "Redirect Attack" (US-125): when an attack roll is made
+ * against the creature, it may use its reaction to swap places with a Small
+ * or Medium ally within 5 ft — the ally becomes the target. The engine
+ * triggers it greedily when the attack would hit; the swapped attack
+ * re-checks against the ally's AC (a nat 20 still hits). Runs before Parry
+ * — one reaction per creature per round either way.
+ */
+function tryNpcRedirectAttack(
+  ctx: GameContext,
+  target: NpcState,
+  targetDef: MonsterDef,
+  resolved: ResolvedPlayerAttack,
+  events: GameEvent[],
+): { applied: false } | { applied: true; newTarget: NpcState; newTargetDef: MonsterDef; replaced: Partial<ResolvedPlayerAttack> } {
+  if (!resolved.isHit) return { applied: false };
+  if (target.reactionUsed) return { applied: false };
+  if (isIncapacitated(target.conditions)) return { applied: false };
+  if (!(targetDef.reactions ?? []).some((r) => r.kind === 'redirect-attack')) return { applied: false };
+  const s = ctx.state;
+  const ally = s.npcs.find((n) =>
+    n !== target && n.hp > 0
+    && n.disposition === target.disposition
+    && !isIncapacitated(n.conditions)
+    && sizeRank(n.size ?? 'medium') <= sizeRank('medium')
+    && chebyshev(n.tileX, n.tileY, target.tileX, target.tileY) <= 1,
+  );
+  if (!ally) return { applied: false };
+  const allyDef = ctx.resolveMonsterDef(ally.defId);
+  if (!allyDef) return { applied: false };
+  target.reactionUsed = true;
+  const bossTile = { x: target.tileX, y: target.tileY };
+  target.tileX = ally.tileX; target.tileY = ally.tileY;
+  ally.tileX = bossTile.x; ally.tileY = bossTile.y;
+  events.push({ type: 'entity_move', entityId: target.id, toX: target.tileX, toY: target.tileY });
+  events.push({ type: 'entity_move', entityId: ally.id, toX: ally.tileX, toY: ally.tileY });
+  const allyName = combatantDisplayName(ally, s.npcs);
+  const newAc = allyDef.ac + shieldAcBonus(ally.conditions);
+  const stillHits = resolved.naturalRoll === 20 || resolved.attackTotal >= newAc;
+  const swapLog: LogEntry = {
+    left: `↪ ${combatantDisplayName(target, s.npcs)} redirects the attack — ${allyName} is shoved into its place!`,
+    style: 'status',
+  };
+  return {
+    applied: true,
+    newTarget: ally,
+    newTargetDef: allyDef,
+    replaced: stillHits
+      ? { logs: [...resolved.logs, swapLog] }
+      : {
+          damage: 0, isHit: false, vexApplied: false, slowApplied: false, bonusComponents: [], sneakAttackFired: false,
+          logs: [...resolved.logs, swapLog, { left: `The redirected strike misses ${allyName}`, right: `vs AC ${newAc}`, style: 'miss' }],
+        },
+  };
+}
+
 function tryNpcParry(
   target: NpcState,
   targetDef: MonsterDef,

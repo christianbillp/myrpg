@@ -44,5 +44,13 @@
   "traits": [
     "pack_tactics"
   ],
-  "tokenAsset": "/tokens/monster_warrior_infantry.svg"
+  "tokenAsset": "/tokens/monster_warrior_infantry.svg",
+  "languages": [
+    "Common"
+  ],
+  "gear": [
+    "chain shirt",
+    "spear"
+  ],
+  "description": "A line soldier in a standard-issue chain shirt, spear and kit maintained to inspection order, moving by drill and standing by habit. One of many, and trained to make that the whole point."
 }

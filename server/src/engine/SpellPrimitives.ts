@@ -18,6 +18,7 @@ import { castSpiritGuardians } from './SpiritGuardiansSystem.js';
 import { resolveSpiritualWeaponAttack } from './SummonSystem.js';
 import { publishNpcDamage } from './ThresholdPublisher.js';
 import { applyDamageWithTempHp, npcBanePenalty } from './CombatSystem.js';
+import { applyNpcDamageInstance } from './NpcDamage.js';
 
 import { requestCombatStart } from './CombatStartPrompt.js';
 import { emitNoise, NOISE_SPELL_VERBAL } from './Sound.js';
@@ -104,7 +105,9 @@ export function applyDamageToNpc(
   const { finalDamage, log: resistLog } = ctx.resistMod(amount, damageType, def, target.name);
   if (resistLog) ctx.addLog(resistLog);
   const hpBefore = target.hp;
-  applyDamageWithTempHp(target, finalDamage);
+  // Spell damage carries no crit through this path, so Undead Fortitude is
+  // only bypassed by its damage type (Radiant).
+  applyNpcDamageInstance(ctx, target, def, finalDamage, damageType);
   Logger.log('combat.damage_dealt', {
     target: target.id,
     defId: target.defId,

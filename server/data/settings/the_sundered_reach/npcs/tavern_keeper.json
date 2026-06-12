@@ -9,9 +9,36 @@
   "persistent": true,
   "conversationId": "tavern_keeper_chat",
   "routine": [
-    { "phase": "morning", "task": { "kind": "walk_to", "tileX": 2,  "tileY": 1 } },
-    { "phase": "noon",    "task": { "kind": "walk_to", "tileX": 11, "tileY": 1 } },
-    { "phase": "evening", "task": { "kind": "idle" } },
-    { "phase": "night",   "task": { "kind": "walk_to", "tileX": 6,  "tileY": 1 } }
-  ]
+    {
+      "phase": "morning",
+      "task": {
+        "kind": "walk_to",
+        "tileX": 2,
+        "tileY": 1
+      }
+    },
+    {
+      "phase": "noon",
+      "task": {
+        "kind": "walk_to",
+        "tileX": 11,
+        "tileY": 1
+      }
+    },
+    {
+      "phase": "evening",
+      "task": {
+        "kind": "idle"
+      }
+    },
+    {
+      "phase": "night",
+      "task": {
+        "kind": "walk_to",
+        "tileX": 6,
+        "tileY": 1
+      }
+    }
+  ],
+  "description": "A broad, steady man with twenty years of bar-rag in his apron and forearms like a smith's, polishing a tankard he has polished a thousand times. Bram's face gives away nothing he doesn't choose to give — but his eyes find every newcomer the moment the door swings."
 }
