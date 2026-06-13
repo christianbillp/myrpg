@@ -133,6 +133,10 @@ export interface GearDef extends MagicItemProps {
   description?: string;
   costCp?: number;
   areaDenial?: AreaDenialDef;
+  /** Carried light emission when lit via the LIGHT action (US-127): Bright
+   *  Light within `brightFt` of the carrier, Darkness lifted to Dim out to
+   *  `brightFt + dimFt` (SRD torch 20/20, hooded lantern 30/30). */
+  lightSource?: { brightFt: number; dimFt: number };
 }
 
 /**

@@ -44,6 +44,8 @@ export type PlayerAction =
   | { type: 'detach' }
   /** Escape a monster grapple — Athletics/Acrobatics vs the escape DC (US-125). */
   | { type: 'escape' }
+  /** Light or douse a carried light source — torch / lantern (US-127). */
+  | { type: 'toggleLight' }
   | { type: 'endTurn' }
   | { type: 'rollDeathSave' }
   | { type: 'shortRest' }

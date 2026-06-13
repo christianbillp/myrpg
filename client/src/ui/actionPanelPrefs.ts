@@ -44,6 +44,7 @@ export const ACTION_BUTTON_CATALOG: ReadonlyArray<ActionButtonCatalogEntry> = [
   { id: 'knock-out', label: 'Knock Out', glyph: '☄', description: 'Toggle non-lethal melee — reduce foes to 0 HP as Unconscious instead of dead.' },
   { id: 'detach', label: 'Detach', glyph: '⤴', description: 'Break free of a grapple or restraint.' },
   { id: 'escape', label: 'Escape', glyph: '⛓', description: 'Escape a monster grapple — Athletics or Acrobatics vs the escape DC.' },
+  { id: 'toggle-light', label: 'Light / Douse', glyph: '🕯', description: 'Light a carried torch or lantern (or douse it). Pushes back darkness around you.' },
   { id: 'disarm-trap', label: 'Disarm Trap', glyph: '⚠', description: 'Attempt to disarm a discovered, armed trap on an adjacent tile.' },
   { id: 'gear', label: 'Deploy Gear (Set)', glyph: '⬡', description: 'Deploy area-denial gear (caltrops, ball bearings) onto a tile.' },
   { id: 'attune', label: 'Attune', glyph: '✶', description: 'Attune to a held magic item that requires attunement (max 3).' },
@@ -71,7 +72,7 @@ const LABEL_TO_ID: Readonly<Record<string, string>> = {
   ATTACK: 'attack', THROW: 'throw', DODGE: 'dodge', DASH: 'dash', DISENGAGE: 'disengage',
   GRAPPLE: 'grapple', SHOVE: 'shove', 'SHOVE PRONE': 'shove-prone', HELP: 'help', READY: 'ready',
   STUDY: 'study', UTILIZE: 'utilize', INFLUENCE: 'influence', SEARCH: 'search', HIDE: 'hide',
-  'SHORT REST': 'short-rest', 'KNOCK OUT': 'knock-out', DETACH: 'detach', ESCAPE: 'escape', ATTUNE: 'attune',
+  'SHORT REST': 'short-rest', 'KNOCK OUT': 'knock-out', DETACH: 'detach', ESCAPE: 'escape', LIGHT: 'toggle-light', DOUSE: 'toggle-light', ATTUNE: 'attune',
   '★ LEVEL UP': 'level-up', '☾ LONG REST': 'long-rest', MOVE: 'move', TALK: 'talk', CAST: 'cast',
   'DISARM TRAP': 'disarm-trap',
 };

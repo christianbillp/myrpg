@@ -1102,6 +1102,7 @@ export class GameScene extends Phaser.Scene {
       onMagicFeature:   () => this.beginMagicFeature(),
       onDetach:         () => gameClient.sendAction({ type: "detach" }),
       onEscape:         () => gameClient.sendAction({ type: "escape" }),
+      onToggleLight:    () => gameClient.sendAction({ type: "toggleLight" }),
       onUseFeature:     (featureId) => this.beginUseFeature(featureId),
       onHide:           () => gameClient.sendAction({ type: "hide" }),
       onDeathSave:      () => gameClient.sendAction({ type: "rollDeathSave" }),
@@ -1287,6 +1288,7 @@ export class GameScene extends Phaser.Scene {
       movesLeft:       state.player.movesLeft,
       moveMode:        this.moveMode,
       nonLethal:       !!state.player.nonLethal,
+      lightActive:     !!state.player.lightSource,
       throwableItems:  state.availableActions.throwableItemIds
         .map(id => allItems.find(i => i.id === id))
         .filter((i): i is ItemDef => i !== undefined)

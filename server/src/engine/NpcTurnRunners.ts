@@ -24,7 +24,7 @@ import { PLAYER_FACTION_ID, PLAYER_ID } from '../../../shared/types.js';
 import { isIncapacitated, isVisible, TURN_CONDITIONS } from './ConditionSystem.js';
 import { doNpcOpportunityAttack } from './CombatActions.js';
 import { applyNpcAttackHit, applyNpcDamageInstance } from './NpcDamage.js';
-import { canSee as visCanSee } from './Vision.js';
+import { canSee as visCanSee, mutualAttackVision, playerSenses } from './Vision.js';
 import { publishNpcDamage } from './ThresholdPublisher.js';
 import { chooseNpcBehavior, fleeFromThreat, isMapEdge } from './NpcBrain.js';
 import {
@@ -428,6 +428,17 @@ export function runSingleEnemyTurn(ctx: GameContext, npc: NpcState, events: Game
         default: return 0;
       }
     },
+    // SRD Unseen Attackers and Targets (US-127): both sides' sight resolved
+    // through the Vision walker from the attacker's post-movement tile.
+    attackVision: (fromX, fromY) => {
+      const targetSenses = target.id === PLAYER_ID
+        ? playerSenses(ctx)
+        : ctx.resolveMonsterDef(s.npcs.find((n) => n.id === target.id)?.defId ?? '')?.senses;
+      const v = mutualAttackVision(s,
+        { tileX: fromX, tileY: fromY, senses: def.senses, conditions: npc.conditions, id: npc.id },
+        { tileX: target.tileX, tileY: target.tileY, senses: targetSenses, conditions: target.conditions, id: target.id });
+      return v;
+    },
   });
 
   // SRD Invisibility — "the spell ends early immediately after the target
@@ -754,6 +765,16 @@ export function runSingleAllyTurn(ctx: GameContext, ally: NpcState, events: Game
     mapCols: s.map.cols,
     mapRows: s.map.rows,
     occupiedTiles: occupied,
+    // SRD Unseen Attackers and Targets (US-127) — same Vision resolution as
+    // the enemy path, with the ally-chosen target looked up by id.
+    attackVision: (fromX, fromY, targetId) => {
+      const targetNpc = s.npcs.find((n) => n.id === targetId);
+      if (!targetNpc) return { seesTarget: true, seenByTarget: true };
+      const targetDef = ctx.resolveMonsterDef(targetNpc.defId);
+      return mutualAttackVision(s,
+        { tileX: fromX, tileY: fromY, senses: def.senses, conditions: ally.conditions, id: ally.id },
+        { tileX: targetNpc.tileX, tileY: targetNpc.tileY, senses: targetDef?.senses, conditions: targetNpc.conditions, id: targetNpc.id });
+    },
   });
 
   ally.tileX = result.finalTileX;

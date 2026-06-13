@@ -36,12 +36,20 @@ import {
 
 /** Cover the target benefits from against the player's spell attack. */
 export function visCanSeeTargetCover(ctx: GameContext, target: NpcState): 'none' | 'half' | 'three-quarters' | 'total' {
+  return visCanSeeTarget(ctx, target).cover;
+}
+
+/** Full vision toward a spell target: cover for the AC bonus AND `sees` —
+ *  SRD targeted spells need "a creature you can see" (US-127), so ambient
+ *  darkness or fog blocks the cast outright rather than imposing
+ *  Disadvantage like a weapon swing at a guessed location. */
+export function visCanSeeTarget(ctx: GameContext, target: NpcState): { cover: 'none' | 'half' | 'three-quarters' | 'total'; sees: boolean } {
   const v = visCanSee(
     ctx.state,
-    { tileX: ctx.state.player.tileX, tileY: ctx.state.player.tileY, senses: ctx.playerDef.senses },
+    { tileX: ctx.state.player.tileX, tileY: ctx.state.player.tileY, senses: ctx.playerDef.senses, blinded: ctx.state.player.conditions.includes('blinded') },
     { tileX: target.tileX, tileY: target.tileY, conditions: target.conditions, id: target.id },
   );
-  return v.cover;
+  return { cover: v.cover, sees: v.sees };
 }
 
 /** Ability mod for the player's spellcasting ability (defaults to 0 if unset). */

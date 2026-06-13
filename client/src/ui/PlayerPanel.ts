@@ -39,6 +39,8 @@ export interface PlayerPanelActionState {
   moveMode: boolean;
   /** SRD Knocking Out (US-052): true while KNOCK OUT (non-lethal melee) mode is on. */
   nonLethal: boolean;
+  /** True while a carried light source is burning (US-127) — flips the LIGHT button to DOUSE. */
+  lightActive: boolean;
   throwableItems: Array<{ id: string; name: string }>;
   availableActions: AvailableActions;
   mainAttackName: string;
@@ -120,6 +122,8 @@ export interface PlayerPanelCallbacks {
   onDetach: () => void;
   /** Escape a monster grapple — Athletics/Acrobatics vs the escape DC (US-125). */
   onEscape: () => void;
+  /** Light or douse a carried light source — torch / lantern (US-127). */
+  onToggleLight: () => void;
   onHide: () => void;
   onDeathSave: () => void;
   onShortRest: () => void;
@@ -567,6 +571,7 @@ export class PlayerPanel {
     add(this.makeBtn('READY', GREEN, this.callbacks.onReady), !aa.canReady);
     add(this.makeBtn('DETACH', GREEN, this.callbacks.onDetach), !aa.canDetach);
     add(this.makeBtn('ESCAPE', GREEN, this.callbacks.onEscape), !aa.canEscapeGrapple);
+    add(this.makeBtn(state.lightActive ? 'DOUSE' : 'LIGHT', GREEN, this.callbacks.onToggleLight), !aa.canToggleLight);
     add(this.makeBtn('KNOCK OUT', state.nonLethal ? '#5a4800' : '#2a2a1a', () => this.callbacks.onToggleNonLethal(!state.nonLethal)), !combat);
     add(this.makeBtn('HIDE', BLUE, this.callbacks.onHide), !aa.canHide);
     add(this.makeBtn('SEARCH', GREEN, this.callbacks.onSearch), !aa.canSearch);

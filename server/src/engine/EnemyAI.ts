@@ -62,6 +62,12 @@ export interface EnemyTurnConfig {
    *  (fromX, fromY) — the caller walks the Vision line (US-045). Consulted
    *  for ranged attacks only; ≥ 99 means Total Cover (no shot is taken). */
   coverFor?: (fromX: number, fromY: number) => number;
+  /** SRD Unseen Attackers and Targets (US-127), evaluated from the attacker's
+   *  post-movement tile: `seesTarget` false → Disadvantage (swinging at a
+   *  location); `seenByTarget` false → Advantage (unseen attacker). The
+   *  caller resolves both through the Vision walker (ambient light, fog,
+   *  blindness, senses). */
+  attackVision?: (fromX: number, fromY: number) => { seesTarget: boolean; seenByTarget: boolean };
 }
 
 export interface EnemyTurnResult {
@@ -107,6 +113,10 @@ export interface AllyTurnConfig {
   /** Pre-disambiguated display name; same convention as EnemyTurnConfig. */
   displayName: string;
   enemyTargets: Array<{ id: string; tileX: number; tileY: number; ac: number; conditions?: string[] }>;
+  /** SRD Unseen Attackers and Targets (US-127) — same contract as
+   *  `EnemyTurnConfig.attackVision`, with the chosen target's id since the
+   *  ally picks its own target inside. */
+  attackVision?: (fromX: number, fromY: number, targetId: string) => { seesTarget: boolean; seenByTarget: boolean };
   blocksMovement: boolean[][];
   mapCols: number;
   mapRows: number;
@@ -256,12 +266,15 @@ export function runEnemyTurn(
 
   const targetUnconscious = target.hp <= 0;
   const grappleAdvantage = !!chosenAttack.advantageVsGrappledTarget && !!target.grappledByAttacker;
-  const withAdvantage = enemyHidden || targetUnconscious || hasAttackAdvantage(enemy.conditions) || !!config.traitAdvantage || grappleAdvantage;
+  // SRD Unseen Attackers and Targets (US-127) from the post-movement tile —
+  // ambient darkness / fog / blindness via the caller's Vision walk.
+  const vision = config.attackVision?.(tileX, tileY);
+  const withAdvantage = enemyHidden || targetUnconscious || hasAttackAdvantage(enemy.conditions) || !!config.traitAdvantage || grappleAdvantage || (vision ? !vision.seenByTarget : false);
   // `grantsDisadvantageAgainst` consolidates the per-condition Disadv sources
   // (blurred, heavily-obscured, invisible, prone-at-distance) so adding a new
   // one is a single edit in ConditionSystem, not every attack resolver.
   const targetGrantsDisadv = grantsDisadvantageAgainst(target.conditions, dist);
-  const withDisadvantage = target.hidden || targetGrantsDisadv || hasAttackDisadvantage(enemy.conditions) || target.dodging || !!config.traitDisadvantage || longShot || pointBlank;
+  const withDisadvantage = target.hidden || targetGrantsDisadv || hasAttackDisadvantage(enemy.conditions) || target.dodging || !!config.traitDisadvantage || longShot || pointBlank || (vision ? !vision.seesTarget : false);
   const attackRollMod = npcBlessBonus(enemy) - npcBanePenalty(enemy);
   const { damage, isHit, isCrit, attackTotal, logs: attackLogs, bonusComponents } = enemyAttack(chosenAttack, target.ac, withAdvantage, withDisadvantage, coverAc, attackRollMod, npcReducedPenalty(enemy));
   logs.push(...attackLogs);
@@ -382,8 +395,9 @@ export function runAllyTurn(
   // target conditions; this also fixes the prone/blinded gap. (The `helped`
   // single-use marker is consumed by the caller after the attack.)
   const nearestConditions = nearest.conditions ?? [];
-  const allyAdvantage = grantsAdvantageAgainst(nearestConditions, dist);
-  const allyDisadvantage = grantsDisadvantageAgainst(nearestConditions, dist) || longShot;
+  const allyVision = config.attackVision?.(tileX, tileY, nearest.id);
+  const allyAdvantage = grantsAdvantageAgainst(nearestConditions, dist) || (allyVision ? !allyVision.seenByTarget : false);
+  const allyDisadvantage = grantsDisadvantageAgainst(nearestConditions, dist) || longShot || (allyVision ? !allyVision.seesTarget : false);
   const { damage, isHit, isCrit, logs: attackLogs, bonusComponents } = enemyAttack(chosenAttack, nearest.ac, allyAdvantage, allyDisadvantage);
   logs.push(...attackLogs);
 

@@ -18,11 +18,12 @@ import {
   canDisengage as guardCanDisengage, canHide as guardCanHide,
   canAttackTarget, playerAttackReachTiles, hasCunningAction,
   canDetach as guardCanDetach, canEscapeGrapple as guardCanEscapeGrapple,
+  canToggleLight as guardCanToggleLight,
   playerArmorSpeedPenaltyFt, playerHasStealthDisadvantage,
 } from './ActionGuards.js';
 import { publishNpcDamage } from './ThresholdPublisher.js';
 import { applyGiantGiftOnHit } from './GiantGifts.js';
-import { canSee as visCanSee } from './Vision.js';
+import { canSee as visCanSee, mutualAttackVision, playerSenses } from './Vision.js';
 import { endConcentration } from './ConcentrationSystem.js';
 import type { PlayerDef } from '../../../shared/types.js';
 import { d20, mod, rollDiceBonus } from './Dice.js';
@@ -290,10 +291,17 @@ export function doAttack(ctx: GameContext, targetId: string | undefined, events:
   // consumed here so a follow-up miss-then-attack doesn't keep the buff.
   const steadyAimAdv = !!s.player.steadyAim;
   if (steadyAimAdv) s.player.steadyAim = false;
-  const withAdvantage = playerHidden || hasAttackAdvantage(s.player.conditions) || grantsAdvantageAgainst(target.conditions, dist) || steadyAimAdv;
+  // SRD Unseen Attackers and Targets (US-127): darkness / fog / blindness
+  // resolved through the Vision walker — a target the player can't see is
+  // attacked at Disadvantage (the swing still happens at the location); a
+  // target that can't see the player back grants Advantage.
+  const attackVision = mutualAttackVision(s,
+    { tileX: s.player.tileX, tileY: s.player.tileY, senses: playerSenses(ctx), conditions: s.player.conditions, id: 'player' },
+    { tileX: target.tileX, tileY: target.tileY, senses: targetDef.senses, conditions: target.conditions, id: target.id });
+  const withAdvantage = playerHidden || hasAttackAdvantage(s.player.conditions) || grantsAdvantageAgainst(target.conditions, dist) || steadyAimAdv || !attackVision.seenByTarget;
   // SRD Heavy on a melee weapon (US-111): STR < 13 imposes Disadvantage.
   const heavyMeleeDisadvantage = !isRangedWeapon && !!atk.heavy && ctx.playerDef.str < 13;
-  const withDisadvantage = hasAttackDisadvantage(s.player.conditions) || grantsDisadvantageAgainst(target.conditions, dist, s.player.seeInvisible) || rangedDisadvantage || heavyMeleeDisadvantage;
+  const withDisadvantage = hasAttackDisadvantage(s.player.conditions) || grantsDisadvantageAgainst(target.conditions, dist, s.player.seeInvisible) || rangedDisadvantage || heavyMeleeDisadvantage || !attackVision.seesTarget;
   const autoCrit = isAutoCrit(target.conditions, dist);
   const { bonus: coverBonus, untargetable } = coverBonusVsTarget(ctx, target);
   if (untargetable) {
@@ -563,9 +571,14 @@ function executeThrowOnTarget(
   // consume semantics as the main attack path.
   const steadyAimAdv = !!s.player.steadyAim;
   if (steadyAimAdv) s.player.steadyAim = false;
-  const withAdvantage = playerHidden || grantsAdvantageAgainst(target.conditions, dist) || steadyAimAdv;
+  // SRD Unseen Attackers and Targets (US-127) — same Vision resolution as
+  // the main attack path.
+  const throwVision = mutualAttackVision(s,
+    { tileX: s.player.tileX, tileY: s.player.tileY, senses: playerSenses(ctx), conditions: s.player.conditions, id: 'player' },
+    { tileX: target.tileX, tileY: target.tileY, senses: targetDef.senses, conditions: target.conditions, id: target.id });
+  const withAdvantage = playerHidden || grantsAdvantageAgainst(target.conditions, dist) || steadyAimAdv || !throwVision.seenByTarget;
   const withDisadvantage = dist > normalRange || grantsDisadvantageAgainst(target.conditions, dist, s.player.seeInvisible)
-    || hasAttackDisadvantage(s.player.conditions) || adjacentEnemy;
+    || hasAttackDisadvantage(s.player.conditions) || adjacentEnemy || !throwVision.seesTarget;
   const autoCrit = isAutoCrit(target.conditions, dist);
   ctx.addLog({ left: `${ctx.playerDef.name} throws ${itemDef.name}`, style: 'normal' });
   const { bonus: coverBonus, untargetable } = coverBonusVsTarget(ctx, target);
@@ -913,6 +926,39 @@ export function doEscapeGrapple(ctx: GameContext): void {
     s.player.conditions = s.player.conditions.filter((c) => c !== 'grappled');
     s.player.grappledBy = undefined;
   }
+}
+
+/**
+ * LIGHT / DOUSE (US-127): toggle the player's carried light source. Lighting
+ * picks the best `lightSource` item in the inventory (widest bright radius).
+ * In combat the toggle rides the SRD free object interaction when available,
+ * else the Action; out of combat it's free. The emission itself is read by
+ * `Vision.effectiveLightAt` — no state beyond `player.lightSource`.
+ */
+export function doToggleLight(ctx: GameContext): void {
+  const s = ctx.state;
+  if (!guardCanToggleLight(ctx)) return;
+  const spendInteraction = (): void => {
+    if (s.phase !== 'player_turn') return;
+    if (!s.player.freeObjectInteractionUsed) s.player.freeObjectInteractionUsed = true;
+    else s.player.actionUsed = true;
+  };
+  if (s.player.lightSource) {
+    const wasSpell = s.player.lightSource.source === 'light';
+    s.player.lightSource = undefined;
+    spendInteraction();
+    ctx.addLog({ left: wasSpell ? `${ctx.playerDef.name} dims the conjured light.` : `${ctx.playerDef.name} douses the light.`, style: 'status' });
+    return;
+  }
+  const lightItems = s.player.inventoryIds
+    .map((id) => ctx.defs.equipment.find((e) => e.id === id))
+    .filter((item): item is typeof item & { lightSource: { brightFt: number; dimFt: number } } =>
+      !!(item as { lightSource?: unknown } | undefined)?.lightSource);
+  if (lightItems.length === 0) return;
+  const best = lightItems.reduce((a, b) => (b.lightSource.brightFt > a.lightSource.brightFt ? b : a));
+  s.player.lightSource = { ...best.lightSource, source: best.id };
+  spendInteraction();
+  ctx.addLog({ left: `${ctx.playerDef.name} lights a ${best.name.toLowerCase()} — bright light to ${best.lightSource.brightFt} ft.`, style: 'status' });
 }
 
 /** Release the player / NPC victims of `grapplerId`'s grapple — called when

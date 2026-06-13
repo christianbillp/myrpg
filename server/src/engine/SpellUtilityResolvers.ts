@@ -74,6 +74,14 @@ export function resolveUtilitySpell(ctx: GameContext, spell: SpellDef, slotLevel
       applySelfBuff(ctx, { spellId: 'bless', modifiers: [{ type: 'dice-bonus', on: 'attack', count: 1, sides: 4 }, { type: 'dice-bonus', on: 'save', count: 1, sides: 4 }], concentration: true });
       ctx.addLog({ left: `${ctx.playerDef.name} is blessed — +1d4 to attack rolls and saves`, style: 'status' });
       return;
+    // Light (US-127): the caster's gear sheds Bright Light in a 20-ft radius
+    // and lifts Darkness to Dim for another 20 ft — modelled as a carried
+    // light source `Vision.effectiveLightAt` reads. The 1-hour duration is
+    // hour-scale: it survives the scene and clears on a Long Rest or recast.
+    case 'light':
+      ctx.state.player.lightSource = { brightFt: 20, dimFt: 20, source: 'light' };
+      ctx.addLog({ left: `${ctx.playerDef.name}'s ${spell.name} flares — bright light to 20 ft.`, style: 'status' });
+      return;
     // Guidance: +1d4 to the caster's ability checks.
     case 'guidance':
       applySelfBuff(ctx, { spellId: 'guidance', modifiers: [{ type: 'dice-bonus', on: 'check', count: 1, sides: 4 }], concentration: true });

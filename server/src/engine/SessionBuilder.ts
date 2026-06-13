@@ -461,6 +461,7 @@ export function buildSessionState(
       castableSpellIds: [],
       canDetach: false,
       canEscapeGrapple: false,
+      canToggleLight: false,
       canLevelUp: false,
       canLongRest: false,
       disarmableTrapTiles: [],

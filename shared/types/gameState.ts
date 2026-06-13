@@ -247,6 +247,14 @@ export interface PlayerState {
    *  escape or when the grappler dies / is incapacitated / disappears. The
    *  `grappled` condition itself lives in `conditions`. */
   grappledBy?: { npcId: string; escapeDc: number };
+  /** Active carried light (US-127): a lit torch / lantern (LIGHT action) or
+   *  the Light cantrip. Sheds Bright Light within `brightFt` of the player
+   *  and lifts Darkness to Dim out to `brightFt + dimFt` —
+   *  `Vision.effectiveLightAt` folds it over the baked/ambient light.
+   *  `source` is the item id or `'light'` (the spell). Cleared by the LIGHT
+   *  action (douse) and by a Long Rest (torches and the spell both run out
+   *  on the hour-scale). */
+  lightSource?: { brightFt: number; dimFt: number; source: string };
 }
 
 export interface AvailableActions {
@@ -274,6 +282,9 @@ export interface AvailableActions {
    *  Acrobatics (whichever is better) vs the grapple's escape DC (US-125).
    *  Drives the ESCAPE button. */
   canEscapeGrapple: boolean;
+  /** True when the player can light a carried light source (torch/lantern in
+   *  inventory) or douse the one burning (US-127). Drives the LIGHT/DOUSE button. */
+  canToggleLight: boolean;
   /** True when the player's XP has reached the threshold to advance to the next level (per SRD Character Advancement). The Player Panel surfaces this as a `LEVEL UP` button. */
   canLevelUp: boolean;
   /** True when the current encounter permits Long Rest (`GameState.allowsLongRest`) AND the player is in the exploration phase. */

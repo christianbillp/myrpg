@@ -1,0 +1,8 @@
+{
+  "id": "torch",
+  "name": "Torch",
+  "type": "gear",
+  "description": "Burns for 1 hour, casting Bright Light in a 20-foot radius and Dim Light for an additional 20 feet. Light it with the LIGHT action.",
+  "costCp": 1,
+  "lightSource": { "brightFt": 20, "dimFt": 20 }
+}

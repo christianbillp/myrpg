@@ -154,6 +154,36 @@ export function canSee(state: GameState, observer: Observer, target: VisionTarge
   return { sees: true, cover: ray.cover, obscurance: finalObscurance, via: 'sight' };
 }
 
+/** One side of an attack for `mutualAttackVision` — position, senses, and
+ *  the full condition list (blinded read from it; hidden/invisible affect
+ *  being seen). */
+export interface CreatureView {
+  tileX: number;
+  tileY: number;
+  senses: Senses | undefined;
+  conditions: string[];
+  id?: string;
+}
+
+/**
+ * SRD Unseen Attackers and Targets (US-127): resolve whether each side of an
+ * attack can see the other — ambient darkness, fog, blindness, hiding and
+ * invisibility all flow through `canSee`. An attacker that can't see its
+ * target rolls at Disadvantage (it may still swing at the location); an
+ * attacker its target can't see rolls with Advantage.
+ */
+export function mutualAttackVision(
+  state: GameState,
+  attacker: CreatureView,
+  target: CreatureView,
+): { seesTarget: boolean; seenByTarget: boolean } {
+  const attackerEye: Observer = { tileX: attacker.tileX, tileY: attacker.tileY, senses: attacker.senses, blinded: attacker.conditions.includes('blinded') };
+  const targetEye: Observer = { tileX: target.tileX, tileY: target.tileY, senses: target.senses, blinded: target.conditions.includes('blinded') };
+  const a2t = canSee(state, attackerEye, { tileX: target.tileX, tileY: target.tileY, conditions: target.conditions, id: target.id });
+  const t2a = canSee(state, targetEye, { tileX: attacker.tileX, tileY: attacker.tileY, conditions: attacker.conditions, id: attacker.id });
+  return { seesTarget: a2t.sees, seenByTarget: t2a.sees };
+}
+
 /**
  * Effective passive perception toward a specific target. Returns a modified
  * PP score factoring in the obscurance and the observer's senses. Used by
@@ -227,9 +257,12 @@ export function runPassivePerceptionSweep(ctx: GameContext): string[] {
     // passively notice the hider regardless of PP.
     if (!vision.sees) continue;
 
+    // SRD: Blindsight / Truesight see the Invisible condition and Tremorsense
+    // pinpoints — a hider inside such a sense's range is noticed outright.
+    const senseAutoFind = vision.via === 'blindsight' || vision.via === 'truesight' || vision.via === 'tremorsense';
     const ePP = effectivePerception(passivePP, vision);
     const distance = chebyshevTiles({ tileX: px, tileY: py }, { tileX: npc.tileX, tileY: npc.tileY });
-    if (ePP >= npc.hideDC) {
+    if (senseAutoFind || ePP >= npc.hideDC) {
       const label = npc.revealedName ?? npc.name;
       Logger.log('vision.hidden_revealed', {
         observer: 'player', hider: npc.id, defId: npc.defId,
@@ -291,8 +324,11 @@ export function runPerceptionSweep(ctx: GameContext, hider: 'player' | string): 
     clearHidden = () => { clearHide(npc); };
   }
 
+  // SRD: the Hide condition ends when AN ENEMY finds you — friends spotting
+  // you don't blow your concealment. The hider's own side never rolls.
+  const hiderNpc = hider === 'player' ? null : s.npcs.find((n) => n.id === hider);
   const observers: { id: 'player' | string; pp: number; obs: Observer; label: string }[] = [];
-  if (hider !== 'player') {
+  if (hider !== 'player' && hiderNpc && hiderNpc.disposition !== 'ally') {
     observers.push({
       id: 'player',
       pp: 10 + (ctx.playerDef.skills['perception'] ?? 0),
@@ -304,6 +340,10 @@ export function runPerceptionSweep(ctx: GameContext, hider: 'player' | string): 
     if (npc.id === hider) continue;
     if (isDead(npc)) continue;
     if (npc.conditions.includes('incapacitated') || npc.conditions.includes('unconscious')) continue;
+    // Enemy-of-the-hider gate: a player hider is only hunted by enemy-
+    // disposition NPCs; an NPC hider only by creatures on the other side.
+    if (hider === 'player' && npc.disposition !== 'enemy') continue;
+    if (hiderNpc && npc.disposition === hiderNpc.disposition) continue;
     const def = ctx.resolveMonsterDef(npc.defId);
     if (!def) continue;
     observers.push({
@@ -316,6 +356,15 @@ export function runPerceptionSweep(ctx: GameContext, hider: 'player' | string): 
   let spotted = false;
   for (const o of observers) {
     const vision = canSee(s, o.obs, { ...hiderTarget, conditions: hiderTarget.conditions.filter((c) => c !== 'hidden' && c !== 'invisible') });
+    // SRD: Blindsight sees the Invisible condition within range, Truesight
+    // pierces invisibility, and Tremorsense pinpoints — a hider inside such
+    // a sense's range is found automatically, no roll.
+    if (vision.via === 'blindsight' || vision.via === 'truesight' || vision.via === 'tremorsense') {
+      ctx.addLog({ left: `${o.label} senses ${hiderLabel} — ${vision.via} defeats hiding`, style: 'status' });
+      spotted = true;
+      break;
+    }
+    if (!vision.sees) continue;
     // Translate the vision result into an effective Perception value.
     const ePP = effectivePerception(o.pp, vision);
     const roll = d20() + (ePP - 10);
@@ -406,12 +455,42 @@ function chebyshevTiles(a: { tileX: number; tileY: number }, b: { tileX: number;
 function ambientObscurance(
   state: GameState, observer: Observer, target: VisionTarget, distFt: number, senses: Senses,
 ): Obscurance {
-  const tileLight = state.map.light?.[target.tileY]?.[target.tileX] ?? null;
-  const baseline = tileLight ?? state.environment.lightLevel ?? 'bright';
+  const baseline = effectiveLightAt(state, target.tileX, target.tileY);
   if (baseline === 'bright') return 'none';
-  if (baseline === 'dim') return 'lightly';
-  // baseline === 'dark'
+  if (baseline === 'dim') {
+    // SRD Darkvision: Dim Light within range reads as Bright Light.
+    if (typeof senses.darkvision === 'number' && distFt <= senses.darkvision) return 'none';
+    return 'lightly';
+  }
+  // baseline === 'dark' — Darkvision steps Darkness → Dim within range.
   if (typeof senses.darkvision === 'number' && distFt <= senses.darkvision) return 'lightly';
   void observer; void target;
   return 'heavily';
+}
+
+export type LightLevel = 'bright' | 'dim' | 'dark';
+const LIGHT_ORDER: Record<LightLevel, number> = { dark: 0, dim: 1, bright: 2 };
+
+/**
+ * Effective ambient light at a tile (US-127): the brightest of
+ *   • the baked per-zone light (`GameMap.light`, US-126) or the encounter-wide
+ *     `environment.lightLevel`, and
+ *   • any carried light source — the player's lit torch / lantern / Light
+ *     cantrip (`PlayerState.lightSource`) sheds Bright Light within
+ *     `brightFt` and lifts Darkness to Dim out to `brightFt + dimFt`.
+ * Light only ever improves the baseline. NPC-carried light is not modelled.
+ */
+export function effectiveLightAt(state: GameState, x: number, y: number): LightLevel {
+  const baked = state.map.light?.[y]?.[x] ?? null;
+  let light: LightLevel = baked ?? state.environment?.lightLevel ?? 'bright';
+  const src = state.player.lightSource;
+  if (src && state.player.hp > 0) {
+    const distFt = Math.max(Math.abs(state.player.tileX - x), Math.abs(state.player.tileY - y)) * TILE_FT;
+    const fromSource: LightLevel | null =
+      distFt <= src.brightFt ? 'bright'
+      : distFt <= src.brightFt + src.dimFt ? 'dim'
+      : null;
+    if (fromSource && LIGHT_ORDER[fromSource] > LIGHT_ORDER[light]) light = fromSource;
+  }
+  return light;
 }

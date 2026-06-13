@@ -40,7 +40,7 @@ import {
 
 // ── Extracted layers (see SpellPrimitives / SpellZones / SpellUtilityResolvers) ──
 import {
-  visCanSeeTargetCover, spellMod, spellSaveDC, spellAttackBonus,
+  visCanSeeTarget, spellMod, spellSaveDC, spellAttackBonus,
   cantripDiceMultiplier, rollDamage, applyDamageToNpc, rollPlayerSaveAndDamage,
   normaliseConditionList, onHitConditionNote, conditionLogText, pushNpcAway,
   damageAfterSave,
@@ -145,14 +145,15 @@ function resolveAttackRollSpell(
   // before any roll happens — refunds nothing (the slot was already
   // consumed by consumeCastingResources, which mirrors the player's choice
   // to commit). The defender's cover bonus stacks onto effective AC.
-  const visionCover = visCanSeeTargetCover(ctx, target);
-  if (visionCover === 'total') {
+  const targetVision = visCanSeeTarget(ctx, target);
+  if (targetVision.cover === 'total' || !targetVision.sees) {
     ctx.addLog({
-      left: `${ctx.playerDef.name} casts ${spell.name} — ${combatantDisplayName(target, ctx.state.npcs)} is behind total cover`,
+      left: `${ctx.playerDef.name} casts ${spell.name} — ${combatantDisplayName(target, ctx.state.npcs)} is ${targetVision.cover === 'total' ? 'behind total cover' : 'beyond sight (darkness or concealment)'}`,
       style: 'miss',
     });
     return { hit: false, damageRolls: [] };
   }
+  const visionCover = targetVision.cover;
   const coverAcBonus = visionCover === 'three-quarters' ? 5 : visionCover === 'half' ? 2 : 0;
   const effectiveAc = def.ac + coverAcBonus + shieldAcBonus(target.conditions);
 
@@ -359,11 +360,12 @@ function resolveTrueStrike(ctx: GameContext, spell: SpellDef, target: NpcState, 
     ctx.addLog({ left: `${spell.name}: no valid weapon equipped`, style: 'miss' });
     return false;
   }
-  const visionCover = visCanSeeTargetCover(ctx, target);
-  if (visionCover === 'total') {
-    ctx.addLog({ left: `${spell.name} — ${combatantDisplayName(target, s.npcs)} is behind total cover`, style: 'miss' });
+  const targetVision = visCanSeeTarget(ctx, target);
+  if (targetVision.cover === 'total' || !targetVision.sees) {
+    ctx.addLog({ left: `${spell.name} — ${combatantDisplayName(target, s.npcs)} is ${targetVision.cover === 'total' ? 'behind total cover' : 'beyond sight (darkness or concealment)'}`, style: 'miss' });
     return false;
   }
+  const visionCover = targetVision.cover;
   const coverAcBonus = visionCover === 'three-quarters' ? 5 : visionCover === 'half' ? 2 : 0;
   const effectiveAc = def.ac + coverAcBonus + shieldAcBonus(target.conditions);
   const sm = spellMod(ctx);

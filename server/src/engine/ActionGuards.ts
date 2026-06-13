@@ -186,6 +186,23 @@ export function canEscapeGrapple(ctx: GameContext): boolean {
   return canSpendAction(ctx) && !!ctx.state.player.grappledBy;
 }
 
+/** Can the player light or douse a carried light source (US-127)? Dousing is
+ *  always offered while lit; lighting needs a `lightSource` item in the
+ *  inventory. In combat it rides the free object interaction (or the Action
+ *  once that's spent) — resolved inside `doToggleLight`. */
+export function canToggleLight(ctx: GameContext): boolean {
+  const s = ctx.state;
+  if (s.player.hp <= 0) return false;
+  if (s.player.lightSource) return true;
+  const hasLightItem = s.player.inventoryIds.some((id) => {
+    const item = ctx.defs.equipment.find((e) => e.id === id) as { lightSource?: unknown } | undefined;
+    return !!item?.lightSource;
+  });
+  if (!hasLightItem) return false;
+  if (s.phase !== 'player_turn') return s.phase === 'exploring';
+  return !s.player.freeObjectInteractionUsed || canSpendAction(ctx);
+}
+
 /** Can the player take a Short Rest right now (always in exploring phase)? */
 export function canShortRest(ctx: GameContext): boolean {
   const s = ctx.state;

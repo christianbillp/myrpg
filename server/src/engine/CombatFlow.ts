@@ -110,7 +110,10 @@ export function doStartCombat(ctx: GameContext, events: GameEvent[]): void {
   // Advantage on Initiative from any source that contributes an
   // `advantage: { on: 'initiative' }` modifier (Remarkable Athlete, Alert, …).
   const initAdvantage = hasAdvantageOn(ctx.playerDef, 'initiative');
-  const playerInit = rollOneInitiative(mod(ctx.playerDef.dex), /*surprised*/false, /*invisible*/false, initAdvantage, ctx.playerDef.halflingLuck);
+  // SRD Invisible: Advantage on Initiative when Invisible at the roll —
+  // the same benefit NPCs already get below.
+  const playerInvisible = s.player.conditions.includes('invisible');
+  const playerInit = rollOneInitiative(mod(ctx.playerDef.dex), /*surprised*/false, playerInvisible, initAdvantage, ctx.playerDef.halflingLuck);
   s.player.initiativeRoll = playerInit.total;
   logs.push({
     left: `${ctx.playerDef.name} rolls Initiative`,

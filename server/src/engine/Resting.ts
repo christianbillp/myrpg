@@ -204,6 +204,9 @@ export function applyLongRest(
   // Strength drained by Shadow attacks recovers on a Long Rest. (The SRD
   // 5.2.1 stat block gives no recovery clause; without Greater Restoration
   // in scope, a Long Rest is the deliberate house-rule recovery point.)
+  // Carried light (US-127) — torches and the Light cantrip run on the
+  // hour-scale; both are out by the end of a Long Rest.
+  player.lightSource = undefined;
   if (player.strengthDrained) {
     playerDef.str += player.strengthDrained;
     player.strengthDrained = 0;

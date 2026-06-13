@@ -3,5 +3,9 @@
   "name": "Hooded Lantern",
   "type": "gear",
   "description": "Burns Oil to cast Bright Light in a 30-foot radius and Dim Light for an additional 30 feet. As a Bonus Action, you can lower the hood, reducing the light to Dim Light in a 5-foot radius, or raise it again.",
-  "costCp": 500
+  "costCp": 500,
+  "lightSource": {
+    "brightFt": 30,
+    "dimFt": 30
+  }
 }
