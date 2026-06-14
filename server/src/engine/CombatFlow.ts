@@ -295,6 +295,10 @@ export function enterPlayerTurn(ctx: GameContext): void {
   // SRD Sneak Attack — "Once per turn". Reset at the start of every player
   // turn so the next eligible hit can ride.
   s.player.sneakAttackUsedThisTurn = false;
+  // US-128 Two-Weapon Fighting / Cleave per-turn gates reset each turn.
+  s.player.attackedThisTurn = false;
+  s.player.offhandAttackUsedThisTurn = false;
+  s.player.cleaveUsedThisTurn = false;
   // SRD: a grapple ends when the grappler is incapacitated (death is handled
   // by killNpc; this catches a grappler paralyzed / stunned mid-fight).
   if (s.player.grappledBy) {

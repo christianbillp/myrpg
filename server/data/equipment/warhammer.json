@@ -1,0 +1,20 @@
+{
+  "id": "warhammer",
+  "name": "Warhammer",
+  "type": "weapon",
+  "statKey": "str",
+  "damageDice": 1,
+  "damageSides": 8,
+  "damageType": "bludgeoning",
+  "mastery": "push",
+  "finesse": false,
+  "twoHanded": false,
+  "thrown": false,
+  "throwNormal": 0,
+  "throwLong": 0,
+  "versatile": {
+    "damageDice": 1,
+    "damageSides": 10
+  },
+  "costCp": 1500
+}

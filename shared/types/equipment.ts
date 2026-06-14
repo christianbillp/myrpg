@@ -81,6 +81,9 @@ export interface WeaponDef extends MagicItemProps {
   rangeLong?: number;         // feet — maximum ranged range
   ammunitionType?: string;    // e.g. "arrow", "bolt", "bullet", "needle"
   loading?: boolean;          // one shot per Action/Bonus/Reaction
+  /** SRD Light (US-128) — qualifies the weapon for Two-Weapon Fighting: a
+   *  Light weapon in each hand lets the off-hand make a bonus-action attack. */
+  light?: boolean;
   heavy?: boolean;            // SRD Heavy — Disadvantage if DEX < 13 (ranged) or STR < 13 (melee) (US-111)
   /** SRD Versatile — the larger damage die used when wielded two-handed (no
    *  shield equipped). Absent for non-versatile weapons. (US-111) */

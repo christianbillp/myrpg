@@ -1,0 +1,17 @@
+{
+  "id": "greataxe",
+  "name": "Greataxe",
+  "type": "weapon",
+  "statKey": "str",
+  "damageDice": 1,
+  "damageSides": 12,
+  "damageType": "slashing",
+  "mastery": "cleave",
+  "finesse": false,
+  "twoHanded": true,
+  "thrown": false,
+  "throwNormal": 0,
+  "throwLong": 0,
+  "heavy": true,
+  "costCp": 3000
+}

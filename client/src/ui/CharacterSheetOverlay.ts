@@ -99,8 +99,8 @@ const ABILITY_LABEL: Record<Ability, string> = {
 type TabId = "stats" | "features" | "story" | "equipment" | "spells";
 
 export interface CharacterSheetCallbacks {
-  onEquip: (slot: "armor" | "weapon" | "shield", itemId: string) => void;
-  onUnequip: (slot: "armor" | "weapon" | "shield") => void;
+  onEquip: (slot: "armor" | "weapon" | "shield" | "offhand", itemId: string) => void;
+  onUnequip: (slot: "armor" | "weapon" | "shield" | "offhand") => void;
   onUse: (itemId: string) => void;
   /** Read a spell scroll (US-124): server casts the scroll's spell and consumes it. */
   onCastScroll: (itemId: string) => void;
@@ -116,7 +116,7 @@ export interface CharacterSheetCallbacks {
 export interface CharacterSheetInputs {
   playerDef: PlayerDef;
   state: PlayerState;
-  equippedItems: Partial<Record<"armor" | "weapon" | "shield", EquipmentDef>>;
+  equippedItems: Partial<Record<"armor" | "weapon" | "shield" | "offhand", EquipmentDef>>;
   inventory: ItemDef[];
   /** Whether consumables (potions) can be used right now — disables the USE button when false. */
   canUseConsumable: boolean;
@@ -491,10 +491,11 @@ export class CharacterSheetOverlay extends BaseOverlay {
 
   private renderInventoryTab(): void {
     const { playerDef, state, equippedItems, inventory, canUseConsumable } = this.inputs;
-    const slotDefs: { key: "armor" | "weapon" | "shield"; label: string }[] = [
-      { key: "armor",  label: "ARMOR"   },
-      { key: "weapon", label: "WEAPON"  },
-      { key: "shield", label: "OFFHAND" },
+    const slotDefs: { key: "armor" | "weapon" | "shield" | "offhand"; label: string }[] = [
+      { key: "armor",   label: "ARMOR"    },
+      { key: "weapon",  label: "WEAPON"   },
+      { key: "shield",  label: "SHIELD"   },
+      { key: "offhand", label: "OFF-HAND" },
     ];
 
     const slotCards = slotDefs.map(({ key, label }) => {
@@ -549,6 +550,13 @@ export class CharacterSheetOverlay extends BaseOverlay {
         : `${escHtml(dispName)}${tail}`;
       const slot: "armor" | "weapon" | "shield" =
         item.type === "armor" ? "armor" : item.type === "weapon" ? "weapon" : "shield";
+      // US-128: a one-handed Light weapon can also go in the off-hand for
+      // Two-Weapon Fighting — offer a second small button.
+      const isLightOneHandedWeapon = item.type === "weapon" && !!(item as WeaponDef).light && !(item as WeaponDef).twoHanded;
+      const offhandBtn = isLightOneHandedWeapon
+        ? `<button data-equip="offhand|${escHtml(item.id)}" class="gui-btn-overlay"
+             style="width:48px;height:22px;background:#0a1520;border:1px solid ${ACCENT};color:${ACCENT};font-size:9px;margin-left:4px;" title="Equip to off-hand (Two-Weapon Fighting)">OFF</button>`
+        : "";
       return `
         <div style="display:flex;align-items:center;justify-content:space-between;height:28px;padding:0 2px;">
           <span style="font-size:11px;color:#b0c8dc;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;margin-right:8px;">
@@ -557,7 +565,7 @@ export class CharacterSheetOverlay extends BaseOverlay {
           <button data-equip="${slot}|${escHtml(item.id)}" class="gui-btn-overlay"
             style="width:72px;height:22px;background:#0a1520;border:1px solid ${ACCENT};color:${ACCENT};font-size:10px;">
             EQUIP
-          </button>
+          </button>${offhandBtn}
         </div>`;
     }).join("");
 
@@ -654,11 +662,11 @@ export class CharacterSheetOverlay extends BaseOverlay {
     slotArea.innerHTML = slotCards;
 
     this.contentEl.querySelectorAll<HTMLButtonElement>("[data-unequip]").forEach(btn => {
-      const slot = btn.dataset.unequip as "armor" | "weapon" | "shield";
+      const slot = btn.dataset.unequip as "armor" | "weapon" | "shield" | "offhand";
       btn.addEventListener("pointerdown", () => this.callbacks.onUnequip(slot));
     });
     this.contentEl.querySelectorAll<HTMLButtonElement>("[data-equip]").forEach(btn => {
-      const [slot, itemId] = btn.dataset.equip!.split("|") as ["armor" | "weapon" | "shield", string];
+      const [slot, itemId] = btn.dataset.equip!.split("|") as ["armor" | "weapon" | "shield" | "offhand", string];
       btn.addEventListener("pointerdown", () => this.callbacks.onEquip(slot, itemId));
     });
     this.contentEl.querySelectorAll<HTMLButtonElement>("[data-use]").forEach(btn => {

@@ -389,7 +389,7 @@ Equipped in the `weapon` slot. `applyEquipment` derives the character's `mainAtt
 | `damageDice` | number | Number of damage dice. |
 | `damageSides` | number | Die size. |
 | `damageType` | string | Damage type string, e.g. `"slashing"`. |
-| `mastery` | string \| null | SRD weapon mastery property: `"graze"`, `"vex"`, `"sap"`, `"slow"`, or `null`. |
+| `mastery` | string \| null | SRD weapon mastery property — all eight wired: `"graze"`, `"vex"`, `"sap"`, `"slow"`, `"topple"`, `"push"`, `"nick"` (US-128, TWF enabler), `"cleave"` (US-128), or `null`. |
 | `finesse` | boolean | If `true`, use the higher of STR/DEX for attack and damage. |
 | `twoHanded` | boolean | If `true`, equipping this weapon auto-unequips any held shield. |
 | `thrown` | boolean | Whether this weapon can be thrown using its own stats. Improvised throws (non-thrown items) deal 1d4 bludgeoning at 20/60 ft. |
@@ -398,10 +398,12 @@ Equipped in the `weapon` slot. `applyEquipment` derives the character's `mainAtt
 | `rangeNormal` | number? | *(ranged weapons)* Normal ranged attack range in feet. Absence/0 = melee weapon. Beyond this range imposes Disadvantage. |
 | `rangeLong` | number? | *(ranged weapons)* Maximum ranged attack range in feet. Beyond this distance the player cannot fire. |
 | `ammunitionType` | string? | *(ranged weapons)* Canonical key for the ammo item id consumed per shot, e.g. `"arrow"`, `"bolt"`, `"bullet"`, `"needle"`. Each attack consumes one matching item from inventory. |
-| `loading` | boolean? | *(ranged weapons)* SRD Loading property. When `true`, only one shot per Action/Bonus Action/Reaction regardless of Extra Attack count. (Field is wired but not enforced until Extra Attack ships — no current Level 1 character has it.) |
+| `loading` | boolean? | *(ranged weapons)* SRD Loading property (enforced, US-128). When `true`, the weapon makes only ONE attack per Action regardless of Extra Attack — `applyAttackOutcome` grants no Extra-Attack reserve. |
 | `heavy` | boolean? | SRD Heavy property (US-111). When `true`: DEX < 13 imposes Disadvantage on **ranged** attacks; STR < 13 imposes Disadvantage on **melee** attacks. Carried onto `PlayerAttack.heavy` for both. |
 | `versatile` | object? | SRD Versatile property (US-111): `{ damageDice, damageSides }` — the larger die used when the weapon is wielded two-handed (no shield equipped). `makePlayerAttack` selects it when `twoHandedGrip` is true. Authored on battleaxe/longsword (1d10) and quarterstaff (1d8). |
-| `reach` | boolean? | SRD Reach property (US-111). When `true`, melee reach is 10 ft (2 tiles) — `playerAttackReachTiles` returns 2. Surfaced on `PlayerAttack.reach`. (No reach weapon ships in the roster yet — content.) |
+| `reach` | boolean? | SRD Reach property (US-111). When `true`, melee reach is 10 ft (2 tiles) — `playerAttackReachTiles` returns 2. Surfaced on `PlayerAttack.reach`. Authored on the glaive (US-128 content). |
+| `light` | boolean? | SRD Light property (US-128). Qualifies the weapon for Two-Weapon Fighting: with a Light weapon in BOTH the `weapon` and `offhand` slots, the player may make a bonus-action off-hand attack (the `offhandAttack` player action; Nick mastery makes it free). The off-hand strike adds the ability modifier to its attack roll but NOT to damage unless negative (`PlayerAttack.offhand`). Authored on dagger, scimitar, shortsword, handaxe. |
+| `offhandId` | string? | *(`EquipmentSlots`)* The off-hand weapon slot (US-128). Shares a hand with the shield — equipping one sheathes the other; a two-handed main weapon clears it. |
 | `cost` | number | Gold piece value. |
 
 A weapon is **ranged** iff `rangeNormal > 0`. Ranged player attacks are dispatched through the same ATTACK button as melee — the engine routes via `mainAttack.rangeNormal` and consumes ammunition from inventory. After every shot, there is a **50% chance per shot** that the arrow/bolt lands on the target's tile as a `mapItem` and can be picked up by walking onto it.

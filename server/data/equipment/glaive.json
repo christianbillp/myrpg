@@ -1,0 +1,18 @@
+{
+  "id": "glaive",
+  "name": "Glaive",
+  "type": "weapon",
+  "statKey": "str",
+  "damageDice": 1,
+  "damageSides": 10,
+  "damageType": "slashing",
+  "mastery": "graze",
+  "finesse": false,
+  "twoHanded": true,
+  "thrown": false,
+  "throwNormal": 0,
+  "throwLong": 0,
+  "reach": true,
+  "heavy": true,
+  "costCp": 2000
+}

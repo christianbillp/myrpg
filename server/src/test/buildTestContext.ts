@@ -41,6 +41,7 @@ export interface TestContextOverrides {
   worldTickCount?: number;
   dayPhase?: GameState['dayPhase'];
   monsters?: MonsterDef[];
+  equipment?: import("./../engine/types.js").ItemDef[];
 }
 
 export interface TestContextResult {
@@ -215,7 +216,7 @@ export function buildTestContext(overrides: TestContextOverrides = {}): TestCont
     monsters: overrides.monsters ?? [],
     npcs: [],
     factions: [],
-    equipment: [],
+    equipment: overrides.equipment ?? [],
     spells: [],
     features: [],
     feats: [],

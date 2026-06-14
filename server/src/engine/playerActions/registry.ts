@@ -23,7 +23,7 @@ import type { PlayerAction } from '../../../../shared/types.js';
 
 // Delegated imports — same set the old switch used.
 import { doMove as exDoMove, doMoveTo as exDoMoveTo, doSearch as exDoSearch, doShortRest as exDoShortRest, doUsePotion as exDoUsePotion } from '../ExplorationActions.js';
-import { doAttack as caDoAttack, doDash as caDoDash, doDodge as caDoDodge, doDisengage as caDoDisengage, doDetach as caDoDetach, doEscapeGrapple as caDoEscapeGrapple, doToggleLight as caDoToggleLight, doHide as caDoHide, throwItem as caThrowItem, doResolveReroll as caDoResolveReroll, doGrapple as caDoGrapple, doShove as caDoShove, doHelp as caDoHelp, doReady as caDoReady } from '../CombatActions.js';
+import { doAttack as caDoAttack, doDash as caDoDash, doDodge as caDoDodge, doDisengage as caDoDisengage, doDetach as caDoDetach, doEscapeGrapple as caDoEscapeGrapple, doToggleLight as caDoToggleLight, doOffhandAttack as caDoOffhandAttack, doHide as caDoHide, throwItem as caThrowItem, doResolveReroll as caDoResolveReroll, doGrapple as caDoGrapple, doShove as caDoShove, doHelp as caDoHelp, doReady as caDoReady } from '../CombatActions.js';
 import { doCastSpell as spDoCastSpell, doUseScroll as spDoUseScroll } from '../SpellSystem.js';
 import { doEquip as ivDoEquip, doUnequip as ivDoUnequip, doAttune as ivDoAttune, doUnattune as ivDoUnattune, doIdentify as ivDoIdentify } from '../InventoryActions.js';
 import { doCommandSummon, checkSummonTether } from '../SummonSystem.js';
@@ -81,6 +81,7 @@ export const PLAYER_ACTIONS: Registry = {
   detach:               (ctx)            => caDoDetach(ctx),
   escape:               (ctx)            => caDoEscapeGrapple(ctx),
   toggleLight:          (ctx)            => caDoToggleLight(ctx),
+  offhandAttack:        (ctx, a, events) => caDoOffhandAttack(ctx, a.targetId, events),
   commandSummon:        (ctx, a, events) => doCommandSummon(ctx, a.summonNpcId, a.tile, events),
   endTurn:              (ctx, _a, events) => {
     if (ctx.state.phase === 'player_turn') {

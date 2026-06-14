@@ -77,7 +77,7 @@ export interface PlayerState {
    *  attack normally — with the Invisible condition's Disadvantage. Cleared when
    *  Invisibility ends (`endConcentration`). */
   unseenBy?: string[];
-  equippedSlotLabels: { armor: string | null; weapon: string | null; shield: string | null };
+  equippedSlotLabels: { armor: string | null; weapon: string | null; shield: string | null; offhand?: string | null };
   /** Current effective AC after armor / shield / Mage Armor / Defense fighting style. Synced from `playerDef.ac` after every `applyEquipment` call so the client doesn't have to recompute. */
   ac: number;
   // ── Spellcasting runtime state ───────────────────────────────────────────
@@ -176,6 +176,15 @@ export interface PlayerState {
    *  and reserves `attacksPerAction - 1` here; each follow-up draws this down
    *  without spending another Action. Reset to 0 at the start of the turn. */
   attacksRemaining?: number;
+  /** US-128 Two-Weapon Fighting: true once the player has made a weapon Attack
+   *  this turn — gates the off-hand bonus attack ("when you take the Attack
+   *  action and attack with a Light weapon"). Reset at the start of the turn. */
+  attackedThisTurn?: boolean;
+  /** US-128: the off-hand TWF attack was spent this turn (once per turn —
+   *  whether it cost the Bonus Action or rode Nick for free). */
+  offhandAttackUsedThisTurn?: boolean;
+  /** US-128 Cleave mastery: the once-per-turn cleave hit was spent this turn. */
+  cleaveUsedThisTurn?: boolean;
   /** SRD attunement (US-124): ids of magic items the player is currently
    *  attuned to (≤ 3). A `requiresAttunement` item's bonus applies only while
    *  its id is in this list. */
@@ -277,6 +286,10 @@ export interface AvailableActions {
    *  Detach as an action (consumes the action and removes the attach effects
    *  from that source). */
   canDetach: boolean;
+  /** True when the player can make the Two-Weapon Fighting off-hand attack
+   *  this turn (US-128): a Light weapon in each hand, having already attacked
+   *  this turn, and either a Bonus Action free or Nick granting it for free. */
+  canOffhandAttack: boolean;
   /** True when a monster grapple holds the player (`PlayerState.grappledBy`)
    *  and they can spend the Action on an Escape attempt — Athletics or
    *  Acrobatics (whichever is better) vs the grapple's escape DC (US-125).

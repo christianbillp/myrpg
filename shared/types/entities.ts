@@ -121,6 +121,19 @@ export interface PlayerAttack {
   push: boolean;
   /** Topple mastery — on hit, target makes a Con save or falls Prone. */
   topple: boolean;
+  /** Nick mastery (US-128) — the Two-Weapon Fighting off-hand attack is made
+   *  as part of the Attack action (no Bonus Action), once per turn. */
+  nick?: boolean;
+  /** Cleave mastery (US-128) — on a melee hit, make one extra attack against a
+   *  second creature within 5 ft and reach; once per turn; no ability mod to
+   *  the second hit's damage unless negative. */
+  cleave?: boolean;
+  /** SRD Light (US-128) — qualifies for Two-Weapon Fighting. */
+  light?: boolean;
+  /** US-128 — set on the off-hand Two-Weapon Fighting attack (and Cleave's
+   *  second hit): the positive ability modifier is NOT added to damage (a
+   *  negative one still is). The attack ROLL keeps the modifier. */
+  offhand?: boolean;
   // Ranged-weapon fields. Absence of rangeNormal means melee (5 ft / 1 tile reach).
   // For ranged weapons, rangeNormal/rangeLong are in feet (1 tile = 5 ft); beyond
   // normal range imposes Disadvantage, beyond long range cannot fire.
@@ -146,6 +159,10 @@ export interface EquipmentSlots {
   armorId: string | null;
   weaponId: string | null;
   shieldId: string | null;
+  /** Off-hand weapon for Two-Weapon Fighting (US-128). Optional so existing
+   *  slot literals stay valid. Occupies the same hand as the shield — the two
+   *  are mutually exclusive. */
+  offhandId?: string | null;
 }
 
 export interface PlayerDef {

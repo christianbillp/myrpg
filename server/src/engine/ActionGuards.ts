@@ -179,6 +179,24 @@ export function canDetach(ctx: GameContext): boolean {
   return canSpendAction(ctx) && ctx.state.player.ongoingEffects.some((oe) => oe.kind === 'attach');
 }
 
+/**
+ * SRD Two-Weapon Fighting (US-128): can the player make the off-hand attack
+ * this turn? Requires a Light weapon in BOTH hands, having already made a
+ * weapon Attack this turn, the off-hand attack not yet spent, and either the
+ * Bonus Action available OR Nick (on either weapon) granting it for free.
+ */
+export function canOffhandAttack(ctx: GameContext): boolean {
+  const s = ctx.state;
+  if (s.phase !== 'player_turn') return false;
+  if (!s.player.attackedThisTurn || s.player.offhandAttackUsedThisTurn) return false;
+  if (isIncapacitated(s.player.conditions)) return false;
+  const off = ctx.defs.equipment.find((e) => e.id === s.player.equippedSlots.offhandId) as { type?: string; light?: boolean; mastery?: string } | undefined;
+  const main = ctx.defs.equipment.find((e) => e.id === s.player.equippedSlots.weaponId) as { type?: string; light?: boolean; mastery?: string } | undefined;
+  if (off?.type !== 'weapon' || main?.type !== 'weapon' || !off.light || !main.light) return false;
+  const nick = main.mastery === 'nick' || off.mastery === 'nick';
+  return nick || !s.player.bonusActionUsed;
+}
+
 /** Can the player attempt to Escape a monster grapple this turn (US-125)?
  *  Costs the Action: Athletics or Acrobatics (whichever is better) vs the
  *  grapple's escape DC. */

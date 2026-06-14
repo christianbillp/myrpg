@@ -66,12 +66,13 @@ function applyEquipmentCost(ctx: GameContext, costAction: boolean): void {
   }
 }
 
-export function doEquip(ctx: GameContext, slot: 'armor' | 'weapon' | 'shield', itemId: string): void {
+export function doEquip(ctx: GameContext, slot: 'armor' | 'weapon' | 'shield' | 'offhand', itemId: string): void {
   const s = ctx.state;
   const slotKey = `${slot}Id` as keyof EquipmentSlots;
   if (!s.player.inventoryIds.includes(itemId)) return;
 
-  const gate = gateEquipmentChange(ctx, slot);
+  // The off-hand follows the weapon's action economy.
+  const gate = gateEquipmentChange(ctx, slot === 'offhand' ? 'weapon' : slot);
   if (!gate.ok) {
     ctx.addLog({ left: gate.reason, style: 'status' });
     return;
@@ -83,12 +84,40 @@ export function doEquip(ctx: GameContext, slot: 'armor' | 'weapon' | 'shield', i
       ctx.addLog({ left: `Cannot equip a shield while wielding a two-handed weapon.`, style: 'status' });
       return;
     }
+    // Shield and off-hand weapon share a hand (US-128) — donning a shield
+    // sheathes the off-hand.
+    if (s.player.equippedSlots.offhandId) {
+      s.player.inventoryIds.push(s.player.equippedSlots.offhandId);
+      s.player.equippedSlots.offhandId = null;
+    }
+  }
+  if (slot === 'offhand') {
+    const incoming = ctx.defs.equipment.find((i) => i.id === itemId) as WeaponDef | undefined;
+    if (incoming?.type !== 'weapon' || incoming.twoHanded) {
+      ctx.addLog({ left: `Only a one-handed weapon can be held in the off-hand.`, style: 'status' });
+      return;
+    }
+    const main = ctx.defs.equipment.find((i) => i.id === s.player.equippedSlots.weaponId) as WeaponDef | undefined;
+    if (main?.twoHanded) {
+      ctx.addLog({ left: `Cannot hold an off-hand weapon while wielding a two-handed weapon.`, style: 'status' });
+      return;
+    }
+    // Off-hand and shield share a hand — equipping the off-hand sheathes the shield.
+    if (s.player.equippedSlots.shieldId) {
+      s.player.inventoryIds.push(s.player.equippedSlots.shieldId);
+      s.player.equippedSlots.shieldId = null;
+    }
   }
   if (slot === 'weapon') {
     const incoming = ctx.defs.equipment.find((i) => i.id === itemId) as WeaponDef | undefined;
     if (incoming?.twoHanded && s.player.equippedSlots.shieldId) {
       s.player.inventoryIds.push(s.player.equippedSlots.shieldId);
       s.player.equippedSlots.shieldId = null;
+    }
+    // A two-handed main weapon also sheathes the off-hand.
+    if (incoming?.twoHanded && s.player.equippedSlots.offhandId) {
+      s.player.inventoryIds.push(s.player.equippedSlots.offhandId);
+      s.player.equippedSlots.offhandId = null;
     }
   }
   if (slot === 'armor' && s.player.mageArmor) {
@@ -110,13 +139,13 @@ export function doEquip(ctx: GameContext, slot: 'armor' | 'weapon' | 'shield', i
   applyEquipmentCost(ctx, gate.costAction);
 }
 
-export function doUnequip(ctx: GameContext, slot: 'armor' | 'weapon' | 'shield'): void {
+export function doUnequip(ctx: GameContext, slot: 'armor' | 'weapon' | 'shield' | 'offhand'): void {
   const s = ctx.state;
   const slotKey = `${slot}Id` as keyof EquipmentSlots;
   const currentId = s.player.equippedSlots[slotKey];
   if (!currentId) return;
 
-  const gate = gateEquipmentChange(ctx, slot);
+  const gate = gateEquipmentChange(ctx, slot === 'offhand' ? 'weapon' : slot);
   if (!gate.ok) {
     ctx.addLog({ left: gate.reason, style: 'status' });
     return;

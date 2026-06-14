@@ -462,6 +462,7 @@ export function buildSessionState(
       canDetach: false,
       canEscapeGrapple: false,
       canToggleLight: false,
+      canOffhandAttack: false,
       canLevelUp: false,
       canLongRest: false,
       disarmableTrapTiles: [],

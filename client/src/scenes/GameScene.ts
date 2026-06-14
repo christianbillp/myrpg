@@ -1103,6 +1103,7 @@ export class GameScene extends Phaser.Scene {
       onDetach:         () => gameClient.sendAction({ type: "detach" }),
       onEscape:         () => gameClient.sendAction({ type: "escape" }),
       onToggleLight:    () => gameClient.sendAction({ type: "toggleLight" }),
+      onOffhandAttack:  () => gameClient.sendAction({ type: "offhandAttack", targetId: this.gameState?.selectedTargetId ?? undefined }),
       onUseFeature:     (featureId) => this.beginUseFeature(featureId),
       onHide:           () => gameClient.sendAction({ type: "hide" }),
       onDeathSave:      () => gameClient.sendAction({ type: "rollDeathSave" }),

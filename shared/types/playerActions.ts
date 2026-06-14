@@ -68,8 +68,11 @@ export type PlayerAction =
    *  creating an `ActiveZone`. Consumes one of the item from inventory. */
   | { type: 'deployGear'; itemId: string; tileX: number; tileY: number }
   | { type: 'usePotion' }
-  | { type: 'equip'; slot: 'armor' | 'weapon' | 'shield'; itemId: string }
-  | { type: 'unequip'; slot: 'armor' | 'weapon' | 'shield' }
+  | { type: 'equip'; slot: 'armor' | 'weapon' | 'shield' | 'offhand'; itemId: string }
+  | { type: 'unequip'; slot: 'armor' | 'weapon' | 'shield' | 'offhand' }
+  /** Two-Weapon Fighting off-hand attack (US-128) — a bonus-action (or
+   *  Nick-free) strike with the off-hand Light weapon. */
+  | { type: 'offhandAttack'; targetId?: string }
   | { type: 'selectTarget'; entityId: string | null }
   | { type: 'scrollLog'; delta: number }
   // ── Conversation system ─────────────────────────────────────────────

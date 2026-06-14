@@ -95,6 +95,8 @@ export interface PlayerPanelCallbacks {
   onOpenQuestLog: () => void;
   onSearch: () => void;
   onAttack: () => void;
+  /** Two-Weapon Fighting off-hand attack (US-128). */
+  onOffhandAttack: () => void;
   onThrow: (itemId: string) => void;
   onUseFeature: (featureId: string) => void;
   onDash: () => void;
@@ -572,6 +574,7 @@ export class PlayerPanel {
     add(this.makeBtn('DETACH', GREEN, this.callbacks.onDetach), !aa.canDetach);
     add(this.makeBtn('ESCAPE', GREEN, this.callbacks.onEscape), !aa.canEscapeGrapple);
     add(this.makeBtn(state.lightActive ? 'DOUSE' : 'LIGHT', GREEN, this.callbacks.onToggleLight), !aa.canToggleLight);
+    add(this.makeBtn('OFF-HAND', GREEN, this.callbacks.onOffhandAttack), !aa.canOffhandAttack);
     add(this.makeBtn('KNOCK OUT', state.nonLethal ? '#5a4800' : '#2a2a1a', () => this.callbacks.onToggleNonLethal(!state.nonLethal)), !combat);
     add(this.makeBtn('HIDE', BLUE, this.callbacks.onHide), !aa.canHide);
     add(this.makeBtn('SEARCH', GREEN, this.callbacks.onSearch), !aa.canSearch);

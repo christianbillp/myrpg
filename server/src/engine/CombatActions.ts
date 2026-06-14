@@ -18,7 +18,7 @@ import {
   canDisengage as guardCanDisengage, canHide as guardCanHide,
   canAttackTarget, playerAttackReachTiles, hasCunningAction,
   canDetach as guardCanDetach, canEscapeGrapple as guardCanEscapeGrapple,
-  canToggleLight as guardCanToggleLight,
+  canToggleLight as guardCanToggleLight, canOffhandAttack as guardCanOffhandAttack,
   playerArmorSpeedPenaltyFt, playerHasStealthDisadvantage,
 } from './ActionGuards.js';
 import { publishNpcDamage } from './ThresholdPublisher.js';
@@ -435,16 +435,31 @@ function applyAttackOutcome(
     else ctx.killWithReward(target, targetDef, `☠ ${target.name} is slain!`);
   }
 
+  // US-128: a weapon Attack this turn enables the Two-Weapon Fighting
+  // off-hand strike ("when you take the Attack action and attack with a
+  // Light weapon"). Set regardless of hit/miss.
+  s.player.attackedThisTurn = true;
+
+  // SRD Cleave mastery (US-128): on a melee hit, one extra attack against a
+  // second creature within 5 ft and reach; once per turn; the second hit
+  // gets no ability mod to damage (the `offhand` flag). Fired here so it
+  // rides the same Action, before the reserve bookkeeping.
+  if (isHit && atk.cleave && !isRangedWeapon && !s.player.cleaveUsedThisTurn) {
+    applyCleave(ctx, atk, target, events);
+  }
+
   // SRD Extra Attack (US-119): the first attack of the action commits the
   // Action and reserves the remaining attacks; each follow-up draws the reserve
   // down without spending another Action. When the reserve hits 0 the Attack
   // action is fully spent. Throws (improvised/thrown items) are single attacks
-  // and just spend the Action via the reserve-of-0 path.
+  // and just spend the Action via the reserve-of-0 path. SRD Loading (US-128):
+  // a loading weapon makes only ONE attack per action — it grants no Extra
+  // Attack reserve.
   if ((s.player.attacksRemaining ?? 0) > 0) {
     s.player.attacksRemaining = (s.player.attacksRemaining ?? 0) - 1;
   } else {
     s.player.actionUsed = true;
-    const reserve = Math.max(0, attacksPerAction(ctx.playerDef) - 1);
+    const reserve = atk.loading ? 0 : Math.max(0, attacksPerAction(ctx.playerDef) - 1);
     s.player.attacksRemaining = reserve;
     if (reserve > 0 && s.phase === 'player_turn') {
       ctx.addLog({ left: `Extra Attack — ${reserve} more attack${reserve > 1 ? 's' : ''} this action`, style: 'status' });
@@ -458,6 +473,115 @@ function applyAttackOutcome(
     endConcentration(ctx, `${ctx.playerDef.name} broke Invisibility by attacking`);
   }
   void events;
+}
+
+/**
+ * Resolve one secondary melee strike (Cleave's second hit, the Two-Weapon
+ * Fighting off-hand attack) against an explicit target and apply its damage,
+ * masteries, and kill. Shares the player attack resolver and the same
+ * Unseen-Attacker vision and cover handling as the main path, but carries no
+ * Extra-Attack / action bookkeeping — the caller owns the economy. The
+ * `attack` is expected to carry `offhand: true` so the ability modifier is
+ * dropped from damage per SRD.
+ */
+function resolveSecondaryStrike(
+  ctx: GameContext,
+  attack: PlayerAttack,
+  target: NpcState,
+  events: GameEvent[],
+): void {
+  const s = ctx.state;
+  const targetDef = ctx.resolveMonsterDef(target.defId);
+  if (!targetDef || target.hp <= 0) return;
+  const dist = chebyshev(s.player.tileX, s.player.tileY, target.tileX, target.tileY);
+  const { bonus: coverBonus, untargetable } = coverBonusVsTarget(ctx, target);
+  if (untargetable) return;
+  const vision = mutualAttackVision(s,
+    { tileX: s.player.tileX, tileY: s.player.tileY, senses: playerSenses(ctx), conditions: s.player.conditions, id: 'player' },
+    { tileX: target.tileX, tileY: target.tileY, senses: targetDef.senses, conditions: target.conditions, id: target.id });
+  const withAdvantage = hasAttackAdvantage(s.player.conditions) || grantsAdvantageAgainst(target.conditions, dist) || !vision.seenByTarget;
+  const withDisadvantage = hasAttackDisadvantage(s.player.conditions) || grantsDisadvantageAgainst(target.conditions, dist, s.player.seeInvisible) || !vision.seesTarget;
+  const autoCrit = isAutoCrit(target.conditions, dist);
+  const resolved = playerThrowAttack(ctx.playerDef, attack, targetDef, withAdvantage, withDisadvantage, ctx.playerDef.proficiencyBonus, autoCrit, false, coverBonus, false, attackRollMod(ctx));
+
+  const parry = tryNpcParry(target, targetDef, dist, resolved);
+  const { damage, isHit, logs, vexApplied, slowApplied, bonusComponents } = parry.applied
+    ? { ...parry.replaced } as typeof resolved
+    : resolved;
+  ctx.addLogs(logs);
+  ctx.eventSink?.push({ type: 'attack', attackerId: 'player', targetId: target.id, kind: 'melee', outcome: resolved.isCrit ? 'crit' : isHit ? 'hit' : 'miss' });
+  emitPhysicalAttackSound(ctx, isHit);
+  if (!isHit) { void bonusComponents; void vexApplied; void slowApplied; void damage; return; }
+
+  const { finalDamage, log: resistLog } = ctx.resistMod(damage, attack.damageType, targetDef, target.name);
+  if (resistLog) ctx.addLog(resistLog);
+  const hpBefore = target.hp;
+  applyNpcDamageInstance(ctx, target, targetDef, finalDamage, attack.damageType, resolved.isCrit);
+  for (const bd of bonusComponents) {
+    const { finalDamage: bdFinal, log: bdResistLog } = ctx.resistMod(bd.damage, bd.damageType, targetDef, target.name);
+    ctx.addLog({ left: `+ ${bdFinal} ${bd.damageType}`, right: bd.rollStr, style: 'hit' });
+    if (bdResistLog) ctx.addLog(bdResistLog);
+    applyNpcDamageInstance(ctx, target, targetDef, bdFinal, bd.damageType, resolved.isCrit);
+  }
+  applyGiantGiftOnHit(ctx, target, targetDef);
+  publishNpcDamage(ctx, target, hpBefore, target.hp);
+  ctx.applyMasteryConditions(target, vexApplied, slowApplied);
+  if (target.hp > 0 && attack.push) applyPushMastery(ctx, target);
+  if (target.hp > 0 && attack.topple) applyToppleMastery(ctx, target, targetDef);
+  if (target.hp <= 0) {
+    if (s.player.nonLethal) ctx.knockOutNpc(target, targetDef);
+    else ctx.killWithReward(target, targetDef, `☠ ${target.name} is slain!`);
+  }
+}
+
+/**
+ * SRD Cleave mastery (US-128): after a melee hit, strike a second creature
+ * within 5 ft of the first that is also within reach. Once per turn; no
+ * ability modifier to the second hit's damage (the `offhand` flag).
+ */
+function applyCleave(ctx: GameContext, atk: PlayerAttack, firstTarget: NpcState, events: GameEvent[]): void {
+  const s = ctx.state;
+  const reachTiles = playerAttackReachTiles(ctx);
+  const second = s.npcs.find((n) =>
+    n !== firstTarget && n.disposition === 'enemy' && n.hp > 0
+    && chebyshev(firstTarget.tileX, firstTarget.tileY, n.tileX, n.tileY) <= 1
+    && chebyshev(s.player.tileX, s.player.tileY, n.tileX, n.tileY) <= reachTiles,
+  );
+  if (!second) return;
+  s.player.cleaveUsedThisTurn = true;
+  ctx.addLog({ left: `↪ Cleave — the blow carries into ${combatantDisplayName(second, s.npcs)}`, style: 'status' });
+  resolveSecondaryStrike(ctx, { ...atk, offhand: true }, second, events);
+}
+
+/**
+ * SRD Two-Weapon Fighting off-hand attack (US-128). Gated by
+ * `Guard.canOffhandAttack`: a Light weapon in each hand and a prior weapon
+ * Attack this turn. Costs the Bonus Action — unless either weapon has the
+ * Nick mastery, which lets the off-hand strike ride free as part of the
+ * Attack action. Once per turn; no ability modifier to damage (unless
+ * negative).
+ */
+export function doOffhandAttack(ctx: GameContext, targetId: string | undefined, events: GameEvent[]): void {
+  const s = ctx.state;
+  if (!guardCanOffhandAttack(ctx)) return;
+  const offhandDef = ctx.defs.equipment.find((e) => e.id === s.player.equippedSlots.offhandId) as WeaponDef | undefined;
+  const mainDef = ctx.defs.equipment.find((e) => e.id === s.player.equippedSlots.weaponId) as WeaponDef | undefined;
+  if (!offhandDef || !mainDef) return;
+  const reachTiles = playerAttackReachTiles(ctx);
+  const inReach = (n: NpcState): boolean =>
+    n.disposition === 'enemy' && n.hp > 0 && chebyshev(s.player.tileX, s.player.tileY, n.tileX, n.tileY) <= reachTiles;
+  let target = targetId ? (s.npcs.find((n) => n.id === targetId && inReach(n)) ?? null) : null;
+  if (!target) target = s.npcs.find(inReach) ?? null;
+  if (!target) return;
+
+  // Nick (on either weapon) makes the off-hand attack part of the Attack
+  // action — free; otherwise it costs the Bonus Action.
+  const nick = !!offhandDef.light && (mainDef.mastery === 'nick' || offhandDef.mastery === 'nick');
+  const attack = { ...makePlayerAttack(ctx.playerDef, offhandDef), offhand: true };
+  ctx.addLog({ left: `${ctx.playerDef.name} strikes with the off-hand ${offhandDef.name.toLowerCase()}${nick ? ' (Nick)' : ''}`, style: 'normal' });
+  resolveSecondaryStrike(ctx, attack, target, events);
+  s.player.offhandAttackUsedThisTurn = true;
+  if (!nick) s.player.bonusActionUsed = true;
 }
 
 /**

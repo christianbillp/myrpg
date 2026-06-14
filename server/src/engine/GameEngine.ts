@@ -1426,6 +1426,7 @@ export class GameEngine {
       canDetach: Guard.canDetach(this.ctx),
       canEscapeGrapple: Guard.canEscapeGrapple(this.ctx),
       canToggleLight: Guard.canToggleLight(this.ctx),
+      canOffhandAttack: Guard.canOffhandAttack(this.ctx),
       // LEVEL UP is offered in exploration only — the overlay opens a modal
       // dialogue and applies HP / feature changes that shouldn't land mid-turn.
       canLevelUp: phase === 'exploring' && canLevelUp(this.playerDef.level, p.xp),

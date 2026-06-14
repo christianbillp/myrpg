@@ -1,0 +1,17 @@
+{
+  "id": "handaxe",
+  "name": "Handaxe",
+  "type": "weapon",
+  "statKey": "str",
+  "damageDice": 1,
+  "damageSides": 6,
+  "damageType": "slashing",
+  "mastery": "vex",
+  "finesse": false,
+  "twoHanded": false,
+  "thrown": true,
+  "throwNormal": 20,
+  "throwLong": 60,
+  "light": true,
+  "costCp": 500
+}

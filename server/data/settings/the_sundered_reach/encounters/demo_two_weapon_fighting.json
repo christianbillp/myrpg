@@ -1,0 +1,37 @@
+{
+  "id": "demo_two_weapon_fighting",
+  "encounterTitle": "Demo — Blades & Cleaving",
+  "demo": true,
+  "description": "Demo of the SRD weapon kit added in US-128: Two-Weapon Fighting (a Light weapon in each hand), the Nick mastery (the off-hand strike rides free as part of the Attack action), and the Cleave mastery (a hit carries into a second adjacent enemy). A tight knot of goblins in the waystation hall gives the off-hand and the great-axe plenty to bite.",
+  "mapId": "the_dead_waystation",
+  "npcIds": [],
+  "allyIds": [],
+  "enemyIds": ["goblin_minion", "goblin_minion", "goblin_minion", "goblin_warrior", "goblin_warrior"],
+  "customIntroduction": "The waystation hall is full of the wrong kind of noise — a goblin scavenger band, five strong, packed shoulder to shoulder over a split supply crate, snarling at each other and now at you. They're bunched so close a single good swing could open two of them at once. Your hands settle on your weapons. The question is only which ones.",
+  "customContext": "DEMO — WEAPON KIT (US-128): Two-Weapon Fighting, Nick, Cleave. The five goblins (faction monsters — three Minions, two Warriors) stand in a tight cluster in the great hall so the off-hand and the great-axe have adjacent targets to showcase.\n\nSETUP — on encounter start, give the player a choice of loadouts via add_item, and explain each plainly in-fiction (the player equips through the inventory screen — main weapon to WEAPON, the second to OFF-HAND, or the two-hander to WEAPON):\n  • add_item \"scimitar\" + add_item \"dagger\" (reason: \"a matched pair for fighting with both hands\") — a scimitar in the main hand and a dagger in the off-hand. BOTH are Light, so the player can make a bonus-action OFF-HAND strike after attacking. The dagger has the Nick mastery, so that off-hand strike costs NO Bonus Action — it folds into the Attack action for free.\n  • add_item \"greataxe\" (reason: \"a heavy two-hander\") — has the Cleave mastery: when it hits a goblin, the blow carries into a SECOND goblin within 5 ft, once per turn, for weapon damage with no ability bonus.\n\nWHAT TO DEMONSTRATE — narrate as the engine resolves them; do NOT fake the dice:\n1. TWO-WEAPON FIGHTING: with a Light weapon in each hand, after the player's ATTACK the OFF-HAND button lights up — a second strike with the dagger. Its damage adds NO ability modifier (the roll still does).\n2. NICK: because the dagger has Nick, that off-hand strike is FREE (part of the Attack action), so the Bonus Action stays open for something else. Point this out — Nick is the difference between 'costs your Bonus Action' and 'free'.\n3. CLEAVE: with the greataxe, a hit on one packed goblin spills into an adjacent second goblin automatically — once per turn. The cluster is arranged so this always has a target.\n4. (Rules note, not shown: a Loading weapon like a crossbow fires only once per Action even with Extra Attack — relevant at higher levels.)\n\nLet the player re-equip mid-fight to feel both styles: dual-wield to clear minions with two strikes a turn, or swing the great-axe to cleave the cluster. The goblins fight normally (Nimble Escape, pack tactics); there's no objective beyond the lesson — dropping the band completes it.",
+  "objective": "Arm up — twin blades or a great-axe — and cut down the goblin knot. Feel how the off-hand, Nick, and Cleave each change the math of a turn.",
+  "completionFlag": "goblin_knot_cleared",
+  "allowsLongRest": false,
+  "placementMode": "exact",
+  "placements": [
+    { "role": "player", "x": 5, "y": 12 },
+    { "role": "enemy", "index": 0, "x": 13, "y": 11 },
+    { "role": "enemy", "index": 1, "x": 14, "y": 11 },
+    { "role": "enemy", "index": 2, "x": 13, "y": 12 },
+    { "role": "enemy", "index": 3, "x": 15, "y": 12 },
+    { "role": "enemy", "index": 4, "x": 14, "y": 13 }
+  ],
+  "environment": {
+    "lightLevel": "bright"
+  },
+  "triggers": [
+    {
+      "id": "demo_twf_hint",
+      "when": { "event": "encounter_started" },
+      "then": [
+        { "type": "show_log", "message": "DEMO: the GM will hand you a SCIMITAR + DAGGER (dual-wield) and a GREATAXE. Equip the scimitar to WEAPON and the dagger to OFF-HAND, then ATTACK — the OFF-HAND button makes a second strike (no ability bonus to its damage), and because the dagger has Nick it's FREE (no Bonus Action). Or wield the greataxe: a hit CLEAVES into a second adjacent goblin. The goblins are packed tight so both shine." }
+      ],
+      "once": true
+    }
+  ]
+}

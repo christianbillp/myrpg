@@ -72,6 +72,9 @@ export function makePlayerAttack(playerDef: PlayerDef, weapon: WeaponDef, twoHan
     slow: weapon.mastery === 'slow',
     push: weapon.mastery === 'push',
     topple: weapon.mastery === 'topple',
+    nick: weapon.mastery === 'nick',
+    cleave: weapon.mastery === 'cleave',
+    light: !!weapon.light,
     rangeNormal: isRanged ? weapon.rangeNormal : undefined,
     rangeLong:   isRanged ? weapon.rangeLong : undefined,
     ammunitionType: isRanged ? weapon.ammunitionType : undefined,
@@ -87,7 +90,7 @@ export function computeEquippedSlotLabels(
   playerDef: PlayerDef,
   slots: EquipmentSlots,
   allItems: ItemDef[],
-): { armor: string | null; weapon: string | null; shield: string | null } {
+): { armor: string | null; weapon: string | null; shield: string | null; offhand: string | null } {
   const byId = Object.fromEntries(allItems.map((i) => [i.id, i]));
   const armor  = slots.armorId  ? (byId[slots.armorId]  as ArmorDef  | undefined) ?? null : null;
   const shield = slots.shieldId ? (byId[slots.shieldId] as ShieldDef | undefined) ?? null : null;
@@ -117,7 +120,16 @@ export function computeEquippedSlotLabels(
     weaponLabel = `${diceStr}${sign}${statMod}${masteryStr}`;
   }
 
-  return { armor: armorLabel, weapon: weaponLabel, shield: shieldLabel };
+  const offhand = slots.offhandId ? (byId[slots.offhandId] as WeaponDef | undefined) ?? null : null;
+  let offhandLabel: string | null = null;
+  if (offhand) {
+    const attack = makePlayerAttack(playerDef, offhand);
+    const diceStr = `${attack.damageDice}d${attack.damageSides}`;
+    const nickStr = offhand.mastery === 'nick' ? ' (Nick)' : '';
+    offhandLabel = `${diceStr}${nickStr}`;
+  }
+
+  return { armor: armorLabel, weapon: weaponLabel, shield: shieldLabel, offhand: offhandLabel };
 }
 
 export function applySpecies(playerDef: PlayerDef, allSpecies: SpeciesDef[]): void {

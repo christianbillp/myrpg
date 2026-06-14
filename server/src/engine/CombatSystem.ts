@@ -114,6 +114,10 @@ function resolvePlayerAttack(
   extraAttackMod = 0,
 ): ResolvedPlayerAttack {
   const statMod = attack.statKey === 'str' ? mod(player.str) : mod(player.dex);
+  // SRD Two-Weapon Fighting / Cleave (US-128): the off-hand (or cleave) attack
+  // adds the ability modifier to the ROLL but NOT to damage, unless it's
+  // negative. `damageStatMod` is the value folded into damage rolls below.
+  const damageStatMod = attack.offhand ? Math.min(0, statMod) : statMod;
   // SRD Magic Weapon spell — flat bonus to attack rolls (consumed below
   // when damage is rolled).
   const magicWeaponBonus = attack.magicWeaponBonus ?? 0;
@@ -175,11 +179,11 @@ function resolvePlayerAttack(
       sneakAttackFired = true;
     }
     const enlargeTot = attack.damageDiceBonus ? rollDice(attack.damageDiceBonus.count * 2, attack.damageDiceBonus.sides).total : 0;
-    damage = diceTot + statMod + magicWeaponBonus + sneakTot + enlargeTot;
+    damage = diceTot + damageStatMod + magicWeaponBonus + sneakTot + enlargeTot;
     const sneakPart = sneakTot > 0 ? ` + sneak[${sneakRolls.join(',')}]=${sneakTot}` : '';
     const mwPart = magicWeaponBonus > 0 ? ` +${magicWeaponBonus}(magic)` : '';
     const enlPart = enlargeTot > 0 ? ` +${enlargeTot}(enlarge)` : '';
-    const dicePart = `2×${attack.damageDice}d${attack.damageSides}[${diceRolls.join(',')}]+${statMod}${mwPart}${enlPart}${sneakPart}`;
+    const dicePart = `2×${attack.damageDice}d${attack.damageSides}[${diceRolls.join(',')}]+${damageStatMod}${mwPart}${enlPart}${sneakPart}`;
     logs.push({ left: `⚡ Critical hit with ${attack.name} — ${damage} ${attack.damageType}`, right: `${atkPart} · ${dicePart}`, style: 'crit' });
     vexApplied = attack.vex || attack.sap;
     slowApplied = attack.slow;
@@ -202,20 +206,20 @@ function resolvePlayerAttack(
       sneakAttackFired = true;
     }
     const enlargeTot = attack.damageDiceBonus ? rollDice(attack.damageDiceBonus.count, attack.damageDiceBonus.sides).total : 0;
-    damage = diceTotal + statMod + magicWeaponBonus + sneakTot + enlargeTot;
+    damage = diceTotal + damageStatMod + magicWeaponBonus + sneakTot + enlargeTot;
     const sneakSuffix = sneakTot > 0 ? ` (+${sneakTot} sneak)` : '';
     const sneakRightPart = sneakTot > 0 ? ` + sneak[${sneakRolls.join(',')}]=${sneakTot}` : '';
     const savPart = attack.savageAttacker ? ' Savage' : '';
     const mwHitPart = magicWeaponBonus > 0 ? ` +${magicWeaponBonus}(magic)` : '';
     const enlHitPart = enlargeTot > 0 ? ` +${enlargeTot}(enlarge)` : '';
-    const dicePart = `${attack.damageDice}d${attack.damageSides}[${diceRolls.join(',')}]+${statMod}${mwHitPart}${enlHitPart}${savPart}${sneakRightPart}`;
+    const dicePart = `${attack.damageDice}d${attack.damageSides}[${diceRolls.join(',')}]+${damageStatMod}${mwHitPart}${enlHitPart}${savPart}${sneakRightPart}`;
     logs.push({ left: `Hit with ${attack.name} — ${damage} ${attack.damageType}${sneakSuffix}`, right: `${atkPart} · ${dicePart}`, style: 'hit' });
     vexApplied = attack.vex || attack.sap;
     slowApplied = attack.slow;
 
   } else {
     if (attack.graze) {
-      damage = Math.max(0, statMod);
+      damage = Math.max(0, damageStatMod);
       logs.push(damage > 0
         ? { left: `Graze with ${attack.name} — ${damage} ${attack.damageType}`, right: atkPart, style: 'miss' }
         : { left: `Miss with ${attack.name}`, right: atkPart, style: 'miss' });

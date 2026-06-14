@@ -14,8 +14,8 @@ import { WorldPause } from "../net/WorldPause";
 import { DevMode } from "../devMode";
 
 export interface OverlayCallbacks {
-  onEquip: (slot: "armor" | "weapon" | "shield", itemId: string) => void;
-  onUnequip: (slot: "armor" | "weapon" | "shield") => void;
+  onEquip: (slot: "armor" | "weapon" | "shield" | "offhand", itemId: string) => void;
+  onUnequip: (slot: "armor" | "weapon" | "shield" | "offhand") => void;
   onUsePotion: () => void;
   /** Read a spell scroll (US-124) — sends `useScroll`. */
   onUseScroll: (itemId: string) => void;
@@ -398,11 +398,12 @@ export class OverlayManager {
     const byId = Object.fromEntries(allItems.map(i => [i.id, i]));
     const inventory = state.player.inventoryIds.map(id => byId[id]).filter(Boolean) as ItemDef[];
 
-    const { armorId, weaponId, shieldId } = state.player.equippedSlots;
-    const equippedItems: Partial<Record<"armor" | "weapon" | "shield", EquipmentDef>> = {};
+    const { armorId, weaponId, shieldId, offhandId } = state.player.equippedSlots;
+    const equippedItems: Partial<Record<"armor" | "weapon" | "shield" | "offhand", EquipmentDef>> = {};
     if (armorId  && byId[armorId])  equippedItems.armor  = byId[armorId]  as EquipmentDef;
     if (weaponId && byId[weaponId]) equippedItems.weapon = byId[weaponId] as EquipmentDef;
     if (shieldId && byId[shieldId]) equippedItems.shield = byId[shieldId] as EquipmentDef;
+    if (offhandId && byId[offhandId]) equippedItems.offhand = byId[offhandId] as EquipmentDef;
 
     const canUseConsumable = state.phase === "exploring"
       || (state.phase === "player_turn" && !state.player.bonusActionUsed);

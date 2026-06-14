@@ -12,5 +12,6 @@
   "thrown": false,
   "throwNormal": 0,
   "throwLong": 0,
-  "costCp": 2500
+  "costCp": 2500,
+  "light": true
 }
