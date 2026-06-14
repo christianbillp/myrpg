@@ -215,6 +215,31 @@ Runtime additions shared across creatures, on top of the data-file fields above.
 
 ---
 
+## banter/
+
+Ambient NPC-to-NPC banter packs (US-129), loaded from
+`server/data/settings/<id>/banter/*.json` into `GameDefs.banter`. Short
+scripted exchanges the world tick plays between idle, nearby NPCs the player
+can witness — flavour only, no choices or effects. Full system:
+[systems/ambient-conversations.md](systems/ambient-conversations.md).
+
+### Fields
+
+| Field | Type | Notes |
+|---|---|---|
+| `id` | string | Unique key. |
+| `relation` | string | Required pair relation (via `viewStance`): `"friendly"` (gossip/jokes), `"neutral"` (small talk), `"hostile"` (barbed rivalry — speakers who aren't actually fighting). |
+| `sameFaction` | boolean? | Both speakers must share a faction. |
+| `faction` | string? | At least one speaker must belong to this faction id. |
+| `dayPhases` | string[]? | Restrict to these day phases (`["evening","night"]`). |
+| `exchanges` | object[] | Each `{ lines: BanterLine[] }`. A `BanterLine` is `{ speaker: "a" \| "b", text }`; `a` is the initiator, `b` the partner; `text` supports `{a}`/`{b}` name placeholders. |
+
+Runtime: `GameState.ambientChats` (in-flight exchanges), `ambientChatCooldowns`
+(per-NPC gap), and `recentAmbientLines` (surfaced to the AIGM as `OVERHEARD`).
+Lines emit via the `npc_speech` event + the dimmed `ambient` Event Log style.
+
+---
+
 ## factions/
 
 Faction definitions loaded from `server/data/factions/*.json` and surfaced via `GET /factions`. Each faction carries an id, display name + colour, renown rating, and a default-relation table. The relation table drives `GameState.factionRelations` — see "Factions & relations" below for the runtime model.

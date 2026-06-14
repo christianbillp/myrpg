@@ -42,6 +42,7 @@ export interface TestContextOverrides {
   dayPhase?: GameState['dayPhase'];
   monsters?: MonsterDef[];
   equipment?: import("./../engine/types.js").ItemDef[];
+  banter?: import("../../../shared/types.js").BanterPack[];
 }
 
 export interface TestContextResult {
@@ -225,6 +226,7 @@ export function buildTestContext(overrides: TestContextOverrides = {}): TestCont
     classes: [],
     subclasses: [],
     conversations: [],
+    banter: overrides.banter ?? [],
     narration: [],
     quests: [],
   } as unknown as GameDefs;

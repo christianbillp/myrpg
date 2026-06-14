@@ -7,6 +7,7 @@ export * from "./types/modifiers.js";
 export * from "./types/reference.js";
 export * from "./types/entities.js";
 export * from "./types/conversation.js";
+export * from "./types/banter.js";
 export * from "./types/npcSave.js";
 export * from "./types/equipment.js";
 export * from "./types/classes.js";

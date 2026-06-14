@@ -33,7 +33,7 @@ import { Logger } from '../Logger.js';
 import {
   NpcTickRunner, SimRng, FollowPlayerTask, WaitHereTask, IdleTask,
   InvestigateTask, AlertTask, WalkToTask,
-  tasksForRoutine,
+  tasksForRoutine, runAmbientConversations,
 } from './npcSim/index.js';
 import { ALERT_DECAY_TICKS, DAY_PHASE_CYCLE, TICKS_PER_DAY_PHASE } from '../../../shared/types.js';
 
@@ -255,6 +255,10 @@ function runSimNpcTicks(ctx: GameContext, tickId: number, events: GameEvent[]): 
       runAlertedAmbientTick(ctx, npc, tickId, events);
     }
   }
+  // US-129: ambient NPC-to-NPC banter — a separate pass after individual sim
+  // decisions so it can pair up idle, calm, mutually-visible NPCs the player
+  // can witness and play short exchanges between them.
+  runAmbientConversations(ctx, tickId, events);
 }
 
 /**

@@ -68,6 +68,7 @@ function styleColor(s?: LogEntryStyle): string {
     case 'status': return '#88aacc';
     case 'header': return '#ddeeff';
     case 'miss':   return '#667788';
+    case 'ambient': return '#9a86b8';  // US-129 overheard banter — muted lavender.
     default:       return '#aabbcc';
   }
 }
@@ -81,6 +82,7 @@ function styleColorDim(s?: LogEntryStyle): string {
     case 'status': return '#607890';
     case 'header': return '#99bbcc';
     case 'miss':   return '#445566';
+    case 'ambient': return '#6a5a82';
     default:       return '#778899';
   }
 }

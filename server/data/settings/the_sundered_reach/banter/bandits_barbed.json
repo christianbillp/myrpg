@@ -1,0 +1,15 @@
+{
+  "id": "bandits_barbed",
+  "relation": "hostile",
+  "faction": "bandits",
+  "exchanges": [
+    { "lines": [
+      { "speaker": "a", "text": "That was MY cut you palmed back at the bridge." },
+      { "speaker": "b", "text": "Prove it, {a}. Go on — reach for the knife and see what happens." }
+    ] },
+    { "lines": [
+      { "speaker": "a", "text": "Keep eyeing me like that and they'll find you in the gorge." },
+      { "speaker": "b", "text": "Promises, promises." }
+    ] }
+  ]
+}

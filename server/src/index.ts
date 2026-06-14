@@ -174,6 +174,7 @@ const defs: GameDefs = {
   tileLegend: { notes: "", tiles: {} },
   tileLegendsByTileset: {},
   conversations: [],
+  banter: [],
   classes: [],
   subclasses: [],
 };
@@ -261,6 +262,9 @@ async function loadDefs(): Promise<void> {
   defs.classes = classes;
   defs.subclasses = subclasses;
   defs.quests = quests;
+  // US-129 ambient banter packs (separate await to avoid reshuffling the
+  // positional Promise.all tuple above).
+  defs.banter = await readDirOrEmpty<GameDefs["banter"][0]>(settingSub("banter")).catch(() => []);
   for (const p of defs.playerDefs) {
     applySpecies(p, defs.species);
     // Surface activated species abilities (Orc Adrenaline Rush, …) as known

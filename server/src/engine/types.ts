@@ -45,6 +45,10 @@ export interface GameDefs {
    *  directory. Empty when no setting is active. The conversation system
    *  looks up an NPC's `conversationId` here at start time. */
   conversations: ConversationDef[];
+  /** US-129 ambient banter packs loaded from the active setting's `banter/`
+   *  directory. Short NPC-to-NPC exchanges the world tick plays between idle
+   *  NPCs. Empty when no setting is active. */
+  banter: import('../../../shared/types.js').BanterPack[];
   /** Class definitions loaded from `server/data/classes/*.json`. Drive the
    *  level-up resolver, character-build defaults, and per-class scaling
    *  tables (Sneak Attack dice, Second Wind uses, etc.). */

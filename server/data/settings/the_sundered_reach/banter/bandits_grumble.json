@@ -1,0 +1,22 @@
+{
+  "id": "bandits_grumble",
+  "relation": "friendly",
+  "sameFaction": true,
+  "faction": "bandits",
+  "exchanges": [
+    { "lines": [
+      { "speaker": "a", "text": "My boots are through at the toe again. This is no way to make a living." },
+      { "speaker": "b", "text": "Living? We're one bad toll from a noose, {a}. Keep your voice down." },
+      { "speaker": "a", "text": "...fair." }
+    ] },
+    { "lines": [
+      { "speaker": "a", "text": "Heard the Bureau strung up two of Hesk's crew at Harrowgate." },
+      { "speaker": "b", "text": "Then we work the south road. Quietly." }
+    ] },
+    { "lines": [
+      { "speaker": "a", "text": "You ever think of just... farming?" },
+      { "speaker": "b", "text": "With what land, {a}? With what the Capes left us?" },
+      { "speaker": "a", "text": "Was only asking." }
+    ] }
+  ]
+}

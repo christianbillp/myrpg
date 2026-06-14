@@ -1,0 +1,16 @@
+{
+  "id": "bureau_shoptalk",
+  "relation": "neutral",
+  "faction": "bureau_of_adjustment",
+  "exchanges": [
+    { "lines": [
+      { "speaker": "a", "text": "Adjutant wants the east-road ledger reconciled by dusk." },
+      { "speaker": "b", "text": "The east-road ledger is three months of guesswork and bloodstains." },
+      { "speaker": "a", "text": "Then she'll have three months of guesswork by dusk. Move." }
+    ] },
+    { "lines": [
+      { "speaker": "a", "text": "Quiet shift?" },
+      { "speaker": "b", "text": "In the Reach, {a}, quiet just means it hasn't started yet." }
+    ] }
+  ]
+}

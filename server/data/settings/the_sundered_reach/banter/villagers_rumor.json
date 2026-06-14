@@ -1,0 +1,16 @@
+{
+  "id": "villagers_rumor",
+  "relation": "friendly",
+  "faction": "commoners",
+  "dayPhases": ["evening", "night"],
+  "exchanges": [
+    { "lines": [
+      { "speaker": "a", "text": "They say the old waystation lights up at night again. Lanterns nobody carries." },
+      { "speaker": "b", "text": "Don't say it three times, {a}. You know what they say about saying it three times." }
+    ] },
+    { "lines": [
+      { "speaker": "a", "text": "My cousin swears a White Cape was asking after the miller's boy." },
+      { "speaker": "b", "text": "Then the miller's boy should take a long trip. A very long one." }
+    ] }
+  ]
+}

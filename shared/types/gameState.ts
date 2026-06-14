@@ -346,6 +346,7 @@ export interface AvailableActions {
 import type { AdventureChapter, AdventureDef } from "./adventures.js";
 import type { LogEntry } from "./combatLog.js";
 import type { ActiveConversation } from "./conversation.js";
+import type { ActiveBanter } from "./banter.js";
 import type { EncounterEnvironment, EncounterTileProperty, MapTilesetInfo, SecretDef } from "./encounter.js";
 import type { WorldFlagValue } from "./engineEvents.js";
 import type { Rumor } from "./factions.js";
@@ -621,6 +622,16 @@ export interface GameState {
    *  `morning` and the cycle runs while the player explores. Persistence
    *  across encounters is part of the WorldState refactor (step 7). */
   dayPhase: DayPhase;
+  /** US-129 ambient banter — in-flight NPC-to-NPC exchanges, one line per
+   *  world tick. Transient: present only while a pair is mid-conversation. */
+  ambientChats?: ActiveBanter[];
+  /** US-129 — per-NPC cooldown (earliest `worldTickCount` they may banter
+   *  again), so the same pair doesn't loop and chatter stays sparse. */
+  ambientChatCooldowns?: Record<string, number>;
+  /** US-129 — the last few ambient lines, surfaced to the AIGM as an
+   *  `OVERHEARD` block so it can answer "what were those two saying?".
+   *  Capped to the most recent handful. */
+  recentAmbientLines?: string[];
   /**
    * Legacy player-relative view of standings. **Kept for backward compatibility**
    * with existing `faction_standing` guards, `adjust_faction_standing` AIGM

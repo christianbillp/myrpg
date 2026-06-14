@@ -6,7 +6,10 @@
  */
 
 
-export type LogEntryStyle = 'normal' | 'hit' | 'crit' | 'kill' | 'heal' | 'status' | 'header' | 'miss';
+export type LogEntryStyle = 'normal' | 'hit' | 'crit' | 'kill' | 'heal' | 'status' | 'header' | 'miss'
+  /** US-129 ambient NPC-to-NPC banter — rendered dimmed/italic so it reads as
+   *  overheard background chatter, not a directed line or a mechanical beat. */
+  | 'ambient';
 
 export interface LogEntry {
   left: string;

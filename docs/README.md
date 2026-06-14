@@ -31,6 +31,7 @@ SRD 5.2.1 RPG with an AI Game Master. Start with the signpost for your role.
 - [design/systems/srd-rules.md](./design/systems/srd-rules.md) — detailed spec for the SRD rule systems.
 - [design/systems/content-generation.md](./design/systems/content-generation.md) — detailed spec for content generation & the AIGM-driven world.
 - [design/systems/npc-simulation.md](./design/systems/npc-simulation.md) — the off-camera living world: world ticks, alertness, routines, companions (US-094).
+- [design/systems/ambient-conversations.md](./design/systems/ambient-conversations.md) — idle NPCs talk to each other (banter packs, witness gating) to make scenes feel alive (US-129).
 - [design/systems/animation-timeline.md](./design/systems/animation-timeline.md) — the ordered combat-beat timeline the client animates.
 - [design/systems/improvised-actions.md](./design/systems/improvised-actions.md) — first-class resolution of free-text creative actions (US-121).
 

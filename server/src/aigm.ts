@@ -356,6 +356,12 @@ function buildStateMessage(engine: GameEngine): string {
 
   const recentLog = s.eventLog.map((e) => e.right ? `${e.left}  [${e.right}]` : e.left).join('\n  ') || 'No entries yet.';
 
+  // US-129: ambient NPC-to-NPC banter the player has overheard, so the GM can
+  // answer "what were those two saying?" and weave it into the scene.
+  const overheard = (s.recentAmbientLines ?? []).length > 0
+    ? s.recentAmbientLines!.map((l) => `  ${l}`).join('\n')
+    : null;
+
   const itemIds = engine.getItemIds().join(', ');
   const monsterIds = engine.getMonsterIds().join(', ');
 
@@ -449,7 +455,7 @@ ${itemLines}
 
 NPC PERSONAS:
 ${personaLines}
-
+${overheard ? `\nOVERHEARD (ambient NPC chatter the player has caught — flavour, not directed at them):\n${overheard}\n` : ''}
 REFERENCE DATA (valid IDs for add_item / spawn_enemy):
   ITEMS: ${itemIds}
   MONSTERS: ${monsterIds}

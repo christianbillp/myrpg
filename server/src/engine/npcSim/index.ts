@@ -32,3 +32,4 @@ export {
   FACTION_ALERT_RADIUS,
 } from './Awareness.js';
 export { registerCompanionFollowHooks } from './CompanionFollow.js';
+export { runAmbientConversations } from './Banter.js';

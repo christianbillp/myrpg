@@ -1,0 +1,14 @@
+{
+  "id": "smalltalk_generic",
+  "relation": "neutral",
+  "exchanges": [
+    { "lines": [
+      { "speaker": "a", "text": "Cold one coming. You can smell it." },
+      { "speaker": "b", "text": "Always is, this far out." }
+    ] },
+    { "lines": [
+      { "speaker": "a", "text": "Long way to anywhere from here." },
+      { "speaker": "b", "text": "Longer back." }
+    ] }
+  ]
+}
