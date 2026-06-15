@@ -1,38 +1,20 @@
 /**
- * End-to-end test of the demo_quest_generator loop, driven through the trigger
- * system exactly as the demo encounter does it:
+ * End-to-end test of the generated-mission contract loop, driven through the
+ * trigger system exactly as the demo_quest_generator hub encounter does it
+ * (the demo JSON itself is a dev-only, git-ignored file, so this test drives the
+ * actions directly rather than asserting the encounter's wiring):
  *   1. `generate_mission_contract` rolls a typed quest + registers it.
  *   2. `begin_generated_quest` (the stage's encounter_started trigger) starts it.
  *   3. The quest drives the objective; completing its stage flag resolves the
  *      contract (mission_complete) and grants the step XP.
- * Also asserts the demo encounter JSON is wired correctly.
  */
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { buildTestContext } from '../test/buildTestContext.js';
 import { registerQuestSystem } from '../engine/QuestSystem.js';
 import { fireAction } from '../engine/TriggerSystem.js';
 import { setGeneratedMapTilesets, getQuest, clearQuestRegistry } from './questRegistry.js';
 
-const ENCOUNTER = join(
-  dirname(fileURLToPath(import.meta.url)),
-  '../../data/settings/the_sundered_reach/encounters/demo_quest_generator.json',
-);
-
-describe('demo_quest_generator encounter', () => {
-  it('is a demo hub that rolls and pays out contracts', () => {
-    const e = JSON.parse(readFileSync(ENCOUNTER, 'utf8'));
-    expect(e.demo).toBe(true);
-    expect(e.missionHub).toBe(true);
-    const roll = e.triggers.find((t: { id: string }) => t.id === 'demo_roll');
-    expect(roll.then.some((a: { type: string }) => a.type === 'generate_mission_contract')).toBe(true);
-    const payout = e.triggers.find((t: { id: string }) => t.id === 'demo_payout');
-    expect(payout.if.some((g: { name: string }) => g.name === 'mission_complete')).toBe(true);
-    expect(payout.then.some((a: { type: string }) => a.type === 'award_mission_reward')).toBe(true);
-  });
-
+describe('generated-mission contract loop', () => {
   it('rolls a contract, starts the quest, and resolves it on stage completion', () => {
     setGeneratedMapTilesets([]);
     clearQuestRegistry();

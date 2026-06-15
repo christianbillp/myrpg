@@ -53,3 +53,6 @@ plans/
 
 server/data/settings/the_sundered_reach/encounters/gen_*
 server/data/settings/the_sundered_reach/maps/gen_*
+
+# Demo / showcase encounters (development only — not shipped with the game)
+**/encounters/demo_*.json
