@@ -32,7 +32,7 @@ import { canSee as visCanSee } from './Vision.js';
 import { hasModifierFlag, hasAdvantageOn } from './Modifiers.js';
 import { applySelfBuff, applyBuffTo, removeSpellBuffsFrom } from './Buffs.js';
 import { applyInvisibilityConcealment, logInvisibilityFind } from './InvisibilitySystem.js';
-import { SPEED_ZERO_CONDITIONS, isIncapacitated, shieldAcBonus, npcConditionImmune } from './ConditionSystem.js';
+import { SPEED_ZERO_CONDITIONS, isIncapacitated, shieldAcBonus, npcConditionImmune, grantsAdvantageAgainst, hasAttackAdvantage } from './ConditionSystem.js';
 import {
   tilesInArea, playerInArea, creaturesInArea,
   sphereRadiusTiles, chebyshevDiscTiles,
@@ -158,12 +158,21 @@ function resolveAttackRollSpell(
   const effectiveAc = def.ac + coverAcBonus + shieldAcBonus(target.conditions);
 
   const bonus = spellAttackBonus(ctx) + rollDiceBonus(ctx.state.player.attackDiceBonus);
-  // Shocking Grasp grants Advantage if the target wears metal armor. The
-  // engine doesn't model armor material yet, so we surface this only when
-  // explicitly enabled. Other callers may pass options.advantage too.
+  // Advantage on a spell attack roll, parity with weapon attacks: an explicit
+  // caller flag (Shocking Grasp vs metal armor), the target's condition (SRD
+  // Help `helped`, plus blinded / restrained / paralyzed / prone-at-melee, via
+  // `grantsAdvantageAgainst`), or the caster's own state (Hidden, etc.). The
+  // single-use `helped` marker is consumed by making this attack.
+  const distToTarget = chebyshev(ctx.state.player.tileX, ctx.state.player.tileY, target.tileX, target.tileY);
+  const advantage = !!options?.advantage
+    || grantsAdvantageAgainst(target.conditions, distToTarget)
+    || hasAttackAdvantage(ctx.state.player.conditions);
+  if (target.conditions.includes('helped')) {
+    target.conditions = target.conditions.filter((c) => c !== 'helped');
+  }
   const r1 = d20();
-  const r2 = options?.advantage ? d20() : r1;
-  const roll = applyHalflingLuck(options?.advantage ? Math.max(r1, r2) : r1, ctx.playerDef.halflingLuck).natural;
+  const r2 = advantage ? d20() : r1;
+  const roll = applyHalflingLuck(advantage ? Math.max(r1, r2) : r1, ctx.playerDef.halflingLuck).natural;
   const isCrit = roll === 20;
   const total = roll + bonus;
   let hit = isCrit || (roll !== 1 && total >= effectiveAc);
@@ -171,7 +180,7 @@ function resolveAttackRollSpell(
   // reaction-cast Shield (+5 AC, persists via the shielded condition).
   if (hit && tryNpcShieldVsSpellAttack(ctx, target, def, total, effectiveAc, isCrit).deflected) hit = false;
   const coverNote = coverAcBonus > 0 ? ` (+${coverAcBonus} cover)` : '';
-  const advNote = options?.advantage ? ` (advantage)` : '';
+  const advNote = advantage ? ` (advantage)` : '';
   const chainNote = options?.isChainHop ? ` [chain]` : '';
 
   if (!hit) {
