@@ -24,8 +24,11 @@ per tick:
 
 1. **Advance** every in-flight exchange one line, dropping any whose speakers
    are no longer eligible.
-2. With a small chance (`START_CHANCE`), **start** one new exchange between two
-   eligible NPCs the player can witness.
+2. With a per-tick chance, **start** one new exchange between two eligible NPCs
+   the player can witness. The chance is **eager when the scene is silent**
+   (`FIRST_START_CHANCE`, so a loitered-near scene comes alive within a tick or
+   two rather than sitting quiet for ~24s) and **sparse once chatter is live**
+   (`START_CHANCE`) so it stays ambience, not a talk-show.
 
 Determinism: every random choice draws from `SimRng.forNpcTick(tickId, 'banter')`
 — never `Math.random`. Same world state + tick id → same banter.

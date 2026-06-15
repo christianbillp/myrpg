@@ -28,9 +28,13 @@ const CHAT_RADIUS_TILES = 3;
 /** The player must be within this many tiles of a speaker to witness (and thus
  *  trigger) an exchange — keeps off-screen chatter out of the log. */
 const EARSHOT_TILES = 8;
-/** Per-tick probability the sim tries to open ONE new exchange. Sparse on
- *  purpose: ambience, not a talk-show. */
+/** Per-tick probability the sim tries to open ONE new exchange once chatter is
+ *  already underway. Sparse on purpose: ambience, not a talk-show. */
 const START_CHANCE = 0.25;
+/** Higher chance to open the FIRST exchange when nothing is being said yet, so a
+ *  loitered-near scene comes alive within a tick or two instead of sitting
+ *  silent for ~24s. Settles back to `START_CHANCE` once a conversation is live. */
+const FIRST_START_CHANCE = 0.85;
 /** Ticks an NPC must wait after finishing an exchange before bantering again. */
 const COOLDOWN_TICKS = 12;
 /** Cap on the OVERHEARD lines surfaced to the AIGM. */
@@ -134,7 +138,9 @@ export function runAmbientConversations(ctx: GameContext, tickId: number, events
   s.ambientChats = ongoing;
 
   // ── 2. Maybe start a new exchange ──
-  if (!rng.chance(START_CHANCE)) return;
+  // Eager when the scene is silent (get it talking fast), sparse once it isn't.
+  const startChance = ongoing.length === 0 ? FIRST_START_CHANCE : START_CHANCE;
+  if (!rng.chance(startChance)) return;
   const busy = new Set<string>();
   for (const chat of ongoing) { busy.add(chat.speakerA); busy.add(chat.speakerB); }
   const cooldowns = s.ambientChatCooldowns ?? {};

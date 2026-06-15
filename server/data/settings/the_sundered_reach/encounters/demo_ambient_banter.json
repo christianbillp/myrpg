@@ -31,6 +31,7 @@
       "when": { "event": "encounter_started" },
       "then": [
         { "type": "set_faction_relation", "a": "party", "b": "bandits", "value": 0 },
+        { "type": "set_faction_relation", "a": "bandits", "b": "commoners", "value": 0 },
         { "type": "set_disposition_by_def_id", "defId": "bandit", "disposition": "neutral" },
         { "type": "show_log", "message": "DEMO: a tavern truce holds — the bandits won't fight. Drift between the tables and LOITER near a pair: their grumbling plays out on its own, line by line (dimmed 'overheard' lines + speech bubbles), but only while you're close enough to hear. Step away and it goes quiet. The banter is chosen by who they are to each other; ask the GM what someone said and it'll know." }
       ],
