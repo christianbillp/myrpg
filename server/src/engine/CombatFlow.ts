@@ -102,7 +102,9 @@ export function doStartCombat(ctx: GameContext, events: GameEvent[]): void {
   // caster commands them, never roll initiative, and don't take their own
   // turns.
   const combatNpcs = s.npcs.filter((n) => n.disposition !== 'neutral' && n.hp > 0 && !n.summonSpellId);
-  for (const npc of combatNpcs.filter((n) => !n.combatLabel)) ctx.assignCombatLabel(npc);
+  // GMPCs (US-130) are referenced by their `gmpc_<slug>` id, not an ally_A
+  // combat label — skip label assignment so the GM doesn't see a duplicate ref.
+  for (const npc of combatNpcs.filter((n) => !n.combatLabel && !n.gmpcId)) ctx.assignCombatLabel(npc);
 
   // ── Roll Initiative for every combatant ─────────────────────────────────
   const logs: LogEntry[] = [{ left: '⚔ Combat begins', style: 'header' }];
@@ -240,6 +242,24 @@ export function advanceTurn(ctx: GameContext, events: GameEvent[]): void {
       // The player always gets a turn (even at 0 HP — that's the death save).
       enterPlayerTurn(ctx);
       return;
+    }
+    // US-130 — a GMPC takes its turn through the deterministic combat AI
+    // (instant, no LLM), then the loop continues to the next combatant — exactly
+    // like an NPC turn. A downed GMPC (shell at 0 HP) is skipped.
+    if (s.gmpcs?.some((g) => g.id === id)) {
+      const shell = s.npcs.find((n) => n.gmpcId === id);
+      if (!shell || shell.hp <= 0) continue;
+      s.npcs.forEach((n) => { n.isActive = false; });
+      shell.isActive = true;
+      s.phase = 'gmpc_turn';
+      ctx.addLog({ left: `── ${shell.name}'s turn ──`, style: 'header' });
+      ctx.publish({ type: 'turn_started', combatantId: id });
+      ctx.engineRef?.runGmpcTurn(id, events);
+      shell.isActive = false;
+      ctx.publish({ type: 'turn_ended', combatantId: id });
+      const afterGmpc = s.phase as string;
+      if (afterGmpc === 'defeat' || afterGmpc === 'death_saves' || afterGmpc === 'exploring') return;
+      return advanceTurn(ctx, events);
     }
     const npc = s.npcs.find((n) => n.id === id);
     if (!npc || npc.hp <= 0) continue;

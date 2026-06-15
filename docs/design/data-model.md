@@ -215,6 +215,21 @@ Runtime additions shared across creatures, on top of the data-file fields above.
 
 ---
 
+## GMPCs — GM-controlled player characters (US-130)
+
+Full PCs the GM controls and roleplays. Full behaviour spec: [systems/gmpcs.md](systems/gmpcs.md). Data shapes:
+
+- **`GmpcActor`** (`shared/types/gameState.ts`) — `{ id, defId, state: PlayerState, persona? }`. `id` is `gmpc_<defId>` and appears in `turnOrderIds`; `defId` is a `PlayerDef` id; `state` is a full `PlayerState` (its own HP, spell slots, resources, conditions, position). The party's GMPCs live on `GameState.gmpcs?: GmpcActor[]`.
+- **`GameState.activeActorId?`** — `'player'` or a GMPC id; whose `PlayerState` is bound for mechanics resolution (the active-actor seam). Always restored to the human before serialisation.
+- **`GameState.parkedActorTile?`** — while a GMPC is bound, the swapped-out human's tile, so the GMPC's pathing still treats the human as an obstacle (`doMove` / `doMoveTo`). Transient — set during the bound turn, cleared after.
+- **`CombatMode` adds `'gmpc_turn'`** — the GM-driven turn phase (peer to `player_turn` / `enemy_turn`).
+- **`NpcState.gmpcId?`** — marks an `NpcState` as a GMPC's on-map ally **shell** (value = the GMPC id; the shell's own `id` equals it, and `defId` is the `PlayerDef` id so the client resolves its PC token). The shell makes the GMPC targetable / damageable / renderable via ordinary ally machinery; HP / position / conditions sync with the `GmpcActor.state`. Shells are stripped from the saved `npcs` (rebuilt on load) and excluded from the AIGM COMBATANTS list.
+- **`EncounterDef.gmpcIds?`** (`shared/types/encounter.ts`) — `PlayerDef` ids spawned as party GMPCs at session start; mirrored onto `CreateSessionRequest.gmpcIds` and `EncounterContext.gmpcIds`.
+
+GMPC `PlayerDef`s + synthetic shell `MonsterDef`s (for enemy targeting AC/initiative) are built in `GameEngine.registerGmpc`; helpers + the shell ⇄ actor sync live in `server/src/engine/Gmpc.ts`.
+
+---
+
 ## banter/
 
 Ambient NPC-to-NPC banter packs (US-129), loaded from

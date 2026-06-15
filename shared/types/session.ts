@@ -29,6 +29,9 @@ export interface CreateSessionRequest {
   allyIds?: string[];
   /** Hand-picked hostile creature ids — see EncounterDef.enemyIds. */
   enemyIds?: string[];
+  /** GMPC PlayerDef ids (US-130) — GM-controlled player characters spawned as
+   *  party members. See EncounterDef.gmpcIds. */
+  gmpcIds?: string[];
   customIntroduction?: string;
   customContext?: string;
   customObjective?: string;

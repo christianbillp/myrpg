@@ -977,6 +977,7 @@ export class EncounterSetupScene extends Phaser.Scene {
           npcIds: enc.npcIds,
           allyIds: enc.allyIds,
           enemyIds: enc.enemyIds,
+          gmpcIds: enc.gmpcIds,
           customIntroduction: enc.customIntroduction,
           customContext: enc.customContext,
           customObjective: enc.objective,

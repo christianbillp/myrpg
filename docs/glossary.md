@@ -36,6 +36,12 @@ data shapes in [design/data-model.md](./design/data-model.md).
 - **Faction** — `factionId` shared by creatures; turning one hostile aggros the
   rest of its faction.
 - **Combat label** — the (A), (B), (C)… tag assigned to combatants for the turn.
+- **GMPC** — a GM-controlled player character (US-130): a full PC (class, spells
+  with slots, features) the AIGM controls and roleplays instead of the human.
+  Held as a `GmpcActor` (`{ id, defId, state: PlayerState, persona? }`) on
+  `GameState.gmpcs`, with an ally `NpcState` shell (`gmpcId`) on the map so it's
+  targetable and renders with its PC token. The GM drives it via the `gmpc_act`
+  tool on its own `gmpc_turn`. See `design/systems/gmpcs.md`.
 
 ## Rules vocabulary
 

@@ -617,3 +617,38 @@ Sets the player's hidden status. When hidden, the player's next attack has Advan
 
 ---
 
+### GMPCs
+
+#### `gmpc_act`
+
+Take a single mechanical action **as a GMPC** — a full player character the GM controls and roleplays (US-130). The action resolves through the same rules engine the human player uses and spends the GMPC's own resources (HP, spell slots, action economy). Roleplay the GMPC's words with `npc_speaks`; use this tool for what it *does*. GMPCs are listed in CURRENT STATE under PARTY → GMPCs with their id, kit, and persona. Spec: [systems/gmpcs.md](systems/gmpcs.md).
+
+| Parameter     | Type     | Required | Notes                                                                                                          |
+| ------------- | -------- | -------- | ------------------------------------------------------------------------------------------------------------- |
+| `gmpc_id`     | string   | yes      | The GMPC id from CURRENT STATE (e.g. `"gmpc_lyra"`).                                                          |
+| `kind`        | string   | yes      | `attack` / `offhandAttack` / `castSpell` / `useFeature` / `moveTo` / `dodge` / `dash` / `disengage` / `hide` / `endTurn`. |
+| `target`      | string   | no       | Entity ref for `attack` / `offhandAttack` / `useFeature` (`"enemy_A"`, `"ally_A"`, `"npc_[id]"`).             |
+| `spell_id`    | string   | no\*     | `castSpell`: spell id from the GMPC's prepared list (\*required for that kind).                               |
+| `slot_level`  | integer  | no\*     | `castSpell`: slot level to spend, ≥ the spell's level (\*required for that kind; upcasts at higher levels).   |
+| `targets`     | string[] | no       | `castSpell`: one or more target entity refs (falls back to `target` if omitted).                             |
+| `feature_id`  | string   | no\*     | `useFeature`: class-feature id from the GMPC's kit (\*required for that kind).                                |
+| `tile_x`      | integer  | no\*     | `moveTo` destination or a tile-targeted spell's centre (\*required for `moveTo`).                            |
+| `tile_y`      | integer  | no\*     | `moveTo` destination or a tile-targeted spell's centre (\*required for `moveTo`).                            |
+| `reason`      | string   | yes      |                                                                                                              |
+
+When the turn reaches a GMPC (phase `gmpc_turn`), resolve its whole turn with `gmpc_act` and end it with `kind: "endTurn"` — that advances the initiative order. The client prompts you automatically when a GMPC's turn begins.
+
+#### `add_gmpc`
+
+Add a GMPC to the party mid-scene from a `PlayerDef` id (US-130). The character spawns near the player with its full kit (class, spells with slots, features); if a fight is underway it rolls Initiative and joins the turn order. The resulting GMPC id is `gmpc_<def_id>`. Drive it thereafter with `gmpc_act` and voice it with `npc_speaks`.
+
+| Parameter | Type    | Required | Notes                                                                 |
+| --------- | ------- | -------- | --------------------------------------------------------------------- |
+| `def_id`  | string  | yes      | A `PlayerDef` id from the character roster (the playable characters). |
+| `persona` | string  | no       | Roleplay brief — voice, manner, loyalties — so you play it in voice.  |
+| `tile_x`  | integer | no       | Spawn tile X (defaults to a free tile near the player).               |
+| `tile_y`  | integer | no       | Spawn tile Y.                                                         |
+| `reason`  | string  | yes      |                                                                       |
+
+---
+

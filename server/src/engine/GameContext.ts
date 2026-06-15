@@ -82,5 +82,9 @@ export interface GameContext {
   engineRef: {
     fireSingleAction(action: import('../../../shared/types.js').TriggerAction): void;
     getNpcSaves(): Map<string, import('../../../shared/types.js').NpcSave>;
+    /** US-130 — resolve a GMPC's combat turn deterministically (no LLM). The
+     *  turn loop calls this when initiative reaches a GMPC; the engine binds the
+     *  actor and runs the combat AI. */
+    runGmpcTurn(gmpcId: string, events: import('../../../shared/types/animation.js').GameEvent[]): void;
   } | null;
 }

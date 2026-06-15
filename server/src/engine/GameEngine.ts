@@ -1,6 +1,6 @@
 import {
   GameState, GameEvent, PlayerAction,
-  PlayerDef, MonsterDef,
+  PlayerDef, PlayerState, MonsterDef, GmpcActor,
   NpcState, Disposition,
   LogEntry, GameDefs,
   CreateSessionRequest,
@@ -12,6 +12,11 @@ import {
 } from './CombatSystem.js';
 import { rollDiceBonus, d20 } from './Dice.js';
 import { applyEquipment, computeEquippedSlotLabels } from './EquipmentSystem.js';
+import {
+  gmpcIdForDef, buildGmpcPlayerState, buildGmpcShellDef, buildGmpcShell,
+  pullShellIntoActor, pushActorIntoShell, retagPlayerEventsToActor, resetActorTurnEconomy,
+} from './Gmpc.js';
+import { gmpcTakeCombatTurn } from './GmpcCombatAI.js';
 import { hasRelentlessEndurance, RELENTLESS_ENDURANCE_ID } from './SpeciesAbilities.js';
 import { applyStoneEndurance } from './GiantGifts.js';
 import { chebyshev } from './EnemyAI.js';
@@ -112,6 +117,18 @@ export class GameEngine {
   private state: GameState;
   private defs: GameDefs;
   private playerDef: PlayerDef;
+  /** GMPC character defs (US-130), cloned + level-up-replayed like the human's,
+   *  keyed by GMPC actor id. */
+  private gmpcDefs = new Map<string, PlayerDef>();
+  /** Synthetic `MonsterDef` shell stat blocks for GMPCs (US-130), keyed by the
+   *  shell's `defId` (a `PlayerDef` id), so enemy targeting / initiative read
+   *  the GMPC's real AC and abilities. */
+  private gmpcShellDefs = new Map<string, MonsterDef>();
+  /** The PlayerDef of whoever's turn it is for player-mechanics resolution —
+   *  the human's def by default, a GMPC's while `withActor` is bound. Exposed
+   *  through `ctx.playerDef` (a getter) so every existing handler resolves the
+   *  active actor with no edits. */
+  private activeDef: PlayerDef;
   private ctx: GameContext;
   private bus: EventBus;
   /** GameEvents emitted during session construction (notably by triggers fired
@@ -166,6 +183,11 @@ export class GameEngine {
     applyEquipment(this.playerDef, state.player.equippedSlots, this.defs.equipment, state.player.mageArmor, state.player.shieldActive, 0, state.player.attunedItemIds ?? []);
     state.player.ac = this.playerDef.ac;
     state.player.equippedSlotLabels = computeEquippedSlotLabels(this.playerDef, state.player.equippedSlots, this.defs.equipment);
+    this.activeDef = this.playerDef;
+
+    // US-130: register each GMPC — build its full PC def, synthetic shell stat
+    // block, and ensure its on-map ally shell exists.
+    for (const gmpc of state.gmpcs ?? []) this.registerGmpc(gmpc);
 
     for (const npc of state.npcs) npc.inventoryIds ??= [];
     for (const id of [
@@ -264,10 +286,89 @@ export class GameEngine {
     return out;
   }
 
+  /**
+   * Clone a character def and run it through the same level-up-replay + track
+   * sync + Strength-drain reapplication the human's def gets, so a GMPC fields
+   * its full PC kit. Returns null when the def id isn't in the roster.
+   * (Level-up history for GMPCs isn't persisted yet — they boot at their
+   * authored level; cross-session GMPC advancement is a later slice.)
+   */
+  private buildActorDef(defId: string, st: PlayerState): PlayerDef | undefined {
+    const shared = this.defs.playerDefs.find((p) => p.id === defId);
+    if (!shared) return undefined;
+    const def: PlayerDef = JSON.parse(JSON.stringify(shared));
+    syncCharacterTracks(def, this.defs.classes);
+    if (st.strengthDrained) def.str = Math.max(0, def.str - st.strengthDrained);
+    return def;
+  }
+
+  /**
+   * Register a GMPC (US-130): build its full level-up-replayed, equipped def;
+   * synthesise the shell stat block enemies target against; and ensure its ally
+   * `NpcState` shell exists on the map. Idempotent — safe to call at boot and
+   * when a GMPC is added mid-session.
+   */
+  private registerGmpc(gmpc: GmpcActor): void {
+    const def = this.buildActorDef(gmpc.defId, gmpc.state);
+    if (!def) return;
+    this.gmpcDefs.set(gmpc.id, def);
+    applyEquipment(def, gmpc.state.equippedSlots, this.defs.equipment, gmpc.state.mageArmor, gmpc.state.shieldActive, 0, gmpc.state.attunedItemIds ?? []);
+    gmpc.state.ac = def.ac;
+    gmpc.state.equippedSlotLabels = computeEquippedSlotLabels(def, gmpc.state.equippedSlots, this.defs.equipment);
+    this.gmpcShellDefs.set(def.id, buildGmpcShellDef(def));
+    if (!this.state.npcs.some((n) => n.gmpcId === gmpc.id)) {
+      this.state.npcs.push(buildGmpcShell(gmpc.id, def, gmpc.state));
+    }
+  }
+
+  /** The on-map shell for a GMPC, or undefined if it has none yet. */
+  private gmpcShell(gmpcId: string): NpcState | undefined {
+    return this.state.npcs.find((n) => n.gmpcId === gmpcId);
+  }
+
+  /**
+   * Run `fn` with the named actor bound as "the active player" (US-130). For a
+   * GMPC this physically binds its `PlayerState` into `state.player` and points
+   * `activeDef` at its def for the call's duration, then restores the human —
+   * so every player-mechanics path (attacks, leveled spellcasting, features,
+   * resting) operates on the GMPC unchanged. A no-op for `'player'`.
+   */
+  withActor<T>(actorId: string, fn: () => T): T {
+    if (actorId === 'player' || actorId === PLAYER_ID) return fn();
+    const gmpc = (this.state.gmpcs ?? []).find((g) => g.id === actorId);
+    const def = this.gmpcDefs.get(actorId);
+    if (!gmpc || !def) return fn();
+    const savedPlayer = this.state.player;
+    const savedDef = this.activeDef;
+    const savedActiveId = this.state.activeActorId;
+    const savedParked = this.state.parkedActorTile;
+    // Pull the shell's map-canonical fields (HP/pos/conditions enemies imposed)
+    // into the GMPC's full state before it acts; write them back after.
+    const shell = this.gmpcShell(actorId);
+    if (shell) pullShellIntoActor(shell, gmpc.state);
+    this.state.player = gmpc.state;
+    this.activeDef = def;
+    this.state.activeActorId = actorId;
+    // Keep the swapped-out human as a movement obstacle for the bound GMPC.
+    this.state.parkedActorTile = { x: savedPlayer.tileX, y: savedPlayer.tileY };
+    try {
+      return fn();
+    } finally {
+      this.state.player = savedPlayer;
+      this.activeDef = savedDef;
+      this.state.activeActorId = savedActiveId;
+      this.state.parkedActorTile = savedParked;
+      if (shell) pushActorIntoShell(gmpc.state, shell);
+    }
+  }
+
   private buildCtx(): GameContext {
+    // `playerDef` is a getter so it tracks the active actor (the human, or a
+    // GMPC while `withActor` is bound) without touching the ~800 read sites.
+    const self = this;
     return {
-      state: this.state,
-      playerDef: this.playerDef,
+      get state() { return self.state; },
+      get playerDef() { return self.activeDef; },
       defs: this.defs,
       addLog: (e) => this.addLog(e),
       addLogs: (es) => this.addLogs(es),
@@ -296,6 +397,7 @@ export class GameEngine {
       engineRef: {
         fireSingleAction: (action) => triggerFireAction(this.ctx, action),
         getNpcSaves: () => this.npcSaves,
+        runGmpcTurn: (gmpcId, events) => this.runGmpcCombatTurn(gmpcId, events),
       },
     };
   }
@@ -320,8 +422,25 @@ export class GameEngine {
     // available on every tick, regardless of how the underlying consumers
     // decremented them.
     this.applyDevFlagsTopup();
+    this.syncGmpcShells();
     this.computeAvailableActions();
     return this.state;
+  }
+
+  /**
+   * US-130 — reflect each GMPC shell's map-canonical HP/position/conditions back
+   * onto its full `PlayerState` so the serialised `state.gmpcs` (read by the
+   * client party UI and the AIGM party section) is consistent between turns,
+   * when enemies have damaged or moved the shell.
+   */
+  private syncGmpcShells(): void {
+    for (const gmpc of this.state.gmpcs ?? []) {
+      // Skip the GMPC currently bound and acting — its actor state is canonical
+      // mid-turn (and `withActor` writes back to the shell on exit).
+      if (this.state.activeActorId === gmpc.id) continue;
+      const shell = this.gmpcShell(gmpc.id);
+      if (shell) pullShellIntoActor(shell, gmpc.state);
+    }
   }
 
   /** Dev-mode normalisation pass — called from `getState`. Idempotent. */
@@ -368,7 +487,10 @@ export class GameEngine {
     const direct = this.defs.monsters.find((m) => m.id === defId);
     if (direct) return direct;
     const npcDef = this.defs.npcs.find((n) => n.id === defId);
-    return npcDef ? this.defs.monsters.find((m) => m.id === npcDef.monsterClass) : undefined;
+    if (npcDef) return this.defs.monsters.find((m) => m.id === npcDef.monsterClass);
+    // US-130 — a GMPC shell's defId is a PlayerDef id; resolve its synthetic
+    // stat block so enemy targeting / initiative read the GMPC's real AC.
+    return this.gmpcShellDefs.get(defId);
   }
 
   /** Flavour description for a spawned creature — the NPC wrapper's own when
@@ -401,6 +523,130 @@ export class GameEngine {
     } finally {
       this.ctx.eventSink = null;
     }
+  }
+
+  /**
+   * US-130 — run a single `PlayerAction` as a GMPC. The named GMPC is bound as
+   * the active actor for the call (`withActor`), so the action flows through the
+   * exact same handler registry the human player uses — its attacks, leveled
+   * spellcasting, class features, and resting all resolve against the GMPC's own
+   * `PlayerState` (HP, spell slots, resource pools) with zero handler edits.
+   *
+   * Returns the same `{ events, state }` shape as `processAction`. The serialized
+   * `state.player` is always the human (the swap is restored in `withActor`'s
+   * finally), so the wire model is unchanged — the GMPC's mutated state lives in
+   * `state.gmpcs`.
+   */
+  gmpcAct(gmpcId: string, action: PlayerAction): ActionResult {
+    const events: GameEvent[] = [];
+    this.ctx.eventSink = events;
+    try {
+      if (action.type === 'endTurn') {
+        // End the GMPC's turn: drop its active highlight, clear the actor
+        // binding, and hand off to the next combatant in initiative order.
+        if (this.state.phase === 'gmpc_turn' && this.state.activeActorId === gmpcId) {
+          const shell = this.gmpcShell(gmpcId);
+          if (shell) shell.isActive = false;
+          this.state.activeActorId = PLAYER_ID;
+          cfAdvanceTurn(this.ctx, events);
+        }
+      } else {
+        // Present the GMPC's turn to the action handlers as a normal
+        // `player_turn`: the vast majority of move / attack / cast / feature
+        // paths gate on `phase === 'player_turn'`, and the bound actor IS the
+        // active turn-taker. Restored to `gmpc_turn` after — unless the action
+        // itself legitimately transitioned the phase (e.g. killing the last
+        // enemy ends combat → `exploring`), in which case the new phase wins.
+        const savedPhase = this.state.phase;
+        if (savedPhase === 'gmpc_turn') this.state.phase = 'player_turn';
+        try {
+          this.withActor(gmpcId, () => {
+            dispatchPlayerAction(this.ctx, action, events, this);
+          });
+        } finally {
+          if (savedPhase === 'gmpc_turn' && this.state.phase === 'player_turn') {
+            this.state.phase = 'gmpc_turn';
+          }
+        }
+        // The handlers ran on the swapped `state.player`, so they tagged their
+        // animation events as `'player'`. Throughout a GMPC action window the
+        // GMPC *is* `state.player` (the human isn't), so retag those events to
+        // the GMPC's shell id — otherwise the client animates the human's token
+        // (movement, attack swings, cast VFX, even an enemy OA against it).
+        retagPlayerEventsToActor(events, gmpcId);
+      }
+      const state = this.getState();
+      return { events, state };
+    } finally {
+      this.ctx.eventSink = null;
+    }
+  }
+
+  /**
+   * US-130 — resolve a GMPC's combat turn deterministically (no LLM). Binds the
+   * actor, presents the phase as `player_turn` so the standard handlers run, and
+   * drives the combat AI, which dispatches the GMPC's move + attack/cast through
+   * the same registry the human uses. Events are retagged to the shell so the
+   * client animates the GMPC. Turn completion (advancing initiative) is the
+   * caller's (`advanceTurn`'s) job.
+   */
+  runGmpcCombatTurn(gmpcId: string, events: GameEvent[]): void {
+    const savedPhase = this.state.phase;
+    if (savedPhase !== 'enemy_turn' && savedPhase !== 'gmpc_turn' && savedPhase !== 'player_turn') return;
+    this.state.phase = 'player_turn';
+    try {
+      this.withActor(gmpcId, () => {
+        resetActorTurnEconomy(this.state.player, this.activeDef);
+        gmpcTakeCombatTurn(this.ctx, (action) => dispatchPlayerAction(this.ctx, action, events, this));
+      });
+    } finally {
+      // Restore the loop's phase unless the turn itself ended combat / downed
+      // someone (those transitions win).
+      if (this.state.phase === 'player_turn') this.state.phase = savedPhase;
+      retagPlayerEventsToActor(events, gmpcId);
+    }
+  }
+
+  /** True when the given id names a registered GMPC. */
+  isGmpc(id: string): boolean {
+    return this.gmpcDefs.has(id);
+  }
+
+  /**
+   * US-130 — add a GMPC to the party mid-session from a `PlayerDef` id (the
+   * `add_gmpc` AIGM tool). Builds a fresh full-kit `PlayerState`, registers the
+   * actor + shell, and — if a fight is underway — rolls it into initiative.
+   * Returns the new GMPC's id, or null when the def id is unknown.
+   */
+  addGmpc(defId: string, persona?: string, tile?: { x: number; y: number }): { id: string } | null {
+    const shared = this.defs.playerDefs.find((p) => p.id === defId);
+    if (!shared) return null;
+    const id = gmpcIdForDef(defId);
+    if (this.gmpcDefs.has(id)) return { id };  // already present — idempotent
+    const anchor = tile ?? this.findFreeTileNear(this.state.player.tileX, this.state.player.tileY, 1, 4);
+    const [tx, ty] = Array.isArray(anchor) ? anchor : [anchor.x, anchor.y];
+    const placed = tx === -1
+      ? { x: this.state.player.tileX, y: this.state.player.tileY }
+      : { x: tx, y: ty };
+    const st = buildGmpcPlayerState(shared, this.defs, placed);
+    const gmpc: GmpcActor = { id, defId, state: st, persona };
+    (this.state.gmpcs ??= []).push(gmpc);
+    this.registerGmpc(gmpc);
+    // Join an in-progress fight: roll initiative and slot into the order.
+    if (this.state.phase !== 'exploring' && !this.state.turnOrderIds.includes(id)) {
+      const shellDef = this.gmpcShellDefs.get(defId);
+      st.initiativeRoll = (shellDef ? d20() + shellDef.initiativeBonus : d20());
+      const shell = this.gmpcShell(id);
+      if (shell) shell.initiativeRoll = st.initiativeRoll;
+      this.state.turnOrderIds.push(id);
+    }
+    return { id };
+  }
+
+  /** Look up a GMPC's built (level-up-replayed, equipped) PlayerDef — for the
+   *  AIGM party section + any UI that needs the GMPC's class kit. */
+  getGmpcDef(gmpcId: string): PlayerDef | undefined {
+    return this.gmpcDefs.get(gmpcId);
   }
 
   // ── AIGM tool handlers ──────────────────────────────────────────────────────

@@ -28,7 +28,7 @@ export interface ActiveBuff {
   sourceNpcId?: string;
 }
 
-export type CombatMode = 'exploring' | 'player_turn' | 'enemy_turn' | 'death_saves' | 'defeat';
+export type CombatMode = 'exploring' | 'player_turn' | 'gmpc_turn' | 'enemy_turn' | 'death_saves' | 'defeat';
 
 export type Disposition = 'ally' | 'neutral' | 'enemy';
 
@@ -347,6 +347,24 @@ import type { AdventureChapter, AdventureDef } from "./adventures.js";
 import type { LogEntry } from "./combatLog.js";
 import type { ActiveConversation } from "./conversation.js";
 import type { ActiveBanter } from "./banter.js";
+
+/**
+ * A GM-controlled player character (US-130). `defId` resolves to a `PlayerDef`
+ * (the same character defs the human roster draws from); `state` is its live
+ * `PlayerState`, structurally identical to the human's. `persona` is the GM's
+ * roleplay brief. `tileX`/`tileY` mirror the state's position for spawn/render
+ * convenience.
+ */
+export interface GmpcActor {
+  /** Combatant id — `gmpc_<slug>`. Appears in `turnOrderIds`. */
+  id: string;
+  /** Character definition id (a `PlayerDef`). */
+  defId: string;
+  /** Live PC state — HP, spell slots, resources, conditions, position. */
+  state: PlayerState;
+  /** GM roleplay brief, surfaced to the AIGM so it plays the character in voice. */
+  persona?: string;
+}
 import type { EncounterEnvironment, EncounterTileProperty, MapTilesetInfo, SecretDef } from "./encounter.js";
 import type { WorldFlagValue } from "./engineEvents.js";
 import type { Rumor } from "./factions.js";
@@ -548,6 +566,24 @@ export interface GameState {
   phase: CombatMode;
   map: GameMap;
   player: PlayerState;
+  /** GMPCs (US-130) — full player characters the GM controls and roleplays.
+   *  Each carries its own `PlayerState` (HP, spell slots, class-feature
+   *  resources, conditions) exactly like the human's. On a GMPC's turn the
+   *  engine binds its state into the active-actor slot so every existing
+   *  player-mechanics path (attacks, leveled spellcasting, features, resting)
+   *  operates on it unchanged. Absent / empty in solo play. */
+  gmpcs?: GmpcActor[];
+  /** Id of the combatant currently taking its turn for player-mechanics
+   *  resolution: `'player'` (the human, default) or a `gmpc_<n>` id. The
+   *  engine's active-actor binding reads this; never serialized as anything
+   *  but `'player'` to the client (GMPC turns resolve server-side). */
+  activeActorId?: string;
+  /** US-130 — while a GMPC is bound as the active actor, the human player is
+   *  swapped out of `state.player` and would otherwise vanish from movement
+   *  occupancy checks. This holds the swapped-out player's tile so the GMPC's
+   *  pathing still treats it as occupied (a GMPC can't walk onto / stop on the
+   *  human). Transient: set only during a bound turn, always cleared after. */
+  parkedActorTile?: { x: number; y: number };
   npcs: NpcState[];
   mapItems: MapItemState[];
   secrets: SecretState[];

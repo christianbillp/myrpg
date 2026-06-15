@@ -1,7 +1,7 @@
 import {
   GameState, GameMap, GameDefs, EquipmentSlots, NpcState, MapItemState,
   SecretState, NpcPersona, CreateSessionRequest, EncounterTileProperty,
-  MapTilesetInfo, LogEntry, TrapState,
+  MapTilesetInfo, LogEntry, TrapState, GmpcActor,
 } from './types.js';
 import { PLAYER_FACTION_ID, PLAYER_ID } from '../../../shared/types.js';
 import type { EncounterContext } from '../encounterService.js';
@@ -14,6 +14,7 @@ import { buildFactionRelations, projectFactionStandings, seedFactionRelationsFro
 import { reprojectAllDispositions } from './Relationships.js';
 import { speciesAbilityResources } from './SpeciesAbilities.js';
 import { magicInitiateResources } from './MagicInitiate.js';
+import { gmpcIdForDef, buildGmpcPlayerState } from './Gmpc.js';
 import { stripTileFlipBits } from '../../../shared/tileGid.js';
 
 /** The shape stored in `defs.maps[i]` — pure geometry, no semantics.
@@ -205,6 +206,32 @@ function buildGameMapFromSaved(
  * Build a fresh GameState from an encounter request. Pure: does not mutate
  * any input. The returned state is ready to hand to a new GameEngine.
  */
+/**
+ * First passable, in-bounds, unoccupied tile in an outward ring search around
+ * (cx, cy) — used to seat GMPCs beside the player at spawn (US-130). Falls back
+ * to the anchor tile itself if the area is fully blocked.
+ */
+function findFreeAdjacentTile(
+  map: GameMap,
+  cx: number,
+  cy: number,
+  occupied: (x: number, y: number) => boolean,
+): { x: number; y: number } {
+  for (let r = 1; r <= 6; r++) {
+    for (let dy = -r; dy <= r; dy++) {
+      for (let dx = -r; dx <= r; dx++) {
+        if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue;
+        const x = cx + dx, y = cy + dy;
+        if (x < 0 || y < 0 || x >= map.cols || y >= map.rows) continue;
+        if (map.blocksMovement[y][x]) continue;
+        if (occupied(x, y)) continue;
+        return { x, y };
+      }
+    }
+  }
+  return { x: cx, y: cy };
+}
+
 export function buildSessionState(
   sessionId: string,
   req: CreateSessionRequest & { encounterContext: EncounterContext },
@@ -432,12 +459,33 @@ export function buildSessionState(
     }
   }
 
+  // GMPCs (US-130): spawn each encounter-authored GMPC near the player with a
+  // full-kit PlayerState. Their on-map ally shells + character defs are built by
+  // the GameEngine constructor from these `GmpcActor` entries.
+  const gmpcs: GmpcActor[] = [];
+  const gmpcIds = req.gmpcIds ?? req.encounterContext.gmpcIds ?? [];
+  for (const defId of gmpcIds) {
+    const gdef = defs.playerDefs.find((p) => p.id === defId);
+    if (!gdef) continue;
+    const occupied = (x: number, y: number): boolean =>
+      (player.tileX === x && player.tileY === y)
+      || npcs.some((n) => n.tileX === x && n.tileY === y)
+      || gmpcs.some((g) => g.state.tileX === x && g.state.tileY === y);
+    const spot = findFreeAdjacentTile(map, player.tileX, player.tileY, occupied);
+    gmpcs.push({
+      id: gmpcIdForDef(defId),
+      defId,
+      state: buildGmpcPlayerState(gdef, defs, spot),
+    });
+  }
+
   const state: GameState = {
     sessionId,
     phase: 'exploring',
     map,
     player,
     npcs,
+    gmpcs,
     mapItems,
     secrets,
     eventLog: seedLog,

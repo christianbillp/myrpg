@@ -122,6 +122,10 @@ export async function saveWorldState(
   const worldSave: WorldSave = {
     ...state,
     player: sessionPlayer,
+    // US-130 — GMPCs are persisted via `state.gmpcs`; their on-map ally shells
+    // are rebuilt from those at load (GameEngine ctor). Don't double-save the
+    // shells as ordinary NPCs, or a reload would resurrect a stale duplicate.
+    npcs: state.npcs.filter((n) => !n.gmpcId),
     aigmHistory,
     inFlightMissions: serialiseQuestsForSave(),
   };

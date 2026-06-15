@@ -288,6 +288,14 @@ export interface EncounterDef {
    * keys off `encounterContext.enemyCount`).
    */
   enemyIds?: string[];
+  /**
+   * GMPC `PlayerDef` ids (US-130) — full player characters the GM controls and
+   * roleplays. Spawned as party members (ally disposition) with their complete
+   * kit (class, spells with slots, features, fighting styles). Resolved against
+   * the character roster (`defs.playerDefs`). Each gets a `gmpc_<defId>` id; the
+   * GM drives them via the `gmpc_act` AIGM tool.
+   */
+  gmpcIds?: string[];
   customIntroduction?: string;
   customContext?: string;
   /**

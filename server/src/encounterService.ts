@@ -12,6 +12,9 @@ export interface EncounterContext {
   npcIds?: string[];
   allyIds?: string[];
   enemyIds?: string[];
+  /** GMPC `PlayerDef` ids (US-130) — full player characters the GM controls and
+   *  roleplays. Spawned as party members with their complete kit. */
+  gmpcIds?: string[];
   startingZones?: StartingZonesLayer;
   /** Mirrors `EncounterDef.placementMode` — see that field for the rules. */
   placementMode?: 'zones' | 'exact';
@@ -43,6 +46,7 @@ export interface EncounterStartRequest {
   npcIds?: string[];
   allyIds?: string[];
   enemyIds?: string[];
+  gmpcIds?: string[];
   customIntroduction?: string;
   customContext?: string;
   customObjective?: string;
@@ -111,6 +115,7 @@ export function buildEncounter(req: EncounterStartRequest): EncounterContext {
     npcIds:        req.npcIds,
     allyIds:       req.allyIds,
     enemyIds:      req.enemyIds,
+    gmpcIds:       req.gmpcIds,
     startingZones: req.startingZones,
     placementMode: req.placementMode,
     placements:    req.placements,

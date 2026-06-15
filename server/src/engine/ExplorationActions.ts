@@ -46,6 +46,9 @@ export function doMove(ctx: GameContext, dx: number, dy: number, events: GameEve
   //     surface) and block the step, with a log line so the player
   //     understands why their move didn't land.
   //   • Living, visible NPC — block as before.
+  // US-130 — the swapped-out human (while a GMPC is the active actor) still
+  // occupies their tile: the bound GMPC can't move onto / through it.
+  if (s.parkedActorTile && s.parkedActorTile.x === nx && s.parkedActorTile.y === ny) return;
   const blocker = s.npcs.find((n) => n.hp > 0 && n.tileX === nx && n.tileY === ny);
   if (blocker) {
     const blockerHidden = blocker.conditions.includes('hidden');
@@ -151,6 +154,8 @@ export function doMoveTo(ctx: GameContext, targetX: number, targetY: number, eve
       // living NPCs still block routing.
       if (s.npcs.some((n) => n.hp > 0 && n.tileX === nc && n.tileY === nr
           && !(n.conditions.includes('hidden') && n.revealedByTrigger))) continue;
+      // The swapped-out human (US-130) blocks pathing for a bound GMPC.
+      if (s.parkedActorTile && s.parkedActorTile.x === nc && s.parkedActorTile.y === nr) continue;
       if (dist[nr][nc] !== -1) continue;
       dist[nr][nc] = dist[cy][cx] + 1;
       prev[nr][nc] = [cy, cx];

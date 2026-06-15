@@ -289,7 +289,10 @@ function buildStateMessage(engine: GameEngine): string {
   // them yet, so the GM shouldn't narrate them either; encounter authors
   // who want the GM to allude to their presence carry that context in the
   // encounter's `customContext` instead.
-  const livingCombatants = s.npcs.filter((n) => n.hp > 0 && !n.conditions.includes('hidden') && (isHostileNpc(n) || isFriendlyNpc(n)));
+  // GMPC shells (US-130) are excluded here — they're listed in their own PARTY
+  // → GMPCs section with full PC detail, and referenced by `gmpc_<id>`, not an
+  // ally combat label.
+  const livingCombatants = s.npcs.filter((n) => n.hp > 0 && !n.gmpcId && !n.conditions.includes('hidden') && (isHostileNpc(n) || isFriendlyNpc(n)));
   const combatantLines = livingCombatants.length > 0
     ? livingCombatants.map((n) => {
         const entityRef = entityRefFor(n);
@@ -360,6 +363,35 @@ function buildStateMessage(engine: GameEngine): string {
   // answer "what were those two saying?" and weave it into the scene.
   const overheard = (s.recentAmbientLines ?? []).length > 0
     ? s.recentAmbientLines!.map((l) => `  ${l}`).join('\n')
+    : null;
+
+  // US-130: GMPCs — full PCs you (the GM) control and roleplay. Surface each
+  // one's kit + persona so you play it competently and in voice; drive it with
+  // `gmpc_act` (id below) and speak for it with `npc_speaks`.
+  const gmpcLines = (s.gmpcs ?? []).length > 0
+    ? s.gmpcs!.map((g) => {
+        const def = engine.getGmpcDef(g.id);
+        const st = g.state;
+        const isActive = s.activeActorId === g.id;
+        const slots = st.spellSlots.map((n, i) => n > 0 ? `L${i + 1}:${n}` : '').filter(Boolean).join(',');
+        const res = Object.entries(st.resources).filter(([, n]) => n > 0).map(([id, n]) => `${id} ×${n}`);
+        const econ = isActive
+          ? [`Action: ${st.actionUsed ? 'USED' : 'AVAILABLE'}`, `Bonus: ${st.bonusActionUsed ? 'USED' : 'AVAILABLE'}`, `${st.movesLeft} moves left`]
+          : [];
+        const bits = [
+          slots ? `Slots ${slots}` : '',
+          st.concentratingOn ? `Concentrating: ${st.concentratingOn}` : '',
+          ...res,
+          ...econ,
+        ].filter(Boolean).join(' · ');
+        const classLn = def ? `${def.className} L${def.level}${def.subclassId ? ` (${def.subclassId})` : ''}` : g.defId;
+        const prepared = st.preparedSpellIds.length > 0 ? `\n    Prepared spells: ${st.preparedSpellIds.join(', ')}` : '';
+        const features = (def?.defaultFeatureIds ?? []).length > 0 ? `\n    Features: ${def!.defaultFeatureIds!.join(', ')}` : '';
+        return `  [${g.id}] ${def?.name ?? g.defId} — ${classLn}${isActive ? ' [ACTIVE TURN — resolve its turn with gmpc_act, end with kind="endTurn"]' : ''}\n`
+          + `    ${st.hp}/${def?.maxHp ?? st.hp} HP · AC ${st.ac} · tile (${st.tileX},${st.tileY})${bits ? ` · ${bits}` : ''}`
+          + `${prepared}${features}`
+          + (g.persona ? `\n    Persona: ${g.persona}` : '');
+      }).join('\n')
     : null;
 
   const itemIds = engine.getItemIds().join(', ');
@@ -439,7 +471,7 @@ PLAYER: tile (${p.tileX},${p.tileY}) · HP ${p.hp}/${playerDef.maxHp}${isBloodie
   Equipped: armor=${p.equippedSlots.armorId ?? 'none'} weapon=${p.equippedSlots.weaponId ?? 'none'} shield=${p.equippedSlots.shieldId ?? 'none'}
   ${p.preparedSpellIds.length > 0 ? `Prepared spells: ${p.preparedSpellIds.join(', ')}` : ''}
   ${focusLine}
-
+${gmpcLines ? `\nPARTY → GMPCs (full PCs YOU control & roleplay — drive with gmpc_act, speak with npc_speaks):\n${gmpcLines}\n` : ''}
 COMBATANTS (enemies & allies):
 ${combatantLines}
 

@@ -1973,6 +1973,7 @@ export class GameScene extends Phaser.Scene {
       npcIds: def.npcIds,
       allyIds: def.allyIds,
       enemyIds: def.enemyIds,
+      gmpcIds: def.gmpcIds,
       customIntroduction: def.customIntroduction,
       customContext: def.customContext,
       customObjective: def.objective,
@@ -2423,6 +2424,24 @@ export class GameScene extends Phaser.Scene {
     const monsters = this.defs.monsters();
     const monster = monsters.find(m => m.id === defId);
     if (monster) return monster;
+    // US-130 — a GMPC shell's defId is a PlayerDef id; resolve a MonsterDef-shaped
+    // view from the character roster so it renders with its real PC token.
+    const character = this.defs.characters().find(c => c.id === defId);
+    if (character) {
+      const base = monsters[0];
+      return {
+        ...base,
+        id: character.id,
+        name: character.name,
+        color: character.color,
+        tokenAsset: tokenAssetForPlayer(character),
+        type: `${character.speciesName} ${character.className}`,
+        ac: character.ac,
+        maxHp: character.maxHp,
+        cr: '—',
+        description: character.description ?? base?.description,
+      } as MonsterDef;
+    }
     const npcs = this.defs.npcs();
     const npcDef = npcs.find(n => n.id === defId);
     if (npcDef) {

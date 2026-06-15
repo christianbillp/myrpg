@@ -39,6 +39,15 @@ export interface NpcState {
   factionId: string;
   combatLabel: string;
   revealedName?: string;
+  /** US-130 — when set, this NpcState is the on-map "shell" for a GMPC (a
+   *  GM-controlled player character). The value is the GMPC's id (`gmpc_<slug>`,
+   *  also this shell's own `id`). The shell exists so a GMPC can be targeted by
+   *  enemies, take a turn-order slot, and render — but it is NOT an autonomous
+   *  combatant: the turn loop and sim ticks skip it (the GM drives the GMPC via
+   *  `gmpc_act`), and HP/position/conditions sync with the GMPC's full
+   *  `PlayerState` in `GameState.gmpcs`. The client resolves its token from the
+   *  player roster via `defId` (a `PlayerDef` id). */
+  gmpcId?: string;
   combatPassive?: boolean;
   /** When set, this NPC was conjured by a spell — Mage Hand, Unseen Servant.
    *  Summons skip the normal NPC turn loop (they don't act on their own; the

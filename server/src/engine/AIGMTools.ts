@@ -1,6 +1,6 @@
 import { GameEngine } from './GameEngine.js';
 import { GameEvent } from './types.js';
-import type { QuestDef, QuestScope } from '../../../shared/types.js';
+import type { QuestDef, QuestScope, PlayerAction } from '../../../shared/types.js';
 import { getActiveSetting, lookupSettingSection, lookupWorldbookEntry } from '../settings.js';
 import { purseToCp, formatCoins } from '../../../shared/currency.js';
 import { DIFFICULTY_BAND_DC } from './ImprovisedActionSystem.js';
@@ -313,6 +313,45 @@ function buildToolList() { return [
         reason: { type: 'string' },
       },
       required: ['entity', 'ability', 'difficulty', 'reason'],
+    },
+  },
+  {
+    name: 'gmpc_act',
+    description: 'Take a single mechanical action AS a GMPC — a full player character (class, spells with slots, class features, fighting styles) that you, the GM, control and roleplay (US-130). The action resolves through the exact same rules engine the human player uses, spending the GMPC\'s OWN resources (HP, spell slots, action economy). GMPCs are listed in CURRENT STATE under PARTY → GMPCs with their id (gmpc_[slug]), kit, and persona. Roleplay the GMPC\'s words with npc_speaks; use this tool for what it DOES. The action object mirrors a player action: set `kind` and the fields it needs. kind="attack" needs target ("enemy_A"/"npc_[id]"); "castSpell" needs spell_id + slot_level (+ optional targets / tile); "useFeature" needs feature_id (+ optional target); "moveTo" needs tile_x/tile_y; "offhandAttack" needs target; "dodge"/"dash"/"disengage"/"hide"/"endTurn" need nothing else. Targets and spell/feature ids come from the GMPC\'s entry in CURRENT STATE. End the GMPC\'s turn with kind="endTurn".',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        gmpc_id: { type: 'string', description: 'The GMPC id from CURRENT STATE → PARTY → GMPCs, e.g. "gmpc_lyra".' },
+        kind: {
+          type: 'string',
+          enum: ['attack', 'offhandAttack', 'castSpell', 'useFeature', 'moveTo', 'dodge', 'dash', 'disengage', 'hide', 'endTurn'],
+          description: 'What the GMPC does.',
+        },
+        target: { type: 'string', description: 'Entity ref for attack/offhandAttack/useFeature ("enemy_A", "ally_A", "npc_[id]").' },
+        spell_id: { type: 'string', description: 'For kind="castSpell": the spell id from the GMPC\'s prepared list.' },
+        slot_level: { type: 'integer', description: 'For kind="castSpell": the slot level to spend (>= the spell\'s level; upcasts at higher levels).' },
+        targets: { type: 'array', items: { type: 'string' }, description: 'For kind="castSpell": one or more target entity refs.' },
+        feature_id: { type: 'string', description: 'For kind="useFeature": the class-feature id from the GMPC\'s kit.' },
+        tile_x: { type: 'integer', description: 'For kind="moveTo" or a tile-targeted spell: destination/centre X.' },
+        tile_y: { type: 'integer', description: 'For kind="moveTo" or a tile-targeted spell: destination/centre Y.' },
+        reason: { type: 'string' },
+      },
+      required: ['gmpc_id', 'kind', 'reason'],
+    },
+  },
+  {
+    name: 'add_gmpc',
+    description: 'Add a GMPC to the party (US-130) — a full player character (a `PlayerDef` from the character roster) that you, the GM, then control and roleplay via `gmpc_act` + `npc_speaks`. The character spawns near the player with its full kit (class, spells with slots, features). If a fight is underway it rolls Initiative and joins the turn order. Use this when a companion PC joins the party in fiction. Valid `def_id` values are PlayerDef ids; the resulting GMPC id is `gmpc_<def_id>`. Give it a `persona` so you play it in voice.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        def_id: { type: 'string', description: 'A PlayerDef id from the character roster (the playable characters).' },
+        persona: { type: 'string', description: 'Short roleplay brief — voice, manner, loyalties — so you play the character consistently.' },
+        tile_x: { type: 'integer', description: 'Optional spawn tile X (defaults to a free tile near the player).' },
+        tile_y: { type: 'integer', description: 'Optional spawn tile Y.' },
+        reason: { type: 'string' },
+      },
+      required: ['def_id', 'reason'],
     },
   },
 ]; }
@@ -944,7 +983,88 @@ const AIGM_TOOL_HANDLERS: Record<string, AIGMToolHandler> = {
       out.toolResultContent = `Roll result: ${result.name} d20 + ${ability} save mod = ${result.total} vs DC ${dc} (${difficulty}). ${result.success ? 'SUCCESS — the creature resists; do not apply the effect' : 'FAILURE — the creature fails to resist; enact the effect with state tools before narrating'}.`;
       out.rollResult = `${result.name} ${ability} save: d20(${result.roll}) = ${result.total} vs DC ${dc} — ${result.success ? 'SUCCESS' : 'FAILURE'}`;
   },
+  gmpc_act(engine, input, ctx, out) {
+    const gmpcId = String(input['gmpc_id'] ?? '').trim();
+      if (!engine.isGmpc(gmpcId)) {
+        out.toolResultContent = `Unknown GMPC "${gmpcId}" — use a gmpc_[slug] id from CURRENT STATE → PARTY → GMPCs.`;
+        return;
+      }
+      const kind = String(input['kind'] ?? '').trim();
+      const action = gmpcActionFromInput(kind, input);
+      if (!action) {
+        out.toolResultContent = `gmpc_act: unknown or incomplete action "${kind}".`;
+        return;
+      }
+      const gmpc = engine.getState().gmpcs?.find((g) => g.id === gmpcId);
+      const before = gmpc?.state;
+      const hpBefore = before?.hp ?? 0;
+      const slotsBefore = [...(before?.spellSlots ?? [])];
+      const result = engine.gmpcAct(gmpcId, action);
+      out.events = result.events;
+      const after = result.state.gmpcs?.find((g) => g.id === gmpcId)?.state;
+      const parts: string[] = [`${gmpcId} ${kind} resolved.`];
+      if (after) {
+        if (after.hp !== hpBefore) parts.push(`its HP ${hpBefore} → ${after.hp}.`);
+        const spent = slotsBefore.findIndex((n, i) => n !== (after.spellSlots[i] ?? n));
+        if (spent >= 0) parts.push(`spent a level-${spent + 1} slot.`);
+      }
+      out.toolResultContent = parts.join(' ');
+  },
+  add_gmpc(engine, input, ctx, out) {
+    const defId = String(input['def_id'] ?? '').trim();
+      const persona = input['persona'] != null ? String(input['persona']) : undefined;
+      const tile = typeof input['tile_x'] === 'number' && typeof input['tile_y'] === 'number'
+        ? { x: input['tile_x'] as number, y: input['tile_y'] as number }
+        : undefined;
+      const added = engine.addGmpc(defId, persona, tile);
+      if (!added) {
+        out.toolResultContent = `add_gmpc: unknown def_id "${defId}" — use a PlayerDef id from the character roster.`;
+        return;
+      }
+      out.toolResultContent = `GMPC "${added.id}" joined the party. Control it with gmpc_act (id "${added.id}") and roleplay it with npc_speaks.`;
+  },
 };
+
+/**
+ * US-130 — map a `gmpc_act` tool payload onto a `PlayerAction`. Returns
+ * `undefined` for an unknown kind or one missing its required fields, so the
+ * handler can reject without resolving.
+ */
+export function gmpcActionFromInput(kind: string, input: Record<string, unknown>): PlayerAction | undefined {
+  const target = input['target'] != null ? String(input['target']) : undefined;
+  switch (kind) {
+    case 'attack':        return { type: 'attack', targetId: target };
+    case 'offhandAttack': return { type: 'offhandAttack', targetId: target };
+    case 'dodge':         return { type: 'dodge' };
+    case 'dash':          return { type: 'dash' };
+    case 'disengage':     return { type: 'disengage' };
+    case 'hide':          return { type: 'hide' };
+    case 'endTurn':       return { type: 'endTurn' };
+    case 'moveTo': {
+      const tileX = input['tile_x'], tileY = input['tile_y'];
+      if (typeof tileX !== 'number' || typeof tileY !== 'number') return undefined;
+      return { type: 'moveTo', tileX, tileY };
+    }
+    case 'useFeature': {
+      const featureId = input['feature_id'] != null ? String(input['feature_id']) : '';
+      if (!featureId) return undefined;
+      return { type: 'useFeature', featureId, targetId: target };
+    }
+    case 'castSpell': {
+      const spellId = input['spell_id'] != null ? String(input['spell_id']) : '';
+      const slotLevel = input['slot_level'];
+      if (!spellId || typeof slotLevel !== 'number') return undefined;
+      const targets = Array.isArray(input['targets'])
+        ? (input['targets'] as unknown[]).map(String)
+        : (target ? [target] : undefined);
+      const tile = typeof input['tile_x'] === 'number' && typeof input['tile_y'] === 'number'
+        ? { x: input['tile_x'] as number, y: input['tile_y'] as number }
+        : undefined;
+      return { type: 'castSpell', spellId, slotLevel, targetIds: targets, tile };
+    }
+    default: return undefined;
+  }
+}
 
 export function applyAIGMTool(
   engine: GameEngine,

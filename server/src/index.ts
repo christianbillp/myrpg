@@ -1635,6 +1635,7 @@ interface EncounterDefJson {
   npcIds?: string[];
   allyIds?: string[];
   enemyIds?: string[];
+  gmpcIds?: string[];
   customIntroduction?: string;
   customContext?: string;
   objective?: string;
@@ -1713,6 +1714,7 @@ async function startAdventureChapter(
     npcIds: encDef.npcIds,
     allyIds: encDef.allyIds,
     enemyIds: encDef.enemyIds,
+    gmpcIds: encDef.gmpcIds,
     customIntroduction: encDef.customIntroduction,
     customContext: encDef.customContext,
     customObjective: encDef.objective,
@@ -1738,6 +1740,7 @@ async function startAdventureChapter(
     npcIds: encDef.npcIds,
     allyIds: encDef.allyIds,
     enemyIds: encDef.enemyIds,
+    gmpcIds: encDef.gmpcIds,
     customIntroduction: encDef.customIntroduction,
     customContext: encDef.customContext,
     customObjective: encDef.objective,
@@ -1861,6 +1864,7 @@ async function startAdventureRest(
     npcIds: encDef.npcIds,
     allyIds: encDef.allyIds,
     enemyIds: encDef.enemyIds,
+    gmpcIds: encDef.gmpcIds,
     customIntroduction: encDef.customIntroduction,
     customContext: encDef.customContext,
     customObjective: encDef.objective,
@@ -1895,6 +1899,7 @@ async function startAdventureRest(
     npcIds: encDef.npcIds,
     allyIds: encDef.allyIds,
     enemyIds: encDef.enemyIds,
+    gmpcIds: encDef.gmpcIds,
     customIntroduction: encDef.customIntroduction,
     customContext: encDef.customContext,
     customObjective: encDef.objective,
@@ -2085,6 +2090,7 @@ server.post("/game/session", async (req, reply) => {
     npcIds: body.npcIds,
     allyIds: body.allyIds,
     enemyIds: body.enemyIds,
+    gmpcIds: body.gmpcIds,
     customIntroduction: body.customIntroduction,
     customContext: body.customContext,
     customObjective: body.customObjective,
