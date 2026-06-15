@@ -402,9 +402,22 @@ function walkLOS(map: GameMap, a: { tileX: number; tileY: number }, b: { tileX: 
 
   // Skip the start tile.
   while (true) {
+    const oldX = x0, oldY = y0;
     const e2 = 2 * err;
-    if (e2 > -dy) { err -= dy; x0 += sx; }
-    if (e2 < dx) { err += dx; y0 += sy; }
+    let movedX = false, movedY = false;
+    if (e2 > -dy) { err -= dy; x0 += sx; movedX = true; }
+    if (e2 < dx) { err += dx; y0 += sy; movedY = true; }
+    // Diagonal corner-cutting: when a step moves on BOTH axes, the line is
+    // squeezing through the vertex shared by the two tiles it skips past
+    // (`(oldY, newX)` and `(newY, oldX)`). If BOTH of those block sight, two
+    // walls meet at that corner and nothing can see — or shoot — through the
+    // seam between them. Checked before the end-tile break so a target standing
+    // immediately past the corner is still blocked.
+    if (movedX && movedY
+        && (map.blocksSight[oldY]?.[x0] ?? false)
+        && (map.blocksSight[y0]?.[oldX] ?? false)) {
+      return { cover: 'total', obscurance: obs };
+    }
     if (x0 === x1 && y0 === y1) break;     // skip end tile too
     cover = worseCover(cover, tileCover(map, x0, y0));
     obs = worseObscurance(obs, tileObs(map, x0, y0));

@@ -5,9 +5,14 @@
  * Lightly Obscured space are tinted softer; tiles in Heavily Obscured /
  * Dark (without Darkvision) are nearly opaque.
  *
- * The mask reads three GameState fields:
+ * The mask mirrors the server's `Vision.effectiveLightAt` + obscurance so what
+ * the player sees matches what the engine lets them target. It reads:
  *   - `map.cover` / `map.obscurance` — baked per-tile properties.
- *   - `environment.lightLevel` — encounter ambient baseline.
+ *   - `map.light` — per-tile ambient light grid (US-126 multi-region maps);
+ *     a dark cave zone stays dark even when the encounter baseline is bright.
+ *   - `environment.lightLevel` — encounter ambient baseline (fallback).
+ *   - `player.lightSource` — the radius of a lit torch / lantern / Light
+ *     cantrip, which pushes the darkness back to bright/dim around the player.
  *   - `playerDef.senses` — Darkvision range for ambient stepping.
  *
  * Sound rings are also drawn here (separate graphics layer) so audible
@@ -22,6 +27,10 @@ const VEIL_DARK_ALPHA = 0.78;
 const VEIL_HEAVY_ALPHA = 0.55;
 const VEIL_LIGHT_ALPHA = 0.18;
 const SOUND_RING_DURATION_MS = 700;
+const TILE_FT = 5;
+
+type LightLevel = "bright" | "dim" | "dark";
+const LIGHT_ORDER: Record<LightLevel, number> = { dark: 0, dim: 1, bright: 2 };
 
 export class VisionMask {
   readonly fogLayer: Phaser.GameObjects.Graphics;
@@ -36,11 +45,12 @@ export class VisionMask {
   /** Repaint the fog-of-war overlay for the current state. Run every frame. */
   refresh(state: GameState, playerDef: PlayerDef): void {
     this.fogLayer.clear();
-    if (!state.map.cover && !state.map.obscurance && (state.environment?.lightLevel ?? "bright") === "bright") {
-      // Nothing to fog — fully lit, no obscurance, no cover.
+    if (!state.map.cover && !state.map.obscurance && !state.map.light
+        && (state.environment?.lightLevel ?? "bright") === "bright") {
+      // Nothing to fog — fully lit, no per-tile light grid, no obscurance, no cover.
       return;
     }
-    const ambient = state.environment?.lightLevel ?? "bright";
+    const ambient = (state.environment?.lightLevel ?? "bright") as LightLevel;
     const dvFeet = playerDef.senses?.darkvision ?? 0;
     const dvTiles = Math.floor(dvFeet / 5);
     const px = state.player.tileX;
@@ -56,21 +66,45 @@ export class VisionMask {
     }
   }
 
+  /**
+   * Effective light at a tile — mirrors `Vision.effectiveLightAt`: the baked
+   * per-tile `map.light` value wins over the encounter baseline, and the
+   * player's carried light source (torch / lantern / Light cantrip) raises the
+   * level to bright/dim within its radius. Keeps the fog in lockstep with what
+   * the engine considers visible/targetable.
+   */
+  private effectiveLight(state: GameState, x: number, y: number, px: number, py: number, ambient: LightLevel): LightLevel {
+    const baked = (state.map.light?.[y]?.[x] ?? null) as LightLevel | null;
+    let light: LightLevel = baked ?? ambient;
+    const src = state.player.lightSource;
+    if (src && state.player.hp > 0) {
+      const distFt = Math.max(Math.abs(px - x), Math.abs(py - y)) * TILE_FT;
+      const fromSource: LightLevel | null =
+        distFt <= src.brightFt ? "bright"
+        : distFt <= src.brightFt + src.dimFt ? "dim"
+        : null;
+      if (fromSource && LIGHT_ORDER[fromSource] > LIGHT_ORDER[light]) light = fromSource;
+    }
+    return light;
+  }
+
   /** Compute the alpha (0–1) to paint over tile (x,y). 0 = clear. */
-  private tileVeil(state: GameState, x: number, y: number, px: number, py: number, ambient: string, dvTiles: number): number {
+  private tileVeil(state: GameState, x: number, y: number, px: number, py: number, ambient: LightLevel, dvTiles: number): number {
     if (x === px && y === py) return 0;
-    // LOS via Bresenham — mirrors Vision.ts. If a tile along the way has
-    // total cover (cover === 'total'), tiles beyond it are fully fogged.
+    // LOS via Bresenham — mirrors Vision.ts (including diagonal corner-cutting).
+    // A blocked line means tiles beyond a sight-blocker are fully fogged.
     const losBlocked = this.bresenhamLosBlocked(state, px, py, x, y);
     if (losBlocked) return VEIL_DARK_ALPHA;
 
     // Tile-level obscurance (forest underbrush, smoke).
     const tileObs = state.map.obscurance?.[y]?.[x];
-    // Ambient obscurance — darkvision steps `dark`→`dim` within range.
+    // Ambient obscurance from the EFFECTIVE light at this tile (per-tile grid +
+    // carried light source), darkvision-stepped — mirrors `ambientObscurance`.
     const dist = Math.max(Math.abs(x - px), Math.abs(y - py));
+    const baseline = this.effectiveLight(state, x, y, px, py, ambient);
     let ambientLevel: "none" | "lightly" | "heavily" = "none";
-    if (ambient === "dim") ambientLevel = "lightly";
-    else if (ambient === "dark") ambientLevel = dist <= dvTiles ? "lightly" : "heavily";
+    if (baseline === "dim") ambientLevel = dist <= dvTiles ? "none" : "lightly";
+    else if (baseline === "dark") ambientLevel = dist <= dvTiles ? "lightly" : "heavily";
 
     const effective = worseObs(tileObs ?? "none", ambientLevel);
     if (effective === "heavily") return VEIL_HEAVY_ALPHA;
@@ -84,13 +118,19 @@ export class VisionMask {
     const sy = y0 < y1 ? 1 : -1;
     let err = dx - dy;
     let cx = x0, cy = y0;
+    const blocks = (x: number, y: number) =>
+      !!state.map.blocksSight?.[y]?.[x] || state.map.cover?.[y]?.[x] === "total";
     while (true) {
+      const ox = cx, oy = cy;
       const e2 = 2 * err;
-      if (e2 > -dy) { err -= dy; cx += sx; }
-      if (e2 < dx) { err += dx; cy += sy; }
+      let movedX = false, movedY = false;
+      if (e2 > -dy) { err -= dy; cx += sx; movedX = true; }
+      if (e2 < dx) { err += dx; cy += sy; movedY = true; }
+      // Diagonal corner-cutting: a step on both axes that squeezes between two
+      // sight-blockers meeting at a corner is blocked — mirrors `Vision.walkLOS`.
+      if (movedX && movedY && blocks(cx, oy) && blocks(ox, cy)) return true;
       if (cx === x1 && cy === y1) break;
-      if (state.map.blocksSight?.[cy]?.[cx]) return true;
-      if (state.map.cover?.[cy]?.[cx] === "total") return true;
+      if (blocks(cx, cy)) return true;
     }
     return false;
   }

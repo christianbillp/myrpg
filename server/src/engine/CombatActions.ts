@@ -243,6 +243,16 @@ export function doAttack(ctx: GameContext, targetId: string | undefined, events:
   const targetDef = ctx.resolveMonsterDef(target.defId);
   if (!targetDef) return;
 
+  // SRD: a target behind Total Cover "can't be targeted directly" — the line
+  // of fire is blocked by a sight-blocking tile (a wall, or the seam where two
+  // walls meet at a corner). Gate this BEFORE consuming ammunition, breaking
+  // Sanctuary, or spending anything, so a blocked shot is a true no-op.
+  const { bonus: coverBonus, untargetable } = coverBonusVsTarget(ctx, target);
+  if (untargetable) {
+    ctx.addLog({ left: `${ctx.playerDef.name} has no line of sight — ${target.name} is behind total cover`, style: 'miss' });
+    return;
+  }
+
   // SRD Charmed (US-125, Enthralling Panache): the charmed player can't
   // attack the charmer. Other targets stay fair game.
   const charmedByTarget = s.player.conditions.includes('charmed')
@@ -303,11 +313,6 @@ export function doAttack(ctx: GameContext, targetId: string | undefined, events:
   const heavyMeleeDisadvantage = !isRangedWeapon && !!atk.heavy && ctx.playerDef.str < 13;
   const withDisadvantage = hasAttackDisadvantage(s.player.conditions) || grantsDisadvantageAgainst(target.conditions, dist, s.player.seeInvisible) || rangedDisadvantage || heavyMeleeDisadvantage || !attackVision.seesTarget;
   const autoCrit = isAutoCrit(target.conditions, dist);
-  const { bonus: coverBonus, untargetable } = coverBonusVsTarget(ctx, target);
-  if (untargetable) {
-    ctx.addLog({ left: `${ctx.playerDef.name} has no line of sight — ${target.name} is behind total cover`, style: 'miss' });
-    return;
-  }
   const sneakAttackAllowed = sneakAttackEligible(ctx, atk, target, withAdvantage, withDisadvantage);
   const params = { withAdvantage, withDisadvantage, autoCrit, playerHidden, coverBonus, sneakAttackAllowed };
   const resolved = playerThrowAttack(

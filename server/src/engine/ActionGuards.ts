@@ -7,6 +7,7 @@ import type { ArmorDef, WeaponDef } from './types.js';
 import { isIncapacitated } from './ConditionSystem.js';
 import { armorSpeedPenaltyFt } from './EquipmentSystem.js';
 import { chebyshev } from './EnemyAI.js';
+import { canSee } from './Vision.js';
 import { isHostileTo } from './FactionRelations.js';
 import { isMagicInitiateSpell, magicInitiateResourceId } from './MagicInitiate.js';
 import { PLAYER_FACTION_ID, PLAYER_ID } from '../../../shared/types.js';
@@ -280,6 +281,17 @@ export function canAttackTarget(ctx: GameContext, targetId?: string): boolean {
   const dist = chebyshev(s.player.tileX, s.player.tileY, target.tileX, target.tileY);
   const reach = playerAttackReachTiles(ctx);
   if (dist > reach) return false;
+
+  // SRD Total Cover — "can't be targeted directly": no line of sight (a wall on
+  // the line, or the seam where two walls meet at a corner) means the target
+  // can't be attacked. Mirrors the `doAttack` gate so the ATTACK button is
+  // disabled rather than letting a shot fly into a wall.
+  const los = canSee(
+    s,
+    { tileX: s.player.tileX, tileY: s.player.tileY, senses: ctx.playerDef.senses },
+    { tileX: target.tileX, tileY: target.tileY, conditions: target.conditions, id: target.id },
+  );
+  if (los.cover === 'total') return false;
 
   const atk = ctx.playerDef.mainAttack;
   if (atk.ammunitionType) {
