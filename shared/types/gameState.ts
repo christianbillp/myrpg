@@ -365,7 +365,7 @@ export interface GmpcActor {
   /** GM roleplay brief, surfaced to the AIGM so it plays the character in voice. */
   persona?: string;
 }
-import type { EncounterEnvironment, EncounterTileProperty, MapTilesetInfo, SecretDef } from "./encounter.js";
+import type { EncounterEnvironment, EncounterTileProperty, MapTilesetInfo, SecretDef, RunMutators } from "./encounter.js";
 import type { WorldFlagValue } from "./engineEvents.js";
 import type { Rumor } from "./factions.js";
 import type { PendingReaction, PendingReroll, PendingCombatStart } from "./reaction.js";
@@ -514,6 +514,27 @@ export interface ActiveZone {
    *  recurring per-turn effect (Spirit Guardians: +1d8 radiant per slot
    *  above 3). Absent for zones whose effect doesn't scale. */
   castSlotLevel?: number;
+  /** Environmental HAZARD payload (Tactical Crucible #32) — a spreading fire, a
+   *  pool of acid, a collapsing floor. When present the zone is a battlefield
+   *  hazard, not a spell: each combat round it deals `dice`d`sides`+`bonus`
+   *  damage of `damageType` to every creature in its tiles (a DEX/CON save for
+   *  half when `saveAbility`/`saveDC` are set), and if `spreads` it grows into
+   *  adjacent passable tiles. Drives kick-the-foe-into-the-fire play.
+   *  See `design/systems/hazards.md`. */
+  hazard?: {
+    dice: number;
+    sides: number;
+    bonus?: number;
+    damageType: string;
+    saveAbility?: 'str' | 'dex' | 'con' | 'int' | 'wis' | 'cha';
+    saveDC?: number;
+    halfOnSave?: boolean;
+    /** When true, the hazard grows by one ring of adjacent passable tiles each
+     *  round (fire racing across the floor). */
+    spreads?: boolean;
+    /** Cap on how many tiles a spreading hazard may reach (keeps fire bounded). */
+    maxTiles?: number;
+  };
 }
 
 /**
@@ -578,6 +599,10 @@ export interface GameState {
    *  engine's active-actor binding reads this; never serialized as anything
    *  but `'player'` to the client (GMPC turns resolve server-side). */
   activeActorId?: string;
+  /** Combat round counter (1-based), bumped at the top of each full pass through
+   *  the initiative order; 0 outside combat. Drives the `combat_round` trigger
+   *  event for objective / wave / timer authoring (US-131). */
+  combatRound?: number;
   /** US-130 — while a GMPC is bound as the active actor, the human player is
    *  swapped out of `state.player` and would otherwise vanish from movement
    *  occupancy checks. This holds the swapped-out player's tile so the GMPC's
@@ -734,6 +759,10 @@ export interface GameState {
   encounterCompleteOnFlagOnly?: boolean;
   /** Environmental flags consulted by combat resolvers — sourced from EncounterDef.environment at session creation. */
   environment: EncounterEnvironment;
+  /** Opt-in run mutators (#29) — challenge knobs sourced from
+   *  `EncounterDef.mutators` at session creation; read by the combat resolvers
+   *  (enemy-HP scaling at spawn, incoming-damage scaling on player hits). */
+  mutators?: RunMutators;
   /** Persistent area-of-effect zones currently in play (Fog Cloud, Web,
    *  Darkness, Grease, illusions, future Walls + Spirit Guardians + Cloudkill).
    *  Lifetime is driven by `roundsRemaining`, not by concentration — the

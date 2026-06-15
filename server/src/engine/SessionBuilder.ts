@@ -11,6 +11,7 @@ import {
   ZoneMap, parseStartingZones, findPlayerSpawn, populateNpcs,
 } from './SpawnHelpers.js';
 import { buildFactionRelations, projectFactionStandings, seedFactionRelationsFromDispositions } from './FactionRelations.js';
+import { scaledEnemyHp } from './RunMutators.js';
 import { reprojectAllDispositions } from './Relationships.js';
 import { speciesAbilityResources } from './SpeciesAbilities.js';
 import { magicInitiateResources } from './MagicInitiate.js';
@@ -399,6 +400,17 @@ export function buildSessionState(
     },
   );
 
+  // Run mutator (#29) — "Tougher Foes": scale every spawned enemy's HP. Applied
+  // here, after populateNpcs seeds each NPC at its def maxHp, so the boost rides
+  // on top of whatever the stat block / placement produced.
+  if (req.mutators?.enemyHpMult) {
+    for (const npc of npcs) {
+      if (npc.disposition !== 'enemy') continue;
+      npc.maxHp = scaledEnemyHp(npc.maxHp, req.mutators);
+      npc.hp = scaledEnemyHp(npc.hp, req.mutators);
+    }
+  }
+
   const npcPersonas: NpcPersona[] = npcs
     .filter((n) => n.disposition === 'neutral')
     .flatMap((ns) => {
@@ -562,6 +574,7 @@ export function buildSessionState(
     encounterCompletionFlag: req.completionFlag ?? req.adventureSeed?.completionFlag,
     encounterCompleteOnFlagOnly: req.completeOnFlagOnly,
     environment: req.encounterContext.environment ?? {},
+    mutators: req.mutators,
     devFlags: req.devFlags,
   };
 

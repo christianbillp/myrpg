@@ -43,6 +43,7 @@ export interface TestContextOverrides {
   monsters?: MonsterDef[];
   equipment?: import("./../engine/types.js").ItemDef[];
   banter?: import("../../../shared/types.js").BanterPack[];
+  combatBarks?: import("../../../shared/types.js").CombatBarkPack[];
 }
 
 export interface TestContextResult {
@@ -227,6 +228,7 @@ export function buildTestContext(overrides: TestContextOverrides = {}): TestCont
     subclasses: [],
     conversations: [],
     banter: overrides.banter ?? [],
+    combatBarks: overrides.combatBarks ?? [],
     narration: [],
     quests: [],
   } as unknown as GameDefs;

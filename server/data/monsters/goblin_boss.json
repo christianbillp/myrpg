@@ -93,5 +93,6 @@
   "cr": "1",
   "color": 5535788,
   "tokenAsset": "/tokens/monster_goblin_boss.svg",
-  "description": "A goblin gone fat on other goblins' work, swaggering in a looted chain shirt with a crown of bent imperial coins wired into its topknot. It keeps a warrior between itself and danger at all times, and its quick yellow eyes are always measuring who can be spent next."
+  "description": "A goblin gone fat on other goblins' work, swaggering in a looted chain shirt with a crown of bent imperial coins wired into its topknot. It keeps a warrior between itself and danger at all times, and its quick yellow eyes are always measuring who can be spent next.",
+  "role": "leader"
 }

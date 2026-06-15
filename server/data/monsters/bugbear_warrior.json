@@ -76,5 +76,6 @@
   "cr": "1",
   "color": 9332552,
   "tokenAsset": "/tokens/monster_bugbear_warrior.svg",
-  "description": "Seven feet of matted fur and stale-sweat muscle, hunched so its long arms hang past its knees, a light hammer dangling from each fist. For all its bulk it stands unnervingly still and silent — a thing built for waiting beside dark roads."
+  "description": "Seven feet of matted fur and stale-sweat muscle, hunched so its long arms hang past its knees, a light hammer dangling from each fist. For all its bulk it stands unnervingly still and silent — a thing built for waiting beside dark roads.",
+  "role": "brute"
 }

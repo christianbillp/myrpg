@@ -1,0 +1,64 @@
+{
+  "id": "demo_directors_cut",
+  "encounterTitle": "Demo — Director's Cut (mutators · controller · support · twist)",
+  "demo": true,
+  "description": "The capstone for the second wave of the Tactical Crucible. This run is MUTATED — every foe is tougher and every hit you take lands harder (run mutators #29). A GHOUL fights as a CONTROLLER — it opens by raking you with a paralysing claw and then refuses to let you go, locking down the most dangerous target on the field (you). A GOBLIN SHAMAN fights as SUPPORT — it hangs back, kites on its hex-bolt, and keeps mending its wounded kin, so the goblins you 'killed' keep getting back up unless you put the shaman down first. And on round 2 the Director throws a TWIST — but which one is rolled at random, so no two playthroughs of this fight are the same (mid-fight complications #39). Kill priority is a puzzle: break the shaman to stop the healing, drop the ghoul to free yourself, and survive whatever the Director rolls.",
+  "mapId": "the_dead_waystation",
+  "npcIds": [],
+  "allyIds": [],
+  "enemyIds": ["ghoul", "goblin_shaman", "goblin_warrior", "goblin_warrior"],
+  "customIntroduction": "Something is wrong with the air here — heavier, hungrier. A grave-pale ghoul uncoils from a heap of bones and fixes its drooling stare on you, while a stooped goblin shaman rattles its bone fetishes from the back and two warriors fan out with notched scimitars. The shaman's hands already glow a sickly green. This will not be a fair fight — and it knows it.",
+  "customContext": "DEMO — DIRECTOR'S CUT CAPSTONE (Tactical Crucible, second wave). Everything is engine-driven; narrate what the Event Log reports and do not override targeting, healing, paralysis, the mutator numbers, or the round-2 twist.\n\nRUN MUTATORS (#29): this encounter sets `mutators.enemyHpMult = 1.25` (every enemy spawns at +25% HP) and `mutators.incomingDamageMult = 1.25` (all damage the PLAYER takes is scaled +25%). These re-tune the whole fight without changing its content — the same roster would be a pushover at 1.0. Voice it as a deadlier, desperate scene.\n\nCONTROLLER (#35 v2): the GHOUL (`ghoul`) is a controller. It opens with its Claw's CON-save paralysis rider and then FIXATES on the most dangerous foe — the player — sticking to whatever it has locked down instead of wandering. A paralysed player is auto-crit by adjacent attackers, so the goblins will pile on. Teach the player to break free / kill the ghoul fast.\n\nSUPPORT (#35 v2): the GOBLIN SHAMAN (`goblin_shaman`) is a back-rank support healer. Each turn it mends its most-wounded ally for 2d4+2 (`Mend Flesh`, 3 uses), kites away from melee on its Hex Bolt, and only knifes you if cornered. While the shaman lives, the warriors you wound keep bouncing back — the lesson is to focus the healer first.\n\nTHE TWIST (#39): on ROUND 2 the Director rolls ONE of three complications at random via a `random_action` trigger — (a) two more goblins charge in from the gate; (b) a brazier topples into a spreading fire mid-yard; or (c) the shaman screams a blood-frenzy that raises a fresh ghoul from the bone-heap. Narrate whichever one the Event Log shows; it differs every playthrough.\n\nThis is a straight kill-all victory (no objective flag) made into a decision puzzle by roles + mutators + the twist. Drive the drama; the engine drives the mechanics.",
+  "objective": "Survive a mutated, deadlier fight: the ghoul paralyses and pins you, the shaman keeps healing its kin (kill it first!), and the Director rolls a different round-2 twist each run.",
+  "allowsLongRest": false,
+  "placementMode": "exact",
+  "placements": [
+    { "role": "player", "x": 5, "y": 12 },
+    { "role": "enemy", "index": 0, "x": 12, "y": 12 },
+    { "role": "enemy", "index": 1, "x": 21, "y": 12 },
+    { "role": "enemy", "index": 2, "x": 14, "y": 10 },
+    { "role": "enemy", "index": 3, "x": 14, "y": 14 }
+  ],
+  "environment": {
+    "lightLevel": "dim"
+  },
+  "mutators": {
+    "enemyHpMult": 1.25,
+    "incomingDamageMult": 1.25
+  },
+  "triggers": [
+    {
+      "id": "dc_hint",
+      "when": { "event": "encounter_started" },
+      "then": [
+        { "type": "show_log", "message": "DEMO (Director's Cut): MUTATED run — foes have +25% HP and you take +25% damage. The GHOUL paralyses and pins you (controller); the SHAMAN heals its kin from the back (support — kill it first!). Round 2: the Director rolls a RANDOM twist." }
+      ],
+      "once": true
+    },
+    {
+      "id": "dc_twist",
+      "when": { "event": "combat_round", "round": 2 },
+      "then": [
+        {
+          "type": "random_action",
+          "choices": [
+            [
+              { "type": "show_announcement", "text": "A horn sounds — two more goblins boil in from the gate!", "mode": "unfocused" },
+              { "type": "spawn_enemy_at", "monsterId": "goblin_warrior", "x": 18, "y": 10 },
+              { "type": "spawn_enemy_at", "monsterId": "goblin_warrior", "x": 18, "y": 14 }
+            ],
+            [
+              { "type": "show_announcement", "text": "A brazier topples — burning oil races across the yard!", "mode": "unfocused" },
+              { "type": "spawn_hazard", "x": 13, "y": 12, "sizeFeet": 5, "name": "Fire", "tintHex": "#ff7a3c", "dice": 2, "sides": 6, "damageType": "fire", "saveAbility": "dex", "saveDC": 13, "halfOnSave": true, "spreads": true, "maxTiles": 14 }
+            ],
+            [
+              { "type": "show_announcement", "text": "The shaman shrieks a blood-frenzy — the bone-heap stirs and a fresh ghoul claws free!", "mode": "unfocused" },
+              { "type": "spawn_enemy_at", "monsterId": "ghoul", "x": 20, "y": 12 }
+            ]
+          ]
+        }
+      ],
+      "once": true
+    }
+  ]
+}

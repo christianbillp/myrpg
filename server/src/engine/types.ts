@@ -49,6 +49,10 @@ export interface GameDefs {
    *  directory. Short NPC-to-NPC exchanges the world tick plays between idle
    *  NPCs. Empty when no setting is active. */
   banter: import('../../../shared/types.js').BanterPack[];
+  /** In-combat bark packs from the active setting's `barks/` directory —
+   *  flavorful one-liners NPCs call out on combat events (attack / damaged /
+   *  death / flee / surrender). Empty when no setting is active. */
+  combatBarks: import('../../../shared/types.js').CombatBarkPack[];
   /** Class definitions loaded from `server/data/classes/*.json`. Drive the
    *  level-up resolver, character-build defaults, and per-class scaling
    *  tables (Sneak Attack dice, Second Wind uses, etc.). */

@@ -17,6 +17,7 @@ import { applyMonsterOnHitToPlayer } from './OngoingEffectsSystem.js';
 import { applyNpcDamageInstance } from './NpcDamage.js';
 import { hasAdvantageOn } from './Modifiers.js';
 import { tickActiveZones, tickZoneEnterSaves, runGustOfWindEndOfTurnSaves } from './SpellSystem.js';
+import { tickHazardZones } from './HazardSystem.js';
 import { endConcentration } from './ConcentrationSystem.js';
 import { recomputeBuffs, removeBuffsForSpell } from './Buffs.js';
 import { pingFactionAlert } from './npcSim/index.js';
@@ -174,6 +175,7 @@ export function doStartCombat(ctx: GameContext, events: GameEvent[]): void {
 
   // ── Start the first combatant's turn ────────────────────────────────────
   s.activeNpcIndex = -1;
+  s.combatRound = 0;  // first wrap to the top of the order makes it round 1
   if (ctx.isConstructing) {
     // The encounter just started and we're still inside `GameEngine`'s
     // constructor (an `encounter_started` combat trigger fired this call).
@@ -237,6 +239,19 @@ export function advanceTurn(ctx: GameContext, events: GameEvent[]): void {
   // Find the next live combatant.
   for (let step = 0; step < s.turnOrderIds.length + 1; step++) {
     s.activeNpcIndex = (s.activeNpcIndex + 1) % s.turnOrderIds.length;
+    // Top of the order = a new round. Publish `combat_round` so objective /
+    // reinforcement / timer triggers can fire (US-131). A trigger may end the
+    // fight (fail_encounter → defeat, or victory flag); bail if so.
+    if (s.activeNpcIndex === 0) {
+      s.combatRound = (s.combatRound ?? 0) + 1;
+      ctx.publish({ type: 'combat_round', round: s.combatRound });
+      // A round trigger may have ended the fight (fail_encounter → defeat). Bail
+      // only on those terminal states — NOT on 'exploring', which is still the
+      // phase here on the very first advance of a freshly-started combat (the
+      // turn-entry below is what sets player_turn/enemy_turn).
+      const ph = s.phase as string;
+      if (ph === 'defeat' || ph === 'death_saves') return;
+    }
     const id = s.turnOrderIds[s.activeNpcIndex];
     if (id === 'player') {
       // The player always gets a turn (even at 0 HP — that's the death save).
@@ -374,6 +389,9 @@ export function enterPlayerTurn(ctx: GameContext): void {
     // round at the top of every player turn. Expired zones are removed
     // and their conditions stripped from any creature still inside.
     tickActiveZones(ctx);
+    // Environmental hazards (#32) — spreading fire / acid pools damage everyone
+    // standing in them and grow, once per round.
+    tickHazardZones(ctx, ctx.eventSink ?? []);
     // SRD Web: a creature starting its turn in the webs rolls the save.
     tickZoneEnterSaves(ctx, 'player');
   }

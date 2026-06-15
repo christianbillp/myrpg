@@ -983,6 +983,7 @@ export class EncounterSetupScene extends Phaser.Scene {
           customObjective: enc.objective,
           allowsLongRest: enc.allowsLongRest,
           completionFlag: enc.completionFlag,
+          completeOnFlagOnly: enc.completeOnFlagOnly,
           tileProperties: enc.tileProperties,
           startingZones: enc.startingZones,
           placementMode: enc.placementMode,

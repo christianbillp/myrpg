@@ -1,0 +1,35 @@
+[
+  { "id": "bandit_attack", "trigger": "attack", "factions": ["bandits"], "lines": [
+    "This'll cost you!",
+    "Should've paid the toll.",
+    "Hold still, will you?",
+    "Easy coin, this.",
+    "Come 'ere!"
+  ] },
+  { "id": "bandit_damaged", "trigger": "damaged", "factions": ["bandits"], "lines": [
+    "Gah — lucky shot!",
+    "You'll pay for that.",
+    "Tch — barely felt it.",
+    "Cheap trick!"
+  ] },
+  { "id": "bandit_bloodied", "trigger": "bloodied", "factions": ["bandits"], "lines": [
+    "That's it — no more games.",
+    "Cap'n didn't pay us enough for this…",
+    "I'm bleedin' — you're dead for that."
+  ] },
+  { "id": "bandit_flee", "trigger": "flee", "factions": ["bandits"], "lines": [
+    "Sod this — I'm gone!",
+    "Every man for himself!",
+    "Not worth dyin' over!"
+  ] },
+  { "id": "bandit_surrender", "trigger": "surrender", "factions": ["bandits"], "lines": [
+    "Alright, alright — I yield! Don't kill me!",
+    "Mercy! I'm done, I swear it!",
+    "Take the coin, take it all — just let me live."
+  ] },
+  { "id": "bandit_death", "trigger": "death", "factions": ["bandits"], "lines": [
+    "Tell my brother… he was right…",
+    "Augh—!",
+    "Not… like this…"
+  ] }
+]

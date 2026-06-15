@@ -2,6 +2,7 @@ import type { NpcState, MonsterDef } from './types.js';
 import type { GameContext } from './GameContext.js';
 import { chebyshev, nextStepToward } from './EnemyAI.js';
 import { hasSpeedZero, proneStandCost, isIncapacitated } from './ConditionSystem.js';
+import { factionHasLivingLeader } from './MonsterRoles.js';
 import { Logger } from '../Logger.js';
 
 /**
@@ -54,11 +55,13 @@ function scoreBehaviors(ctx: GameContext, npc: NpcState, def: MonsterDef): Behav
   const aggression = 40 + Math.min(30, parseCr(def.cr) * 6);
 
   // loyalty: rises with living allies of the same disposition. A lone
-  // creature breaks more easily.
+  // creature breaks more easily. A living faction leader (#35) steadies the
+  // whole squad — a big loyalty floor that keeps them from fleeing while it
+  // stands (and evaporates when it falls).
   const samePeers = s.npcs.filter((n) =>
     n.id !== npc.id && n.hp > 0 && n.disposition === npc.disposition,
   ).length;
-  const loyalty = Math.min(30, samePeers * 10);
+  const loyalty = Math.min(30, samePeers * 10) + (factionHasLivingLeader(ctx, npc) ? 40 : 0);
 
   return {
     attack: aggression + loyalty * 0.5 - survival * 0.3,

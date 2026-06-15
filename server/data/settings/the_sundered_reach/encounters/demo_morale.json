@@ -1,0 +1,35 @@
+{
+  "id": "demo_morale",
+  "encounterTitle": "Demo — Morale & Surrender",
+  "demo": true,
+  "description": "Demo of combat morale (Tactical Crucible #34). Enemies no longer fight to the last hit point regardless of sense. Thinking foes — the road-bandits here — break when the fight turns against them: a wounded one runs for the map edge to escape, and the LAST bandit standing, bloodied and cornered (or badly hurt), throws down its weapon and YIELDS — flipping to a neutral, surrendered captive you can spare, capture, or interrogate. The lone skeleton, mindless undead, fights to destruction no matter what. Verify: whittle the bandits down — watch one flee off the edge and the final one surrender (combat ends), while the skeleton never breaks.",
+  "mapId": "the_dead_waystation",
+  "npcIds": [],
+  "allyIds": [],
+  "enemyIds": ["bandit", "bandit", "bandit", "skeleton"],
+  "customIntroduction": "Four shapes hold the waystation yard: three road-bandits in patched leathers fanning behind an overturned cart, and — incongruous among them — a skeleton, jaw clacking, bound to no fear at all. The bandits trade a glance as you square up; the bone-thing simply raises its blade.",
+  "customContext": "DEMO — MORALE & SURRENDER (#34). This is a COMBAT scene showcasing enemy morale. The engine resolves morale automatically — DON'T fake it; narrate what the Event Log reports.\n\nHOW IT WORKS:\n1. The three bandits are Humanoids: when one is wounded and the fight is going badly it BREAKS and flees toward the nearest map edge (and escapes off it — gone from the encounter). When a bandit is the LAST enemy standing AND is bloodied and either cornered or badly hurt (<35% HP), it SURRENDERS — the log reads 'throws down their weapon and yields!', it flips to a NEUTRAL, passive captive carrying the 'surrendered' condition, and combat ends if no hostiles remain.\n2. The skeleton is mindless Undead: it never flees and never yields — it fights until destroyed. (Beasts, constructs, oozes behave the same.)\n\nYOUR JOB — narrate the human drama the engine surfaces: the bandit's nerve cracking, the run for the gate, the final one dropping to its knees. When a bandit surrenders it is now NEUTRAL and at your mercy — offer the player the choice: spare it, take it captive, or interrogate it (you can set_world_flag / advance the scene from what it tells you). Do NOT have a surrendered captive attack unless the player provokes it. Killing a yielded prisoner is the player's call — react in-fiction (it's a cold thing to do).\n\nThe point: fights resolve like real fights — fear, flight, and surrender — so victory becomes a choice (mercy vs. execution), not just attrition.",
+  "objective": "Beat the bandits and the skeleton. Watch the bandits' morale break — one flees, the last surrenders — while the mindless skeleton fights to the end. Then choose what to do with the prisoner.",
+  "allowsLongRest": false,
+  "placementMode": "exact",
+  "placements": [
+    { "role": "player", "x": 5, "y": 12 },
+    { "role": "enemy", "index": 0, "x": 13, "y": 11 },
+    { "role": "enemy", "index": 1, "x": 14, "y": 12 },
+    { "role": "enemy", "index": 2, "x": 13, "y": 13 },
+    { "role": "enemy", "index": 3, "x": 15, "y": 12 }
+  ],
+  "environment": {
+    "lightLevel": "bright"
+  },
+  "triggers": [
+    {
+      "id": "demo_morale_hint",
+      "when": { "event": "encounter_started" },
+      "then": [
+        { "type": "show_log", "message": "DEMO (#34): enemies have morale. Wounded bandits flee toward the edge; the last bandit standing surrenders when bloodied and cornered or badly hurt (becoming a neutral captive — spare, capture, or interrogate). The skeleton, mindless undead, fights to destruction." }
+      ],
+      "once": true
+    }
+  ]
+}

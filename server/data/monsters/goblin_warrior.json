@@ -87,5 +87,6 @@
   "cr": "1/4",
   "color": 7902004,
   "tokenAsset": "/tokens/monster_goblin_warrior.svg",
-  "description": "A wiry goblin in scraps of leather armour, scimitar notched from use and a short bow over one shoulder, moving in quick darting bursts from cover to cover. The grin is confident; the feet are already planning the escape."
+  "description": "A wiry goblin in scraps of leather armour, scimitar notched from use and a short bow over one shoulder, moving in quick darting bursts from cover to cover. The grin is confident; the feet are already planning the escape.",
+  "role": "skirmisher"
 }

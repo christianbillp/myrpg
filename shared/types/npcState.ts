@@ -39,6 +39,10 @@ export interface NpcState {
   factionId: string;
   combatLabel: string;
   revealedName?: string;
+  /** Combat round of this NPC's most recent in-combat bark — throttles frequent
+   *  barks (attack / damaged) to at most one per round. Impactful one-shots
+   *  (bloodied / death / flee / surrender) bypass it. See `CombatBarks.ts`. */
+  lastBarkRound?: number;
   /** US-130 — when set, this NpcState is the on-map "shell" for a GMPC (a
    *  GM-controlled player character). The value is the GMPC's id (`gmpc_<slug>`,
    *  also this shell's own `id`). The shell exists so a GMPC can be targeted by
@@ -81,6 +85,10 @@ export interface NpcState {
    *  don't rest: per-day = per-spawn, and the field persists on the world
    *  save so a reload doesn't refill it. Absent for non-casters. */
   spellUses?: Record<string, number>;
+  /** Times this creature has used its non-spell `MonsterDef.supportHeal`
+   *  ability this combat (US-131 #35 v2). Capped by `supportHeal.uses`; same
+   *  per-spawn / persistence semantics as `spellUses`. Absent until first use. */
+  supportHealUsed?: number;
   /** Remaining limited-use reactions (US-117), keyed by `MonsterReaction.kind`
    *  — e.g. the Mage's shared 3/day Protective Magic pool. Same per-spawn /
    *  persistence semantics as `spellUses`. */

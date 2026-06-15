@@ -417,6 +417,30 @@ export interface EncounterDef {
    * defeat regardless of this field.
    */
   completionFlag?: string;
+  /** When true, clearing all enemies does NOT complete the encounter — only the
+   *  `completionFlag` being set does. Used for objective-driven encounters where
+   *  combat is a means, not the goal (survive N rounds, reach the exit, protect
+   *  the escort). Seeds `GameState.encounterCompleteOnFlagOnly`. */
+  completeOnFlagOnly?: boolean;
+  /** Opt-in run mutators (US-131 "Tactical Crucible" #29) — challenge knobs that
+   *  re-tune the whole encounter without touching its content. Seeds
+   *  `GameState.mutators`; the combat resolvers read it. See `RunMutators`. */
+  mutators?: RunMutators;
+}
+
+/**
+ * Run mutators (#29) — stackable challenge modifiers applied to an entire
+ * encounter at session boot, re-tuning familiar content rather than re-authoring
+ * it. Each knob is read by exactly one resolver so they compose cleanly:
+ *   • `enemyHpMult` — every enemy spawns with this fraction of its max HP
+ *     (1.5 = +50% — "Tougher Foes"), applied in `SessionBuilder` after spawn.
+ *   • `incomingDamageMult` — all damage the player TAKES is scaled (1.5 =
+ *     "Deadly"), applied at the top of `GameEngine.applyDamageToPlayer`.
+ * Omitted / 1 means "no change". Designed to extend with more knobs over time.
+ */
+export interface RunMutators {
+  enemyHpMult?: number;
+  incomingDamageMult?: number;
 }
 
 export interface EncounterEnvironment {

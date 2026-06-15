@@ -73,6 +73,7 @@
     }
   ],
   "multiattack": 2,
+  "role": "controller",
   "immunities": [
     "poison"
   ],

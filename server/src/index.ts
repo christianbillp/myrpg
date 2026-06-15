@@ -175,6 +175,7 @@ const defs: GameDefs = {
   tileLegendsByTileset: {},
   conversations: [],
   banter: [],
+  combatBarks: [],
   classes: [],
   subclasses: [],
 };
@@ -265,6 +266,7 @@ async function loadDefs(): Promise<void> {
   // US-129 ambient banter packs (separate await to avoid reshuffling the
   // positional Promise.all tuple above).
   defs.banter = await readDirOrEmpty<GameDefs["banter"][0]>(settingSub("banter")).catch(() => []);
+  defs.combatBarks = await readDirOrEmpty<GameDefs["combatBarks"][0]>(settingSub("barks")).catch(() => []);
   for (const p of defs.playerDefs) {
     applySpecies(p, defs.species);
     // Surface activated species abilities (Orc Adrenaline Rush, …) as known
@@ -1649,6 +1651,8 @@ interface EncounterDefJson {
    *  `completionFlag` being set does. For encounters where combat is a step, not
    *  the objective (kill the captors, THEN free the captives). */
   completeOnFlagOnly?: boolean;
+  /** Opt-in run mutators (#29) — challenge knobs applied to the whole encounter. */
+  mutators?: import("./engine/types.js").RunMutators;
   tileProperties?: import("./engine/types.js").EncounterTileProperty[];
   startingZones?: import("./engine/types.js").StartingZonesLayer;
   placementMode?: 'zones' | 'exact';
@@ -1746,6 +1750,7 @@ async function startAdventureChapter(
     customObjective: encDef.objective,
     completionFlag: encDef.completionFlag,
     completeOnFlagOnly: encDef.completeOnFlagOnly,
+    mutators: encDef.mutators,
     tileProperties: encDef.tileProperties,
     startingZones: encDef.startingZones,
     placementMode: encDef.placementMode,
@@ -1905,6 +1910,7 @@ async function startAdventureRest(
     customObjective: encDef.objective,
     completionFlag: encDef.completionFlag,
     completeOnFlagOnly: encDef.completeOnFlagOnly,
+    mutators: encDef.mutators,
     tileProperties: encDef.tileProperties,
     startingZones: encDef.startingZones,
     placementMode: encDef.placementMode,
@@ -2312,6 +2318,7 @@ server.post<{
     customObjective: encDef.objective,
     completionFlag: encDef.completionFlag,
     completeOnFlagOnly: encDef.completeOnFlagOnly,
+    mutators: encDef.mutators,
     tileProperties: encDef.tileProperties,
     startingZones: encDef.startingZones,
     placementMode: encDef.placementMode,

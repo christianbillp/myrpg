@@ -1979,6 +1979,7 @@ export class GameScene extends Phaser.Scene {
       customObjective: def.objective,
       allowsLongRest: def.allowsLongRest,
       completionFlag: def.completionFlag,
+      completeOnFlagOnly: def.completeOnFlagOnly,
       tileProperties: def.tileProperties,
       startingZones: def.startingZones,
       placementMode: def.placementMode,

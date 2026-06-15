@@ -1,0 +1,43 @@
+{
+  "id": "demo_reinforcements",
+  "encounterTitle": "Demo — Reinforcements",
+  "demo": true,
+  "description": "Demo of reinforcements & escalation (Tactical Crucible #33), authored entirely from the existing trigger system — no special engine code. Two bandits hold a watch-post; the moment you drop the first, the survivor sounds the alarm and a fresh pair charges in from the gate. The fight has momentum and a clock: cut them down fast, or silence the caller, before the second wave lands. Verify: kill a bandit and watch a wave spawn (once), with a log announcing it.",
+  "mapId": "the_dead_waystation",
+  "npcIds": [],
+  "allyIds": [],
+  "enemyIds": ["bandit", "bandit"],
+  "customIntroduction": "A pair of road-bandits keep a wary watch over the waystation gate — and a battered iron bell hangs from the lintel beside them. The moment blades are drawn, one of them edges toward the bell-rope.",
+  "customContext": "DEMO — REINFORCEMENTS (#33). This is a COMBAT scene showing escalation authored from existing triggers (`npc_killed` → `spawn_enemy_at`), not new engine code. When the first bandit falls, the survivor 'rings the bell' and a second wave of two bandits charges in from the gate (the `bandit_alarm` trigger, fires `once`). PROCEDURE: narrate the alarm and the new arrivals when the wave trigger fires (you'll see them appear + the DEMO log line); play the tension of a timer — the longer the fight drags, the more arrive. Combine naturally with morale (#34, already in the engine): once the player turns the tide, wounded bandits will flee and the last may surrender. The point: a fight with momentum and a clock, where speed and silencing the caller matter — built from data, so any encounter can author waves on a kill, an HP threshold, or a turn.",
+  "objective": "Hold the gate. Drop the bandits fast — the first to fall rings for help, and a second wave charges in. Win before the reinforcements bury you.",
+  "allowsLongRest": false,
+  "placementMode": "exact",
+  "placements": [
+    { "role": "player", "x": 5, "y": 12 },
+    { "role": "enemy", "index": 0, "x": 13, "y": 11 },
+    { "role": "enemy", "index": 1, "x": 13, "y": 13 }
+  ],
+  "environment": {
+    "lightLevel": "bright"
+  },
+  "triggers": [
+    {
+      "id": "demo_reinf_hint",
+      "when": { "event": "encounter_started" },
+      "then": [
+        { "type": "show_log", "message": "DEMO (#33): reinforcements. When the first bandit falls, a wave charges in from the gate. Drop them fast — or silence the caller — before more arrive. (Authored from existing triggers; pairs with engine morale #34: survivors will flee or surrender once routed.)" }
+      ],
+      "once": true
+    },
+    {
+      "id": "bandit_alarm",
+      "when": { "event": "npc_killed", "defId": "bandit" },
+      "then": [
+        { "type": "show_log", "message": "The bell clangs — reinforcements charge in from the gate!" },
+        { "type": "spawn_enemy_at", "monsterId": "bandit", "x": 16, "y": 11 },
+        { "type": "spawn_enemy_at", "monsterId": "bandit", "x": 16, "y": 13 }
+      ],
+      "once": true
+    }
+  ]
+}

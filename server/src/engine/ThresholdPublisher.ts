@@ -4,6 +4,7 @@ import type { NpcState } from './types.js';
 import { d20, mod } from './Dice.js';
 
 import { breakNpcConcentrationOnDamage } from './NpcConcentration.js';
+import { emitCombatBark } from './CombatBarks.js';
 
 /**
  * Publishes `hp_threshold_crossed` events when an entity's HP ratio crosses
@@ -45,6 +46,16 @@ export function publishNpcDamage(ctx: GameContext, npc: NpcState, hpBefore: numb
   if (dmg <= 0) return;
   ctx.publish({ type: 'damage_dealt', target: npc.id, amount: dmg });
   publishHpThresholdCrossings(ctx, npc.id, hpBefore, hpAfter, npc.maxHp);
+  // In-combat barks on the central damage path (covers every damage source).
+  // Impactful one-shots (death, just-bloodied) always fire; a plain hit is sparse.
+  const max = Math.max(1, npc.maxHp);
+  if (hpAfter <= 0) {
+    emitCombatBark(ctx, npc, 'death', { force: true });
+  } else if (hpBefore / max > 0.5 && hpAfter / max <= 0.5) {
+    emitCombatBark(ctx, npc, 'bloodied', { force: true });
+  } else {
+    emitCombatBark(ctx, npc, 'damaged');
+  }
   maybeHideousLaughterDamageSave(ctx, npc);
   // SRD concentration (US-117): an NPC caster sustaining its own spell
   // (self-Invisibility, Fly) checks concentration on every damage instance.

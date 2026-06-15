@@ -1,6 +1,7 @@
 import { NpcState, MonsterDef, GameEvent, LogEntry, AttackOnHitEffect, ExtraAttack, MonsterSaveAction } from './types.js';
 import { tryNimbleEscape, enemyAttack, npcBanePenalty, npcBlessBonus, npcReducedPenalty, type RolledBonusDamage } from './CombatSystem.js';
 import { isIncapacitated, hasAttackDisadvantage, hasAttackAdvantage, hasSpeedZero, proneStandCost, grantsDisadvantageAgainst, grantsAdvantageAgainst } from './ConditionSystem.js';
+import { rolePrefersRange } from './MonsterRoles.js';
 
 /**
  * Snapshot of the creature an enemy NPC is about to engage. Generic over
@@ -48,6 +49,10 @@ export interface EnemyTurnConfig {
   mapCols: number;
   mapRows: number;
   occupiedTiles: [number, number][];
+  /** Tactical role (#35) — `artillery` / range-preferring `skirmisher` hold their
+   *  weapon's range and kite away from melee instead of marching in. Defaults to
+   *  `soldier` when omitted (today's advance-to-melee behavior). */
+  role?: import('../../../shared/types.js').MonsterRole;
   /** Trait-derived attack-roll modifier (set by the caller — see CombatFlow.collectTraitModifiers). */
   traitAdvantage?: boolean;
   /** Trait-derived attack-roll modifier (set by the caller — see CombatFlow.collectTraitModifiers). */
@@ -205,9 +210,17 @@ export function runEnemyTurn(
   // Movement intent: close to melee when this turn's budget can plausibly
   // reach adjacency; otherwise a shooter advances only to normal range (or
   // holds position if already inside it) instead of marching into reach.
+  // Role #35: artillery (and a skirmisher with a ranged option) HOLD their
+  // weapon's range — they advance only to that range and kite back out of melee.
   const startDist = chebyshev(tileX, tileY, target.tileX, target.tileY);
-  const canReachMelee = !!meleeAttack && startDist - stepsLeft <= 1;
-  const desiredDist = rangedAttack && !canReachMelee ? Math.min(rangeNormalTiles, Math.max(1, startDist)) : 1;
+  const prefersRange = rolePrefersRange(config.role ?? 'soldier', !!rangedAttack) && rangeNormalTiles > 0;
+  let desiredDist: number;
+  if (prefersRange) {
+    desiredDist = rangeNormalTiles;
+  } else {
+    const canReachMelee = !!meleeAttack && startDist - stepsLeft <= 1;
+    desiredDist = rangedAttack && !canReachMelee ? Math.min(rangeNormalTiles, Math.max(1, startDist)) : 1;
+  }
 
   while (stepsLeft > 0 && chebyshev(tileX, tileY, target.tileX, target.tileY) > desiredDist) {
     const next = nextStepToward(
@@ -225,6 +238,19 @@ export function runEnemyTurn(
     // hook runs after the tile commit so a failed Web save with
     // `condition: 'restrained'` will be observed by the next iteration's
     // `hasSpeedZero` check and break the loop.
+    const cost = config.onStep?.(tileX, tileY) ?? 1;
+    stepsLeft -= cost;
+    if (hasSpeedZero(enemy.conditions)) break;
+  }
+
+  // Kite (#35): a range-preferring shooter that's inside its range (a melee foe
+  // closed on it) backs away to regain distance, spending its remaining movement.
+  while (prefersRange && stepsLeft > 0 && chebyshev(tileX, tileY, target.tileX, target.tileY) < desiredDist) {
+    const away = stepAwayFrom(tileX, tileY, target.tileX, target.tileY, config.blocksMovement, config.mapRows, config.mapCols, config.occupiedTiles);
+    if (!away) break;
+    tileX = away[0];
+    tileY = away[1];
+    events.push({ type: 'entity_move', entityId: enemy.id, toX: tileX, toY: tileY });
     const cost = config.onStep?.(tileX, tileY) ?? 1;
     stepsLeft -= cost;
     if (hasSpeedZero(enemy.conditions)) break;
@@ -402,6 +428,32 @@ export function runAllyTurn(
   logs.push(...attackLogs);
 
   return { attackedTargetId: nearest.id, damage, isHit, isCrit, attacked: true, logs, events, finalTileX: tileX, finalTileY: tileY, bonusComponents };
+}
+
+/**
+ * One step that increases distance from the target (kiting, #35). Picks the
+ * passable, unoccupied, in-bounds neighbor with the greatest Chebyshev distance
+ * from the target; returns null when no neighbor improves (cornered).
+ */
+export function stepAwayFrom(
+  fromX: number, fromY: number,
+  targetX: number, targetY: number,
+  blocksMovement: boolean[][], rows: number, cols: number,
+  occupiedTiles: [number, number][],
+): [number, number] | null {
+  const here = chebyshev(fromX, fromY, targetX, targetY);
+  let best: [number, number] | null = null;
+  let bestDist = here;
+  for (const [dr, dc] of [[0, 1], [0, -1], [1, 0], [-1, 0], [1, 1], [1, -1], [-1, 1], [-1, -1]] as [number, number][]) {
+    const nx = fromX + dc, ny = fromY + dr;
+    if (nx < 0 || ny < 0 || nx >= cols || ny >= rows) continue;
+    if (blocksMovement[ny][nx]) continue;
+    if (dr !== 0 && dc !== 0 && blocksMovement[fromY][nx] && blocksMovement[ny][fromX]) continue;
+    if (occupiedTiles.some(([ox, oy]) => ox === nx && oy === ny)) continue;
+    const d = chebyshev(nx, ny, targetX, targetY);
+    if (d > bestDist) { bestDist = d; best = [nx, ny]; }
+  }
+  return best;
 }
 
 export function nextStepToward(

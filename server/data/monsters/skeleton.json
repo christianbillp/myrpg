@@ -72,5 +72,6 @@
     "shortbow",
     "shortsword"
   ],
-  "description": "Bare bones the colour of old parchment, held together by nothing visible and moving with a dry, clicking precision. Rusted scraps of its last uniform still hang from its frame, and pinpoints of pale light burn where eyes should be."
+  "description": "Bare bones the colour of old parchment, held together by nothing visible and moving with a dry, clicking precision. Rusted scraps of its last uniform still hang from its frame, and pinpoints of pale light burn where eyes should be.",
+  "role": "artillery"
 }

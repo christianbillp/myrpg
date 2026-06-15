@@ -1,0 +1,15 @@
+[
+  { "id": "undead_attack", "trigger": "attack", "types": ["undead"], "lines": [
+    "*the bones rattle and lunge*",
+    "*a dry, joyless hiss*",
+    "*jaw clacking, it strikes*"
+  ] },
+  { "id": "undead_damaged", "trigger": "damaged", "types": ["undead"], "lines": [
+    "*a crack splits the old bone — it does not slow*",
+    "*it feels nothing, and comes on*"
+  ] },
+  { "id": "undead_death", "trigger": "death", "types": ["undead"], "lines": [
+    "*the binding breaks — it collapses into still bones*",
+    "*a final rattle, then nothing*"
+  ] }
+]

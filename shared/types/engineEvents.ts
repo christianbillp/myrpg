@@ -39,6 +39,10 @@ export type EngineEvent =
   | { type: 'turn_ended'; combatantId: 'player' | string }
   | { type: 'combat_started' }
   | { type: 'combat_ended' }
+  /** Published at the top of each combat round (one full pass through the
+   *  initiative order). `round` is 1-based. Authors hang objective / wave /
+   *  timer triggers off it ("on round 3, reinforcements"; "survive 5 rounds"). */
+  | { type: 'combat_round'; round: number }
   /** Published once at session start AFTER triggers register, so encounter authors
    *  can attach lifecycle reactions (intro supertitles, scripted lines, etc.).
    *  The events emitted by these triggers are buffered into the engine's

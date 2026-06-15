@@ -67,5 +67,6 @@
   "cr": "1/2",
   "color": 5468449,
   "tokenAsset": "/tokens/monster_scout.svg",
-  "description": "A weathered tracker in oiled leathers the colour of dead bracken, longbow strung and a shortsword worn for trouble rather than ceremony. They stand where the sightlines are longest, and their gaze never stops walking the horizon."
+  "description": "A weathered tracker in oiled leathers the colour of dead bracken, longbow strung and a shortsword worn for trouble rather than ceremony. They stand where the sightlines are longest, and their gaze never stops walking the horizon.",
+  "role": "skirmisher"
 }

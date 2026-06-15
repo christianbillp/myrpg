@@ -462,6 +462,11 @@ export interface MonsterDef {
    *  turn. Absent / ≤ 1 means a single attack. Each is a separate attack roll
    *  using the same chosen weapon. */
   multiattack?: number;
+  /** Combat role driving the tactical AI's positioning + target priority (US-131
+   *  "Tactical Crucible" #35). When omitted, inferred from the stat block
+   *  (`MonsterRoles.resolveMonsterRole`). `soldier` is the neutral default
+   *  (today's behavior). See `design/systems/enemy-roles.md`. */
+  role?: import('./monsterRoles.js').MonsterRole;
   xp: number;
   cr: string;
   color: number;
@@ -503,6 +508,22 @@ export interface MonsterDef {
    *  AI replaces an attack whenever the target lacks the condition and is
    *  within `rangeFeet`. */
   saveActions?: MonsterSaveAction[];
+  /** Non-spell healing ability for a `support`-role creature (US-131 "Tactical
+   *  Crucible" #35 v2). A goblin shaman's bound-wounds, a cultist's healing
+   *  draught — patches up the most-wounded bloodied ally without needing a full
+   *  Spellcasting block. Resolved by `NpcSupportRole.tryNpcRoleHeal` once per
+   *  turn, limited to `uses` per combat. Spellcaster healers use `spellcasting`
+   *  / `tryNpcSupportCast` instead. */
+  supportHeal?: {
+    name: string;
+    dice: number;
+    sides: number;
+    bonus?: number;
+    /** Reach within which a wounded ally can be mended, in feet. Default 30. */
+    rangeFeet?: number;
+    /** Total uses per combat. Default 2. */
+    uses?: number;
+  };
   /** Path to the SVG used as this monster's token sprite. Required — every
    *  monster JSON must declare its token explicitly (no naming-convention
    *  fallback). */

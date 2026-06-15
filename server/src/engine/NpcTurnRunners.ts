@@ -20,7 +20,11 @@ import {
 } from './EnemyAI.js';
 import { isHostileTo } from './FactionRelations.js';
 import { attackerCannotLocate } from './InvisibilitySystem.js';
-import { PLAYER_FACTION_ID, PLAYER_ID } from '../../../shared/types.js';
+import { PLAYER_FACTION_ID, PLAYER_ID, isBloodied } from '../../../shared/types.js';
+import { setIndividualRelation, reprojectDisposition } from './Relationships.js';
+import { emitCombatBark } from './CombatBarks.js';
+import { resolveMonsterRole, factionHasLivingLeader } from './MonsterRoles.js';
+import { tryNpcRoleHeal } from './NpcSupportRole.js';
 import { isIncapacitated, isVisible, TURN_CONDITIONS } from './ConditionSystem.js';
 import { doNpcOpportunityAttack } from './CombatActions.js';
 import { applyNpcAttackHit, applyNpcDamageInstance } from './NpcDamage.js';
@@ -289,7 +293,23 @@ export function pickEnemyAttackTarget(ctx: GameContext, attacker: NpcState): Ene
       noAttack: true,
     };
   }
-  candidates.sort((a, b) => (a.dist - b.dist) || (a.isPlayer ? -1 : b.isPlayer ? 1 : 0));
+  // Target priority by role (#35): a brute finishes the most-wounded; artillery
+  // snipes the weakest (squishy backline). Both focus the lowest-HP foe, breaking
+  // ties by nearest. A controller locks down the most dangerous foe — it sticks
+  // to a target it has already grappled, else fixates on the player (the
+  // spellcaster threat in a single-player fight). Everyone else targets the
+  // nearest (player-priority tiebreak).
+  const role = (() => { const d = ctx.resolveMonsterDef(attacker.defId); return d ? resolveMonsterRole(d) : 'soldier'; })();
+  if (role === 'brute' || role === 'artillery') {
+    candidates.sort((a, b) => (a.target.hp - b.target.hp) || (a.dist - b.dist) || (a.isPlayer ? -1 : b.isPlayer ? 1 : 0));
+  } else if (role === 'controller') {
+    candidates.sort((a, b) =>
+      (Number(b.target.grappledByAttacker ?? false) - Number(a.target.grappledByAttacker ?? false))
+      || (Number(b.isPlayer) - Number(a.isPlayer))
+      || (a.dist - b.dist));
+  } else {
+    candidates.sort((a, b) => (a.dist - b.dist) || (a.isPlayer ? -1 : b.isPlayer ? 1 : 0));
+  }
   Logger.log('ai.target_pick', {
     attacker: attacker.id, attackerDefId: attacker.defId,
     charmedByPlayer,
@@ -297,6 +317,54 @@ export function pickEnemyAttackTarget(ctx: GameContext, attacker: NpcState): Ene
     chosen: candidates[0].target.id,
   });
   return candidates[0].target;
+}
+
+/**
+ * SRD-flavored morale (#34): only thinking, self-preserving creatures yield —
+ * mindless / instinct-driven types (Undead, Construct, Ooze, Beast, …) fight to
+ * destruction. Gated to Humanoids (and Giants), and never twice.
+ */
+export function npcCanYield(npc: NpcState, def: MonsterDef): boolean {
+  if (npc.conditions.includes('surrendered')) return false;
+  const type = (def.type ?? '').toLowerCase();
+  return type.includes('humanoid') || type.includes('giant');
+}
+
+/**
+ * Would this enemy surrender at the start of its turn? A thinking creature
+ * (`npcCanYield`) that is **bloodied** and the **last enemy standing** throws
+ * down its arms rather than fight — or Dodge — a hopeless solo battle to the
+ * death. Checked up front, before the attack/hold/flee decision, so a cornered
+ * bandit yields instead of Dodging in place forever. Strong (un-bloodied) last
+ * foes, and mindless types, still fight on.
+ */
+export function npcWouldYield(ctx: GameContext, npc: NpcState, def: MonsterDef): boolean {
+  if (!npcCanYield(npc, def)) return false;
+  if (!isBloodied(npc.hp, npc.maxHp)) return false;
+  // Leader morale (#35): the squad holds while a leader stands; its death breaks
+  // them. So a bloodied trooper won't yield while its captain still fights.
+  if (factionHasLivingLeader(ctx, npc)) return false;
+  const lastStanding = !ctx.state.npcs.some((n) => n.id !== npc.id && n.hp > 0 && n.disposition === 'enemy');
+  return lastStanding;
+}
+
+/**
+ * Resolve a surrender: the creature stops fighting, flips to a neutral
+ * non-combatant (relationship neutralised so the projection sticks), and is
+ * marked `surrendered` so the client / AIGM can offer capture, mercy, or
+ * interrogation. Combat auto-ends if no hostiles remain.
+ */
+export function applyNpcSurrender(ctx: GameContext, npc: NpcState, events: GameEvent[]): void {
+  setIndividualRelation(ctx.state, npc.id, PLAYER_ID, 0, { mirror: true });
+  reprojectDisposition(ctx.state, npc);
+  npc.combatPassive = true;
+  npc.conditions = npc.conditions.filter((c) => c !== 'dodging');
+  if (!npc.conditions.includes('surrendered')) npc.conditions.push('surrendered');
+  ctx.addLog({ left: `${combatantDisplayName(npc, ctx.state.npcs)} throws down their weapon and yields!`, style: 'status' });
+  emitCombatBark(ctx, npc, 'surrender', { force: true });
+  finalizeNpcTurn(ctx, npc, events);
+  ctx.publish({ type: 'turn_ended', combatantId: npc.id });
+  ctx.autoEndCombatIfNoEnemies();
 }
 
 /**
@@ -347,6 +415,16 @@ export function runSingleEnemyTurn(ctx: GameContext, npc: NpcState, events: Game
     return;
   }
 
+  // ── Morale (#34) — surrender before deciding to fight/hold/flee ──────────
+  // A bloodied, last-standing thinking creature yields rather than fight (or
+  // Dodge) a hopeless solo battle — which also resolves the encounter instead of
+  // looping. Checked before `chooseNpcBehavior` so it fires whatever the AI
+  // would otherwise pick.
+  if (npcWouldYield(ctx, npc, def)) {
+    applyNpcSurrender(ctx, npc, events);
+    return;
+  }
+
   // ── NpcBrain — decide behavior ─────────────────────────────────────────
   const behavior = chooseNpcBehavior(ctx, npc, def);
   if (behavior === 'hold') {
@@ -366,6 +444,7 @@ export function runSingleEnemyTurn(ctx: GameContext, npc: NpcState, events: Game
     npc.tileX = flee.finalTileX;
     npc.tileY = flee.finalTileY;
     ctx.addLog({ left: `${combatantDisplayName(npc, s.npcs)} breaks and flees!`, style: 'status' });
+    emitCombatBark(ctx, npc, 'flee', { force: true });
     finalizeNpcTurn(ctx, npc, events);
     ctx.publish({ type: 'turn_ended', combatantId: npc.id });
     // Escape off the map edge — the creature leaves the encounter entirely.
@@ -376,6 +455,15 @@ export function runSingleEnemyTurn(ctx: GameContext, npc: NpcState, events: Game
     return;
   }
   // behavior === 'attack' — fall through to the existing AI loop.
+
+  // ── Support role (#35 v2) — non-spell heal ─────────────────────────────
+  // A support-role healer with a `supportHeal` ability mends its most-wounded
+  // ally from the back instead of attacking. Spends the action; turn ends.
+  if (tryNpcRoleHeal(ctx, npc, def)) {
+    finalizeNpcTurn(ctx, npc, events);
+    ctx.publish({ type: 'turn_ended', combatantId: npc.id });
+    return;
+  }
 
   // ── Stat-block spellcasting (US-117 / US-125) ──────────────────────────
   // ONE bonus action: support casting (the Priest Acolyte's Divine Aid —
@@ -406,6 +494,7 @@ export function runSingleEnemyTurn(ctx: GameContext, npc: NpcState, events: Game
   const result = runEnemyTurn(npc, def, {
     displayName: combatantDisplayName(npc, s.npcs),
     target,
+    role: resolveMonsterRole(def),
     blocksMovement: s.map.blocksMovement,
     mapCols: s.map.cols,
     mapRows: s.map.rows,
@@ -452,6 +541,8 @@ export function runSingleEnemyTurn(ctx: GameContext, npc: NpcState, events: Game
   }
   // Same rule for an NPC caster's own self-cast Invisibility (US-117).
   if (result.attacked) breakNpcSelfInvisibilityOnAttack(ctx, npc);
+  // In-combat bark as it swings (sparse — chance + once per round).
+  if (result.attacked) emitCombatBark(ctx, npc, 'attack');
 
   // SRD Ray of Enfeeblement (fail branch): "subtracts 1d8 from all its
   // damage rolls". Roll the deduction once per landed attack and clamp

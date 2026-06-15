@@ -72,5 +72,6 @@
   "cr": "2",
   "color": 10896687,
   "tokenAsset": "/tokens/monster_bandit_captain.svg",
-  "description": "A veteran freebooter in a good coat gone shabby at the cuffs, scimitar worn high and a flintlock pistol worth more than most farms riding the other hip. Scarred, unhurried, and smiling like the toll is already agreed — the eyes do the counting while the mouth does the charm."
+  "description": "A veteran freebooter in a good coat gone shabby at the cuffs, scimitar worn high and a flintlock pistol worth more than most farms riding the other hip. Scarred, unhurried, and smiling like the toll is already agreed — the eyes do the counting while the mouth does the charm.",
+  "role": "leader"
 }

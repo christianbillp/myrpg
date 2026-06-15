@@ -6,7 +6,7 @@
  */
 
 // Cross-domain imports — keep these explicit so the dependency graph is visible.
-import type { EncounterDef, EncounterPlacement, EncounterTileProperty, EncounterTrapDef, StartingZonesLayer } from "./encounter.js";
+import type { EncounterDef, EncounterPlacement, EncounterTileProperty, EncounterTrapDef, RunMutators, StartingZonesLayer } from "./encounter.js";
 import type { WorldFlagValue } from "./engineEvents.js";
 import type { EquipmentSlots } from "./entities.js";
 import type { Rumor } from "./factions.js";
@@ -41,6 +41,8 @@ export interface CreateSessionRequest {
   completionFlag?: string;
   /** Mirror of `EncounterDef.completeOnFlagOnly`. Seeded onto `GameState.encounterCompleteOnFlagOnly`: when true, combat-clear alone won't complete the encounter — only the completion flag will. */
   completeOnFlagOnly?: boolean;
+  /** Mirror of `EncounterDef.mutators` (#29). Seeded onto `GameState.mutators`. */
+  mutators?: RunMutators;
   tileProperties?: EncounterTileProperty[];
   startingZones?: StartingZonesLayer;
   /** Mirrors `EncounterDef.placementMode` — see that field for the rules. */

@@ -96,5 +96,6 @@
   "cr": "6",
   "color": 15790320,
   "tokenAsset": "/tokens/monster_mage.svg",
-  "description": "A robed scholar past their first youth, ink-stained fingers wrapped around a wand of polished hawthorn, eyes glittering with catalogued spells. The plain travelling robe is cut to hide how expensive it is — and how many components are sewn into the lining."
+  "description": "A robed scholar past their first youth, ink-stained fingers wrapped around a wand of polished hawthorn, eyes glittering with catalogued spells. The plain travelling robe is cut to hide how expensive it is — and how many components are sewn into the lining.",
+  "role": "artillery"
 }

@@ -63,6 +63,7 @@ import { registerWarlockHooks } from './WarlockFeatures.js';
 import { maybeBreakConcentration, endConcentration } from './ConcentrationSystem.js';
 import { doUseFeature } from './FeatureRegistry.js';
 import { buildSessionState, SavedMapRecord } from './SessionBuilder.js';
+import { scaledIncomingDamage } from './RunMutators.js';
 import { registerTriggers, adjustFactionStanding, recordRumor, fireAction as triggerFireAction } from './TriggerSystem.js';
 import {
   startConversation as cnStartConversation,
@@ -1393,6 +1394,10 @@ export class GameEngine {
 
   private applyDamageToPlayer(damage: number, _events: GameEvent[], damageType?: string): void {
     const s = this.state;
+    // Run mutator (#29) — "Deadly": scale ALL incoming player damage before any
+    // resistance / temp-HP math, so the harsher numbers flow through the normal
+    // pipeline (logs, concentration save, thresholds).
+    damage = scaledIncomingDamage(damage, s.mutators);
     // SRD: resistance/vulnerability/immunity adjusts the typed damage first,
     // before Temporary HP absorbs and before the CON save sees it.
     let effective = damageType ? this.playerResistMod(damage, damageType) : damage;

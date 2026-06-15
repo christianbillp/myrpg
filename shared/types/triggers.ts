@@ -47,6 +47,11 @@ export type WhenClause =
   | { event: 'turn_ended'; combatantId?: 'player' | string }
   | { event: 'combat_started' }
   | { event: 'combat_ended' }
+  /** Fires at the top of a combat round (1-based). `round` matches a specific
+   *  round exactly; `atLeast` fires every round from that number on. With
+   *  `once`, use for "survive N rounds" victories, timed waves, or a defeat
+   *  timer. Omit both to fire every round. */
+  | { event: 'combat_round'; round?: number; atLeast?: number }
   /** Fires once at session start, after all engine subscribers register. Use
    *  to attach intro cinematics (supertitle, fade-in, opening announcement). */
   | { event: 'encounter_started' }
@@ -256,6 +261,28 @@ export type TriggerAction =
   | { type: 'set_npc_companion'; defId: string; isCompanion: boolean; followMode?: 'tight' | 'loose'; returnDisposition?: 'neutral' | 'ally' | 'enemy' }
   /** Kicks off combat when the engine is in the exploring phase and at least one enemy is alive. Idempotent — no-ops if either precondition fails. */
   | { type: 'trigger_combat' }
+  /** Mid-fight complication / Director twist (Tactical Crucible #39): picks ONE
+   *  of the `choices` action-sets at random and runs it. Drives "something
+   *  changes mid-fight" beats that differ each playthrough — a wave arrives, a
+   *  hazard erupts, a third faction crashes in, the boss rallies. Pair with a
+   *  `combat_round` / `hp_threshold_crossed` trigger. */
+  | { type: 'random_action'; choices: TriggerAction[][] }
+  /** Ends the encounter in DEFEAT — the player has failed the objective (a
+   *  protected NPC died, a hold/survive timer ran out, an escort was lost).
+   *  Sets the `defeat` phase; `reason` is shown to the player. Use for
+   *  objective-driven loss conditions beyond the player simply dying. */
+  | { type: 'fail_encounter'; reason?: string }
+  /** Drop a battlefield HAZARD (Tactical Crucible #32) — a toppled brazier's
+   *  fire, a ruptured acid vat, a collapsing floor. Centered on (x,y) with a
+   *  `sizeFeet` chebyshev radius; each round it deals `dice`d`sides`+`bonus`
+   *  damage of `damageType` to creatures inside (a save for half when
+   *  `saveAbility`/`saveDC` are set), and if `spreads` it grows. Combine with a
+   *  `combat_round` / improvised-action beat ("kick the cultist into the fire").
+   *  Renders as a tinted zone (`tintHex`). */
+  | { type: 'spawn_hazard'; x: number; y: number; sizeFeet?: number; name?: string; tintHex?: string;
+      dice: number; sides: number; bonus?: number; damageType: string;
+      saveAbility?: 'str' | 'dex' | 'con' | 'int' | 'wis' | 'cha'; saveDC?: number; halfOnSave?: boolean;
+      spreads?: boolean; maxTiles?: number; rounds?: number }
   /** Award XP to the player. Use for trigger-fired story rewards (parley success, scouted clue, riddle solved) where no kill rolled the XP automatically. */
   | { type: 'award_xp'; amount: number }
   /** Roll a player ability check server-side (d20 + the player's `skills[<skill>]` bonus) against `dc`. Fires `onPass` actions if the total ≥ DC, otherwise `onFail`. Either branch may be empty — an empty `onFail` is the standard way to write "perception check that silently does nothing on a miss". The roll itself is NOT logged so failed perception/stealth checks don't leak information about hidden content. */

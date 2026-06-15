@@ -11,6 +11,7 @@ import { d20 as d20Local } from './Dice.js';
 import { setRelation, adjustRelation } from './FactionRelations.js';
 import { setIndividualRelation, adjustIndividualRelation, reprojectAllDispositions, relation } from './Relationships.js';
 import { isDead } from './ConditionSystem.js';
+import { registerHazardZone } from './HazardSystem.js';
 import { PLAYER_FACTION_ID, PLAYER_ID } from '../../../shared/types.js';
 import { formatCoins as formatCoinsTrigger } from '../../../shared/currency.js';
 import { Logger } from '../Logger.js';
@@ -65,7 +66,7 @@ function validateTrigger(trigger: EncounterTrigger, ctx: GameContext): void {
 
   const validEvents: WhenClause['event'][] = [
     'player_moved', 'npc_killed', 'item_picked_up',
-    'turn_started', 'turn_ended', 'combat_started', 'combat_ended',
+    'turn_started', 'turn_ended', 'combat_started', 'combat_ended', 'combat_round',
     'encounter_started', 'encounter_completed',
     'damage_dealt', 'hp_threshold_crossed', 'faction_changed', 'flag_set', 'custom',
     'spell_cast', 'help_used', 'study_feature', 'magic_feature',
@@ -210,6 +211,12 @@ function whenMatches(when: WhenClause, event: EngineEvent): boolean {
     case 'encounter_started':
     case 'encounter_completed':
       return true;
+    case 'combat_round': {
+      const e = event as Extract<EngineEvent, { type: 'combat_round' }>;
+      if (when.round !== undefined) return e.round === when.round;
+      if (when.atLeast !== undefined) return e.round >= when.atLeast;
+      return true;
+    }
     case 'damage_dealt': {
       const e = event as Extract<EngineEvent, { type: 'damage_dealt' }>;
       return when.target === undefined || when.target === e.target;
@@ -623,6 +630,22 @@ const TRIGGER_ACTIONS: TriggerRegistry = {
     const sink = ctx.eventSink ?? [];
     ctx.doStartCombat(sink);
   },
+  fail_encounter: (ctx, a) => {
+    // Objective-driven defeat (US-131): the player failed (escort died, timer
+    // ran out, hold lost). Idempotent — no-op if the encounter already resolved.
+    const s = ctx.state;
+    if (s.phase === 'defeat' || s.encounterComplete) return;
+    s.phase = 'defeat';
+    ctx.addLog({ left: a.reason?.trim() || 'You have failed.', style: 'kill' });
+  },
+  spawn_hazard: (ctx, a) => {
+    registerHazardZone(ctx, {
+      x: a.x, y: a.y, sizeFeet: a.sizeFeet, name: a.name, tintHex: a.tintHex,
+      dice: a.dice, sides: a.sides, bonus: a.bonus, damageType: a.damageType,
+      saveAbility: a.saveAbility, saveDC: a.saveDC, halfOnSave: a.halfOnSave,
+      spreads: a.spreads, maxTiles: a.maxTiles, rounds: a.rounds,
+    });
+  },
   award_xp: (ctx, a) => {
     // Authored story XP — kill XP is awarded automatically by the kill resolver.
     const amount = Math.max(0, Math.floor(a.amount));
@@ -637,6 +660,15 @@ const TRIGGER_ACTIONS: TriggerRegistry = {
     const total = roll + bonus;
     const branch = total >= a.dc ? a.onPass : a.onFail;
     for (const sub of branch) fireAction(ctx, sub);
+  },
+  random_action: (ctx, a) => {
+    // Mid-fight complication / Director twist (#39): pick ONE of the `choices`
+    // action-sets at random and run it, so the same encounter throws a
+    // different wrench each playthrough. Each choice is itself a list of
+    // actions, run in order via the canonical `fireAction` path.
+    if (!Array.isArray(a.choices) || a.choices.length === 0) return;
+    const idx = Math.floor(Math.random() * a.choices.length);
+    for (const sub of a.choices[idx]) fireAction(ctx, sub);
   },
   show_announcement: (ctx, a) => {
     const text = a.text.trim();
