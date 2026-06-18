@@ -20,12 +20,22 @@ import type { ComposedMap, Feature, MapAnchors, MapZone } from '../mapTypes.js';
 import { WALL_GIDS, FURNITURE_GIDS } from '../mapTiles.js';
 import { SCRIBBLE_TILESET, flatten } from './shared.js';
 
+/** Dungeon layout silhouette (Roadmap v2 · M2/D1):
+ *   • serial — the classic single chain entrance→…→vault (one path).
+ *   • branch — a minimum spanning tree: side passages and dead-end spurs.
+ *   • loop   — a spanning tree plus a few extra edges, so the dungeon has
+ *              flanking loops (no single chokepoint chain). */
+export type DungeonVariant = 'serial' | 'branch' | 'loop';
+const DUNGEON_VARIANTS: readonly DungeonVariant[] = ['serial', 'branch', 'loop'];
+
 export interface ComposeDungeonOpts {
   width: number;
   height: number;
   features: Feature[];
   rng: () => number;
   allocZoneId: (kind: string) => string;
+  /** Force a layout silhouette; default picks one from the seed. */
+  variant?: DungeonVariant;
 }
 
 export function composeDungeon(opts: ComposeDungeonOpts): ComposedMap {
@@ -67,16 +77,18 @@ export function composeDungeon(opts: ComposeDungeonOpts): ComposedMap {
     for (let dy = 0; dy < r.h; dy++) for (let dx = 0; dx < r.w; dx++) floor[r.y + dy][r.x + dx] = true;
   }
 
-  // Serial chain, south → north: the southernmost room is the entrance and the
-  // chain links consecutive rooms only, so there is a single path to the last
-  // (deepest) room — the "final room".
+  // Link the rooms as a graph. The southernmost room is the entrance; the
+  // variant decides whether the rest form a single chain, a branching tree, or a
+  // looped graph. The "final room" (vault) is the room graph-farthest from the
+  // entrance — for `serial` that's the deepest room, as before.
   rooms.sort((a, b) => (b.cy - a.cy) || (a.cx - b.cx));
-  for (let i = 1; i < rooms.length; i++) {
-    carveCorridor(floor, rooms[i - 1].cx, rooms[i - 1].cy, rooms[i].cx, rooms[i].cy);
-  }
+  const variant = opts.variant ?? DUNGEON_VARIANTS[Math.floor(rng() * DUNGEON_VARIANTS.length)];
+  const edges = planDungeonEdges(rooms, variant, rng);
+  for (const [i, j] of edges) carveCorridor(floor, rooms[i].cx, rooms[i].cy, rooms[j].cx, rooms[j].cy);
 
   const entryRoom = rooms[0];
-  const finalRoom = rooms.length > 1 ? rooms[rooms.length - 1] : undefined;
+  const vaultIndex = rooms.length > 1 ? farthestRoom(rooms.length, edges, 0) : 0;
+  const finalRoom = rooms.length > 1 ? rooms[vaultIndex] : undefined;
   if (entryRoom && !useStairs) {
     const entryX = entryRoom.x + Math.floor(entryRoom.w / 2);
     for (let r = entryRoom.y + entryRoom.h; r < H; r++) floor[r][entryX] = true;
@@ -150,11 +162,51 @@ export function composeDungeon(opts: ComposeDungeonOpts): ComposedMap {
     terrainData: flatten(terrainGrid),
     objectData: flatten(objectGrid),
     name: dungeonName(rooms.length, rng),
-    description: dungeonDescription(rooms.length, useStairs),
+    description: dungeonDescription(rooms.length, useStairs, variant),
     tilesets: [SCRIBBLE_TILESET],
     anchors,
     ...(zones.length > 0 ? { zones } : {}),
   };
+}
+
+/** Plan which room pairs get a corridor. `serial` = a chain; `branch` = a
+ *  minimum spanning tree (Prim, by squared centre distance); `loop` = that tree
+ *  plus the shortest few non-tree edges, adding flanking loops. Every variant
+ *  spans all rooms, so the dungeon stays fully connected. */
+function planDungeonEdges(rooms: Array<{ cx: number; cy: number }>, variant: DungeonVariant, _rng: () => number): Array<[number, number]> {
+  const n = rooms.length;
+  if (n <= 1) return [];
+  if (variant === 'serial') return Array.from({ length: n - 1 }, (_, i) => [i, i + 1] as [number, number]);
+
+  const dist = (a: number, b: number): number => { const dx = rooms[a].cx - rooms[b].cx, dy = rooms[a].cy - rooms[b].cy; return dx * dx + dy * dy; };
+  const inTree = new Set<number>([0]);
+  const edges: Array<[number, number]> = [];
+  while (inTree.size < n) {
+    let best: { a: number; b: number; d: number } | null = null;
+    for (const a of inTree) for (let b = 0; b < n; b++) if (!inTree.has(b)) { const d = dist(a, b); if (!best || d < best.d) best = { a, b, d }; }
+    edges.push([best!.a, best!.b]); inTree.add(best!.b);
+  }
+  if (variant === 'loop') {
+    const have = new Set(edges.map(([a, b]) => (a < b ? `${a},${b}` : `${b},${a}`)));
+    const cand: Array<[number, number, number]> = [];
+    for (let a = 0; a < n; a++) for (let b = a + 1; b < n; b++) if (!have.has(`${a},${b}`)) cand.push([a, b, dist(a, b)]);
+    cand.sort((p, q) => p[2] - q[2]);
+    const extra = Math.max(1, Math.round((n - 1) * 0.4));
+    for (let i = 0; i < extra && i < cand.length; i++) edges.push([cand[i][0], cand[i][1]]);
+  }
+  return edges;
+}
+
+/** BFS room index farthest (in corridor hops) from `start`. */
+function farthestRoom(n: number, edges: Array<[number, number]>, start: number): number {
+  const adj: number[][] = Array.from({ length: n }, () => []);
+  for (const [a, b] of edges) { adj[a].push(b); adj[b].push(a); }
+  const dist = new Array<number>(n).fill(-1); dist[start] = 0;
+  const q = [start];
+  while (q.length) { const u = q.shift()!; for (const v of adj[u]) if (dist[v] < 0) { dist[v] = dist[u] + 1; q.push(v); } }
+  let far = start;
+  for (let i = 0; i < n; i++) if (dist[i] > dist[far]) far = i;
+  return far;
 }
 
 function carveCorridor(floor: boolean[][], x1: number, y1: number, x2: number, y2: number): void {
@@ -184,9 +236,14 @@ function dungeonName(roomCount: number, rng: () => number): string {
   return variants[Math.floor(rng() * variants.length)];
 }
 
-function dungeonDescription(roomCount: number, stairs: boolean): string {
+function dungeonDescription(roomCount: number, stairs: boolean, variant: DungeonVariant): string {
   const entry = stairs
     ? 'A flight of stairs in the entry chamber descends from above.'
     : 'The entrance opens onto the southern edge of the map.';
-  return `A stone dungeon of ${roomCount} room${roomCount === 1 ? '' : 's'} strung along a single line of corridors, ending at the final room. ${entry}`;
+  const shape = variant === 'serial'
+    ? 'strung along a single line of corridors'
+    : variant === 'branch'
+      ? 'branching off a winding network of corridors'
+      : 'woven together by looping corridors';
+  return `A stone dungeon of ${roomCount} room${roomCount === 1 ? '' : 's'} ${shape}, ending at the final room. ${entry}`;
 }
