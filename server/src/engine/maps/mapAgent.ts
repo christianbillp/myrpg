@@ -23,6 +23,7 @@ import { safeId } from '../../util/requestValidation.js';
 import { buildMapJson } from '../MapPersistence.js';
 import { MapCanvas } from './MapCanvas.js';
 import { renderCanvasAscii } from './canvasRender.js';
+import { tacticalAnalysis } from './tactical.js';
 import { MATERIAL_NAMES, GROUND_MATERIALS } from './materials.js';
 import {
   fillTerrain, stampRoom, placeBuilding, carveCorridor, layPath, placeWaterBody,
@@ -147,7 +148,25 @@ function applyTool(state: Dispatch, name: string, input: Record<string, unknown>
     default: return { text: `Unknown tool "${name}".`, isError: true, done: false };
   }
   if (!res.ok) return { text: `${name}: ${res.error}`, isError: true, done: false };
-  return { text: `${res.summary}\n\n${renderCanvasAscii(c)}`, isError: false, done: false };
+  return { text: `${res.summary}\n\n${renderCanvasAscii(c)}\n\n${buildDiagnostics(c)}`, isError: false, done: false };
+}
+
+/**
+ * A one-line connectivity + tactical read after each op (Roadmap v2 · M5/#9), so
+ * the model SEES a sealed-off room or a coverless blob immediately and fixes it
+ * mid-build — not only at `finish` (where auto-repair is the last resort).
+ */
+export function buildDiagnostics(c: MapCanvas): string {
+  const { sizes } = passableRegions(c);
+  const open = sizes.reduce((a, b) => a + b, 0);
+  if (open === 0) return 'DIAGNOSTICS: no walkable floor yet.';
+  const t = tacticalAnalysis(c);
+  const parts: string[] = [];
+  if (sizes.length > 1) parts.push(`⚠ ${sizes.length} DISCONNECTED regions (largest ${Math.max(...sizes)} of ${open} open cells) — carve corridors to join them before finishing`);
+  else parts.push(`✓ one connected space (${open} open cells)`);
+  parts.push(`cover ${Math.round(t.coverRatio * 100)}%`);
+  parts.push(`${t.chokepoints.length} chokepoint(s)`);
+  return `DIAGNOSTICS: ${parts.join('; ')}.`;
 }
 
 const n = (v: unknown): number => Number(v);
@@ -197,7 +216,7 @@ function buildSystemPrompt(defs: GameDefs): string {
 
 WORKFLOW:
 1. Call begin_map FIRST (size + base ground + a place name & description).
-2. Build the scene with operations. After every call you receive an ASCII render of the current map — READ IT and adjust: fix gaps, reposition overlaps, ensure spaces connect.
+2. Build the scene with operations. After every call you receive an ASCII render PLUS a DIAGNOSTICS line — READ BOTH and adjust: if DIAGNOSTICS reports DISCONNECTED regions, carve corridors to join them; fix gaps, reposition overlaps, ensure spaces connect. Do not call finish while regions are disconnected.
 3. Call finish when done. The server validates connectivity and persists the map.
 
 COORDINATES: x increases right, y increases down. (0,0) is top-left. The render shows a ruler.
