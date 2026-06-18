@@ -320,6 +320,7 @@ export class GameClient {
   refineAdventure = authoringApi.refineAdventure;
   refineNpc = authoringApi.refineNpc;
   composeMap = authoringApi.composeMap;
+  restampMap = authoringApi.restampMap;
   saveMap = authoringApi.saveMap;
   composeEncounter = authoringApi.composeEncounter;
   listEncounters = authoringApi.listEncounters;

@@ -29,6 +29,12 @@ import {
   placeHazard, scatterDecor, placeCampsite, paintRegion, defineZone, wallAroundFloor,
   validateCanvas, passableRegions, type OpResult,
 } from './mapOps.js';
+import { placeFeature, FEATURE_REGISTRY, FEATURE_IDS } from './mapFeatures.js';
+
+/** Human-readable "id (Label, min W×H)" list for the stamp_feature tool + prompt. */
+const FEATURE_CATALOG = FEATURE_IDS
+  .map((id) => { const f = FEATURE_REGISTRY[id]; return `${id} (${f.label}, min ${f.minW}×${f.minH})`; })
+  .join(', ');
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const DATA_DIR = join(__dirname, '..', '..', '..', 'data');
@@ -75,6 +81,7 @@ function buildTools(): Anthropic.Tool[] {
     },
     { name: 'stamp_room', description: 'Stamp a rectangular walled room: floor fill + aligned wall ring + carved doorways. Doorways must sit on the wall ring.', input_schema: { type: 'object', properties: { x: { type: 'integer' }, y: { type: 'integer' }, w: { type: 'integer' }, h: { type: 'integer' }, floor: { type: 'string', enum: ground }, doorways: { type: 'array', items: POINT }, walls: { type: 'boolean' }, zoneName: { type: 'string' } }, required: ['x', 'y', 'w', 'h', 'floor'] } },
     { name: 'place_building', description: 'Stone-floored walled building with one auto-placed doorway on the chosen side.', input_schema: { type: 'object', properties: { x: { type: 'integer' }, y: { type: 'integer' }, w: { type: 'integer' }, h: { type: 'integer' }, doorSide: { type: 'string', enum: ['N', 'S', 'E', 'W'] }, floor: { type: 'string', enum: ground }, name: { type: 'string' } }, required: ['x', 'y', 'w', 'h'] } },
+    { name: 'stamp_feature', description: `Stamp a prebuilt SET-PIECE into a footprint — one call drops a whole coherent, guaranteed-valid structure (walls, fences, zones, connectivity all handled). Prefer this over hand-assembling a known set-piece. Place it on already-laid ground; size the footprint to the feature's minimum or larger. Features: ${FEATURE_CATALOG}.`, input_schema: { type: 'object', properties: { feature: { type: 'string', enum: FEATURE_IDS as string[] }, x: { type: 'integer' }, y: { type: 'integer' }, w: { type: 'integer' }, h: { type: 'integer' } }, required: ['feature', 'x', 'y', 'w', 'h'] } },
     { name: 'carve_corridor', description: 'Carve an L-shaped floor corridor between two points, punching through any walls so it always connects.', input_schema: { type: 'object', properties: { from: POINT, to: POINT, width: { type: 'integer', enum: [1, 2] }, floor: { type: 'string', enum: ground } }, required: ['from', 'to', 'floor'] } },
     { name: 'lay_path', description: 'Lay an auto-tiled dirt path on the object layer through a list of waypoints (connected by L segments). Good for roads/trails over open ground.', input_schema: { type: 'object', properties: { waypoints: { type: 'array', items: POINT, minItems: 2 } }, required: ['waypoints'] } },
     { name: 'place_water', description: 'Place water: mode "edge" floods a map edge (a coast); mode "pond" fills a rectangle as a shored pond. Water is impassable — bridge it with a path or corridor to cross.', input_schema: { type: 'object', properties: { mode: { type: 'string', enum: ['edge', 'pond'] }, side: { type: 'string', enum: ['N', 'S', 'E', 'W'] }, depth: { type: 'integer' }, rect: RECT }, required: ['mode'] } },
@@ -127,6 +134,7 @@ function applyTool(state: Dispatch, name: string, input: Record<string, unknown>
   switch (name) {
     case 'stamp_room':      res = stampRoom(c, { x: n(input.x), y: n(input.y), w: n(input.w), h: n(input.h), floor: input.floor as never, doorways: input.doorways as never, walls: input.walls as never, zone: input.zoneName ? { name: String(input.zoneName) } : undefined }); break;
     case 'place_building':  res = placeBuilding(c, { x: n(input.x), y: n(input.y), w: n(input.w), h: n(input.h), doorSide: input.doorSide as never, floor: input.floor as never, name: input.name as never }); break;
+    case 'stamp_feature':   res = placeFeature(c, String(input.feature), { x: n(input.x), y: n(input.y), w: n(input.w), h: n(input.h) }); break;
     case 'carve_corridor':  res = carveCorridor(c, { from: input.from as never, to: input.to as never, width: input.width as never, floor: input.floor as never }); break;
     case 'lay_path':        res = layPath(c, { waypoints: input.waypoints as never }); break;
     case 'place_water':     res = placeWaterBody(c, { mode: input.mode as never, side: input.side as never, depth: input.depth as never, rect: input.rect as never }); break;
@@ -197,6 +205,8 @@ COORDINATES: x increases right, y increases down. (0,0) is top-left. The render 
 MATERIALS (use these names; never raw numbers):
 - ground floors: ${(MATERIAL_NAMES.ground as unknown as string[]).join(', ')}
 - hazards (impassable): ${(MATERIAL_NAMES.hazard as unknown as string[]).join(', ')}
+
+SET-PIECES: for a known structure (${FEATURE_CATALOG}) call stamp_feature ONCE on a footprint instead of hand-assembling it — the whole thing lands valid and connected. Lay the surrounding ground first.
 
 DESIGN PRINCIPLES:
 - ONE clear focal feature (a courtyard, the central hall, the campfire), with the rest arranged around it. Avoid uniform fields.

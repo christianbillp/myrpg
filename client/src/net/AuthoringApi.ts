@@ -94,16 +94,26 @@ export async function refineNpc(
  * by the rule-based composer in `engine/MapComposer.ts`.
  */
 export async function composeMap(args: {
-  terrain?: 'grassland' | 'forest' | 'dungeon' | 'tavern' | 'cave' | 'urban';
+  terrain?: 'grassland' | 'forest' | 'dungeon' | 'cave' | 'urban';
   features?: Array<'campsites' | 'coastline' | 'path' | 'intersection' | '3-room' | '5-room' | 'stairs'>;
   seed?: number;
-  /** Outdoor structures (small buildings / ruins), each with a type and a
-   *  connected-room count (1..5). Used on grassland / forest terrain. */
-  structures?: Array<{ type: 'building' | 'ruin'; rooms: number }>;
-  /** BIG multi-region map mode (US-126): 2-5 biome bands in travel order.
-   *  When present, the server composes via the multi-region composer and
-   *  `terrain`/`features`/`structures` are ignored. */
+  /** Buildings / ruins (type + connected-room count 1..5, + optional target
+   *  region index on a big map). Baked into a single grassland/forest terrain, or
+   *  stamped consciously onto a BIG MAP. */
+  structures?: Array<{ type: 'building' | 'ruin'; rooms: number; region?: number }>;
+  /** BIG multi-region map mode (US-126): 2-5 biome bands in travel order. The
+   *  base is the multi-region composer; `structures` and `feature` (if given) are
+   *  stamped onto it, re-rolling until they fit cleanly. `terrain`/`features` are
+   *  not used in this mode. */
   regions?: Array<{ terrain: 'grassland' | 'forest' | 'urban' | 'cave' | 'dungeon'; share?: number; name?: string; light?: 'bright' | 'dim' | 'dark' }>;
+  /** Set-piece recipe (watchtower / cemetery / town_square). Stamped onto the
+   *  chosen base — a big map, an open terrain, or (alone) a flat grass field —
+   *  re-rolling until it fits cleanly. */
+  feature?: string;
+  /** The unified placeable catalog (structures + set-pieces): any registry id,
+   *  with a room count for building/ruin and an optional target region. Stamped
+   *  onto the terrain / big map. */
+  placeables?: Array<{ id: string; rooms?: number; region?: number }>;
   /** Map size — used by the regions mode (24×16 up to 96×64). */
   width?: number;
   height?: number;
@@ -122,6 +132,8 @@ export async function composeMap(args: {
   /** Named tile regions emitted by feature placers (currently `path` and
    *  `intersection`). Empty array when the chosen features produced none. */
   zones: Array<{ id: string; name: string; color: string; cells: string[]; lightLevel?: 'bright' | 'dim' | 'dark' }>;
+  /** Placed structures (Phase B), for in-place interior re-roll via `restampMap`. */
+  placements: PlacementRecord[];
 }> {
   const res = await fetch(`${API_URL}/generate/map/composed`, {
     method: 'POST',
@@ -132,14 +144,39 @@ export async function composeMap(args: {
     const body = await res.json().catch(() => ({ error: `HTTP ${res.status}` })) as { error?: string };
     throw new Error(body.error ?? `Map compose failed: ${res.status}`);
   }
-  return res.json() as Promise<{
-    mapId: null; width: number; height: number;
-    terrainData: number[]; objectData: number[];
-    name: string; description: string;
-    tilesets: Array<{ firstgid: number; source: string }>;
-    anchors: ComposedMapAnchors;
-    zones: Array<{ id: string; name: string; color: string; cells: string[]; lightLevel?: 'bright' | 'dim' | 'dark' }>;
-  }>;
+  return res.json() as Promise<ComposeMapResult>;
+}
+
+/** A structure placed onto a composed map — re-roll its interior with `restampMap`. */
+export interface PlacementRecord { id: string; label: string; x: number; y: number; w: number; h: number; rooms?: number; interiorSeed: number; }
+
+export interface ComposeMapResult {
+  mapId: null; width: number; height: number;
+  terrainData: number[]; objectData: number[];
+  name: string; description: string;
+  tilesets: Array<{ firstgid: number; source: string }>;
+  anchors: ComposedMapAnchors;
+  zones: Array<{ id: string; name: string; color: string; cells: string[]; lightLevel?: 'bright' | 'dim' | 'dark' }>;
+  placements: PlacementRecord[];
+}
+
+/** Re-roll placed structures' interiors IN PLACE — `index` re-rolls one, omit for
+ *  all — without recomposing the map. Returns the updated composed map. */
+export async function restampMap(args: {
+  width: number; height: number; terrainData: number[]; objectData: number[];
+  name?: string; description?: string;
+  zones?: Array<{ id: string; name: string; color: string; cells: string[]; lightLevel?: 'bright' | 'dim' | 'dark' }>;
+  placements: PlacementRecord[];
+  index?: number;
+}): Promise<ComposeMapResult> {
+  const res = await fetch(`${API_URL}/generate/map/restamp`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(args),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({ error: `HTTP ${res.status}` })) as { error?: string };
+    throw new Error(body.error ?? `Restamp failed: ${res.status}`);
+  }
+  return res.json() as Promise<ComposeMapResult>;
 }
 
 /**
@@ -189,9 +226,15 @@ export async function saveMap(args: {
  */
 export async function composeEncounter(args: {
   existingMapId?: string;
-  terrain?: 'grassland' | 'forest' | 'dungeon' | 'tavern' | 'cave' | 'urban';
+  terrain?: 'grassland' | 'forest' | 'dungeon' | 'cave' | 'urban';
   features?: Array<'campsites' | 'coastline' | 'path' | 'intersection' | '3-room' | '5-room' | 'stairs'>;
-  structures?: Array<{ type: 'building' | 'ruin'; rooms: number }>;
+  structures?: Array<{ type: 'building' | 'ruin'; rooms: number; region?: number }>;
+  /** Multi-region big-map bands (composed with placeable/road extras). */
+  regions?: Array<{ terrain: 'grassland' | 'forest' | 'urban' | 'cave' | 'dungeon'; share?: number; name?: string; light?: 'bright' | 'dim' | 'dark' }>;
+  /** A single set-piece stamped onto the base. */
+  feature?: string;
+  /** Unified placeable catalog (structures + set-pieces) stamped onto the map. */
+  placeables?: Array<{ id: string; rooms?: number; region?: number }>;
   /** Long-form AIGM scene context (writes to the encounter's `customContext`). */
   aigmContext?: string;
   /** Player-facing card summary (writes to the encounter's `description`). */

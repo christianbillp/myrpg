@@ -6,7 +6,7 @@ import { z } from "zod";
 import type { GameDefs } from "./engine/types.js";
 import { buildMapJson as sharedBuildMapJson } from "./engine/MapPersistence.js";
 import { AI_PALETTE_TILESETS, tilesetsForGids, ownerTilesetName } from "./engine/maps/shared.js";
-import { composeRegions } from "./engine/maps/regions.js";
+import { composeRegionsWithExtras, FEATURE_IDS } from "./engine/MapComposer.js";
 import type { ComposedMap } from "./engine/mapTypes.js";
 import { settingPromptBlock } from "./settings.js";
 import { safeId } from "./util/requestValidation.js";
@@ -28,6 +28,16 @@ const RegionPlanSchema = z.object({
   hostileRegions: z.array(z.number().int()).optional(),
   neutralRegions: z.array(z.number().int()).optional(),
   allyRegions:    z.array(z.number().int()).optional(),
+  /** Structures to STAMP onto the bands (Phase B) — the engine places each one
+   *  consciously (connected, never overlapping roads/each other) and re-rolls
+   *  until it fits. Far better than hand-painting buildings into tile arrays. */
+  structures:     z.array(z.object({
+    id:     z.string(),
+    rooms:  z.number().int().optional(),
+    region: z.number().int().optional(),
+  })).optional(),
+  /** Roads laid across the open bands. */
+  roads:          z.array(z.enum(['path', 'intersection'])).optional(),
 });
 
 const GeneratedPayloadSchema = z.object({
@@ -47,9 +57,10 @@ const GeneratedPayloadSchema = z.object({
   terrainData:        z.array(z.number()).optional(),
   objectData:         z.array(z.number()).optional(),
   startingZonesData:  z.array(z.number()).optional(),
-  /** Big multi-region map mode (US-126): the model plans biome bands instead
-   *  of authoring tiles; `composeRegions` synthesizes the map. Exactly one of
-   *  regionPlan / the direct tile arrays must be present. */
+  /** Big multi-region map mode (US-126 + Phase B): the model plans biome bands
+   *  (+ optional stamped structures and roads) instead of authoring tiles;
+   *  `composeRegionsWithExtras` synthesizes the map. Exactly one of regionPlan /
+   *  the direct tile arrays must be present. */
   regionPlan:         RegionPlanSchema.optional(),
 });
 
@@ -126,11 +137,13 @@ export async function generateEncounter(
     // from the model's biome plan, then derive spawn zones from the
     // per-region map zones the composer emitted.
     const plan = payload.regionPlan;
-    const composed = composeRegions({
+    const composed = composeRegionsWithExtras({
       width: plan.width,
       height: plan.height,
       seed: stamp & 0xffffffff,
       regions: plan.regions,
+      placeables: plan.structures,
+      features: plan.roads,
     });
     const startingZonesData = buildRegionStartingZones(composed, plan, legend);
     mapJson = sharedBuildMapJson({
@@ -207,6 +220,8 @@ BIOME FLOORS — for caverns and settlements, prefer the themed floor families i
 TWO MAP MODES — pick exactly one:
 1. DIRECT (default, single-scene maps up to 30×22): author the tile arrays yourself per MAP RULES below.
 2. REGION PLAN (big multi-biome maps, 24×16 up to 96×64): when the scene calls for a JOURNEY across changing terrain — "a grassland that becomes a forest and ends in a cave", "the road through the wood to the mine" — submit \`regionPlan\` INSTEAD of width/height/terrainData/objectData/startingZonesData. List 2-5 regions in travel order; the engine lays them out as bands with natural blended transitions (open biomes) or a carved rock-face mouth (cave/dungeon regions), names a map zone per region, makes cave/dungeon regions genuinely dark, and guarantees connectivity. Give regions evocative zone names, put the player in the entry region (\`playerRegion\`), and assign \`hostileRegions\` so different creatures hold different regions (goblins in the forest, undead in the cave). Spawn zones are derived for you — do NOT send tile arrays in this mode.
+
+STRUCTURES (region-plan mode) — DECLARE buildings & landmarks; do not paint them. If the scene has a tavern, a watchtower, a ruined keep, a graveyard, a town square, or any building, add it to \`regionPlan.structures\` with a type from {building, ruin, tavern, watchtower, cemetery, town_square} (building/ruin/tavern take \`rooms\` 1-5 — a tavern with more rooms gains a kitchen, cellar, snug, etc. around its taproom). Optionally pin one to a \`region\` index (a building belongs in an OPEN band, never a cave). The engine stamps each one fully-walled, furnished, and connected, placed clear of roads and each other — far more reliable than authoring wall tiles by hand. Add \`roads: ["path"]\` (or "intersection") to lay a winding road across the open bands.
 
 MAP RULES (direct mode):
 - Width × height must be between 12×8 and 30×22 inclusive.
@@ -295,6 +310,20 @@ function buildResponseTool() {
             hostileRegions: { type: "array", items: { type: "integer" }, description: "Region indexes that get enemy spawn zones. Default: every region except the player's." },
             neutralRegions: { type: "array", items: { type: "integer" }, description: "Region indexes that get neutral-NPC spawn zones." },
             allyRegions:    { type: "array", items: { type: "integer" }, description: "Region indexes that get ally spawn zones. Default: the player's region." },
+            structures: {
+              type: "array",
+              description: "STRUCTURES to stamp onto the bands — declare them here rather than hand-painting buildings. The engine places each consciously (connected, never overlapping a road or another structure) and re-rolls until it fits. Use for any building/landmark in the scene.",
+              items: {
+                type: "object",
+                properties: {
+                  id:     { type: "string", enum: ["building", "ruin", "tavern", "watchtower", "cemetery", "town_square"], description: "Structure type. building/ruin/tavern take a room count." },
+                  rooms:  { type: "integer", minimum: 1, maximum: 5, description: "Room count for building/ruin/tavern (ignored by set-pieces)." },
+                  region: { type: "integer", description: "Optional: region index to place it in (defaults to anywhere open; a cave/dungeon band has no room for a building)." },
+                },
+                required: ["id"],
+              },
+            },
+            roads: { type: "array", items: { type: "string", enum: ["path", "intersection"] }, description: "Lay a winding road across the open bands ('intersection' = a crossroads)." },
           },
           required: ["width", "height", "regions"],
         },
@@ -358,6 +387,10 @@ function validateCommon(
     const max = regions.length;
     for (const idx of [p.regionPlan.playerRegion ?? 0, ...(p.regionPlan.hostileRegions ?? []), ...(p.regionPlan.neutralRegions ?? []), ...(p.regionPlan.allyRegions ?? [])]) {
       if (idx < 0 || idx >= max) throw new Error(`regionPlan references region index ${idx}, but only ${max} regions are declared`);
+    }
+    for (const s of p.regionPlan.structures ?? []) {
+      if (!FEATURE_IDS.includes(s.id)) throw new Error(`regionPlan structure "${s.id}" is not one of ${FEATURE_IDS.join(', ')}`);
+      if (s.region !== undefined && (s.region < 0 || s.region >= max)) throw new Error(`regionPlan structure targets region ${s.region}, but only ${max} regions are declared`);
     }
   }
 

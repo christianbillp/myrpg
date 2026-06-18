@@ -15,7 +15,7 @@ import {
   buildTextarea as sharedBuildTextarea,
 } from "../ui/sceneInputs";
 import { MapPalette } from "../ui/edit/MapPalette";
-import { StructureList, type StructureSpec } from "../ui/edit/StructureList";
+import { StructureList, TAKES_ROOMS, type StructureSpec } from "../ui/edit/StructureList";
 import { RegionList, type RegionRowSpec, type BigMapSize } from "../ui/edit/RegionList";
 import {
   TILE_SIZE,
@@ -62,27 +62,23 @@ interface EditTabHandle {
   dispose(): void;
 }
 
-type Terrain = "grassland" | "forest" | "dungeon" | "tavern" | "cave" | "urban";
+type Terrain = "grassland" | "forest" | "dungeon" | "cave" | "urban";
 type Feature = "campsites" | "coastline" | "path" | "intersection" | "3-room" | "5-room" | "stairs";
 
 const OUTSIDE_TERRAINS: Terrain[] = ["grassland", "forest", "urban"];
-const INSIDE_TERRAINS:  Terrain[] = ["dungeon", "tavern", "cave"];
+const INSIDE_TERRAINS:  Terrain[] = ["dungeon", "cave"];
 const OUTSIDE_FEATURES: Feature[] = ["campsites", "coastline", "path", "intersection"];
 const INSIDE_FEATURES:  Feature[] = ["3-room", "5-room", "stairs"];
-/** Terrains that take the configurable STRUCTURES editor (small buildings / ruins). */
-const STRUCTURE_TERRAINS: Terrain[] = ["grassland", "forest"];
 
 /** Per-terrain whitelist of features the composer actually consumes. The
  *  Map Editor's feature chips enable / disable themselves against this
  *  table — outdoor features only fire on `grassland` / `forest`, the
  *  room-count features only fire on `dungeon` / `cave` (small vs large),
- *  `urban` only consumes the `buildings` count, and tavern accepts no
- *  features today (the composer generates a fixed-layout single room). */
+ *  and `urban` only consumes the `buildings` count. */
 const TERRAIN_COMPATIBLE_FEATURES: Record<Terrain, Feature[]> = {
   grassland: OUTSIDE_FEATURES,
   forest:    OUTSIDE_FEATURES,
   dungeon:   INSIDE_FEATURES,
-  tavern:    [],
   cave:      INSIDE_FEATURES,
   urban:     [],
 };
@@ -91,7 +87,6 @@ const TERRAIN_LABEL: Record<Terrain, string> = {
   grassland: "GRASSLAND",
   forest: "FOREST",
   dungeon: "DUNGEON",
-  tavern: "TAVERN",
   cave: "CAVE",
   urban: "TOWN",
 };
@@ -104,6 +99,10 @@ const FEATURE_LABEL: Record<Feature, string> = {
   "5-room": "5 ROOMS",
   stairs: "STAIRS",
 };
+
+/** Default canvas size when composing a single-terrain map carrying placeables
+ *  (structures + set-pieces) — a comfortable field with room for a few. */
+const PLACEABLE_MAP_SIZE = { width: 30, height: 22 };
 function featureColumn(_f: Feature): "outside" | "inside" {
   return "outside";
 }
@@ -155,8 +154,9 @@ export class MapEditorScene extends Phaser.Scene {
   private selectedFeatures: Set<Feature> = new Set();
   private terrainChips: Map<Terrain, HtmlButtonHandle> = new Map();
   private featureChips: Map<Feature, HtmlButtonHandle> = new Map();
-  /** Configured outdoor structures (small buildings / ruins), each with a type
-   *  and connected-room count. Authored via the STRUCTURES list editor. */
+  /** The unified placeable catalog (structures + set-pieces) authored via the
+   *  STRUCTURES list — each entry a building/ruin/tavern/watchtower/… stamped
+   *  onto the terrain or big map (Phase B 4a). */
   private structures: StructureSpec[] = [];
   private structureList: StructureList | null = null;
   /** BIG MAP mode (US-126): 2+ regions switch GENERATE to the multi-region
@@ -171,7 +171,12 @@ export class MapEditorScene extends Phaser.Scene {
   // Bottom-bar buttons.
   private loadBtn!: HtmlButtonHandle;
   private generateBtn!: HtmlButtonHandle;
+  private regenBtn: HtmlButtonHandle | null = null;
   private saveBtn!: HtmlButtonHandle;
+
+  // Placed structures on the current preview (Phase B) — for in-place interior
+  // re-roll without recomposing the whole map.
+  private lastPlacements: import("../net/AuthoringApi").PlacementRecord[] = [];
 
   // Left-column preview.
   private preview: EmbeddedMapPreview | null = null;
@@ -546,13 +551,14 @@ export class MapEditorScene extends Phaser.Scene {
     });
     const featuresEndY = featuresRowY + Math.ceil(allFeatures.length / 2) * 32;
 
-    // Structures section — an add-and-configure list (small buildings / ruins,
-    // each with a connected-room count).
+    // Set-pieces — prebuilt recipes stamped on a flat field (one click, no LLM).
+    // Structures & set-pieces — one unified catalog (Phase B 4a): add buildings,
+    // ruins, taverns, watchtowers, … each placed onto the terrain or big map.
     const structLabelY = featuresEndY + 14;
     this.addToBucket("det", createHtmlText({
       scene: this, sceneWidth: W,
       x, y: structLabelY, w, h: 14,
-      text: "STRUCTURES",
+      text: "STRUCTURES & SET-PIECES",
       fontSize: 10, color: "#778899", letterSpacing: 1,
     }));
     const listY = structLabelY + 20;
@@ -563,9 +569,11 @@ export class MapEditorScene extends Phaser.Scene {
       scene: this, sceneWidth: W,
       get: () => this.structures,
       set: (next) => { this.structures = next; this.refreshButtons(); },
+      // Region names for big-map structure targeting (Phase B #3).
+      getRegions: () => this.regions.length >= 2 ? this.regions.map((r, i) => `${i + 1} · ${r.terrain}`) : [],
     });
     this.addToBucket("det", this.structureList.build(x, listY, w, listH));
-    this.structureList.setApplicable(this.selectedTerrain !== null && STRUCTURE_TERRAINS.includes(this.selectedTerrain));
+    this.structureList.setApplicable(this.structuresApplicable());
 
     // BIG MAP — REGIONS (US-126): 2-5 biome bands composed as one large map.
     const regionLabelY = listY + listH + 14;
@@ -580,7 +588,13 @@ export class MapEditorScene extends Phaser.Scene {
     this.regionList = new RegionList({
       scene: this, sceneWidth: W,
       get: () => this.regions,
-      set: (next) => { this.regions = next; this.refreshButtons(); },
+      set: (next) => {
+        this.regions = next;
+        // Crossing the big-map threshold flips whether structures + road features apply.
+        this.structureList?.setApplicable(this.structuresApplicable());
+        this.refreshFeatureChips();
+        this.refreshButtons();
+      },
       getSize: () => this.bigMapSize,
       setSize: (next) => { this.bigMapSize = next; },
     });
@@ -732,13 +746,20 @@ export class MapEditorScene extends Phaser.Scene {
         this.selectedFeatures.clear();
         this.refreshTerrainChips();
         this.refreshFeatureChips();
-        this.structureList?.setApplicable(this.selectedTerrain !== null && STRUCTURE_TERRAINS.includes(this.selectedTerrain));
+        this.structureList?.setApplicable(this.structuresApplicable());
         this.refreshButtons();
       },
     });
     this.terrainChips.set(t, btn);
     this.addToBucket("det", btn);
     this.refreshTerrainChips();
+  }
+
+  /** Placeables (structures + set-pieces) apply on a BIG MAP (stamped onto the
+   *  regions) or on a single OPEN terrain (grassland/forest/town). */
+  private structuresApplicable(): boolean {
+    if (this.regions.length >= 2) return true;
+    return this.selectedTerrain !== null && OUTSIDE_TERRAINS.includes(this.selectedTerrain);
   }
 
   private buildFeatureChip(f: Feature, x: number, y: number, w: number): void {
@@ -769,6 +790,9 @@ export class MapEditorScene extends Phaser.Scene {
   }
 
   private featureChipEnabled(f: Feature): boolean {
+    // BIG MAP: only the road features (path / intersection) apply — they're laid
+    // across the open bands. The rest are per-terrain / per-region fill.
+    if (this.regions.length >= 2) return f === "path" || f === "intersection";
     if (this.selectedTerrain === null) return false;
     return TERRAIN_COMPATIBLE_FEATURES[this.selectedTerrain].includes(f);
   }
@@ -780,6 +804,7 @@ export class MapEditorScene extends Phaser.Scene {
       btn.el.style.borderColor = on ? "#2a8866" : "#445566";
       btn.el.style.color = on ? "#ffffff" : "#aabbcc";
       btn.el.style.opacity = on ? "0.85" : "1";
+      btn.el.style.cursor = "pointer";
     }
   }
 
@@ -894,6 +919,49 @@ export class MapEditorScene extends Phaser.Scene {
     this.saveBtn.el.style.borderColor = "#5588aa";
     this.saveBtn.el.style.color = "#cce4ff";
     this.addToBucket("always", this.saveBtn);
+
+    // ↻ REGEN INTERIORS — re-rolls placed structures' interiors (e.g. a tavern's
+    // furniture) in place, without recomposing the rest of the map. Only useful
+    // when the current preview has placed structures.
+    this.regenBtn = createHtmlButton({
+      scene: this, sceneWidth: W,
+      x: W / 2 + 92 + 230, y, w: 210, h: btnH,
+      label: "↻ REGEN INTERIORS", variant: "secondary", fontSize: 12,
+      onClick: () => this.runRegenInteriors(),
+    });
+    this.regenBtn.el.style.background = "#23332a";
+    this.regenBtn.el.style.borderColor = "#3f7a55";
+    this.regenBtn.el.style.color = "#cfe9d6";
+    this.addToBucket("always", this.regenBtn);
+  }
+
+  /** Re-roll the interiors of all placed structures on the current preview,
+   *  leaving the rest of the map untouched. */
+  private async runRegenInteriors(): Promise<void> {
+    if (this.busy || !this.previewedMap || this.lastPlacements.length === 0) return;
+    const m = this.previewedMap as unknown as {
+      width: number; height: number; terrainData: number[]; objectData: number[];
+      name?: string; description?: string;
+      zones?: Array<{ id: string; name: string; color: string; cells: string[]; lightLevel?: 'bright' | 'dim' | 'dark' }>;
+    };
+    this.busy = true;
+    this.refreshButtons();
+    if (this.statusEl) this.statusEl.textContent = "Regenerating interiors…";
+    if (this.preview) this.preview.setBusy(true);
+    try {
+      const data = await gameClient.restampMap({
+        width: m.width, height: m.height, terrainData: m.terrainData, objectData: m.objectData,
+        name: m.name, description: m.description, zones: m.zones, placements: this.lastPlacements,
+      });
+      if (this.statusEl) this.statusEl.textContent = "";
+      this.applyPreviewData(data as MapPreviewData, { preserveView: true });
+    } catch (err) {
+      this.handleError(err, "Regenerate interiors");
+    } finally {
+      this.busy = false;
+      if (this.preview) this.preview.setBusy(false);
+      this.refreshButtons();
+    }
   }
 
   private buildDevButton(): void {
@@ -927,12 +995,18 @@ export class MapEditorScene extends Phaser.Scene {
   private refreshButtons(): void {
     let genReady: boolean;
     if (this.tab === "deterministic") {
-      genReady = (!!this.selectedTerrain || this.regions.length >= 2) && !this.busy;
+      genReady = (!!this.selectedTerrain || this.structures.length > 0 || this.regions.length >= 2) && !this.busy;
     } else {
       const promptLen = this.genPromptInput?.value.trim().length ?? 0;
       genReady = promptLen >= 8 && !this.busy;
     }
     this.generateBtn.setDisabled(!genReady);
+    // REGEN INTERIORS is only meaningful when the preview has placed structures.
+    if (this.regenBtn) {
+      const canRegen = !!this.previewedMap && this.lastPlacements.length > 0 && !this.busy;
+      this.regenBtn.setDisabled(!canRegen);
+      this.regenBtn.el.style.opacity = canRegen ? "1" : "0.4";
+    }
     // SAVE is enabled when we have an unsaved preview.
     const canSave = !!this.previewedMap && !this.savedMapId && !this.busy;
     this.saveBtn.setDisabled(!canSave);
@@ -963,24 +1037,30 @@ export class MapEditorScene extends Phaser.Scene {
 
   private async runComposeMap(): Promise<void> {
     const bigMap = this.regions.length >= 2;
-    if (!bigMap && !this.selectedTerrain) return;
+    if (!bigMap && !this.selectedTerrain && this.structures.length === 0) return;
     this.busy = true;
     this.refreshButtons();
     if (this.statusEl) this.statusEl.textContent = bigMap ? "Composing big map…" : "Composing map…";
     if (this.preview) this.preview.setBusy(true);
     try {
-      // BIG MAP mode (US-126): 2+ regions route to the multi-region composer;
-      // the single-terrain chips/features/structures are ignored.
+      // The unified placeable list (structures + set-pieces) is stamped onto the
+      // base — a big map (regions), the selected open terrain, or a grass field —
+      // re-rolling until everything fits cleanly. Building/ruin/tavern carry a room
+      // count; set-pieces don't.
+      const placeables = this.structures.map((s) => ({
+        id: s.type,
+        rooms: TAKES_ROOMS(s.type) ? s.rooms : undefined,
+        region: s.region,
+      }));
+      const features = Array.from(this.selectedFeatures);
       const data = bigMap
-        ? await gameClient.composeMap({
-            regions: this.regions,
-            width: this.bigMapSize.width,
-            height: this.bigMapSize.height,
-          })
+        ? await gameClient.composeMap({ regions: this.regions, placeables, features, width: this.bigMapSize.width, height: this.bigMapSize.height })
         : await gameClient.composeMap({
-            terrain: this.selectedTerrain!,
-            features: Array.from(this.selectedFeatures),
-            structures: this.structures.length > 0 ? this.structures : undefined,
+            terrain: this.selectedTerrain ?? "grassland",
+            features,
+            placeables,
+            width: PLACEABLE_MAP_SIZE.width,
+            height: PLACEABLE_MAP_SIZE.height,
           });
       if (this.statusEl) this.statusEl.textContent = "";
       this.applyPreviewData(data as MapPreviewData);
@@ -1015,12 +1095,14 @@ export class MapEditorScene extends Phaser.Scene {
   }
 
   /** Push a freshly-produced map into the embedded preview + the left column
-   *  header text. A new preview always starts unsaved and not in edit-mode. */
-  private applyPreviewData(data: MapPreviewData): void {
+   *  header text. A new preview always starts unsaved and not in edit-mode.
+   *  `preserveView` keeps the current zoom/pan (interior re-roll — same bounds). */
+  private applyPreviewData(data: MapPreviewData, opts?: { preserveView?: boolean }): void {
     this.previewedMap = data;
+    this.lastPlacements = (data as unknown as { placements?: import("../net/AuthoringApi").PlacementRecord[] }).placements ?? [];
     this.savedMapId = null;
     this.editingMapId = null;
-    if (this.preview) this.preview.setData(data);
+    if (this.preview) this.preview.setData(data, opts);
     // Refresh the ZONES tab list against the new map's zones — without this
     // the user has to switch tabs to see them after a generate / load.
     this.zonePalette?.refresh();

@@ -67,6 +67,18 @@ describe("runAgenticBuild", () => {
     expect(map.zones?.some((z) => z.name === "building")).toBe(true);
   });
 
+  it("stamps a registered set-piece via stamp_feature", async () => {
+    const model = scriptedModel([
+      [{ name: "begin_map", input: { width: 20, height: 16, baseTerrain: "grassland", name: "Outpost", description: "A grass field." } }],
+      [{ name: "stamp_feature", input: { feature: "watchtower", x: 6, y: 5, w: 7, h: 7 } }],
+      [{ name: "finish", input: { name: "Border Outpost", description: "A watchtower on the frontier." } }],
+    ]);
+    const map = await runAgenticBuild(model, DEFS, { prompt: "a watchtower" });
+    // The recipe's zones came through, so the set-piece landed via the agent loop.
+    expect(map.zones?.some((z) => z.name === "watchtower")).toBe(true);
+    expect(map.zones?.some((z) => z.name === "watchtower courtyard")).toBe(true);
+  });
+
   it("throws if the model never calls begin_map", async () => {
     const model = scriptedModel([[{ name: "finish", input: { name: "x", description: "y" } }]]);
     await expect(runAgenticBuild(model, DEFS, { prompt: "nothing" })).rejects.toThrow(/begin_map/);

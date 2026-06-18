@@ -18,7 +18,9 @@
  *     entries weights toward common creature types.
  */
 
-export type Terrain = 'grassland' | 'forest' | 'dungeon' | 'tavern' | 'cave' | 'urban';
+export type Terrain = 'grassland' | 'forest' | 'dungeon' | 'cave' | 'urban';
+/** Placeable structure / set-piece ids (mirror of the server `FEATURE_REGISTRY`). */
+export type PlaceableId = 'building' | 'ruin' | 'tavern' | 'watchtower' | 'cemetery' | 'town_square';
 export type Feature = 'campsites' | 'coastline' | 'path' | 'intersection' | '3-room' | '5-room' | 'stairs';
 
 /**
@@ -83,6 +85,10 @@ export interface EncounterArchetype {
   features?: Feature[];
   /** Roll N features from this pool. Mutually exclusive with `features`. */
   featurePicks?: { from: Feature[]; count: [number, number] };
+  /** Structures + set-pieces (Phase B) stamped onto the map — a wayside tavern,
+   *  a ruined watchtower, a graveyard. The composer places each consciously
+   *  (connected, clear of roads/each other). `building`/`ruin` take `rooms`. */
+  placeables?: Array<{ id: PlaceableId; rooms?: number; region?: number }>;
 
   /** One string is picked per encounter — surfaced as the in-game title. */
   titles: string[];
@@ -257,6 +263,43 @@ export const ENCOUNTER_ARCHETYPES: EncounterArchetype[] = [
       {
         kind: 'combat',
         anchor: 'edge:north',
+      },
+    ],
+  },
+
+  {
+    id: 'wayside_tavern',
+    name: 'Wayside Tavern',
+    weight: 1,
+    terrain: 'grassland',
+    // The tavern is a STAMPED structure now (no more `tavern` terrain) — the
+    // composer builds a furnished, connected interior on the grass field.
+    placeables: [{ id: 'tavern' }],
+    titles: [
+      'Wayside Tavern', 'The Last Lamp', 'A Roadside Welcome', 'The Crossroads Inn',
+    ],
+    introductions: [
+      'Lamplight spills from a low tavern beside the road — and the voices inside go quiet as you near.',
+      'A roadside inn, shutters drawn against the dusk. Someone inside was not expecting company.',
+    ],
+    descriptions: [
+      'A roadside tavern scene — the building is the stage. The AIGM can run it as a brawl, a tense standoff, or a parley; the patrons need not be hostile from the first beat.',
+    ],
+    objectives: [
+      'Find out what the patrons are hiding',
+      'Settle the trouble at the tavern',
+    ],
+    completionFlag: 'wayside_tavern_resolved',
+    enemyPool: ['bandit', 'bandit', 'tough'],
+    enemyCount: [2, 3],
+    // Party arrives from the road (south); trouble waits inside / north.
+    playerAnchors: ['edge:south'],
+    enemyAnchors:  ['building', 'edge:north'],
+    triggerTemplates: [
+      {
+        kind: 'combat',
+        anchor: 'building',
+        radius: 2,
       },
     ],
   },

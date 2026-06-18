@@ -3,7 +3,8 @@ import { attachPlacement } from "../sceneInputs";
 
 /**
  * StructureList — the DETERMINISTIC-tab editor for outdoor STRUCTURES. The user
- * adds structures and configures each one's type (building / ruin) and number of
+ * adds structures and configures each one's type (building / ruin / tavern, plus
+ * the fixed-size set-pieces) and, for the room-based kinds, the number of
  * connected rooms (1..5). Replaces the old fixed SMALL BUILDINGS / SMALL RUINS
  * counter chips.
  *
@@ -11,10 +12,24 @@ import { attachPlacement } from "../sceneInputs";
  * scrollable HTML lists used by the trigger / monster editors), so adding and
  * removing rows never touches the scene's element buckets.
  */
+/** Any placeable structure id (the merged structures + set-pieces catalog). */
+export type PlaceableType = "building" | "ruin" | "watchtower" | "cemetery" | "town_square" | "tavern";
+
 export interface StructureSpec {
-  type: "building" | "ruin";
+  type: PlaceableType;
   rooms: number;
+  /** Big-map only: index into the region list the structure must be placed in. */
+  region?: number;
 }
+
+/** Catalog order + display labels. `building` / `ruin` / `tavern` take a room count. */
+const PLACEABLE_TYPES: PlaceableType[] = ["building", "ruin", "tavern", "watchtower", "cemetery", "town_square"];
+const PLACEABLE_LABEL: Record<PlaceableType, string> = {
+  building: "BUILDING", ruin: "RUIN", tavern: "TAVERN",
+  watchtower: "WATCHTOWER", cemetery: "CEMETERY", town_square: "TOWN SQUARE",
+};
+/** Which placeable kinds carry a configurable room count (1..5). */
+export const TAKES_ROOMS = (t: PlaceableType): boolean => t === "building" || t === "ruin" || t === "tavern";
 
 const MAX_ROOMS = 5;
 const MAX_STRUCTURES = 8;
@@ -26,6 +41,9 @@ export interface StructureListContext {
   get: () => StructureSpec[];
   /** Persist an edited structures array (scene updates state + buttons). */
   set: (next: StructureSpec[]) => void;
+  /** Region band names for the current BIG MAP (≥2 → a per-structure region
+   *  selector appears). Empty / <2 = no region targeting. */
+  getRegions?: () => string[];
 }
 
 export interface StructureListHandle {
@@ -83,7 +101,7 @@ export class StructureList {
     div.innerHTML = "";
 
     if (!this.applicable) {
-      div.appendChild(hint("Structures apply to Grassland / Forest terrain."));
+      div.appendChild(hint("Structures apply to Grassland / Forest / Town terrain or a big map."));
       return;
     }
 
@@ -110,22 +128,16 @@ export class StructureList {
     const row = document.createElement("div");
     row.style.cssText = "display:flex; gap:4px; align-items:center; margin:4px 0;";
 
-    const typeBtn = button(spec.type === "ruin" ? "RUIN" : "BUILDING", spec.type === "ruin" ? "ruin" : "building");
+    // Type cycles through the whole placeable catalog (buildings + set-pieces).
+    const typeBtn = button(PLACEABLE_LABEL[spec.type], spec.type === "ruin" ? "ruin" : "building");
     typeBtn.style.flex = "1 1 auto";
-    typeBtn.title = "Toggle building / ruin";
+    typeBtn.title = "Cycle structure type";
     typeBtn.onclick = () => {
       const list = [...this.ctx.get()];
-      list[i] = { ...list[i], type: list[i].type === "building" ? "ruin" : "building" };
+      const next = PLACEABLE_TYPES[(PLACEABLE_TYPES.indexOf(list[i].type) + 1) % PLACEABLE_TYPES.length];
+      list[i] = { ...list[i], type: next };
       this.commit(list);
     };
-
-    const minus = button("−", "step");
-    minus.onclick = () => this.bumpRooms(i, -1);
-    const count = document.createElement("span");
-    count.textContent = `${spec.rooms} ${spec.rooms === 1 ? "room" : "rooms"}`;
-    count.style.cssText = "color:#ccd6e0; font-family:monospace; font-size:10px; min-width:48px; text-align:center;";
-    const plus = button("+", "step");
-    plus.onclick = () => this.bumpRooms(i, +1);
 
     const del = button("✕", "danger");
     del.title = "Remove structure";
@@ -135,7 +147,44 @@ export class StructureList {
       this.commit(list);
     };
 
-    row.append(typeBtn, minus, count, plus, del);
+    // Room stepper only for building / ruin; set-pieces are fixed-size.
+    if (TAKES_ROOMS(spec.type)) {
+      const minus = button("−", "step");
+      minus.onclick = () => this.bumpRooms(i, -1);
+      const count = document.createElement("span");
+      count.textContent = `${spec.rooms} ${spec.rooms === 1 ? "room" : "rooms"}`;
+      count.style.cssText = "color:#ccd6e0; font-family:monospace; font-size:10px; min-width:48px; text-align:center;";
+      const plus = button("+", "step");
+      plus.onclick = () => this.bumpRooms(i, +1);
+      row.append(typeBtn, minus, count, plus, del);
+    } else {
+      row.append(typeBtn, del);
+    }
+
+    // Big-map region targeting: a per-structure region dropdown ("Any" + bands).
+    const regions = this.ctx.getRegions?.() ?? [];
+    if (regions.length >= 2) {
+      const sel = document.createElement("select");
+      sel.style.cssText = "background:#1a1a2a; color:#aabbcc; border:1px solid #445566; border-radius:3px; font-size:10px; padding:2px;";
+      sel.title = "Place this structure in a specific region";
+      const any = document.createElement("option"); any.value = "-1"; any.textContent = "Any region"; sel.append(any);
+      regions.forEach((name, ri) => { const o = document.createElement("option"); o.value = String(ri); o.textContent = name; sel.append(o); });
+      sel.value = String(spec.region ?? -1);
+      sel.onchange = () => {
+        const list = [...this.ctx.get()];
+        const v = parseInt(sel.value, 10);
+        list[i] = { ...list[i], region: v < 0 ? undefined : v };
+        this.commit(list);
+      };
+      const regionRow = document.createElement("div");
+      regionRow.style.cssText = "display:flex; gap:4px; align-items:center; margin:0 0 6px 0;";
+      const lbl = document.createElement("span");
+      lbl.textContent = "in:"; lbl.style.cssText = "color:#778899; font-size:10px;";
+      regionRow.append(lbl, sel);
+      const wrap = document.createElement("div");
+      wrap.append(row, regionRow);
+      return wrap as HTMLDivElement;
+    }
     return row;
   }
 

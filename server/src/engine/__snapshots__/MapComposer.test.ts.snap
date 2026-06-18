@@ -40,6 +40,4 @@ exports[`composeMap seed stability > grassland/ruins is byte-stable 1`] = `"27a0
 
 exports[`composeMap seed stability > grassland/small is byte-stable 1`] = `"4c85f137"`;
 
-exports[`composeMap seed stability > tavern is byte-stable 1`] = `"27859c6d"`;
-
 exports[`composeMap seed stability > urban is byte-stable 1`] = `"a7f041cd"`;

@@ -317,17 +317,20 @@ export class EmbeddedMapPreview {
     return { ...this.layerVisibility };
   }
 
-  /** Set the map currently displayed. Also resets pan/zoom and recomputes
-   *  the tileset routing for the new map. */
-  setData(data: MapPreviewData): void {
+  /** Set the map currently displayed and recompute the tileset routing for it.
+   *  Resets pan/zoom and re-fits the map into the viewport — UNLESS
+   *  `opts.preserveView` is set, in which case the current zoom/pan are kept
+   *  (used when re-rolling structure interiors: the geometry's bounds are
+   *  unchanged, so the viewport should not jump). */
+  setData(data: MapPreviewData, opts?: { preserveView?: boolean }): void {
     this.data = data;
-    this.zoom = 1;
-    this.panX = 0;
-    this.panY = 0;
+    const preserve = opts?.preserveView === true;
+    if (!preserve) { this.zoom = 1; this.panX = 0; this.panY = 0; }
     this.applyTransform();
     this.refreshTilesetRouting(data);
     this.renderGrid();
     this.emptyTextEl.style.display = "none";
+    if (preserve) return;
     // Fit the grid into the viewport on initial layout — the user can zoom in
     // from there. Centred and constrained so even a 30×22 map is fully visible.
     const naturalW = data.width * TILE_PX;

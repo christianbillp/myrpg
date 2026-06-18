@@ -19,7 +19,7 @@ import type Anthropic from "@anthropic-ai/sdk";
 import { mkdir, writeFile, readFile, readdir, unlink } from "fs/promises";
 import { join } from "path";
 import { Logger } from "../Logger.js";
-import { composeMap, composeRegions, type Terrain, type Feature, type StructureSpec, type RegionSpec } from "../engine/MapComposer.js";
+import { composeMap, composeTerrainWithFeature, composeRegionsWithExtras, restampPlaceable, FEATURE_IDS, TERRAINS, type Terrain, type Feature, type StructureSpec, type RegionSpec } from "../engine/MapComposer.js";
 import { writeMapJson, isGeneratedId } from "../engine/MapPersistence.js";
 import { generateEncounter } from "../encounterGenerator.js";
 import { generateMapAgentic } from "../engine/maps/mapAgent.js";
@@ -255,6 +255,50 @@ export interface GenerateRoutesCtx {
   getSettingDataDir: () => string;
 }
 
+/** Inputs a map-compose request carries — shared by both the map-compose and the
+ *  encounter-compose routes so they never drift. */
+interface MapComposeSpec {
+  terrain?: Terrain;
+  features?: Feature[];
+  width: number;
+  height: number;
+  seed?: number;
+  buildingsCount?: number;
+  structures?: StructureSpec[];
+  regions?: RegionSpec[];
+  feature?: string;
+  placeables?: import("../engine/MapComposer.js").PlaceableInput[];
+}
+
+/**
+ * The ONE compose dispatch behind both `/generate/map/composed` and
+ * `/generate/encounter/composed`, so every map-creation capability (the unified
+ * placeable catalog, big-map regions, road features) is available wherever a map
+ * is generated. Validates ids / terrains (throws Error → the caller maps to 400)
+ * and routes to: a multi-region big map, placeables stamped on an open terrain,
+ * or a plain single terrain.
+ */
+function composeMapFromSpec(spec: MapComposeSpec): import("../engine/MapComposer.js").ComposedMap {
+  const { terrain, features, width, height, seed, buildingsCount, structures, regions, feature, placeables } = spec;
+  const badPlaceable = (placeables ?? []).find((p) => !FEATURE_IDS.includes(p.id));
+  if (badPlaceable) throw new Error(`placeable must be one of ${FEATURE_IDS.join(', ')}`);
+  if (feature && !FEATURE_IDS.includes(feature)) throw new Error(`feature must be one of ${FEATURE_IDS.join(', ')}`);
+  const hasPlaceables = (placeables && placeables.length > 0) || !!feature || (structures && structures.length > 0);
+
+  if (regions && regions.length >= 2) {
+    const badR = regions.find((r) => !TERRAINS.includes(r.terrain as Terrain));
+    if (badR) throw new Error(`region terrain must be one of ${TERRAINS.join(', ')}`);
+    return composeRegionsWithExtras({ width, height, regions, structures, feature, placeables, features, seed });
+  }
+  const OPEN_TERRAINS = ['grassland', 'forest', 'urban'] as const;
+  if (hasPlaceables) {
+    const combineTerrain = terrain && (OPEN_TERRAINS as readonly string[]).includes(terrain) ? terrain : 'grassland';
+    return composeTerrainWithFeature({ width, height, terrain: combineTerrain, feature, features, structures, placeables, seed });
+  }
+  if (!terrain || !TERRAINS.includes(terrain)) throw new Error(`terrain must be one of ${TERRAINS.join(', ')}`);
+  return composeMap({ width, height, terrain, features: features ?? [], seed, buildingsCount, structures });
+}
+
 export function registerGenerateRoutes(server: FastifyInstance, ctx: GenerateRoutesCtx): void {
   const { anthropic, getDefs, loadDefs, getSettingDataDir } = ctx;
   const dataDir = (): string => getSettingDataDir();
@@ -271,41 +315,11 @@ export function registerGenerateRoutes(server: FastifyInstance, ctx: GenerateRou
    * a carved mouth into cave/dungeon regions). Size up to 96×64.
    */
   server.post<{
-    Body: { terrain?: Terrain; features?: Feature[]; width?: number; height?: number; seed?: number; structures?: StructureSpec[]; regions?: RegionSpec[] };
+    Body: { terrain?: Terrain; features?: Feature[]; width?: number; height?: number; seed?: number; structures?: StructureSpec[]; regions?: RegionSpec[]; feature?: string; placeables?: import("../engine/MapComposer.js").PlaceableInput[] };
   }>("/generate/map/composed", async (req, reply) => {
-    const { terrain, features, width = 30, height = 22, seed, structures, regions } = req.body;
-    const VALID_TERRAINS = ['grassland', 'forest', 'dungeon', 'tavern', 'cave', 'urban'];
-    const VALID_REGION_TERRAINS = ['grassland', 'forest', 'urban', 'cave', 'dungeon'];
-    if (regions && regions.length > 0) {
-      const bad = regions.find((r) => !VALID_REGION_TERRAINS.includes(r.terrain));
-      if (bad) {
-        return reply.code(400).send({ error: `region terrain must be one of ${VALID_REGION_TERRAINS.join(', ')}` });
-      }
-      try {
-        const composed = composeRegions({ width, height, seed, regions });
-        return reply.send({
-          mapId: null,
-          width: composed.width,
-          height: composed.height,
-          terrainData: composed.terrainData,
-          objectData: composed.objectData,
-          name: composed.name,
-          description: composed.description,
-          tilesets: composed.tilesets,
-          anchors: composed.anchors,
-          zones: composed.zones ?? [],
-        });
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        Logger.log("anomaly.generate_map_composed_failed", { error: msg }, "error");
-        return reply.code(400).send({ error: msg });
-      }
-    }
-    if (!terrain || !VALID_TERRAINS.includes(terrain)) {
-      return reply.code(400).send({ error: `terrain must be one of ${VALID_TERRAINS.join(', ')}` });
-    }
+    const { terrain, features, width = 30, height = 22, seed, structures, regions, feature, placeables } = req.body;
     try {
-      const composed = composeMap({ width, height, terrain, features: features ?? [], seed, structures });
+      const composed = composeMapFromSpec({ terrain, features, width, height, seed, structures, regions, feature, placeables });
       return reply.send({
         mapId: null,
         width: composed.width,
@@ -317,10 +331,54 @@ export function registerGenerateRoutes(server: FastifyInstance, ctx: GenerateRou
         tilesets: composed.tilesets,
         anchors: composed.anchors,
         zones: composed.zones ?? [],
+        placements: composed.placements ?? [],
       });
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       Logger.log("anomaly.generate_map_composed_failed", { error: msg }, "error");
+      return reply.code(400).send({ error: msg });
+    }
+  });
+
+  /**
+   * Re-roll ONE placed structure's interior IN PLACE (Phase B) — or all of them —
+   * without recomposing the map. The caller posts the composed preview (grids +
+   * placements) and which placement to re-roll; the rest of the map is untouched.
+   */
+  server.post<{
+    Body: {
+      width: number; height: number;
+      terrainData: number[]; objectData: number[]; name?: string; description?: string;
+      zones?: Array<{ id: string; name: string; color: string; cells: string[]; lightLevel?: 'bright' | 'dim' | 'dark' }>;
+      placements?: import("../engine/MapComposer.js").ComposedMap['placements'];
+      /** Index into `placements` to re-roll; omit to re-roll ALL interiors. */
+      index?: number;
+      seed?: number;
+    };
+  }>("/generate/map/restamp", async (req, reply) => {
+    const b = req.body;
+    if (!b.placements || b.placements.length === 0) {
+      return reply.code(400).send({ error: "no placed structures to regenerate" });
+    }
+    try {
+      let map: import("../engine/MapComposer.js").ComposedMap = {
+        width: b.width, height: b.height, terrainData: b.terrainData, objectData: b.objectData,
+        name: b.name ?? "Map", description: b.description ?? "", tilesets: [], anchors: {},
+        zones: b.zones, placements: b.placements,
+      };
+      const baseSeed = (b.seed ?? Date.now()) & 0xffffffff;
+      const indices = b.index !== undefined ? [b.index] : b.placements.map((_, i) => i);
+      indices.forEach((idx, n) => { map = restampPlaceable(map, idx, (baseSeed + idx * 2654435761 + n) >>> 0); });
+      return reply.send({
+        mapId: null, width: map.width, height: map.height,
+        terrainData: map.terrainData, objectData: map.objectData,
+        name: map.name, description: map.description,
+        tilesets: map.tilesets, anchors: map.anchors,
+        zones: map.zones ?? [], placements: map.placements ?? [],
+      });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      Logger.log("anomaly.generate_map_restamp_failed", { error: msg }, "error");
       return reply.code(400).send({ error: msg });
     }
   });
@@ -462,6 +520,13 @@ export function registerGenerateRoutes(server: FastifyInstance, ctx: GenerateRou
       seed?: number;
       buildingsCount?: number;
       structures?: StructureSpec[];
+      /** Multi-region big-map bands (US-126) — composed with the unified
+       *  placeable/road extras, same as `/generate/map/composed`. */
+      regions?: RegionSpec[];
+      /** A single set-piece (watchtower / tavern / …) stamped onto the base. */
+      feature?: string;
+      /** Unified placeable catalog (structures + set-pieces) stamped onto the map. */
+      placeables?: import("../engine/MapComposer.js").PlaceableInput[];
       /** Player-facing card summary (writes to the encounter's `description`). */
       description?: string;
       /** Long-form AIGM scene context (writes to `customContext`). */
@@ -487,7 +552,7 @@ export function registerGenerateRoutes(server: FastifyInstance, ctx: GenerateRou
       triggers?: EditorComposedTrigger[];
     };
   }>("/generate/encounter/composed", async (req, reply) => {
-    const { existingMapId, terrain, features, width = 30, height = 22, seed, buildingsCount, structures, description, aigmContext, startingZonesData, placementMode, placements, allyIds, enemyIds, neutralIds, customTitle, customIntroduction, customObjective, completionFlag, triggers: composedTriggers } = req.body;
+    const { existingMapId, terrain, features, width = 30, height = 22, seed, buildingsCount, structures, regions, feature, placeables, description, aigmContext, startingZonesData, placementMode, placements, allyIds, enemyIds, neutralIds, customTitle, customIntroduction, customObjective, completionFlag, triggers: composedTriggers } = req.body;
     const defs = getDefs();
     const hasEnemies = (enemyIds ?? []).length > 0;
     try {
@@ -514,10 +579,10 @@ export function registerGenerateRoutes(server: FastifyInstance, ctx: GenerateRou
         mapDescription = existing.mapdescription ?? "";
         slug = mapId.replace(/^gen_\d+_/, '').slice(0, 32) || 'scene';
       } else {
-        if (!terrain || (terrain !== 'grassland' && terrain !== 'forest')) {
-          return reply.code(400).send({ error: "terrain must be 'grassland' or 'forest'" });
-        }
-        const composed = composeMap({ width, height, terrain, features: features ?? [], seed, buildingsCount, structures });
+        // One compose path with /generate/map/composed — supports every terrain,
+        // the unified placeable catalog (structures + set-pieces), big-map regions,
+        // and road features.
+        const composed = composeMapFromSpec({ terrain, features, width, height, seed, buildingsCount, structures, regions, feature, placeables });
         const stamp = Date.now();
         slug = composed.name.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 32) || 'scene';
         mapId = `gen_${stamp}_${slug}`;

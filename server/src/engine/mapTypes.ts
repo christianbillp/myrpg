@@ -6,7 +6,11 @@
  * turn imports those modules).
  */
 
-export type Terrain = 'grassland' | 'forest' | 'dungeon' | 'tavern' | 'cave' | 'urban';
+/** Canonical terrain list — the single runtime source of truth. `composeMap`'s
+ *  dispatch registry, the route validator, and any client/server enum derive
+ *  from this so adding a terrain is ONE edit, not four. */
+export const TERRAINS = ['grassland', 'forest', 'dungeon', 'cave', 'urban'] as const;
+export type Terrain = typeof TERRAINS[number];
 export type Feature = 'campsites' | 'coastline' | 'path' | 'intersection' | '3-room' | '5-room' | 'stairs';
 
 /** One configurable structure the user adds to an outdoor map. `rooms` (clamped
@@ -15,6 +19,9 @@ export type Feature = 'campsites' | 'coastline' | 'path' | 'intersection' | '3-r
 export interface StructureSpec {
   type: 'building' | 'ruin';
   rooms: number;
+  /** Big-map only (Phase B): index of the region the structure must be placed in
+   *  (into the encounter's `regions[]`). Omitted = anywhere open. */
+  region?: number;
 }
 
 export interface ComposeOptions {
@@ -106,6 +113,24 @@ export interface ComposeRegionsOptions {
   seed?: number;
 }
 
+/** A placeable structure that was stamped onto a composed map (Phase B). Records
+ *  where it landed and its interior seed, so a single one can be re-rolled in
+ *  place (`restampPlaceable`) without recomposing the whole map. */
+export interface PlacementRecord {
+  /** Registry id of the placeable (`watchtower`, `building`, `tavern`, …). */
+  id: string;
+  label: string;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  /** Requested room count for parametric placeables (building/ruin). */
+  rooms?: number;
+  /** Seed driving this placeable's interior layout — re-roll it to regenerate
+   *  just this structure's interior. */
+  interiorSeed: number;
+}
+
 export interface ComposedMap {
   width: number;
   height: number;
@@ -117,6 +142,9 @@ export interface ComposedMap {
   tilesets: ComposedTilesetRef[];
   /** Story-suitable spawn anchors derived during feature placement. */
   anchors: MapAnchors;
+  /** Placeable structures stamped onto this map (Phase B), for in-place re-roll.
+   *  Omitted when none were placed. */
+  placements?: PlacementRecord[];
   /** Author-time named tile regions emitted by feature placers. Omitted when
    *  no feature emitted any (so the saved JSON stays byte-identical to maps
    *  composed before zones existed). */

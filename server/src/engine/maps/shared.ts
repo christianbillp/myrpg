@@ -1,8 +1,8 @@
 /**
  * Shared helpers used by every per-terrain composer module.
  *
- * The per-terrain modules (`outdoor.ts`, `dungeon.ts`, `tavern.ts`) live
- * under `engine/maps/` and each export a single `compose<Terrain>` function.
+ * The per-terrain modules (`outdoor.ts`, `dungeon.ts`, `cave.ts`, `urban.ts`)
+ * live under `engine/maps/` and each export a single `compose<Terrain>` function.
  * This file holds the small primitives they all need: tileset refs, the
  * mulberry32 PRNG, the row-major flatten, the disabled-tile palette
  * filter, and a zone-id allocator that produces deterministic, unique ids

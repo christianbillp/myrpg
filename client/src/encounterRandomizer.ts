@@ -28,6 +28,8 @@ import type { ComposedTrigger } from "./ui/generate/TriggerEditor";
 export interface RolledEncounter {
   archetypeId: string;
   features: Feature[];
+  /** Structures + set-pieces to stamp onto the map (Phase B). */
+  placeables: Array<{ id: string; rooms?: number; region?: number }>;
   title: string;
   introduction: string;
   description: string;
@@ -61,6 +63,7 @@ export function rollArchetype(arch: EncounterArchetype): RolledEncounter {
   return {
     archetypeId: arch.id,
     features,
+    placeables: arch.placeables ? arch.placeables.map((p) => ({ ...p })) : [],
     title: pickRandom(arch.titles),
     introduction: arch.introductions ? pickRandom(arch.introductions) : "",
     description: pickRandom(arch.descriptions),

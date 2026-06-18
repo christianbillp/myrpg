@@ -55,7 +55,6 @@ const CASES: Array<{ label: string; opts: ComposeOptions }> = [
   { label: "forest/path+campsites",           opts: { terrain: "forest", features: ["path", "campsites"], width: 30, height: 22, seed: 11 } },
   { label: "dungeon/3-room",                  opts: { terrain: "dungeon", features: ["3-room"], width: 30, height: 22, seed: 12 } },
   { label: "dungeon/5-room",                  opts: { terrain: "dungeon", features: ["5-room"], width: 30, height: 22, seed: 13 } },
-  { label: "tavern",                          opts: { terrain: "tavern", features: [], width: 30, height: 22, seed: 14 } },
   { label: "cave/small",                      opts: { terrain: "cave", features: [], width: 30, height: 22, seed: 15 } },
   { label: "cave/large",                      opts: { terrain: "cave", features: ["5-room"], width: 30, height: 22, seed: 16 } },
   { label: "cave/stairs",                     opts: { terrain: "cave", features: ["stairs"], width: 30, height: 22, seed: 15 } },
@@ -102,7 +101,7 @@ describe("composeMap seed stability", () => {
       const m = composeMap(opts);
       expect(m.terrainData.length, label).toBe(m.width * m.height);
       expect(m.objectData.length, label).toBe(m.width * m.height);
-      // Outdoor + tavern + urban fill every ground cell; dungeons and caves
+      // Outdoor + urban fill every ground cell; dungeons and caves
       // intentionally leave GID 0 (void) outside the carved floor, so the
       // no-holes invariant only applies to the space-filling terrains.
       if (opts.terrain !== "dungeon" && opts.terrain !== "cave") {
