@@ -19,7 +19,7 @@ import { MapCanvas } from './MapCanvas.js';
 import { mulberry32 } from './shared.js';
 import { fillTerrain, stampRoom, placeBuilding, placeHazard, paintRegion, defineZone, type OpResult, type Point } from './mapOps.js';
 import { groundGid, groundBlocksMovement, objectBlocksMovement, type GroundMaterial } from './materials.js';
-import { PATH_GIDS, WALL_GIDS, FURNITURE_GIDS, DECOR_GIDS } from '../mapTiles.js';
+import { PATH_GIDS, WALL_GIDS, FURNITURE_GIDS, DECOR_GIDS, WATER_FIRSTGID } from '../mapTiles.js';
 import type { ComposedMap, Feature, PlacementRecord } from '../mapTypes.js';
 
 const WALL_GID_SET = new Set(Object.values(WALL_GIDS).map((g) => g & 0x1fffffff));
@@ -44,6 +44,9 @@ export interface MapFeatureDef {
    *  Omitted → a PREVIEW_SIZE square clamped to [min, max]. Parametric
    *  placeables (building/ruin) size to their room count. */
   desiredFootprint?: (params: PlaceableParams, maxW: number, maxH: number) => { w: number; h: number };
+  /** A placeable that intentionally sits ON water (a bridge): placed to span a
+   *  river rather than avoid it, and NOT cleared to grass (Roadmap v2 · M5/#5). */
+  spansWater?: boolean;
   place: (c: MapCanvas, ctx: MapFeatureContext, params: PlaceableParams) => OpResult;
 }
 
@@ -519,6 +522,23 @@ const banditHideout: MapFeatureDef = {
   },
 };
 
+/** Bridge — a walkable plank deck that SPANS a river (Roadmap v2 · M5/#5): placed
+ *  across the water (not avoiding it) so the two banks reconnect. */
+const bridge: MapFeatureDef = {
+  id: 'bridge', label: 'Bridge', minW: 3, minH: 4, spansWater: true,
+  desiredFootprint: () => ({ w: 3, h: 5 }),
+  place: (c, { x, y, w, h }) => {
+    const deck = groundGid('wood_floor')!;
+    for (let cy = y; cy < y + h; cy++) for (let cx = x; cx < x + w; cx++) { c.setGround(cx, cy, deck); c.setObject(cx, cy, 0); c.reserve(cx, cy); }
+    // Plank rails (passable) line the two long sides, leaving the ends open.
+    const vertical = h >= w;
+    if (vertical) for (let cy = y + 1; cy < y + h - 1; cy++) { c.setObject(x, cy, FURNITURE_GIDS.WOODEN_PLANK); c.setObject(x + w - 1, cy, FURNITURE_GIDS.WOODEN_PLANK); }
+    else for (let cx = x + 1; cx < x + w - 1; cx++) { c.setObject(cx, y, FURNITURE_GIDS.WOODEN_PLANK); c.setObject(cx, y + h - 1, FURNITURE_GIDS.WOODEN_PLANK); }
+    defineZone(c, { name: 'bridge', color: '#b88a5a', rect: { x, y, w, h } });
+    return { ok: true, summary: `bridge ${w}×${h} at (${x},${y})` };
+  },
+};
+
 // ── Registry ───────────────────────────────────────────────────────────────────
 
 /** Placeable id → definition. Add a structure by adding an entry; nothing else. */
@@ -533,6 +553,7 @@ export const FEATURE_REGISTRY: Record<string, MapFeatureDef> = {
   [farmstead.id]: farmstead,
   [mine.id]: mine,
   [banditHideout.id]: banditHideout,
+  [bridge.id]: bridge,
 };
 
 export const FEATURE_IDS: readonly string[] = Object.keys(FEATURE_REGISTRY);
@@ -622,6 +643,45 @@ function footprintInside(allowed: Set<string>, x: number, y: number, fw: number,
   return true;
 }
 
+function isWaterGround(c: MapCanvas, x: number, y: number): boolean {
+  const g = c.getGround(x, y) & 0x1fffffff;
+  return g >= WATER_FIRSTGID && g < WATER_FIRSTGID + 16;
+}
+
+/**
+ * Find where a `fw × fh` deck can SPAN a river (Roadmap v2 · M5/#5): a footprint
+ * that overlaps water with both END rows/cols on dry land (the two banks). Tries
+ * both orientations and maximises water overlap. Returns null if no river to cross.
+ */
+interface WaterSpan { x: number; y: number; w: number; h: number; score: number; }
+
+function findWaterSpan(c: MapCanvas, fw: number, fh: number, allowed?: Set<string>): { x: number; y: number; w: number; h: number } | null {
+  const a = bestSpanForOrient(c, fw, fh, allowed);
+  const b = bestSpanForOrient(c, fh, fw, allowed); // transpose — vertical deck spans a horizontal river, and vice-versa
+  const best = !a ? b : !b ? a : (a.score >= b.score ? a : b);
+  return best ? { x: best.x, y: best.y, w: best.w, h: best.h } : null;
+}
+
+function bestSpanForOrient(c: MapCanvas, w: number, h: number, allowed?: Set<string>): WaterSpan | null {
+  const vertical = h >= w;
+  let best: WaterSpan | null = null;
+  for (let y = 1; y <= c.height - h - 1; y++) {
+    for (let x = 1; x <= c.width - w - 1; x++) {
+      if (allowed && !footprintInside(allowed, x, y, w, h)) continue;
+      let water = 0;
+      for (let cy = y; cy < y + h; cy++) for (let cx = x; cx < x + w; cx++) if (isWaterGround(c, cx, cy)) water++;
+      if (water === 0) continue;
+      // The two ends (the banks) must be dry — that's what makes it a crossing.
+      const dryRow = (ry: number): boolean => { for (let cx = x; cx < x + w; cx++) if (isWaterGround(c, cx, ry)) return false; return true; };
+      const dryCol = (cx: number): boolean => { for (let cy = y; cy < y + h; cy++) if (isWaterGround(c, cx, cy)) return false; return true; };
+      const endsDry = vertical ? (dryRow(y) && dryRow(y + h - 1)) : (dryCol(x) && dryCol(x + w - 1));
+      if (!endsDry) continue;
+      if (!best || water > best.score) best = { x, y, w, h, score: water };
+    }
+  }
+  return best;
+}
+
 /** Clear a footprint (+1 buffer) so a placeable never collides: remove objects
  *  (trees/paths/decor), and lift blocking ground (water/chasm/void) to grass. */
 function clearFootprint(c: MapCanvas, x: number, y: number, w: number, h: number): void {
@@ -653,6 +713,17 @@ function stampPlaceableBestFit(c: MapCanvas, spec: StampSpec, allowed?: Set<stri
   if (def.minW > maxW || def.minH > maxH) return null; // map can't fit even the minimum
   const { w, h } = footprintOf(def, params, maxW, maxH);
   if (w < def.minW || h < def.minH) return null;
+
+  // A bridge SPANS water rather than avoiding it — find a position straddling the
+  // river (dry banks at both ends) and stamp the deck without clearing the water.
+  if (def.spansWater) {
+    const span = findWaterSpan(c, w, h, allowed);
+    if (!span) return null;
+    const res = def.place(c, { x: span.x, y: span.y, w: span.w, h: span.h }, params);
+    if (!res.ok) throw new Error(res.error);
+    return { score: 0, record: { id: def.id, label: def.label, x: span.x, y: span.y, w: span.w, h: span.h, rooms: params.rooms, interiorSeed: params.interiorSeed } };
+  }
+
   const { x, y, score } = findFeaturePlacement(c, w, h, allowed);
   if (!Number.isFinite(score)) return null;            // no spot clear of roads/walls
   if (allowed && !footprintInside(allowed, x, y, w, h)) return null; // region too small
@@ -743,6 +814,11 @@ export function composeFeatureMap(opts: { width: number; height: number; seed?: 
   const c = new MapCanvas({ width: opts.width, height: opts.height, seed: (opts.seed ?? 0) & 0xffffffff });
   const fill = fillTerrain(c, { material: opts.baseMaterial ?? 'grass' });
   if (!fill.ok) throw new Error(fill.error);
+  // A water-spanning placeable (bridge) needs a river to cross — carve one.
+  if (def.spansWater) {
+    const yMid = opts.height >> 1;
+    for (let x = 0; x < opts.width; x++) { c.setGround(x, yMid, WATER_FIRSTGID); c.setGround(x, yMid + 1, WATER_FIRSTGID); }
+  }
   const r = stampPlaceableBestFit(c, { id: opts.feature, params: opts.params });
   if (!r) throw new Error(`map ${opts.width}×${opts.height} too small for ${def.label}`);
   const out = c.toComposedMap(def.label, `A ${def.label.toLowerCase()} on an open field.`);

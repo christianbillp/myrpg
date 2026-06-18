@@ -52,8 +52,9 @@ export function composeOutdoor(opts: ComposeOutdoorOpts): ComposedMap {
   const anchors: MapAnchors = {};
   const zones: MapZone[] = [];
   const reserved = new Set<string>();
-  const usesWater = features.includes('coastline');
-  if (usesWater) placeCoastline(terrainGrid, objectGrid, rng, width, height, anchors);
+  const usesWater = features.includes('coastline') || features.includes('river');
+  if (features.includes('coastline')) placeCoastline(terrainGrid, objectGrid, rng, width, height, anchors);
+  if (features.includes('river')) placeRiver(terrainGrid, objectGrid, rng, width, height);
   if (features.includes('path') || features.includes('intersection')) {
     placePath(terrainGrid, objectGrid, rng, width, height, anchors, zones, reserved, allocZoneId, {
       intersection: features.includes('intersection'),
@@ -137,6 +138,30 @@ function rectTouchesWater(terrain: number[][], x: number, y: number, w: number, 
     }
   }
   return false;
+}
+
+/** A winding 2-wide river across the long axis (Roadmap v2 · M5/#5) — a natural
+ *  barrier that splits the map into two banks until a `bridge` spans it. Plain
+ *  water (no shoreline edges); meanders within a bounded deviation. */
+function placeRiver(terrain: number[][], objects: number[][], rng: () => number, W: number, H: number): void {
+  const horizontal = W >= H;
+  const len = horizontal ? W : H;
+  const crossCentre = (horizontal ? H : W) >> 1;
+  const maxDev = Math.min(4, (horizontal ? H : W) >> 2);
+  let cross = crossCentre;
+  for (let main = 0; main < len; main++) {
+    if (rng() < 0.3) {
+      const dir = cross > crossCentre ? -1 : cross < crossCentre ? 1 : (rng() < 0.5 ? -1 : 1);
+      const nc = cross + (rng() < 0.5 ? dir : -dir);
+      if (nc >= crossCentre - maxDev && nc <= crossCentre + maxDev) cross = nc;
+    }
+    for (let w = 0; w < 2; w++) {
+      const cc = cross + w;
+      const x = horizontal ? main : cc;
+      const y = horizontal ? cc : main;
+      if (x >= 0 && x < W && y >= 0 && y < H) { terrain[y][x] = WATER_GIDS.WATER; objects[y][x] = 0; }
+    }
+  }
 }
 
 function placeCoastline(terrain: number[][], objects: number[][], rng: () => number, W: number, H: number, anchors: MapAnchors): void {
@@ -491,6 +516,7 @@ const FEATURE_ADJ: Partial<Record<Feature, string>> = {
   path:         'Wayside',
   intersection: 'Crossroads',
   clearing:     'Glade',
+  river:        'Riverside',
 };
 
 function composeOutdoorName(terrain: 'grassland' | 'forest', features: Feature[], structures: StructureSpec[]): string {

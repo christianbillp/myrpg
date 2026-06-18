@@ -13,7 +13,7 @@ import { attachPlacement } from "../sceneInputs";
  * removing rows never touches the scene's element buckets.
  */
 /** Any placeable structure id (the merged structures + set-pieces catalog). */
-export type PlaceableType = "building" | "ruin" | "watchtower" | "cemetery" | "town_square" | "tavern" | "shrine" | "farmstead" | "mine" | "bandit_hideout";
+export type PlaceableType = "building" | "ruin" | "watchtower" | "cemetery" | "town_square" | "tavern" | "shrine" | "farmstead" | "mine" | "bandit_hideout" | "bridge";
 
 export interface StructureSpec {
   type: PlaceableType;
@@ -23,11 +23,11 @@ export interface StructureSpec {
 }
 
 /** Catalog order + display labels. `building` / `ruin` / `tavern` take a room count. */
-const PLACEABLE_TYPES: PlaceableType[] = ["building", "ruin", "tavern", "watchtower", "cemetery", "town_square", "shrine", "farmstead", "mine", "bandit_hideout"];
+const PLACEABLE_TYPES: PlaceableType[] = ["building", "ruin", "tavern", "watchtower", "cemetery", "town_square", "shrine", "farmstead", "mine", "bandit_hideout", "bridge"];
 const PLACEABLE_LABEL: Record<PlaceableType, string> = {
   building: "BUILDING", ruin: "RUIN", tavern: "TAVERN",
   watchtower: "WATCHTOWER", cemetery: "CEMETERY", town_square: "TOWN SQUARE",
-  shrine: "SHRINE", farmstead: "FARMSTEAD", mine: "MINE", bandit_hideout: "BANDIT HIDEOUT",
+  shrine: "SHRINE", farmstead: "FARMSTEAD", mine: "MINE", bandit_hideout: "BANDIT HIDEOUT", bridge: "BRIDGE",
 };
 /** Which placeable kinds carry a configurable room count (1..5). */
 export const TAKES_ROOMS = (t: PlaceableType): boolean => t === "building" || t === "ruin" || t === "tavern";

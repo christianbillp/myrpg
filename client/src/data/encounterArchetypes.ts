@@ -20,7 +20,7 @@
 
 export type Terrain = 'grassland' | 'forest' | 'dungeon' | 'cave' | 'urban';
 /** Placeable structure / set-piece ids (mirror of the server `FEATURE_REGISTRY`). */
-export type PlaceableId = 'building' | 'ruin' | 'tavern' | 'watchtower' | 'cemetery' | 'town_square' | 'shrine' | 'farmstead' | 'mine' | 'bandit_hideout';
+export type PlaceableId = 'building' | 'ruin' | 'tavern' | 'watchtower' | 'cemetery' | 'town_square' | 'shrine' | 'farmstead' | 'mine' | 'bandit_hideout' | 'bridge';
 export type Feature = 'campsites' | 'coastline' | 'path' | 'intersection' | '3-room' | '5-room' | 'stairs';
 
 /**
