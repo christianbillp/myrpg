@@ -56,9 +56,13 @@ export function composeOutdoor(opts: ComposeOutdoorOpts): ComposedMap {
   if (features.includes('coastline')) placeCoastline(terrainGrid, objectGrid, rng, width, height, anchors);
   if (features.includes('river')) placeRiver(terrainGrid, objectGrid, rng, width, height);
   if (features.includes('path') || features.includes('intersection')) {
+    // A plain road perpendicular to the river crosses it (so a bridge lines up).
+    const forceOrientation = features.includes('river') && !features.includes('intersection')
+      ? (width >= height ? 'v' : 'h') as 'h' | 'v' : undefined;
     placePath(terrainGrid, objectGrid, rng, width, height, anchors, zones, reserved, allocZoneId, {
       intersection: features.includes('intersection'),
       coastline: usesWater,
+      forceOrientation,
     });
   }
   // Structures — each configured spec stamped as a connected multi-room
@@ -216,7 +220,7 @@ function placePath(
   zones: MapZone[],
   reserved: Set<string>,
   allocZoneId: (kind: string) => string,
-  opts: { intersection: boolean; coastline: boolean },
+  opts: { intersection: boolean; coastline: boolean; forceOrientation?: 'h' | 'v' },
 ): void {
   const pathCells = new Set<string>();
   const paint = (x: number, y: number): boolean => {
@@ -278,7 +282,9 @@ function placePath(
       if (p) endpoints.push(p);
     }
   } else {
-    const horizontal = rng() < 0.5;
+    // When a river is present, run the road ACROSS it (perpendicular) so a bridge
+    // can line up with the crossing instead of the road running along the bank.
+    const horizontal = opts.forceOrientation ? opts.forceOrientation === 'h' : rng() < 0.5;
     if (horizontal) {
       const row = 3 + Math.floor(rng() * Math.max(1, H - 6));
       for (let x = 0; x < W; x++) paint(x, row);

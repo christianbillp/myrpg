@@ -534,6 +534,13 @@ const bridge: MapFeatureDef = {
     const vertical = h >= w;
     if (vertical) for (let cy = y + 1; cy < y + h - 1; cy++) { c.setObject(x, cy, FURNITURE_GIDS.WOODEN_PLANK); c.setObject(x + w - 1, cy, FURNITURE_GIDS.WOODEN_PLANK); }
     else for (let cx = x + 1; cx < x + w - 1; cx++) { c.setObject(cx, y, FURNITURE_GIDS.WOODEN_PLANK); c.setObject(cx, y + h - 1, FURNITURE_GIDS.WOODEN_PLANK); }
+    // If a road crosses the river here, carry it ACROSS the deck so the path and
+    // the bridge line up into one continuous road (Roadmap v2 · M4).
+    const line = pathCrossingLine(c, x, y, w, h, vertical);
+    if (line !== null) {
+      if (vertical) for (let cy = y; cy < y + h; cy++) c.setObject(line, cy, PATH_GIDS.V);
+      else for (let cx = x; cx < x + w; cx++) c.setObject(cx, line, PATH_GIDS.H);
+    }
     defineZone(c, { name: 'bridge', color: '#b88a5a', rect: { x, y, w, h } });
     return { ok: true, summary: `bridge ${w}×${h} at (${x},${y})` };
   },
@@ -648,6 +655,19 @@ function isWaterGround(c: MapCanvas, x: number, y: number): boolean {
   return g >= WATER_FIRSTGID && g < WATER_FIRSTGID + 16;
 }
 
+function isPathObject(c: MapCanvas, x: number, y: number): boolean {
+  return c.inBounds(x, y) && PATH_GID_SET.has(c.getObject(x, y) & 0x1fffffff);
+}
+
+/** If a road approaches BOTH banks at the same line through a candidate footprint
+ *  (a road interrupted by the river), return the aligned column (vertical deck) or
+ *  row (horizontal deck) so a bridge there carries the road across and lines up. */
+function pathCrossingLine(c: MapCanvas, x: number, y: number, w: number, h: number, vertical: boolean): number | null {
+  if (vertical) { for (let col = x; col < x + w; col++) if (isPathObject(c, col, y - 1) && isPathObject(c, col, y + h)) return col; }
+  else { for (let row = y; row < y + h; row++) if (isPathObject(c, x - 1, row) && isPathObject(c, x + w, row)) return row; }
+  return null;
+}
+
 /**
  * Find where a `fw × fh` deck can SPAN a river (Roadmap v2 · M5/#5): a footprint
  * that overlaps water with both END rows/cols on dry land (the two banks). Tries
@@ -676,7 +696,11 @@ function bestSpanForOrient(c: MapCanvas, w: number, h: number, allowed?: Set<str
       const dryCol = (cx: number): boolean => { for (let cy = y; cy < y + h; cy++) if (isWaterGround(c, cx, cy)) return false; return true; };
       const endsDry = vertical ? (dryRow(y) && dryRow(y + h - 1)) : (dryCol(x) && dryCol(x + w - 1));
       if (!endsDry) continue;
-      if (!best || water > best.score) best = { x, y, w, h, score: water };
+      // A span the road already crosses wins decisively, so the bridge lines up
+      // with the path instead of spanning the river somewhere else.
+      const aligned = pathCrossingLine(c, x, y, w, h, vertical) !== null ? 1000 : 0;
+      const score = water + aligned;
+      if (!best || score > best.score) best = { x, y, w, h, score };
     }
   }
   return best;
