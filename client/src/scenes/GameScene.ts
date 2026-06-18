@@ -17,6 +17,7 @@ import { RestPromptOverlay } from "../ui/RestPromptOverlay";
 import { SpellOptionPicker } from "../ui/SpellOptionPicker";
 import { SpeechBubbles, speechReadMs } from "../ui/SpeechBubbles";
 import { scaleDuration } from "../animationSpeed";
+import { TIMING } from "../animationTimings";
 import { SpellVfx } from "../ui/SpellVfx";
 import { SpeechInputBubble } from "../ui/SpeechInputBubble";
 import { ScreenEffects } from "../ui/ScreenEffects";
@@ -55,9 +56,9 @@ const GAME_H = GRID_ROWS * TILE_SIZE + HUD_HEIGHT;
 const API_URL = "http://localhost:3000";
 
 /** Breath between combatants at a turn_started beat (scaled by Combat Speed). */
-const TURN_BEAT_PAUSE_MS = 280;
+const TURN_BEAT_PAUSE_MS = TIMING.turnBeatPauseMs;
 /** Dwell after a condition_changed float so stacked changes stay readable. */
-const CONDITION_BEAT_MS = 260;
+const CONDITION_BEAT_MS = TIMING.conditionBeatMs;
 
 export class GameScene extends Phaser.Scene {
   /** Typed view over the Phaser registry. Use `this.defs.spells()` etc.
@@ -614,7 +615,7 @@ export class GameScene extends Phaser.Scene {
       if (tile) this.spawnFloatingNumber(tile.x, tile.y, `+${event.amount}`, '#5aff8c');
       if (event.entityId === 'player' && this.player) this.player.setHp(event.newHp, this.playerDef.maxHp);
       else this.npcTokens.get(event.entityId)?.setHp(event.newHp);
-      this.time.delayedCall(180, () => { this.animating = false; this.processNextEvent(); });
+      this.time.delayedCall(scaleDuration(TIMING.healDwellMs), () => { this.animating = false; this.processNextEvent(); });
       return;
     } else if (event.type === "death") {
       const deadToken = this.npcTokens.get(event.entityId);
@@ -683,7 +684,7 @@ export class GameScene extends Phaser.Scene {
     // the same offset/zoom/scroll as the tokens (not the unscaled scene root).
     this.gridView.container.add(label);
     this.tweens.add({
-      targets: label, y: y - 22, alpha: 0, duration: 650, ease: 'Quad.easeOut',
+      targets: label, y: y - 22, alpha: 0, duration: scaleDuration(TIMING.floatNumberMs), ease: 'Quad.easeOut',
       onComplete: () => label.destroy(),
     });
   }

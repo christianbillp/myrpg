@@ -1,8 +1,9 @@
 import Phaser from 'phaser';
 import { scaleDuration } from "../animationSpeed";
+import { TIMING } from "../animationTimings";
 import { TILE_SIZE, DEFAULT_TOKEN_COLOR } from '../constants';
 
-const MOVE_DURATION = 150;
+const MOVE_DURATION = TIMING.movePlayerMs;
 
 export class Player {
   tileX: number;
@@ -75,7 +76,7 @@ export class Player {
       targets: this.container,
       x: tx * TILE_SIZE + TILE_SIZE / 2,
       y: ty * TILE_SIZE + TILE_SIZE / 2,
-      duration: scaleDuration(Math.min(420, dist * 90)),
+      duration: scaleDuration(Math.min(TIMING.glideMaxMs, dist * TIMING.glidePerTileMs)),
       ease: 'Sine.easeInOut',
     });
   }
@@ -98,7 +99,7 @@ export class Player {
       targets: this.container,
       x: cx + (dx / len) * TILE_SIZE * 0.35,
       y: cy + (dy / len) * TILE_SIZE * 0.35,
-      duration: 90, yoyo: true, ease: 'Quad.easeOut',
+      duration: scaleDuration(TIMING.lungeMs), yoyo: true, ease: 'Quad.easeOut',
       onComplete: () => { this.container.setPosition(cx, cy); onComplete(); },
     });
   }
@@ -108,7 +109,7 @@ export class Player {
     this.setHp(newHp, maxHp);
     this.scene.tweens.add({
       targets: this.container, scaleX: 1.18, scaleY: 1.18,
-      duration: 90, yoyo: true, ease: 'Quad.easeOut', onComplete,
+      duration: scaleDuration(TIMING.flashMs), yoyo: true, ease: 'Quad.easeOut', onComplete,
     });
   }
 }

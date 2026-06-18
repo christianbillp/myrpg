@@ -1,10 +1,11 @@
 import Phaser from 'phaser';
 import { scaleDuration } from "../animationSpeed";
+import { TIMING } from "../animationTimings";
 import { TILE_SIZE, DEFAULT_TOKEN_COLOR_HEX } from '../constants';
 import { MonsterDef } from '../../../shared/types';
 import { Disposition } from '../../../shared/types';
 
-const MOVE_DURATION = 130;
+const MOVE_DURATION = TIMING.moveNpcMs;
 const DPR = window.devicePixelRatio;
 
 export class NpcToken {
@@ -117,7 +118,7 @@ export class NpcToken {
       targets: this.container,
       x: tx * TILE_SIZE + TILE_SIZE / 2,
       y: ty * TILE_SIZE + TILE_SIZE / 2,
-      duration: scaleDuration(Math.min(420, dist * 90)),
+      duration: scaleDuration(Math.min(TIMING.glideMaxMs, dist * TIMING.glidePerTileMs)),
       ease: 'Sine.easeInOut',
     });
   }
@@ -181,7 +182,7 @@ export class NpcToken {
       targets: this.container,
       x: cx + (dx / len) * TILE_SIZE * 0.35,
       y: cy + (dy / len) * TILE_SIZE * 0.35,
-      duration: 90, yoyo: true, ease: 'Quad.easeOut',
+      duration: scaleDuration(TIMING.lungeMs), yoyo: true, ease: 'Quad.easeOut',
       onComplete: () => { this.container.setPosition(cx, cy); onComplete(); },
     });
   }
@@ -191,14 +192,14 @@ export class NpcToken {
     this.setHp(newHp);
     this.scene.tweens.add({
       targets: this.container, scaleX: 1.18, scaleY: 1.18,
-      duration: 90, yoyo: true, ease: 'Quad.easeOut', onComplete,
+      duration: scaleDuration(TIMING.flashMs), yoyo: true, ease: 'Quad.easeOut', onComplete,
     });
   }
 
   /** Fade to the dead/corpse state — the death beat. */
   fadeToDead(onComplete: () => void): void {
     this.scene.tweens.add({
-      targets: this.container, alpha: 0.4, duration: 280, ease: 'Quad.easeOut',
+      targets: this.container, alpha: 0.4, duration: scaleDuration(TIMING.deathFadeMs), ease: 'Quad.easeOut',
       onComplete: () => { this.setDead(); onComplete(); },
     });
   }

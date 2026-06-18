@@ -1,5 +1,6 @@
 import Phaser from 'phaser';
 import { TILE_SIZE } from '../constants';
+import { TIMING, scaleDuration } from '../animationTimings';
 import type { GameEvent } from '../../../shared/types';
 
 type SpellVfxEvent = Extract<GameEvent, { type: 'spell_vfx' }>;
@@ -43,21 +44,21 @@ export class SpellVfx {
     switch (ev.style) {
       case 'projectile': return this.projectile(src, dst, core, glow, ev.count ?? 1, onComplete);
       case 'beam': return this.beam(src, dst, core, glow, onComplete);
-      case 'touch-burst': return this.burst(dst, core, glow, TILE_SIZE * 0.55, 170, onComplete);
-      case 'target-burst': return this.burst(dst, core, glow, TILE_SIZE * 0.7, 190, onComplete);
+      case 'touch-burst': return this.burst(dst, core, glow, TILE_SIZE * 0.55, scaleDuration(TIMING.burstTouchMs), onComplete);
+      case 'target-burst': return this.burst(dst, core, glow, TILE_SIZE * 0.7, scaleDuration(TIMING.burstTargetMs), onComplete);
       case 'area-burst': {
         const r = Math.max(1, Math.ceil((ev.radiusFeet ?? 5) / 5)) * TILE_SIZE;
-        return this.burst(dst, core, glow, r, 300, onComplete);
+        return this.burst(dst, core, glow, r, scaleDuration(TIMING.burstAreaMs), onComplete);
       }
       case 'zone-spawn': {
         const r = ev.radiusFeet ? Math.max(1, Math.ceil(ev.radiusFeet / 5)) * TILE_SIZE : TILE_SIZE * 1.3;
-        return this.burst(dst, core, glow, r, 320, onComplete);
+        return this.burst(dst, core, glow, r, scaleDuration(TIMING.burstZoneMs), onComplete);
       }
-      case 'summon-appear': return this.glow(dst, glow, 300, onComplete);
-      case 'target-glow': return this.glow(dst, glow, 220, onComplete);
-      case 'self-glow': return this.glow(src, glow, 220, onComplete);
-      case 'vanish': return this.glow(src, glow, 240, onComplete);
-      case 'ambient': return this.glow(src, glow, 130, onComplete);
+      case 'summon-appear': return this.glow(dst, glow, scaleDuration(TIMING.glowSummonMs), onComplete);
+      case 'target-glow': return this.glow(dst, glow, scaleDuration(TIMING.glowTargetMs), onComplete);
+      case 'self-glow': return this.glow(src, glow, scaleDuration(TIMING.glowSelfMs), onComplete);
+      case 'vanish': return this.glow(src, glow, scaleDuration(TIMING.glowVanishMs), onComplete);
+      case 'ambient': return this.glow(src, glow, scaleDuration(TIMING.glowAmbientMs), onComplete);
       default: return onComplete();
     }
   }
@@ -72,7 +73,7 @@ export class SpellVfx {
       const dot = this.at(this.scene.add.circle(src.x, src.y, 4, core).setDepth(40));
       const halo = this.at(this.scene.add.circle(src.x, src.y, 7, glow, 0.4).setDepth(39));
       this.scene.tweens.add({
-        targets: [dot, halo], x: dst.x, y: dst.y, duration: 200, delay: i * 70, ease: 'Quad.easeIn',
+        targets: [dot, halo], x: dst.x, y: dst.y, duration: scaleDuration(TIMING.projectileMs), delay: scaleDuration(i * TIMING.projectileDartDelayMs), ease: 'Quad.easeIn',
         onComplete: () => {
           dot.destroy(); halo.destroy(); this.spark(dst, glow);
           if (++landed === total) onComplete();
@@ -87,7 +88,7 @@ export class SpellVfx {
     const g = this.at(this.scene.add.graphics().setDepth(40));
     g.lineStyle(5, glow, 0.5).lineBetween(src.x, src.y, dst.x, dst.y);
     g.lineStyle(2, core, 1).lineBetween(src.x, src.y, dst.x, dst.y);
-    this.scene.tweens.add({ targets: g, alpha: 0, duration: 200, ease: 'Quad.easeOut', onComplete: () => { g.destroy(); this.spark(dst, glow); onComplete(); } });
+    this.scene.tweens.add({ targets: g, alpha: 0, duration: scaleDuration(TIMING.beamMs), ease: 'Quad.easeOut', onComplete: () => { g.destroy(); this.spark(dst, glow); onComplete(); } });
   }
 
   /** An expanding translucent disc that emanates FROM the centre point — touch /
@@ -131,7 +132,7 @@ export class SpellVfx {
     const g = this.at(this.scene.add.graphics().setDepth(41));
     const t = { p: 0 };
     this.scene.tweens.add({
-      targets: t, p: 1, duration: 160, ease: 'Quad.easeOut',
+      targets: t, p: 1, duration: scaleDuration(TIMING.sparkleMs), ease: 'Quad.easeOut',
       onUpdate: () => { g.clear(); g.fillStyle(glow, 0.7 * (1 - t.p)); g.fillCircle(at.x, at.y, 5 + 10 * t.p); },
       onComplete: () => g.destroy(),
     });
