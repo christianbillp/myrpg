@@ -221,7 +221,7 @@ TWO MAP MODES — pick exactly one:
 1. DIRECT (default, single-scene maps up to 30×22): author the tile arrays yourself per MAP RULES below.
 2. REGION PLAN (big multi-biome maps, 24×16 up to 96×64): when the scene calls for a JOURNEY across changing terrain — "a grassland that becomes a forest and ends in a cave", "the road through the wood to the mine" — submit \`regionPlan\` INSTEAD of width/height/terrainData/objectData/startingZonesData. List 2-5 regions in travel order; the engine lays them out as bands with natural blended transitions (open biomes) or a carved rock-face mouth (cave/dungeon regions), names a map zone per region, makes cave/dungeon regions genuinely dark, and guarantees connectivity. Give regions evocative zone names, put the player in the entry region (\`playerRegion\`), and assign \`hostileRegions\` so different creatures hold different regions (goblins in the forest, undead in the cave). Spawn zones are derived for you — do NOT send tile arrays in this mode.
 
-STRUCTURES (region-plan mode) — DECLARE buildings & landmarks; do not paint them. If the scene has a tavern, a watchtower, a ruined keep, a graveyard, a town square, or any building, add it to \`regionPlan.structures\` with a type from {building, ruin, tavern, watchtower, cemetery, town_square} (building/ruin/tavern take \`rooms\` 1-5 — a tavern with more rooms gains a kitchen, cellar, snug, etc. around its taproom). Optionally pin one to a \`region\` index (a building belongs in an OPEN band, never a cave). The engine stamps each one fully-walled, furnished, and connected, placed clear of roads and each other — far more reliable than authoring wall tiles by hand. Add \`roads: ["path"]\` (or "intersection") to lay a winding road across the open bands.
+STRUCTURES (region-plan mode) — DECLARE buildings & landmarks; do not paint them. If the scene has a tavern, a watchtower, a ruined keep, a graveyard, a town square, or any building, add it to \`regionPlan.structures\` with a type from {building, ruin, tavern, watchtower, cemetery, town_square, shrine, farmstead, mine, bandit_hideout} (building/ruin/tavern take \`rooms\` 1-5 — a tavern with more rooms gains a kitchen, cellar, snug, etc. around its taproom; the rest are fixed-size set-pieces). Optionally pin one to a \`region\` index (a building belongs in an OPEN band, never a cave). The engine stamps each one fully-walled, furnished, and connected, placed clear of roads and each other — far more reliable than authoring wall tiles by hand. Add \`roads: ["path"]\` (or "intersection") to lay a winding road across the open bands.
 
 MAP RULES (direct mode):
 - Width × height must be between 12×8 and 30×22 inclusive.
@@ -316,7 +316,7 @@ function buildResponseTool() {
               items: {
                 type: "object",
                 properties: {
-                  id:     { type: "string", enum: ["building", "ruin", "tavern", "watchtower", "cemetery", "town_square"], description: "Structure type. building/ruin/tavern take a room count." },
+                  id:     { type: "string", enum: [...FEATURE_IDS], description: "Structure type. building/ruin/tavern take a room count; the rest are fixed-size set-pieces." },
                   rooms:  { type: "integer", minimum: 1, maximum: 5, description: "Room count for building/ruin/tavern (ignored by set-pieces)." },
                   region: { type: "integer", description: "Optional: region index to place it in (defaults to anywhere open; a cave/dungeon band has no room for a building)." },
                 },

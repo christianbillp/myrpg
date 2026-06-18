@@ -550,6 +550,37 @@ describe('winding roads (Phase B #2)', () => {
   });
 });
 
+describe('wilderness set-pieces (Roadmap v2 · M3/#8)', () => {
+  const NEW_IDS = ['shrine', 'farmstead', 'mine', 'bandit_hideout'];
+
+  it('registers each new placeable', () => {
+    for (const id of NEW_IDS) expect(FEATURE_IDS).toContain(id);
+  });
+
+  it('stamps each onto a field staying connected, with its zone', () => {
+    for (const id of NEW_IDS) {
+      const base = composeMap({ terrain: 'grassland', features: [], width: 28, height: 22, seed: 9 });
+      const { map } = stampExtrasOnto(base, [{ id }], 9);
+      expect((map.placements ?? []).some((p) => p.id === id), `${id} placed`).toBe(true);
+      // The set-piece's interior stays reachable across the field — no sealed pocket.
+      const c = new MapCanvas({ width: map.width, height: map.height, seed: 1 });
+      for (let y = 0; y < map.height; y++) for (let x = 0; x < map.width; x++) {
+        c.setGround(x, y, map.terrainData[y * map.width + x]);
+        c.setObject(x, y, map.objectData[y * map.width + x]);
+      }
+      const { sizes } = passableRegions(c);
+      expect(Math.max(...sizes), `${id} mostly one region`).toBeGreaterThan(map.width * map.height * 0.4);
+    }
+  });
+
+  it('renders each new set-piece on a flat field with a zone (preview)', () => {
+    for (const id of NEW_IDS) {
+      const m = composeFeatureMap({ width: 24, height: 18, seed: 4, feature: id });
+      expect((m.zones ?? []).length, id).toBeGreaterThan(0);
+    }
+  });
+});
+
 describe('tactical metrics (Roadmap v2 · M1)', () => {
   it('attaches tactical metrics when requested, and they read a forest as non-degenerate', () => {
     const m = composeTerrainWithFeature({ width: 30, height: 22, terrain: 'forest', feature: 'watchtower', seed: 3, tactical: true });

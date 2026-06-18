@@ -429,6 +429,96 @@ const ruin: MapFeatureDef = {
   place: (c, ctx, p) => stampStructure(c, ctx, 'ruin', p.rooms ?? 1, p.interiorSeed),
 };
 
+// ── Wilderness set-pieces (Roadmap v2 · M3/#8) ──────────────────────────────────
+
+/** Shrine — a paved dais ringed by a dotted colonnade (a ruined ring, some
+ *  pillars missing) around a central altar with flower offerings. The dotted ring
+ *  is always walkable; the interior is open. */
+const shrine: MapFeatureDef = {
+  id: 'shrine', label: 'Shrine', minW: 7, minH: 7,
+  desiredFootprint: () => ({ w: 7, h: 7 }),
+  place: (c, { x, y, w, h }, p) => {
+    const rng = mulberry32(seedFor({ x, y, w, h }, p.interiorSeed));
+    paintRegion(c, { rect: { x, y, w, h }, material: 'plaza', layer: 'ground' });
+    const pillars: Point[] = [];
+    for (let cx = x; cx < x + w; cx += 2) { pillars.push({ x: cx, y }); pillars.push({ x: cx, y: y + h - 1 }); }
+    for (let cy = y + 2; cy < y + h - 1; cy += 2) { pillars.push({ x, y: cy }); pillars.push({ x: x + w - 1, y: cy }); }
+    const kept = pillars.filter(() => rng() > 0.18); // ~18% missing → a ruined ring
+    if (kept.length) paintRegion(c, { cells: kept, material: 'crate', layer: 'object' });
+    const ax = x + (w >> 1), ay = y + (h >> 1);
+    paintRegion(c, { cells: [{ x: ax, y: ay }], material: 'cracked_stone', layer: 'ground' });
+    paintRegion(c, { cells: [{ x: ax - 1, y: ay }, { x: ax + 1, y: ay }], material: 'flowers', layer: 'object' });
+    defineZone(c, { name: 'altar', color: '#d8c46a', rect: { x: ax, y: ay, w: 1, h: 1 } });
+    defineZone(c, { name: 'shrine', color: '#b0a0d0', rect: { x, y, w, h } });
+    return { ok: true, summary: `shrine ${w}×${h} at (${x},${y})` };
+  },
+};
+
+/** Farmstead — a fenced field (one gate) with a small farmhouse in a corner and
+ *  passable crop rows (flowers) striping the open ground. */
+const farmstead: MapFeatureDef = {
+  id: 'farmstead', label: 'Farmstead', minW: 9, minH: 8,
+  desiredFootprint: () => ({ w: 10, h: 8 }),
+  place: (c, { x, y, w, h }) => {
+    placeBuilding(c, { x: x + 1, y: y + 1, w: 4, h: 4, doorSide: 'S', name: 'farmhouse' });
+    fenceRing(c, x, y, w, h, { x: x + (w >> 1), y: y + h - 1 }); // a south gate
+    for (let cy = y + 6; cy <= y + h - 2; cy += 2) {
+      const row: Point[] = [];
+      for (let cx = x + 1; cx <= x + w - 2; cx++) if (!c.isReserved(cx, cy)) row.push({ x: cx, y: cy });
+      if (row.length) paintRegion(c, { cells: row, material: 'flowers', layer: 'object' });
+    }
+    defineZone(c, { name: 'field', color: '#9bbf6a', rect: { x, y, w, h } });
+    defineZone(c, { name: 'farmstead', color: '#caa46a', rect: { x, y, w, h } });
+    return { ok: true, summary: `farmstead ${w}×${h} at (${x},${y})` };
+  },
+};
+
+/** Mine — a dug-out adit: a cracked-stone apron with a stairs-down shaft at the
+ *  back and a few cart props (cover) to the sides. Open, no walls. */
+const mine: MapFeatureDef = {
+  id: 'mine', label: 'Mine', minW: 6, minH: 5,
+  desiredFootprint: () => ({ w: 7, h: 5 }),
+  place: (c, { x, y, w, h }, p) => {
+    const rng = mulberry32(seedFor({ x, y, w, h }, p.interiorSeed));
+    paintRegion(c, { rect: { x, y, w, h }, material: 'cracked_stone', layer: 'ground' });
+    const sx = x + (w >> 1), sy = y + 1;
+    paintRegion(c, { cells: [{ x: sx, y: sy }], material: 'stairs', layer: 'object' });
+    defineZone(c, { name: 'mine shaft', color: '#8a8a8a', rect: { x: sx, y: sy, w: 1, h: 1 } });
+    const props: Point[] = [{ x: x, y: y + h - 1 }, { x: x + w - 1, y: y + h - 1 }, { x: x + 1, y: y + h - 2 }, { x: x + w - 2, y: y + h - 2 }];
+    const kept = props.filter(() => rng() < 0.75);
+    if (kept.length) paintRegion(c, { cells: kept, material: 'crate', layer: 'object' });
+    defineZone(c, { name: 'mine', color: '#9a8466', rect: { x, y, w, h } });
+    return { ok: true, summary: `mine ${w}×${h} at (${x},${y})` };
+  },
+};
+
+/** Bandit hideout — a ruined stockade (cracked-stone enclosure with a sally-port
+ *  gap and a couple of broken wall segments), scattered cover, and a campfire. */
+const banditHideout: MapFeatureDef = {
+  id: 'bandit_hideout', label: 'Bandit hideout', minW: 7, minH: 6,
+  desiredFootprint: () => ({ w: 8, h: 6 }),
+  place: (c, { x, y, w, h }, p) => {
+    const rng = mulberry32(seedFor({ x, y, w, h }, p.interiorSeed));
+    const side = (['N', 'S', 'E', 'W'] as const)[Math.floor(rng() * 4)];
+    const gap = side === 'N' ? { x: x + (w >> 1), y } : side === 'S' ? { x: x + (w >> 1), y: y + h - 1 }
+      : side === 'W' ? { x, y: y + (h >> 1) } : { x: x + w - 1, y: y + (h >> 1) };
+    stampRoom(c, { x, y, w, h, floor: 'cracked_stone', doorways: [gap] });
+    let breaks = 1 + Math.floor(rng() * 2);
+    for (let t = 0; t < 24 && breaks > 0; t++) {
+      const onTopBot = rng() < 0.5;
+      const cell = onTopBot
+        ? { x: x + 1 + Math.floor(rng() * (w - 2)), y: rng() < 0.5 ? y : y + h - 1 }
+        : { x: rng() < 0.5 ? x : x + w - 1, y: y + 1 + Math.floor(rng() * (h - 2)) };
+      if (WALL_GID_SET.has(c.getObject(cell.x, cell.y) & 0x1fffffff)) { c.setObject(cell.x, cell.y, 0); breaks--; }
+    }
+    c.setObject(x + 1, y + h - 2, DECOR_GIDS.CRATE_CLOSED);
+    c.setObject(x + w - 2, y + 1, DECOR_GIDS.BARRELS_TWO);
+    c.setObject(x + (w >> 1), y + (h >> 1), DECOR_GIDS.CAMPFIRE); // a camp's open fire — fine outdoors
+    defineZone(c, { name: 'hideout', color: '#7a6a55', rect: { x, y, w, h } });
+    return { ok: true, summary: `bandit hideout ${w}×${h} at (${x},${y})` };
+  },
+};
+
 // ── Registry ───────────────────────────────────────────────────────────────────
 
 /** Placeable id → definition. Add a structure by adding an entry; nothing else. */
@@ -439,6 +529,10 @@ export const FEATURE_REGISTRY: Record<string, MapFeatureDef> = {
   [tavern.id]: tavern,
   [building.id]: building,
   [ruin.id]: ruin,
+  [shrine.id]: shrine,
+  [farmstead.id]: farmstead,
+  [mine.id]: mine,
+  [banditHideout.id]: banditHideout,
 };
 
 export const FEATURE_IDS: readonly string[] = Object.keys(FEATURE_REGISTRY);
