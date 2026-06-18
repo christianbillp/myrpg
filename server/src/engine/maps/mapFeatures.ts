@@ -804,6 +804,108 @@ function windingThread(len: number, centre: number, maxDev: number, rng: () => n
 }
 
 /**
+ * Route a road between two cells (Roadmap v2 · G2) — a shortest 4-connected path
+ * over `roadable` cells (avoiding `blocked`), as an ordered cell list. `goal` is
+ * always reachable even if not itself roadable (it's the cell at a structure's
+ * doorstep). Returns null if no route exists.
+ */
+function routeThread(c: MapCanvas, start: [number, number], goal: [number, number], blocked: Set<string>): Array<[number, number]> | null {
+  const key = (x: number, y: number): string => `${x},${y}`;
+  const prev = new Map<string, string | null>([[key(start[0], start[1]), null]]);
+  const q: Array<[number, number]> = [start];
+  const gk = key(goal[0], goal[1]);
+  while (q.length) {
+    const [x, y] = q.shift()!;
+    if (x === goal[0] && y === goal[1]) break;
+    for (const [dx, dy] of [[0, -1], [0, 1], [-1, 0], [1, 0]] as const) {
+      const nx = x + dx, ny = y + dy, kk = key(nx, ny);
+      if (!c.inBounds(nx, ny) || prev.has(kk)) continue;
+      const isGoal = nx === goal[0] && ny === goal[1];
+      if (!isGoal && (!roadable(c, nx, ny) || blocked.has(kk))) continue;
+      prev.set(kk, key(x, y));
+      q.push([nx, ny]);
+    }
+  }
+  if (!prev.has(gk)) return null;
+  const path: Array<[number, number]> = [];
+  let cur: string | null = gk;
+  while (cur) { const [x, y] = cur.split(',').map(Number); path.push([x, y]); cur = prev.get(cur) ?? null; }
+  return path.reverse();
+}
+
+/**
+ * Lay a road from a map edge up to each placed structure's doorstep (Roadmap v2 ·
+ * M4/#4) — "a path leading to the tavern". Routes avoid every other footprint and
+ * merge with any existing road network (auto-tiled, intersection tiles only where
+ * roads truly cross). Idempotent-ish: re-tiles all path cells from the union.
+ */
+export function connectPlaceablesByRoad(base: ComposedMap, seed = 1): ComposedMap {
+  const placements = base.placements ?? [];
+  if (placements.length === 0) return base;
+  const c = rehydrate(base, seed);
+
+  // Footprint interiors are off-limits to a road (it must arrive at the wall, not
+  // cut through). The 1-ring is left open so the road can reach the doorstep.
+  const blocked = new Set<string>();
+  for (const p of placements) for (let yy = p.y; yy < p.y + p.h; yy++) for (let xx = p.x; xx < p.x + p.w; xx++) blocked.add(`${xx},${yy}`);
+
+  const pathCells = new Set<string>();
+  for (const z of base.zones ?? []) if (z.name === 'path') for (const cell of z.cells) pathCells.add(cell);
+
+  for (const p of placements) {
+    const target = doorstep(c, p, blocked);
+    if (!target) continue;
+    const start = nearestEdgeRoadable(c, target, blocked);
+    if (!start) continue;
+    const route = routeThread(c, start, target, blocked);
+    if (route) for (const [x, y] of route) pathCells.add(`${x},${y}`);
+  }
+
+  const inPath = (x: number, y: number): boolean => pathCells.has(`${x},${y}`);
+  for (const k of pathCells) {
+    const [x, y] = k.split(',').map(Number);
+    c.setObject(x, y, pathGidForMask(inPath(x, y - 1), inPath(x, y + 1), inPath(x + 1, y), inPath(x - 1, y)));
+    c.reserve(x, y);
+  }
+  const out = c.toComposedMap(base.name, base.description);
+  out.zones = [...(base.zones ?? []).filter((z) => z.name !== 'path')];
+  if (pathCells.size > 0) out.zones.push({ id: `zone_path_${(seed >>> 0).toString(16)}`, name: 'path', color: '#cc9966', cells: [...pathCells].sort() });
+  out.anchors = base.anchors;
+  out.placements = base.placements;
+  return out;
+}
+
+/** A roadable cell orthogonally adjacent to a footprint (the doorstep), preferring
+ *  the side facing a map edge so the approach reads naturally. */
+function doorstep(c: MapCanvas, p: PlacementRecord, blocked: Set<string>): [number, number] | null {
+  const mid = (a: number, b: number): number => a + (b >> 1);
+  const cands: Array<[number, number]> = [
+    [mid(p.x, p.w), p.y + p.h], [mid(p.x, p.w), p.y - 1],
+    [p.x - 1, mid(p.y, p.h)], [p.x + p.w, mid(p.y, p.h)],
+  ];
+  let best: [number, number] | null = null, bestEdge = Infinity;
+  for (const [x, y] of cands) {
+    if (!c.inBounds(x, y) || blocked.has(`${x},${y}`) || !roadable(c, x, y)) continue;
+    const edge = Math.min(x, y, c.width - 1 - x, c.height - 1 - y);
+    if (edge < bestEdge) { best = [x, y]; bestEdge = edge; }
+  }
+  return best;
+}
+
+/** The roadable map-edge cell nearest a target (scans the 4 borders). */
+function nearestEdgeRoadable(c: MapCanvas, target: [number, number], blocked: Set<string>): [number, number] | null {
+  let best: [number, number] | null = null, bestD = Infinity;
+  const consider = (x: number, y: number): void => {
+    if (blocked.has(`${x},${y}`) || !roadable(c, x, y)) return;
+    const d = Math.abs(x - target[0]) + Math.abs(y - target[1]);
+    if (d < bestD) { best = [x, y]; bestD = d; }
+  };
+  for (let x = 0; x < c.width; x++) { consider(x, 0); consider(x, c.height - 1); }
+  for (let y = 0; y < c.height; y++) { consider(0, y); consider(c.width - 1, y); }
+  return best;
+}
+
+/**
  * Lay roads onto a big map — the `path` / `intersection` features. A WINDING road
  * runs the long axis through the map centre (crossing the bands); `intersection`
  * adds the perpendicular cross-road. Roads paint only on `roadable` cells outside

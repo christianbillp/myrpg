@@ -22,7 +22,7 @@ import { composeDungeon } from './maps/dungeon.js';
 import { composeCave    } from './maps/cave.js';
 import { composeUrban   } from './maps/urban.js';
 import { makeZoneIdAlloc, mulberry32 } from './maps/shared.js';
-import { stampExtrasOnto, applyBigMapRoads, type StampSpec } from './maps/mapFeatures.js';
+import { stampExtrasOnto, applyBigMapRoads, connectPlaceablesByRoad, type StampSpec } from './maps/mapFeatures.js';
 import { composeRegions as composeRegionsImpl } from './maps/regions.js';
 import { tacticalAnalysisOfMap } from './maps/tactical.js';
 import { TERRAINS } from './mapTypes.js';
@@ -35,7 +35,7 @@ export { TERRAINS } from './mapTypes.js';
 export { WATER_FIRSTGID } from './mapTiles.js';
 // Feature recipe layer (Phase A) — named set-pieces stamped from the op toolbox,
 // plus the standalone "show me this set-piece" composer behind the editor chips.
-export { composeFeatureMap, stampFeatureOnto, stampExtrasOnto, restampPlaceable, FEATURE_REGISTRY, FEATURE_IDS, placeFeature, type StampSpec, type PlaceableParams } from './maps/mapFeatures.js';
+export { composeFeatureMap, stampFeatureOnto, stampExtrasOnto, restampPlaceable, connectPlaceablesByRoad, FEATURE_REGISTRY, FEATURE_IDS, placeFeature, type StampSpec, type PlaceableParams } from './maps/mapFeatures.js';
 // Tactical analysis (Roadmap v2 · G1) — fighting-shape metrics off the passable grid.
 export { tacticalAnalysis, tacticalAnalysisOfMap } from './maps/tactical.js';
 export type { TacticalMetrics } from './mapTypes.js';
@@ -173,11 +173,15 @@ export function composeTerrainWithFeature(opts: {
   maxTries?: number;
   /** Attach `tactical` metrics and prefer a non-degenerate layout (Roadmap v2 · M1). */
   tactical?: boolean;
+  /** Route a path from a map edge to each placed structure's doorstep (M4/#4). */
+  roadToPlaceables?: boolean;
 }): ComposedMap {
-  return composeWithExtrasRetry(
-    (seed) => composeMap({ width: opts.width, height: opts.height, terrain: opts.terrain, features: opts.features ?? [], structures: opts.structures, seed }),
-    buildStamps(undefined, opts.feature, opts.placeables), (opts.seed ?? Date.now()) & 0xffffffff, opts.maxTries ?? 10, opts.tactical ?? false,
+  const seed = (opts.seed ?? Date.now()) & 0xffffffff;
+  const map = composeWithExtrasRetry(
+    (s) => composeMap({ width: opts.width, height: opts.height, terrain: opts.terrain, features: opts.features ?? [], structures: opts.structures, seed: s }),
+    buildStamps(undefined, opts.feature, opts.placeables), seed, opts.maxTries ?? 10, opts.tactical ?? false,
   );
+  return opts.roadToPlaceables ? connectPlaceablesByRoad(map, seed) : map;
 }
 
 /**
@@ -201,14 +205,18 @@ export function composeRegionsWithExtras(opts: {
   maxTries?: number;
   /** Attach `tactical` metrics and prefer a non-degenerate layout (Roadmap v2 · M1). */
   tactical?: boolean;
+  /** Route a path from a map edge to each placed structure's doorstep (M4/#4). */
+  roadToPlaceables?: boolean;
 }): ComposedMap {
-  return composeWithExtrasRetry(
-    (seed) => {
-      const base = composeRegionsImpl({ width: opts.width, height: opts.height, regions: opts.regions, seed });
+  const seed = (opts.seed ?? Date.now()) & 0xffffffff;
+  const map = composeWithExtrasRetry(
+    (s) => {
+      const base = composeRegionsImpl({ width: opts.width, height: opts.height, regions: opts.regions, seed: s });
       return applyBigMapRoads(base, opts.features ?? [], enclosedRegionCells(base, opts.regions));
     },
-    buildStamps(opts.structures, opts.feature, opts.placeables), (opts.seed ?? Date.now()) & 0xffffffff, opts.maxTries ?? 10, opts.tactical ?? false,
+    buildStamps(opts.structures, opts.feature, opts.placeables), seed, opts.maxTries ?? 10, opts.tactical ?? false,
   );
+  return opts.roadToPlaceables ? connectPlaceablesByRoad(map, seed) : map;
 }
 
 /** Cells belonging to cave/dungeon regions — roads must not enter these. The
