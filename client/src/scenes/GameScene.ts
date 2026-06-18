@@ -521,6 +521,16 @@ export class GameScene extends Phaser.Scene {
     }
     const event = this.eventQueue.shift()!;
     this.animating = true;
+    // Parallel AoE (Animation Roadmap · M3): beats that resolved at one instant
+    // share a `group` id. Fire every OTHER beat in the same group NOW, as
+    // fire-and-forget, so a fireball's five targets flash + pop simultaneously
+    // and the queue resumes after a single beat's dwell — not five in series.
+    const group = (event as { group?: number }).group;
+    if (group !== undefined) {
+      while (this.eventQueue.length > 0 && (this.eventQueue[0] as { group?: number }).group === group) {
+        this.animateGroupedBeat(this.eventQueue.shift()!);
+      }
+    }
     if (event.type === "entity_move") {
       // Highlight the moving entity's chip while their animation plays —
       // refresh the HUD immediately so the bar updates the moment the
@@ -663,6 +673,31 @@ export class GameScene extends Phaser.Scene {
     }
     this.animating = false;
     this.processNextEvent();
+  }
+
+  /** Animate one beat of a simultaneous group (Animation Roadmap · M3) WITHOUT
+   *  resuming the queue — the head beat of the group owns the resume, so the
+   *  whole group plays at once. Covers the beat types AoE fans out: damage,
+   *  heal, condition_changed. */
+  private animateGroupedBeat(ev: GameEvent): void {
+    if (ev.type === "damage") {
+      const tile = this.tileOf(ev.entityId);
+      if (tile) this.spawnFloatingNumber(tile.x, tile.y, `-${ev.amount}`, '#ff5a5a');
+      if (ev.entityId === 'player' && this.player) this.player.flashHit(ev.newHp, this.playerDef.maxHp, () => {});
+      else this.npcTokens.get(ev.entityId)?.flashHit(ev.newHp, () => {});
+    } else if (ev.type === "heal") {
+      const tile = this.tileOf(ev.entityId);
+      if (tile) this.spawnFloatingNumber(tile.x, tile.y, `+${ev.amount}`, '#5aff8c');
+      if (ev.entityId === 'player' && this.player) this.player.setHp(ev.newHp, this.playerDef.maxHp);
+      else this.npcTokens.get(ev.entityId)?.setHp(ev.newHp);
+    } else if (ev.type === "condition_changed") {
+      const tile = this.tileOf(ev.entityId);
+      if (tile) {
+        const sign = ev.change === 'applied' ? '+' : '−';
+        const color = ev.change === 'applied' ? '#ffd166' : '#9aa7b5';
+        this.spawnFloatingNumber(tile.x, tile.y, `${sign}${ev.condition}`, color);
+      }
+    }
   }
 
   /** Current tile of an entity ('player' or an npc id), from its live token. */

@@ -56,7 +56,7 @@ import { resolveUtilitySpell, castEnlargeReduce } from './SpellUtilityResolvers.
 function addConditionBeat(ctx: GameContext, target: NpcState, c: string): void {
   if (target.conditions.includes(c)) return;
   target.conditions.push(c);
-  ctx.eventSink?.push({ type: 'condition_changed', entityId: target.id, condition: c, change: 'applied' });
+  ctx.eventSink?.push({ type: 'condition_changed', entityId: target.id, condition: c, change: 'applied', group: ctx.beatGroup ?? undefined });
 }
 import { npcSaveMod } from './CombatSystem.js';
 import { tryNpcCounterspell, tryNpcShieldVsSpellAttack } from './NpcSpellcasting.js';
@@ -700,6 +700,11 @@ function resolveSaveSpell(
   });
 
   let anyAffected = false;
+  // Animation Roadmap · M3: an AoE that strikes several creatures at once stamps
+  // all its damage/condition beats with one group id so the client animates them
+  // simultaneously. Single-target save spells stay ungrouped (unchanged).
+  const multiTarget = targets.length + (playerHit ? 1 : 0) > 1;
+  if (multiTarget) ctx.beatGroup = ctx.nextBeatGroup();
   for (const target of targets) {
     const def = ctx.resolveMonsterDef(target.defId);
     if (!def) continue;
@@ -793,6 +798,7 @@ function resolveSaveSpell(
       anyAffected = true;
     }
   }
+  ctx.beatGroup = null; // close the simultaneous-beat group (no-op when never opened)
   return anyAffected;
 }
 

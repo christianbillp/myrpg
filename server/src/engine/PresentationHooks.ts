@@ -23,7 +23,7 @@ export function registerPresentationHooks(ctx: GameContext): void {
       ? ctx.state.player.hp
       : ctx.state.npcs.find((n) => n.id === e.target)?.hp;
     if (newHp === undefined) return;
-    ctx.eventSink?.push({ type: 'damage', entityId: e.target, amount: e.amount, newHp });
+    ctx.eventSink?.push({ type: 'damage', entityId: e.target, amount: e.amount, newHp, group: ctx.beatGroup ?? undefined });
   });
 
   ctx.bus.subscribe('npc_killed', (e) => {

@@ -270,6 +270,8 @@ export function buildTestContext(overrides: TestContextOverrides = {}): TestCont
     publish(event) { bus.publish(event); },
     removeNpc(id) { state.npcs = state.npcs.filter((n) => n.id !== id); },
     eventSink: events,
+    beatGroup: null,
+    nextBeatGroup: (() => { let n = 0; return () => ++n; })(),
     isConstructing: false,
     engineRef: null,
   };

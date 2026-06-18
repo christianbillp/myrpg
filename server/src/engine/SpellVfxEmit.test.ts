@@ -7,6 +7,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { doCastSpell } from './SpellSystem.js';
+import { registerPresentationHooks } from './PresentationHooks.js';
 import { buildTestContext, makeNpc } from '../test/buildTestContext.js';
 import type { SpellDef, MonsterDef } from './types.js';
 
@@ -70,6 +71,32 @@ describe('Spell cast VFX emission', () => {
     doCastSpell(ctx, 'ray-of-frost', 0, ['gob'], undefined, false, events);
     expect(events.find((e) => e.type === 'condition_changed'))
       .toMatchObject({ type: 'condition_changed', entityId: 'gob', condition: 'slowed', change: 'applied' });
+  });
+
+  it('groups an AoE\'s damage beats so they animate at once (Roadmap · M3)', () => {
+    const fireball = loadSpell('fireball');
+    const dummy = {
+      id: 'dummy', name: 'Dummy', type: 'Medium Humanoid', maxHp: 80, ac: 10,
+      str: 10, dex: 10, con: 10, int: 10, wis: 10, cha: 10, proficiencyBonus: 2, initiativeBonus: 0,
+      stealthBonus: 0, passivePerception: 10, speed: 30, attacks: [], xp: 0, cr: '1', color: 0x888, tokenAsset: 'x.svg', size: 'medium',
+    } as unknown as MonsterDef;
+    const { ctx, events } = buildTestContext({
+      phase: 'player_turn',
+      player: { tileX: 0, tileY: 0, spellSlots: [4, 4, 4], preparedSpellIds: ['fireball'] },
+      playerDef: { spellcastingAbility: 'int', int: 16, proficiencyBonus: 2 },
+      monsters: [dummy],
+      npcs: [
+        makeNpc({ id: 'gob1', defId: 'dummy', tileX: 6, tileY: 6, hp: 80, maxHp: 80, disposition: 'enemy' }),
+        makeNpc({ id: 'gob2', defId: 'dummy', tileX: 7, tileY: 6, hp: 80, maxHp: 80, disposition: 'enemy' }),
+      ],
+    });
+    ctx.defs.spells.push(fireball);
+    registerPresentationHooks(ctx); // damage beats route through the bus → this bridge
+    doCastSpell(ctx, 'fireball', 3, undefined, { x: 6, y: 6 }, false, events);
+    const dmg = events.filter((e) => e.type === 'damage') as Array<{ group?: number }>;
+    expect(dmg.length).toBeGreaterThanOrEqual(2);
+    expect(dmg.every((d) => d.group !== undefined)).toBe(true);
+    expect(new Set(dmg.map((d) => d.group)).size).toBe(1); // one shared group
   });
 
   it('orders the cast vfx before the heal beat', () => {

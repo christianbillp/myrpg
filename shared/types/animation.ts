@@ -23,15 +23,19 @@ export type GameEvent =
   /** A creature took `amount` damage, leaving it at `newHp`. The client
    *  animates that token's HP bar down to `newHp`, flashes it, and floats a
    *  damage number — at this beat, not at queue end. */
-  | { type: 'damage'; entityId: string; amount: number; newHp: number; damageType?: string }
+  // `group` (Animation Roadmap · M3): beats that resolved at the SAME instant —
+  // e.g. one AoE's damage to every target — share a group id, so the client
+  // animates them concurrently (one combined dwell) instead of marching through
+  // them one at a time. Omitted = an independent, serially-animated beat.
+  | { type: 'damage'; entityId: string; amount: number; newHp: number; damageType?: string; group?: number }
   /** A creature regained HP, leaving it at `newHp`. Mirror of `damage`. */
-  | { type: 'heal'; entityId: string; amount: number; newHp: number }
+  | { type: 'heal'; entityId: string; amount: number; newHp: number; group?: number }
   /** A creature dropped to 0 HP. The client runs its death fade at this beat
    *  and frees the tile, rather than the token snapping to 40% alpha at end. */
   | { type: 'death'; entityId: string }
   /** A condition was applied to / removed from a creature — drives a condition
    *  pip toggle at this beat. */
-  | { type: 'condition_changed'; entityId: string; condition: string; change: 'applied' | 'removed' }
+  | { type: 'condition_changed'; entityId: string; condition: string; change: 'applied' | 'removed'; group?: number }
   /** Turn-order boundaries surfaced to the client so the Turn Order Bar
    *  highlight tracks the animation timeline rather than the final state. */
   | { type: 'turn_started'; combatantId: string }

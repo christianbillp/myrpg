@@ -66,6 +66,16 @@ export interface GameContext {
   eventSink: GameEvent[] | null;
 
   /**
+   * The current simultaneous-beat group id (Animation Roadmap · M3), or null
+   * when not grouping. An AoE resolver opens a group, deals its damage/conditions
+   * to every target, then clears it; beat emitters (`PresentationHooks`, the
+   * spell condition helper) stamp this onto each beat so the client animates the
+   * whole group at once. `nextBeatGroup()` allocates a fresh id.
+   */
+  beatGroup: number | null;
+  nextBeatGroup(): number;
+
+  /**
    * True only during `GameEngine`'s constructor, while the encounter_started
    * triggers are firing. Read by `doStartCombat` to know it should defer
    * `advanceTurn` — the first enemy turn must not run inside session

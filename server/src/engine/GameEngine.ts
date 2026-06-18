@@ -137,6 +137,8 @@ export class GameEngine {
    *  state_update so intro cinematics land the moment the client connects.
    *  See `consumeStartupEvents()`. */
   private startupEvents: GameEvent[] = [];
+  /** Monotonic allocator for simultaneous-beat group ids (Animation Roadmap · M3). */
+  private beatGroupSeq = 0;
 
   constructor(state: GameState, defs: GameDefs, levelUpHistory: LevelUpChoices[] = []) {
     this.state = state;
@@ -394,6 +396,8 @@ export class GameEngine {
       publish: (event) => this.bus.publish(event),
       removeNpc: (id) => this.removeNpcFromEncounter(id),
       eventSink: null,
+      beatGroup: null,
+      nextBeatGroup: () => ++this.beatGroupSeq,
       isConstructing: false,
       engineRef: {
         fireSingleAction: (action) => triggerFireAction(this.ctx, action),
