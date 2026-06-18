@@ -23,7 +23,7 @@ import { SpellVfx } from "../ui/SpellVfx";
 import { SpeechInputBubble } from "../ui/SpeechInputBubble";
 import { ScreenEffects } from "../ui/ScreenEffects";
 import { Cinematic } from "../ui/Cinematic";
-import { playSound } from "../ui/SoundLibrary";
+import { playSound, preloadSounds } from "../ui/SoundLibrary";
 import { UIScale } from "../ui/UIScale";
 import { GridView } from "../systems/GridView";
 import { VisionMask } from "../systems/VisionMask";
@@ -258,6 +258,7 @@ export class GameScene extends Phaser.Scene {
 
   create(): void {
     this.uiScale = new UIScale(this.sys.game.canvas, GAME_W, GAME_H);
+    preloadSounds(); // warm the SFX cache so the first hit/cast plays in sync (M7)
 
     this.gridView = new GridView(this);
     this.highlightLayer = this.add.graphics();

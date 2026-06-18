@@ -33,6 +33,11 @@ describe('Spell cast VFX emission', () => {
     doCastSpell(ctx, 'bless', 1, undefined, undefined, false, events);
     const vfx = events.find((e) => e.type === 'spell_vfx');
     expect(vfx).toMatchObject({ type: 'spell_vfx', style: bless.vfx!.style, palette: bless.vfx!.palette, fromId: 'player' });
+    // A cast SFX cue rides the timeline right after the visual (M7).
+    const types = events.map((e) => e.type);
+    const sound = events.find((e) => e.type === 'play_sound');
+    expect(sound).toMatchObject({ type: 'play_sound', sound: 'spell_cast' });
+    expect(types.indexOf('spell_vfx')).toBeLessThan(types.indexOf('play_sound'));
   });
 
   it('a healing spell emits a heal beat with the new HP', () => {

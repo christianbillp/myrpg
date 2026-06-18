@@ -1197,6 +1197,9 @@ export function doCastSpell(
       toX: toTile?.x, toY: toTile?.y,
       shape: spell.vfx.shape, radiusFeet: spell.vfx.radiusFeet, count: spell.vfx.count,
     });
+    // A cast SFX cue on the timeline, ordered right after the visual (Animation
+    // Roadmap · M7) — physical attacks already emit their hit/miss sounds.
+    events.push({ type: 'play_sound', sound: 'spell_cast' });
   }
 
   // US-124: the scroll is expended on casting (regardless of hit/miss).
