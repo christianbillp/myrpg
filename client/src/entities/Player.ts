@@ -104,6 +104,21 @@ export class Player {
     });
   }
 
+  /** A quick sidestep perpendicular to an incoming attack — the whiff/dodge on a
+   *  miss (Animation Roadmap · M4). Fire-and-forget; returns to the tile centre. */
+  dodge(fromDx: number, fromDy: number): void {
+    const cx = this.tileX * TILE_SIZE + TILE_SIZE / 2;
+    const cy = this.tileY * TILE_SIZE + TILE_SIZE / 2;
+    const len = Math.hypot(fromDx, fromDy) || 1;
+    const px = -fromDy / len, py = fromDx / len;
+    this.scene.tweens.add({
+      targets: this.container,
+      x: cx + px * TILE_SIZE * 0.3, y: cy + py * TILE_SIZE * 0.3,
+      duration: scaleDuration(TIMING.lungeMs), yoyo: true, ease: 'Quad.easeOut',
+      onComplete: () => this.container.setPosition(cx, cy),
+    });
+  }
+
   /** Drop the HP bar to `newHp` and pop the token — the damage-impact beat. */
   flashHit(newHp: number, maxHp: number, onComplete: () => void): void {
     this.setHp(newHp, maxHp);

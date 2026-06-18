@@ -18,6 +18,7 @@ import { SpellOptionPicker } from "../ui/SpellOptionPicker";
 import { SpeechBubbles, speechReadMs } from "../ui/SpeechBubbles";
 import { scaleDuration } from "../animationSpeed";
 import { TIMING } from "../animationTimings";
+import { prefersReducedMotion } from "../reducedMotion";
 import { SpellVfx } from "../ui/SpellVfx";
 import { SpeechInputBubble } from "../ui/SpeechInputBubble";
 import { ScreenEffects } from "../ui/ScreenEffects";
@@ -597,12 +598,20 @@ export class GameScene extends Phaser.Scene {
       const fromTile = this.tileOf(event.fromId);
       const toTile = event.toId ? this.tileOf(event.toId)
         : (event.toX !== undefined && event.toY !== undefined ? { x: event.toX, y: event.toY } : null);
+      if (event.style === "area-burst") this.impactShake(0.005);
       this.spellVfx.play(event, fromTile, toTile, () => { this.animating = false; this.processNextEvent(); });
       return;
     } else if (event.type === "attack") {
-      // Attack swing — lunge the attacker toward the target, then continue.
+      // Attack swing — lunge the attacker toward the target, then continue. A
+      // crit punches the camera; a miss makes the target dodge (it whiffs).
       const tgt = this.tileOf(event.targetId);
       const atk = event.attackerId === 'player' ? this.player : this.npcTokens.get(event.attackerId);
+      if (event.outcome === "crit") this.impactShake(0.006);
+      if (event.outcome === "miss" && !prefersReducedMotion()) {
+        const dodger = event.targetId === 'player' ? this.player : this.npcTokens.get(event.targetId);
+        const src = this.tileOf(event.attackerId);
+        if (dodger && src && tgt) dodger.dodge(tgt.x - src.x, tgt.y - src.y);
+      }
       if (atk && tgt) {
         atk.lungeToward(tgt.x, tgt.y, () => { this.animating = false; this.processNextEvent(); });
         return;
@@ -630,6 +639,7 @@ export class GameScene extends Phaser.Scene {
     } else if (event.type === "death") {
       const deadToken = this.npcTokens.get(event.entityId);
       if (deadToken) {
+        this.impactShake(0.004);
         deadToken.fadeToDead(() => { this.animating = false; this.processNextEvent(); });
         return;
       }
@@ -673,6 +683,14 @@ export class GameScene extends Phaser.Scene {
     }
     this.animating = false;
     this.processNextEvent();
+  }
+
+  /** A brief camera punch on impact (Animation Roadmap · M4) — crits, big AoE
+   *  bursts, deaths. Suppressed under reduced motion; scaled by Combat Speed so
+   *  it reads at every speed. */
+  private impactShake(intensity: number, durationMs = 110): void {
+    if (prefersReducedMotion()) return;
+    this.cameras.main.shake(scaleDuration(durationMs), intensity);
   }
 
   /** Animate one beat of a simultaneous group (Animation Roadmap · M3) WITHOUT
