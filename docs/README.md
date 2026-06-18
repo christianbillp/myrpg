@@ -34,6 +34,7 @@ SRD 5.2.1 RPG with an AI Game Master. Start with the signpost for your role.
 - [design/systems/ambient-conversations.md](./design/systems/ambient-conversations.md) — idle NPCs talk to each other (banter packs, witness gating) to make scenes feel alive (US-129).
 - [design/systems/animation-timeline.md](./design/systems/animation-timeline.md) — the ordered combat-beat timeline the client animates.
 - [design/systems/improvised-actions.md](./design/systems/improvised-actions.md) — first-class resolution of free-text creative actions (US-121).
+- [design/systems/map-generation.md](./design/systems/map-generation.md) — the deterministic + agentic map system: layering, terrain variants, the placeable registry, tactical metrics, routing, river/bridge.
 
 **Guides** — task recipes.
 - [guides/getting-started.md](./guides/getting-started.md) — run it locally.
