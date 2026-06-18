@@ -30,4 +30,24 @@ export function registerPresentationHooks(ctx: GameContext): void {
     if (e.type !== 'npc_killed') return;
     ctx.eventSink?.push({ type: 'death', entityId: e.npcId });
   });
+
+  // Turn boundaries → timeline beats, so the client's Turn Order Bar highlight and
+  // the "turn breath" between combatants ride the animation timeline rather than
+  // snapping to the final state (Roadmap · M1). Already published to the bus by
+  // the combat-flow / NPC-turn runners — this only projects them to the client.
+  ctx.bus.subscribe('turn_started', (e) => {
+    if (e.type !== 'turn_started') return;
+    ctx.eventSink?.push({ type: 'turn_started', combatantId: e.combatantId });
+  });
+  ctx.bus.subscribe('turn_ended', (e) => {
+    if (e.type !== 'turn_ended') return;
+    ctx.eventSink?.push({ type: 'turn_ended', combatantId: e.combatantId });
+  });
+
+  // A noise → a "sound ring" beat at its origin, so audible events out of the
+  // player's line of sight get visual feedback on the timeline (Roadmap · M1).
+  ctx.bus.subscribe('noise', (e) => {
+    if (e.type !== 'noise') return;
+    ctx.eventSink?.push({ type: 'sound_ring', x: e.x, y: e.y, intensity: e.intensity });
+  });
 }

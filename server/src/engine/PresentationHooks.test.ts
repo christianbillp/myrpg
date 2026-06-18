@@ -37,6 +37,22 @@ describe('PresentationHooks bridge', () => {
     expect(events.find((e) => e.type === 'death')).toEqual({ type: 'death', entityId: 'gob' });
   });
 
+  it('projects turn_started / turn_ended → turn beats (Roadmap · M1)', () => {
+    const { ctx, events } = buildTestContext({ npcs: [makeNpc({ id: 'gob', tileX: 1, tileY: 0 })] });
+    registerPresentationHooks(ctx);
+    ctx.publish({ type: 'turn_started', combatantId: 'gob' });
+    ctx.publish({ type: 'turn_ended', combatantId: 'gob' });
+    expect(events.find((e) => e.type === 'turn_started')).toEqual({ type: 'turn_started', combatantId: 'gob' });
+    expect(events.find((e) => e.type === 'turn_ended')).toEqual({ type: 'turn_ended', combatantId: 'gob' });
+  });
+
+  it('projects noise → a sound_ring beat at the source (Roadmap · M1)', () => {
+    const { ctx, events } = buildTestContext({});
+    registerPresentationHooks(ctx);
+    ctx.publish({ type: 'noise', x: 4, y: 7, intensity: 5 });
+    expect(events.find((e) => e.type === 'sound_ring')).toEqual({ type: 'sound_ring', x: 4, y: 7, intensity: 5 });
+  });
+
   it('preserves order: a move pushed before damage stays before the damage beat', () => {
     const { ctx, events } = buildTestContext({
       npcs: [makeNpc({ id: 'gob', tileX: 1, tileY: 0, hp: 4, maxHp: 20 })],

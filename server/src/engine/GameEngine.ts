@@ -1089,14 +1089,17 @@ export class GameEngine {
 
   applyCondition(entity: string, condition: string, reason = 'aigm.apply_condition'): GameEvent[] {
     const s = this.state;
+    const beats: GameEvent[] = [];
     if (entity === 'player') {
       if (!s.player.conditions.includes(condition)) {
         s.player.conditions.push(condition);
         Logger.log('combat.condition_added', { entity: 'player', condition, reason });
+        beats.push({ type: 'condition_changed', entityId: 'player', condition, change: 'applied' });
       }
       if (condition === 'unconscious' && !s.player.conditions.includes('prone')) {
         s.player.conditions.push('prone');
         Logger.log('combat.condition_added', { entity: 'player', condition: 'prone', reason: 'unconscious_implies_prone' });
+        beats.push({ type: 'condition_changed', entityId: 'player', condition: 'prone', change: 'applied' });
       }
     } else {
       const npc = this.resolveNpcByEntity(entity);
@@ -1112,21 +1115,25 @@ export class GameEngine {
       if (npc && !npc.conditions.includes(condition)) {
         npc.conditions.push(condition);
         Logger.log('combat.condition_added', { entity: npc.id, defId: npc.defId, condition, reason });
+        beats.push({ type: 'condition_changed', entityId: npc.id, condition, change: 'applied' });
       }
       if (condition === 'unconscious' && npc && !npc.conditions.includes('prone')) {
         npc.conditions.push('prone');
         Logger.log('combat.condition_added', { entity: npc.id, defId: npc.defId, condition: 'prone', reason: 'unconscious_implies_prone' });
+        beats.push({ type: 'condition_changed', entityId: npc.id, condition: 'prone', change: 'applied' });
       }
     }
-    return [];
+    return beats;
   }
 
   removeCondition(entity: string, condition: string, reason = 'aigm.remove_condition'): GameEvent[] {
     const s = this.state;
+    const beats: GameEvent[] = [];
     if (entity === 'player') {
       if (s.player.conditions.includes(condition)) {
         s.player.conditions = s.player.conditions.filter((c) => c !== condition);
         Logger.log('combat.condition_removed', { entity: 'player', condition, reason });
+        beats.push({ type: 'condition_changed', entityId: 'player', condition, change: 'removed' });
       }
     } else {
       const npc = this.resolveNpcByEntity(entity);
@@ -1137,6 +1144,7 @@ export class GameEngine {
         if (npc.conditions.includes(condition)) {
           npc.conditions = npc.conditions.filter((c) => c !== condition);
           Logger.log('combat.condition_removed', { entity: npc.id, defId: npc.defId, condition, reason });
+          beats.push({ type: 'condition_changed', entityId: npc.id, condition, change: 'removed' });
         }
         // US-092: when Charm Person's `charmed` condition ends, restore the
         // pre-cast social attitude. The condition might also be removed by
@@ -1150,7 +1158,7 @@ export class GameEngine {
         }
       }
     }
-    return [];
+    return beats;
   }
 
   /**

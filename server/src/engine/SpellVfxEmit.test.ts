@@ -8,7 +8,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { doCastSpell } from './SpellSystem.js';
 import { buildTestContext, makeNpc } from '../test/buildTestContext.js';
-import type { SpellDef } from './types.js';
+import type { SpellDef, MonsterDef } from './types.js';
 
 const loadSpell = (id: string): SpellDef =>
   JSON.parse(readFileSync(join(__dirname, '../../data/spells', `${id}.json`), 'utf-8')) as SpellDef;
@@ -47,6 +47,29 @@ describe('Spell cast VFX emission', () => {
     expect(heal).toMatchObject({ type: 'heal', entityId: 'player' });
     expect((heal as { newHp: number }).newHp).toBe(state.player.hp);
     expect(state.player.hp).toBeGreaterThan(1);
+  });
+
+  it('emits a condition_changed beat when a spell applies a condition (Roadmap · M1)', () => {
+    const rayOfFrost = loadSpell('ray-of-frost');
+    const dummy = {
+      id: 'dummy', name: 'Dummy', type: 'Medium Humanoid', maxHp: 80, ac: 10,
+      str: 10, dex: 10, con: 10, int: 10, wis: 10, cha: 10, proficiencyBonus: 2, initiativeBonus: 0,
+      stealthBonus: 0, passivePerception: 10, speed: 30, attacks: [], xp: 0, cr: '1', color: 0x888, tokenAsset: 'x.svg', size: 'medium',
+    } as unknown as MonsterDef;
+    const { ctx, events } = buildTestContext({
+      phase: 'player_turn',
+      player: { tileX: 0, tileY: 0 },
+      // A huge spell-attack bonus vs AC 10 guarantees the hit, so the on-hit
+      // `slowed` rider (and its condition beat) always fires.
+      playerDef: { spellcastingAbility: 'int', int: 40, proficiencyBonus: 2, defaultCantripIds: ['ray-of-frost'] },
+      monsters: [dummy],
+      npcs: [makeNpc({ id: 'gob', defId: 'dummy', tileX: 2, tileY: 0, hp: 80, maxHp: 80, disposition: 'enemy' })],
+    });
+    ctx.defs.spells.push(rayOfFrost);
+    ctx.state.selectedTargetId = 'gob';
+    doCastSpell(ctx, 'ray-of-frost', 0, ['gob'], undefined, false, events);
+    expect(events.find((e) => e.type === 'condition_changed'))
+      .toMatchObject({ type: 'condition_changed', entityId: 'gob', condition: 'slowed', change: 'applied' });
   });
 
   it('orders the cast vfx before the heal beat', () => {

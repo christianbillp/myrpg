@@ -49,6 +49,15 @@ import {
   applyZoneCondition, registerActiveZone, stripZoneAffectedConditions,
 } from './SpellZones.js';
 import { resolveUtilitySpell, castEnlargeReduce } from './SpellUtilityResolvers.js';
+
+/** Apply a condition to a creature AND emit the `condition_changed` timeline beat
+ *  the client animates (Roadmap · M1). No-op (and no duplicate beat) if the
+ *  creature already has the condition. */
+function addConditionBeat(ctx: GameContext, target: NpcState, c: string): void {
+  if (target.conditions.includes(c)) return;
+  target.conditions.push(c);
+  ctx.eventSink?.push({ type: 'condition_changed', entityId: target.id, condition: c, change: 'applied' });
+}
 import { npcSaveMod } from './CombatSystem.js';
 import { tryNpcCounterspell, tryNpcShieldVsSpellAttack } from './NpcSpellcasting.js';
 export { npcSaveMod };
@@ -250,7 +259,7 @@ function resolveAttackRollSpell(
   // to avoid stacking the same rider twice.
   if (!options?.suppressRiders) {
     for (const c of normaliseConditionList(spell.effect?.onHit)) {
-      if (!target.conditions.includes(c)) target.conditions.push(c);
+      addConditionBeat(ctx, target, c);
       ctx.addLog({ left: `${combatantDisplayName(target, ctx.state.npcs)} ${onHitConditionNote(c)}`, style: 'status' });
     }
     // Delayed-self-damage rider (Acid Arrow). Scheduled at the end of the
@@ -341,7 +350,7 @@ function resolveOnHitSave(ctx: GameContext, spell: SpellDef, target: NpcState): 
   }
   const conds = normaliseConditionList(spell.effect.onFail);
   for (const c of conds) {
-    if (!target.conditions.includes(c)) target.conditions.push(c);
+    addConditionBeat(ctx, target, c);
   }
   ctx.addLog({
     left: `${combatantDisplayName(target, ctx.state.npcs)} ${conditionLogText(spell, conds)}`,
@@ -601,7 +610,7 @@ function resolveHpPoolSpell(
     const tDef = ctx.resolveMonsterDef(t.defId);
     const applicable = tDef ? conds.filter((c) => !npcConditionImmune(tDef, c)) : conds;
     for (const c of applicable) {
-      if (!t.conditions.includes(c)) t.conditions.push(c);
+      addConditionBeat(ctx, t, c);
     }
     // SRD Color Spray: "until the end of your next turn". Schedule the
     // condition strip via the existing ongoingEffects pipeline so the
@@ -721,14 +730,14 @@ function resolveSaveSpell(
       const immuneFilter = (c: string) => !targetDef || !npcConditionImmune(targetDef, c);
       const conds = !success ? normaliseConditionList(spell.effect.onFail).filter(immuneFilter) : [];
       for (const c of conds) {
-        if (!target.conditions.includes(c)) target.conditions.push(c);
+        addConditionBeat(ctx, target, c);
       }
       // On-success rider (same descriptor as the single-target path) — applied
       // without counting toward `anyAffected`, so a fully-saved AOE still won't
       // start concentration.
       if (success) {
         for (const c of normaliseConditionList(spell.effect.onSuccess).filter(immuneFilter)) {
-          if (!target.conditions.includes(c)) target.conditions.push(c);
+          addConditionBeat(ctx, target, c);
         }
       }
       // Bounded-duration condition spells (Color Spray "until end of your
@@ -836,7 +845,7 @@ function resolveSingleTargetSaveSpell(
     const immuneFilter = (c: string) => !targetDef || !npcConditionImmune(targetDef, c);
     const conds = !success ? normaliseConditionList(spell.effect.onFail).filter(immuneFilter) : [];
     for (const c of conds) {
-      if (!target.conditions.includes(c)) target.conditions.push(c);
+      addConditionBeat(ctx, target, c);
     }
     // Single-turn save spells (Command → Incapacitated until the end of the
     // target's next turn) schedule their own strip via the ongoingEffects
@@ -855,7 +864,7 @@ function resolveSingleTargetSaveSpell(
     // a fully-saved cast still doesn't trip concentration.
     if (success) {
       for (const c of normaliseConditionList(spell.effect.onSuccess).filter(immuneFilter)) {
-        if (!target.conditions.includes(c)) target.conditions.push(c);
+        addConditionBeat(ctx, target, c);
       }
     }
     ctx.addLog({
@@ -909,6 +918,7 @@ function resolveHealSpell(ctx: GameContext, spell: SpellDef, targetIds: string[]
     const before = ally.hp;
     ally.hp = Math.min(ally.maxHp, ally.hp + amount);
     if (before <= 0 && ally.hp > 0) {
+      for (const c of ['unconscious', 'stable']) if (ally.conditions.includes(c)) ctx.eventSink?.push({ type: 'condition_changed', entityId: ally.id, condition: c, change: 'removed' });
       ally.conditions = ally.conditions.filter((c) => c !== 'unconscious' && c !== 'stable');
     }
     ctx.addLog({ left: `${ctx.playerDef.name} casts ${spell.name} — ${combatantDisplayName(ally, s.npcs)} regains ${ally.hp - before} HP`, style: 'heal' });
