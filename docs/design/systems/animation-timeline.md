@@ -47,14 +47,26 @@ departures, `move_npc` walk paths). State-reconcile corrections **glide**
 420 ms, used for offsets ≤ 6 tiles) so nothing visibly teleports; longer
 jumps (resume, chapter transitions) snap deliberately.
 
-## Combat Speed
+## Combat Speed, timings & accessibility
 
 `client/src/animationSpeed.ts` — a global 1×/1.5×/2×/3× multiplier
 (localStorage `combatSpeed`, set from the Panel Setup Overlay's Configuration
-card). `scaleDuration` scales every combat-timeline duration — move tweens,
-speech dwells, turn breaths, condition dwells — with a 40 ms floor so tweens
-never read as teleports. **Cinematic story beats keep their authored
-pacing** — speeding those up would cheapen narrative moments, not combat.
+card). `scaleDuration` scales every combat-timeline duration with a 40 ms floor
+so tweens never read as teleports. **Cinematic story beats keep their authored
+pacing.** Every beat duration now lives in one place — `client/src/animationTimings.ts`
+(`TIMING`) — and the previously-unscaled durations (attack lunge, hit flash,
+floating numbers, death fade, all spell VFX) route through `scaleDuration`, so
+they no longer desync from movement at 2×/3×. Projectile/beam durations are
+**distance-aware** (`projectileDurationMs` / `beamDurationMs`).
+
+Control & accessibility:
+- **Fast-forward** — holding `TAB` (`setFastForward`) collapses every beat toward
+  the floor to rip through a long round, without touching the persisted speed.
+- **Reduced motion** — `client/src/reducedMotion.ts` (`prefers-reduced-motion` +
+  a persisted system/on/off override) suppresses camera shake and the dodge
+  whiff while keeping state correct.
+- **SFX volume / mute** — `client/src/sfxVolume.ts`, a global level the
+  `SoundLibrary` applies per play.
 
 ## Principles
 
@@ -67,9 +79,26 @@ pacing** — speeding those up would cheapen narrative moments, not combat.
   the client snaps to the final state — events are the rendering timeline,
   the state is the truth.
 
-## Remaining polish (tracked in `plans/pending-work.md`)
+## Parallel AoE (`group`)
+
+Beats that resolved at one instant — an AoE's damage/condition to every target —
+share a `group` id (stamped server-side via `ctx.beatGroup`, opened around the
+multi-target loop in `resolveSaveSpell`). The client (`GameScene.processNextEvent`
+→ `animateGroupedBeat`) fires every other beat in the group the moment the head
+beat starts, so a fireball's targets flash and pop **simultaneously** and the
+queue resumes after one dwell instead of marching through N. Single-target
+actions stay ungrouped (serial).
+
+## Impact & sound
+
+Crits, big AoE bursts, and deaths punch the camera (`impactShake`, reduced-motion
+aware); a missed attack makes its target **dodge** (the whiff); corpses **topple**
+to one side. Physical attacks and spell casts both emit ordered `play_sound`
+beats on the timeline (`spell_cast` after the `spell_vfx` beat); `preloadSounds()`
+warms the cache on encounter enter so the first cue plays in sync.
+
+## Remaining polish
 
 Reaction-pause refinement (`pendingReaction` splits a turn's beats across two
-responses) and the sound/VFX polish tail (per-spell palette tuning,
-distance-aware projectile durations, per-style SFX cues, bespoke
-teleport/illusion treatments).
+responses) and animated sprites (walk/idle/attack frame cycles) remain — the
+latter is an art-blocked epic; the tween-based system stands without it.
