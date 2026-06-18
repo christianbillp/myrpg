@@ -131,6 +131,19 @@ export interface PlacementRecord {
   interiorSeed: number;
 }
 
+/** Tactical read of a map's fighting shape (Roadmap v2 · G1). Computed by
+ *  `tacticalAnalysis` in `maps/tactical.ts`; attached to a composed map so the
+ *  encounter layer can place spawns by role and the composer can reject
+ *  degenerate layouts. */
+export interface TacticalMetrics {
+  openCells: number;
+  coverRatio: number;
+  openness: number;
+  chokepoints: Array<{ x: number; y: number }>;
+  holdZones: Array<{ cx: number; cy: number; size: number; entrances: number }>;
+  loops: number;
+}
+
 export interface ComposedMap {
   width: number;
   height: number;
@@ -149,4 +162,7 @@ export interface ComposedMap {
    *  no feature emitted any (so the saved JSON stays byte-identical to maps
    *  composed before zones existed). */
   zones?: MapZone[];
+  /** Tactical read of the map's fighting shape (Roadmap v2 · G1). Additive —
+   *  omitted unless a compose path requested it. */
+  tactical?: TacticalMetrics;
 }

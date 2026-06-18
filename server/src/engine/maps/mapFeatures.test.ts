@@ -7,7 +7,7 @@ import { describe, it, expect } from 'vitest';
 import { MapCanvas } from './MapCanvas.js';
 import { fillTerrain, passableRegions } from './mapOps.js';
 import { placeFeature, composeFeatureMap, stampFeatureOnto, stampExtrasOnto, restampPlaceable, applyBigMapRoads, FEATURE_REGISTRY, FEATURE_IDS } from './mapFeatures.js';
-import { composeMap, composeRegions, composeTerrainWithFeature, composeRegionsWithExtras } from '../MapComposer.js';
+import { composeMap, composeRegions, composeTerrainWithFeature, composeRegionsWithExtras, isDegenerateLayout } from '../MapComposer.js';
 import { WALL_RING, objectGid, groundGid } from './materials.js';
 
 function grassCanvas(w = 20, h = 16, seed = 1): MapCanvas {
@@ -547,6 +547,26 @@ describe('winding roads (Phase B #2)', () => {
         expect(isPath(m.objectData[y * m.width + x]), `road tile under structure at ${cell}`).toBe(false);
       }
     }
+  });
+});
+
+describe('tactical metrics (Roadmap v2 · M1)', () => {
+  it('attaches tactical metrics when requested, and they read a forest as non-degenerate', () => {
+    const m = composeTerrainWithFeature({ width: 30, height: 22, terrain: 'forest', feature: 'watchtower', seed: 3, tactical: true });
+    expect(m.tactical).toBeDefined();
+    expect(m.tactical!.openCells).toBeGreaterThan(0);
+    // A forest with a walled watchtower has cover and chokepoints — not degenerate.
+    expect(isDegenerateLayout(m.tactical!)).toBe(false);
+  });
+
+  it('omits metrics by default (additive, golden-safe)', () => {
+    const m = composeTerrainWithFeature({ width: 30, height: 22, terrain: 'forest', feature: 'watchtower', seed: 3 });
+    expect(m.tactical).toBeUndefined();
+  });
+
+  it('flags a no-cover open blob as degenerate, but not a map with cover + chokepoints', () => {
+    expect(isDegenerateLayout({ openCells: 600, coverRatio: 0, openness: 1, chokepoints: [], holdZones: [], loops: 0 })).toBe(true);
+    expect(isDegenerateLayout({ openCells: 600, coverRatio: 0.3, openness: 0.6, chokepoints: [{ x: 1, y: 1 }], holdZones: [], loops: 2 })).toBe(false);
   });
 });
 

@@ -24,8 +24,9 @@ import { composeUrban   } from './maps/urban.js';
 import { makeZoneIdAlloc, mulberry32 } from './maps/shared.js';
 import { stampExtrasOnto, applyBigMapRoads, type StampSpec } from './maps/mapFeatures.js';
 import { composeRegions as composeRegionsImpl } from './maps/regions.js';
+import { tacticalAnalysisOfMap } from './maps/tactical.js';
 import { TERRAINS } from './mapTypes.js';
-import type { ComposedMap, ComposeOptions, Terrain, Feature, StructureSpec, RegionSpec } from './mapTypes.js';
+import type { ComposedMap, ComposeOptions, Terrain, Feature, StructureSpec, RegionSpec, TacticalMetrics } from './mapTypes.js';
 
 // Re-export the types so existing call sites that import from
 // `engine/MapComposer.js` keep working without rerouting.
@@ -35,6 +36,9 @@ export { WATER_FIRSTGID } from './mapTiles.js';
 // Feature recipe layer (Phase A) — named set-pieces stamped from the op toolbox,
 // plus the standalone "show me this set-piece" composer behind the editor chips.
 export { composeFeatureMap, stampFeatureOnto, stampExtrasOnto, restampPlaceable, FEATURE_REGISTRY, FEATURE_IDS, placeFeature, type StampSpec, type PlaceableParams } from './maps/mapFeatures.js';
+// Tactical analysis (Roadmap v2 · G1) — fighting-shape metrics off the passable grid.
+export { tacticalAnalysis, tacticalAnalysisOfMap } from './maps/tactical.js';
+export type { TacticalMetrics } from './mapTypes.js';
 // `composeTerrainWithFeature` / `composeRegionsWithExtras` (extras stamped onto a
 // re-rolled-until-clean base) are defined below in this file.
 // Multi-region big maps (US-126) — bands of biomes with ecotone blends and
@@ -111,17 +115,33 @@ export function composeMap(opts: ComposeOptions): ComposedMap {
  * a valid map. If no try is perfectly clean within `maxTries`, the
  * least-disruptive wins. Works for ANY base (single terrain or a big map).
  */
-function composeWithExtrasRetry(makeBase: (seed: number) => ComposedMap, stamps: StampSpec[], baseSeed: number, maxTries: number): ComposedMap {
-  if (stamps.length === 0) return makeBase(baseSeed);
+function composeWithExtrasRetry(makeBase: (seed: number) => ComposedMap, stamps: StampSpec[], baseSeed: number, maxTries: number, tactical = false): ComposedMap {
+  const finalize = (map: ComposedMap, metrics: TacticalMetrics | null): ComposedMap => (metrics ? { ...map, tactical: metrics } : map);
+  if (stamps.length === 0) {
+    const base = makeBase(baseSeed);
+    return finalize(base, tactical ? tacticalAnalysisOfMap(base) : null);
+  }
   const tries = Math.max(1, maxTries);
-  let best: { map: ComposedMap; score: number } | null = null;
+  let best: { map: ComposedMap; metrics: TacticalMetrics | null; rank: number } | null = null;
   for (let i = 0; i < tries; i++) {
     const seed = (baseSeed + i) & 0xffffffff;
     const { map, score } = stampExtrasOnto(makeBase(seed), stamps, seed);
-    if (score === 0) return map;                       // clean fit — done
-    if (!best || score < best.score) best = { map, score };
+    const metrics = tactical ? tacticalAnalysisOfMap(map) : null;
+    const degenerate = metrics ? isDegenerateLayout(metrics) : false;
+    // A clean fit (nothing overwritten) that isn't tactically degenerate wins now.
+    if (score === 0 && !degenerate) return finalize(map, metrics);
+    // Otherwise rank: penalise degenerate layouts heavily, then prefer a cleaner fit.
+    const rank = (degenerate ? 1_000_000 : 0) + score;
+    if (!best || rank < best.rank) best = { map, metrics, rank };
   }
-  return best!.map;
+  return finalize(best!.map, best!.metrics);
+}
+
+/** A layout offers nothing for a fight to use: essentially no cover AND not a
+ *  single chokepoint to hold. (Skipped on tiny maps — too small to judge.) */
+export function isDegenerateLayout(m: TacticalMetrics): boolean {
+  if (m.openCells < 24) return false;
+  return m.coverRatio < 0.05 && m.chokepoints.length === 0;
 }
 
 /** One placeable as the route/editor send it — any registry id, with an optional
@@ -151,10 +171,12 @@ export function composeTerrainWithFeature(opts: {
   placeables?: PlaceableInput[];
   seed?: number;
   maxTries?: number;
+  /** Attach `tactical` metrics and prefer a non-degenerate layout (Roadmap v2 · M1). */
+  tactical?: boolean;
 }): ComposedMap {
   return composeWithExtrasRetry(
     (seed) => composeMap({ width: opts.width, height: opts.height, terrain: opts.terrain, features: opts.features ?? [], structures: opts.structures, seed }),
-    buildStamps(undefined, opts.feature, opts.placeables), (opts.seed ?? Date.now()) & 0xffffffff, opts.maxTries ?? 10,
+    buildStamps(undefined, opts.feature, opts.placeables), (opts.seed ?? Date.now()) & 0xffffffff, opts.maxTries ?? 10, opts.tactical ?? false,
   );
 }
 
@@ -177,13 +199,15 @@ export function composeRegionsWithExtras(opts: {
   features?: Feature[];
   seed?: number;
   maxTries?: number;
+  /** Attach `tactical` metrics and prefer a non-degenerate layout (Roadmap v2 · M1). */
+  tactical?: boolean;
 }): ComposedMap {
   return composeWithExtrasRetry(
     (seed) => {
       const base = composeRegionsImpl({ width: opts.width, height: opts.height, regions: opts.regions, seed });
       return applyBigMapRoads(base, opts.features ?? [], enclosedRegionCells(base, opts.regions));
     },
-    buildStamps(opts.structures, opts.feature, opts.placeables), (opts.seed ?? Date.now()) & 0xffffffff, opts.maxTries ?? 10,
+    buildStamps(opts.structures, opts.feature, opts.placeables), (opts.seed ?? Date.now()) & 0xffffffff, opts.maxTries ?? 10, opts.tactical ?? false,
   );
 }
 
