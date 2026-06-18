@@ -163,8 +163,13 @@ export function rollObjectGid(
   height: number,
   existingObj: number[],
   isWall: (x: number, y: number) => boolean,
+  /** Optional per-cell density multiplier (Roadmap v2 · M3/#6 density curves) —
+   *  e.g. an edge→interior ramp that clears a forest's centre. Default 1. */
+  densityScale?: (x: number, y: number) => number,
 ): number {
+  const scale = densityScale ? densityScale(x, y) : 1;
   for (const entry of palette.objectPool) {
+    const density = entry.density * scale;
     const radius = entry.spreadRadius ?? 2;
     if (entry.clustering === 'spread') {
       let crowded = false;
@@ -177,7 +182,7 @@ export function rollObjectGid(
         }
       }
       if (crowded) continue;
-      if (rng() < entry.density) return entry.gid;
+      if (rng() < density) return entry.gid;
       continue;
     }
     if (entry.clustering === 'clump') {
@@ -191,16 +196,29 @@ export function rollObjectGid(
         }
       }
       const factor = entry.clumpFactor ?? 2.5;
-      const p = Math.min(0.95, entry.density * (1 + sameNeighbours * (factor - 1)));
+      const p = Math.min(0.95, density * (1 + sameNeighbours * (factor - 1)));
       if (rng() < p) return entry.gid;
       continue;
     }
     if (entry.clustering === 'wall_adjacent') {
       const orthoWall = isWall(x - 1, y) || isWall(x + 1, y) || isWall(x, y - 1) || isWall(x, y + 1);
       if (!orthoWall) continue;
-      if (rng() < entry.density) return entry.gid;
+      if (rng() < density) return entry.gid;
       continue;
     }
   }
   return 0;
+}
+
+/** An edge→interior density ramp for the `clearing` feature: ~0 inside a central
+ *  glade radius, rising toward the map edge — so a forest reads as a ringed
+ *  treeline around open ground. */
+export function edgeRampDensity(width: number, height: number): (x: number, y: number) => number {
+  const cx = (width - 1) / 2, cy = (height - 1) / 2;
+  const maxD = Math.hypot(cx, cy) || 1;
+  return (x, y) => {
+    const d = Math.hypot(x - cx, y - cy) / maxD; // 0 centre … 1 corner
+    const t = Math.max(0, (d - 0.35) / 0.65);    // clear within 35% radius
+    return Math.min(3, t * t * 3);
+  };
 }

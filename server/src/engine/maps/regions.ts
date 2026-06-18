@@ -35,7 +35,7 @@
 import { BIOME_PALETTES, pickGroundGid, rollObjectGid, type BiomePalette } from '../../../../shared/biomePalettes.js';
 import type { ComposedMap, ComposeRegionsOptions, RegionSpec } from '../mapTypes.js';
 import { MapCanvas } from './MapCanvas.js';
-import { carveCorridor, placeHazard, wallAroundFloor, passableRegions } from './mapOps.js';
+import { carveCorridor, placeHazard, wallAroundFloor, passableRegions, paintRegion } from './mapOps.js';
 
 const MIN_BAND_TILES = 6;
 const BLEND_TILES = 3;
@@ -133,6 +133,10 @@ export function composeRegions(opts: ComposeRegionsOptions): ComposedMap {
   // spine — for enclosed regions the anchor is real carved floor. ──
   const anchorPoints: Array<{ x: number; y: number }> = [];
   const deferredHazards: Array<Parameters<typeof placeHazard>[1]> = [];
+  // Where each enclosed mouth opens into its open neighbour — used to paint an
+  // ecotone apron (Roadmap v2 · M3/#7) so the entrance reads as carved into the
+  // land, not pasted on.
+  const mouthAprons: Array<{ x: number; y: number; region: number; terrain: RegionSpec['terrain']; neighbourTerrain: RegionSpec['terrain'] }> = [];
   for (let i = 0; i < regions.length; i++) {
     const spec = regions[i];
     const bandLo = i === 0 ? 0 : baseBounds[i - 1];
@@ -165,6 +169,7 @@ export function composeRegions(opts: ComposeRegionsOptions): ComposedMap {
       floor: spec.terrain === 'dungeon' ? 'stone_floor' : 'cave_gravel',
       width: spec.terrain === 'dungeon' ? 1 : 2,
     });
+    mouthAprons.push({ x: mouthTarget.x, y: mouthTarget.y, region: neighbour, terrain: spec.terrain, neighbourTerrain: regions[neighbour].terrain });
   }
 
   // Rock faces: every void cell adjacent to floor becomes a wall — this is
@@ -179,6 +184,11 @@ export function composeRegions(opts: ComposeRegionsOptions): ComposedMap {
   // ── Scatter pass: every untouched natural-ground cell in an open region
   // rolls the (ecotone-blended) palette's object pool. ──
   applyBlendedObjectPool(c, regions, cellRegion, distToBoundary);
+
+  // ── Ecotone aprons at enclosed mouths (#7) — spill the rock terrain's ground
+  // (gravel / cracked stone) a few tiles into the open band around each mouth,
+  // thinning with distance. Ground-only (passable), so connectivity is untouched. ──
+  for (const ap of mouthAprons) paintMouthApron(c, ap, cellRegion);
 
   // ── Connectivity guarantee ──
   ensureConnected(c, anchorPoints);
@@ -227,6 +237,31 @@ function blendedPalette(
     if (rng() < mix) return paletteFor(regions[neighbourIdx].terrain);
   }
   return own;
+}
+
+/** Spill the rock terrain's ground a few tiles into the open neighbour band
+ *  around a mouth, thinning with distance — only over the open region's natural
+ *  ground (never corridors, water, or walls), and ground-only so nothing blocks. */
+function paintMouthApron(
+  c: MapCanvas,
+  ap: { x: number; y: number; region: number; terrain: RegionSpec['terrain']; neighbourTerrain: RegionSpec['terrain'] },
+  cellRegion: (x: number, y: number) => number,
+): void {
+  const R = 4;
+  const material = ap.terrain === 'dungeon' ? 'cracked_stone' : 'cave_gravel';
+  // Only spill over the open neighbour's own natural ground (its palette fills),
+  // never corridors / water / walls.
+  const naturalGround = new Set(paletteFor(ap.neighbourTerrain).groundPool.map((e) => e.gid));
+  for (let dy = -R; dy <= R; dy++) for (let dx = -R; dx <= R; dx++) {
+    const x = ap.x + dx, y = ap.y + dy;
+    if (!c.inBounds(x, y)) continue;
+    if (cellRegion(x, y) !== ap.region) continue;
+    const dist = Math.hypot(dx, dy);
+    if (dist > R) continue;
+    const g = c.getGround(x, y) & 0x1fffffff;
+    if (g === 0 || !naturalGround.has(g)) continue;
+    if (c.rng() < (1 - dist / (R + 1)) * 0.7) paintRegion(c, { cells: [{ x, y }], material, layer: 'ground' });
+  }
 }
 
 interface EnclosedBand {

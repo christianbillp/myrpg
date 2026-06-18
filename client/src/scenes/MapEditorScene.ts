@@ -63,11 +63,11 @@ interface EditTabHandle {
 }
 
 type Terrain = "grassland" | "forest" | "dungeon" | "cave" | "urban";
-type Feature = "campsites" | "coastline" | "path" | "intersection" | "3-room" | "5-room" | "stairs";
+type Feature = "campsites" | "coastline" | "path" | "intersection" | "3-room" | "5-room" | "stairs" | "clearing";
 
 const OUTSIDE_TERRAINS: Terrain[] = ["grassland", "forest", "urban"];
 const INSIDE_TERRAINS:  Terrain[] = ["dungeon", "cave"];
-const OUTSIDE_FEATURES: Feature[] = ["campsites", "coastline", "path", "intersection"];
+const OUTSIDE_FEATURES: Feature[] = ["campsites", "coastline", "path", "intersection", "clearing"];
 const INSIDE_FEATURES:  Feature[] = ["3-room", "5-room", "stairs"];
 
 /** Per-terrain whitelist of features the composer actually consumes. The
@@ -98,6 +98,7 @@ const FEATURE_LABEL: Record<Feature, string> = {
   "3-room": "3 ROOMS",
   "5-room": "5 ROOMS",
   stairs: "STAIRS",
+  clearing: "CLEARING",
 };
 
 /** Default canvas size when composing a single-terrain map carrying placeables

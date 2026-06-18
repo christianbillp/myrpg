@@ -95,7 +95,7 @@ export async function refineNpc(
  */
 export async function composeMap(args: {
   terrain?: 'grassland' | 'forest' | 'dungeon' | 'cave' | 'urban';
-  features?: Array<'campsites' | 'coastline' | 'path' | 'intersection' | '3-room' | '5-room' | 'stairs'>;
+  features?: Array<'campsites' | 'coastline' | 'path' | 'intersection' | '3-room' | '5-room' | 'stairs' | 'clearing'>;
   seed?: number;
   /** Buildings / ruins (type + connected-room count 1..5, + optional target
    *  region index on a big map). Baked into a single grassland/forest terrain, or
@@ -227,7 +227,7 @@ export async function saveMap(args: {
 export async function composeEncounter(args: {
   existingMapId?: string;
   terrain?: 'grassland' | 'forest' | 'dungeon' | 'cave' | 'urban';
-  features?: Array<'campsites' | 'coastline' | 'path' | 'intersection' | '3-room' | '5-room' | 'stairs'>;
+  features?: Array<'campsites' | 'coastline' | 'path' | 'intersection' | '3-room' | '5-room' | 'stairs' | 'clearing'>;
   structures?: Array<{ type: 'building' | 'ruin'; rooms: number; region?: number }>;
   /** Multi-region big-map bands (composed with placeable/road extras). */
   regions?: Array<{ terrain: 'grassland' | 'forest' | 'urban' | 'cave' | 'dungeon'; share?: number; name?: string; light?: 'bright' | 'dim' | 'dark' }>;

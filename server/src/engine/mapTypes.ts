@@ -11,7 +11,7 @@
  *  from this so adding a terrain is ONE edit, not four. */
 export const TERRAINS = ['grassland', 'forest', 'dungeon', 'cave', 'urban'] as const;
 export type Terrain = typeof TERRAINS[number];
-export type Feature = 'campsites' | 'coastline' | 'path' | 'intersection' | '3-room' | '5-room' | 'stairs';
+export type Feature = 'campsites' | 'coastline' | 'path' | 'intersection' | '3-room' | '5-room' | 'stairs' | 'clearing';
 
 /** One configurable structure the user adds to an outdoor map. `rooms` (clamped
  *  1..5) are placed adjacent and linked by doorways through their shared walls;

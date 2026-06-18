@@ -17,7 +17,7 @@
  * All feature placers respect a shared `reserved: Set<string>` so a path
  * never overlaps a building and vice versa.
  */
-import { BIOME_PALETTES, pickGroundGid, rollObjectGid, type BiomePalette } from '../../../../shared/biomePalettes.js';
+import { BIOME_PALETTES, pickGroundGid, rollObjectGid, edgeRampDensity, type BiomePalette } from '../../../../shared/biomePalettes.js';
 import type { ComposedMap, ComposedTilesetRef, Feature, MapAnchors, MapZone, StructureSpec, Terrain } from '../mapTypes.js';
 import { DECOR_GIDS, EDGE_ROTATION, FURNITURE_GIDS, PATH_GIDS, RUIN_WALL_GIDS, TERRAIN_GIDS, WALL_GIDS, WATER_FIRSTGID, WATER_GIDS } from '../mapTiles.js';
 import { SCRIBBLE_TILESET, WATER_TILESET, flatten } from './shared.js';
@@ -69,7 +69,10 @@ export function composeOutdoor(opts: ComposeOutdoorOpts): ComposedMap {
   }
   if (features.includes('campsites')) placeCampsites(terrainGrid, objectGrid, rng, width, height, anchors);
 
-  applyObjectPool(palette, terrainGrid, objectGrid, rng, width, height);
+  // `clearing` ramps decoration toward the edges, leaving an open central glade
+  // ringed by a dense treeline (Roadmap v2 · M3/#6).
+  const densityScale = features.includes('clearing') ? edgeRampDensity(width, height) : undefined;
+  applyObjectPool(palette, terrainGrid, objectGrid, rng, width, height, densityScale);
 
   const tilesets: ComposedTilesetRef[] = usesWater ? [SCRIBBLE_TILESET, WATER_TILESET] : [SCRIBBLE_TILESET];
   return {
@@ -92,6 +95,7 @@ function applyObjectPool(
   objects: number[][],
   rng: () => number,
   W: number, H: number,
+  densityScale?: (x: number, y: number) => number,
 ): void {
   if (palette.objectPool.length === 0) return;
   const naturalGround = new Set(palette.groundPool.map((e) => e.gid));
@@ -109,7 +113,7 @@ function applyObjectPool(
       if (objects[r][c] !== 0) continue;
       const ground = terrain[r][c] & 0x1fffffff;
       if (!naturalGround.has(ground)) continue;
-      const gid = rollObjectGid(palette, rng, c, r, W, H, flat, isWall);
+      const gid = rollObjectGid(palette, rng, c, r, W, H, flat, isWall, densityScale);
       if (gid !== 0) {
         objects[r][c] = gid;
         flat[r * W + c] = gid;
@@ -486,6 +490,7 @@ const FEATURE_ADJ: Partial<Record<Feature, string>> = {
   coastline:    'Coastal',
   path:         'Wayside',
   intersection: 'Crossroads',
+  clearing:     'Glade',
 };
 
 function composeOutdoorName(terrain: 'grassland' | 'forest', features: Feature[], structures: StructureSpec[]): string {
