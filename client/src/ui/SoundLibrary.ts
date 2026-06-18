@@ -6,6 +6,7 @@
  * Drop new sound files at `server/data/sounds/<filename>` and add a
  * mapping below. The server route accepts `.mp3`, `.ogg`, and `.wav`.
  */
+import { effectiveSfxVolume } from '../sfxVolume';
 
 const SOUND_BASE_URL = 'http://localhost:3000';
 
@@ -31,17 +32,21 @@ const cache = new Map<string, HTMLAudioElement>();
 export function playSound(id: string): void {
   const filename = SOUND_FILES[id];
   if (!filename) return;
+  // Global SFX volume + mute (M6) — applied per play so settings changes take
+  // effect immediately. A muted / zero level skips playback entirely.
+  const vol = effectiveSfxVolume(SOUND_VOLUME[id] ?? 0.8);
+  if (vol <= 0) return;
   let el = cache.get(id);
   if (!el) {
     try {
       el = new Audio(`${SOUND_BASE_URL}/sounds/${filename}`);
       el.preload = 'auto';
-      el.volume = SOUND_VOLUME[id] ?? 0.8;
       cache.set(id, el);
     } catch {
       return;
     }
   }
+  el.volume = vol;
   try {
     el.currentTime = 0;
     void el.play().catch(() => { /* autoplay blocked / file missing — visual still plays */ });

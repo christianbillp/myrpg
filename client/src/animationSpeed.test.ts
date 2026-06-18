@@ -3,7 +3,7 @@
  * scaled durations with a readability floor, and graceful no-storage fallback.
  */
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { COMBAT_SPEEDS, getCombatSpeed, setCombatSpeed, scaleDuration } from './animationSpeed';
+import { COMBAT_SPEEDS, getCombatSpeed, setCombatSpeed, scaleDuration, setFastForward, isFastForward } from './animationSpeed';
 
 function stubStorage(): Record<string, string> {
   const store: Record<string, string> = {};
@@ -50,5 +50,17 @@ describe('combat speed', () => {
 
   it('exposes the selectable speeds for the settings card', () => {
     expect(COMBAT_SPEEDS).toEqual([1, 1.5, 2, 3]);
+  });
+
+  it('fast-forward collapses durations toward the floor while held (M6)', () => {
+    stubStorage();
+    setCombatSpeed(1);
+    expect(isFastForward()).toBe(false);
+    const normal = scaleDuration(280);
+    setFastForward(true);
+    expect(isFastForward()).toBe(true);
+    expect(scaleDuration(280)).toBeLessThan(normal);
+    setFastForward(false);
+    expect(scaleDuration(280)).toBe(normal);
   });
 });

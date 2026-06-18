@@ -16,7 +16,7 @@ import { LongRestOverlay } from "../ui/LongRestOverlay";
 import { RestPromptOverlay } from "../ui/RestPromptOverlay";
 import { SpellOptionPicker } from "../ui/SpellOptionPicker";
 import { SpeechBubbles, speechReadMs } from "../ui/SpeechBubbles";
-import { scaleDuration } from "../animationSpeed";
+import { scaleDuration, setFastForward } from "../animationSpeed";
 import { TIMING } from "../animationTimings";
 import { prefersReducedMotion } from "../reducedMotion";
 import { SpellVfx } from "../ui/SpellVfx";
@@ -895,6 +895,14 @@ export class GameScene extends Phaser.Scene {
   private setupInput(): void {
     this.cursors = this.input.keyboard!.createCursorKeys();
     this.escKey = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.ESC);
+
+    // Hold TAB to fast-forward the animation queue (Animation Roadmap · M6) —
+    // rip through a long multi-NPC round without changing the persisted Combat
+    // Speed. Released → back to normal. preventDefault stops Tab from moving
+    // browser focus off the canvas.
+    const ffKey = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.TAB);
+    ffKey.on('down', () => setFastForward(true));
+    ffKey.on('up', () => setFastForward(false));
 
     this.input.on("wheel", (pointer: Phaser.Input.Pointer, _go: unknown, _dx: number, dy: number) => {
       if (this.overlays.isAnyOpen) return;

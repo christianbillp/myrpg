@@ -36,5 +36,16 @@ export function setCombatSpeed(speed: number): void {
 
 /** Scale a combat-beat duration by the current speed (higher = faster). */
 export function scaleDuration(ms: number): number {
-  return Math.max(MIN_DURATION_MS, Math.round(ms / getCombatSpeed()));
+  const speed = getCombatSpeed() * (fastForward ? FAST_FORWARD_FACTOR : 1);
+  return Math.max(MIN_DURATION_MS, Math.round(ms / speed));
 }
+
+/** Transient fast-forward (Animation Roadmap · M6): while held, every combat beat
+ *  collapses toward the readability floor so the player can rip through a long
+ *  sequence (a big multi-NPC round, a slow AoE) without changing their persisted
+ *  Combat Speed. Not persisted — it's a momentary "skip", not a setting. */
+let fastForward = false;
+const FAST_FORWARD_FACTOR = 8;
+
+export function setFastForward(on: boolean): void { fastForward = on; }
+export function isFastForward(): boolean { return fastForward; }
