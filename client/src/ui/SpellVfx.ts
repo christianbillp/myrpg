@@ -1,6 +1,6 @@
 import Phaser from 'phaser';
 import { TILE_SIZE } from '../constants';
-import { TIMING, scaleDuration } from '../animationTimings';
+import { TIMING, scaleDuration, projectileDurationMs, beamDurationMs } from '../animationTimings';
 import type { GameEvent } from '../../../shared/types';
 
 type SpellVfxEvent = Extract<GameEvent, { type: 'spell_vfx' }>;
@@ -63,17 +63,35 @@ export class SpellVfx {
     }
   }
 
-  /** One or more glowing motes flying from caster to target, each with an
-   *  impact spark on arrival. Resolves when the last lands. */
+  /** One or more glowing motes flying from caster to target, each with an impact
+   *  spark on arrival. The travel time scales with distance (a far bolt visibly
+   *  travels), and the flight BOWS along a slight arc that grows with distance —
+   *  so a long throw reads as lobbed, a point-blank one as a straight dart
+   *  (Animation Roadmap · M5). Resolves when the last lands. */
   private projectile(src: Pt | null, dst: Pt | null, core: number, glow: number, count: number, onComplete: () => void): void {
     if (!src || !dst) return onComplete();
+    const distPx = Math.hypot(dst.x - src.x, dst.y - src.y);
+    const distTiles = distPx / TILE_SIZE;
+    const dur = projectileDurationMs(distTiles);
+    // Quadratic-bezier control point, bowed perpendicular to the flight line.
+    const len = distPx || 1;
+    const nx = -(dst.y - src.y) / len, ny = (dst.x - src.x) / len;
+    const bow = Math.min(TILE_SIZE * 1.1, distTiles * TILE_SIZE * 0.11);
+    const ctrl = { x: (src.x + dst.x) / 2 + nx * bow, y: (src.y + dst.y) / 2 + ny * bow };
     let landed = 0;
     const total = Math.max(1, count);
     for (let i = 0; i < total; i++) {
       const dot = this.at(this.scene.add.circle(src.x, src.y, 4, core).setDepth(40));
       const halo = this.at(this.scene.add.circle(src.x, src.y, 7, glow, 0.4).setDepth(39));
+      const t = { p: 0 };
       this.scene.tweens.add({
-        targets: [dot, halo], x: dst.x, y: dst.y, duration: scaleDuration(TIMING.projectileMs), delay: scaleDuration(i * TIMING.projectileDartDelayMs), ease: 'Quad.easeIn',
+        targets: t, p: 1, duration: dur, delay: scaleDuration(i * TIMING.projectileDartDelayMs), ease: 'Quad.easeIn',
+        onUpdate: () => {
+          const u = t.p, v = 1 - u;
+          const x = v * v * src.x + 2 * v * u * ctrl.x + u * u * dst.x;
+          const y = v * v * src.y + 2 * v * u * ctrl.y + u * u * dst.y;
+          dot.setPosition(x, y); halo.setPosition(x, y);
+        },
         onComplete: () => {
           dot.destroy(); halo.destroy(); this.spark(dst, glow);
           if (++landed === total) onComplete();
@@ -82,13 +100,15 @@ export class SpellVfx {
     }
   }
 
-  /** A flashing coloured line from caster to target. */
+  /** A flashing coloured line from caster to target — a long beam lingers a
+   *  touch longer (distance-aware, Animation Roadmap · M5). */
   private beam(src: Pt | null, dst: Pt | null, core: number, glow: number, onComplete: () => void): void {
     if (!src || !dst) return onComplete();
+    const dur = beamDurationMs(Math.hypot(dst.x - src.x, dst.y - src.y) / TILE_SIZE);
     const g = this.at(this.scene.add.graphics().setDepth(40));
     g.lineStyle(5, glow, 0.5).lineBetween(src.x, src.y, dst.x, dst.y);
     g.lineStyle(2, core, 1).lineBetween(src.x, src.y, dst.x, dst.y);
-    this.scene.tweens.add({ targets: g, alpha: 0, duration: scaleDuration(TIMING.beamMs), ease: 'Quad.easeOut', onComplete: () => { g.destroy(); this.spark(dst, glow); onComplete(); } });
+    this.scene.tweens.add({ targets: g, alpha: 0, duration: dur, ease: 'Quad.easeOut', onComplete: () => { g.destroy(); this.spark(dst, glow); onComplete(); } });
   }
 
   /** An expanding translucent disc that emanates FROM the centre point — touch /
