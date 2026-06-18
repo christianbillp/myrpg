@@ -659,12 +659,20 @@ function isPathObject(c: MapCanvas, x: number, y: number): boolean {
   return c.inBounds(x, y) && PATH_GID_SET.has(c.getObject(x, y) & 0x1fffffff);
 }
 
-/** If a road approaches BOTH banks at the same line through a candidate footprint
- *  (a road interrupted by the river), return the aligned column (vertical deck) or
- *  row (horizontal deck) so a bridge there carries the road across and lines up. */
+/** Does a road approach BOTH banks at this exact line through the footprint (a
+ *  road the river interrupts here)? */
+function isCrossingAtLine(c: MapCanvas, line: number, x: number, y: number, w: number, h: number, vertical: boolean): boolean {
+  return vertical ? (isPathObject(c, line, y - 1) && isPathObject(c, line, y + h)) : (isPathObject(c, x - 1, line) && isPathObject(c, x + w, line));
+}
+
+/** The line through a candidate footprint a road crosses, PREFERRING the deck's
+ *  middle so the road runs down the centre of the bridge. Returns null if no
+ *  road crosses here. */
 function pathCrossingLine(c: MapCanvas, x: number, y: number, w: number, h: number, vertical: boolean): number | null {
-  if (vertical) { for (let col = x; col < x + w; col++) if (isPathObject(c, col, y - 1) && isPathObject(c, col, y + h)) return col; }
-  else { for (let row = y; row < y + h; row++) if (isPathObject(c, x - 1, row) && isPathObject(c, x + w, row)) return row; }
+  const centre = vertical ? x + (w >> 1) : y + (h >> 1);
+  if (isCrossingAtLine(c, centre, x, y, w, h, vertical)) return centre;
+  if (vertical) { for (let col = x; col < x + w; col++) if (isCrossingAtLine(c, col, x, y, w, h, vertical)) return col; }
+  else { for (let row = y; row < y + h; row++) if (isCrossingAtLine(c, row, x, y, w, h, vertical)) return row; }
   return null;
 }
 
@@ -696,9 +704,10 @@ function bestSpanForOrient(c: MapCanvas, w: number, h: number, allowed?: Set<str
       const dryCol = (cx: number): boolean => { for (let cy = y; cy < y + h; cy++) if (isWaterGround(c, cx, cy)) return false; return true; };
       const endsDry = vertical ? (dryRow(y) && dryRow(y + h - 1)) : (dryCol(x) && dryCol(x + w - 1));
       if (!endsDry) continue;
-      // A span the road already crosses wins decisively, so the bridge lines up
-      // with the path instead of spanning the river somewhere else.
-      const aligned = pathCrossingLine(c, x, y, w, h, vertical) !== null ? 1000 : 0;
+      // A span whose MIDDLE the road crosses wins decisively, so the bridge lines
+      // up with the path AND the road runs down the centre of the deck.
+      const centre = vertical ? x + (w >> 1) : y + (h >> 1);
+      const aligned = isCrossingAtLine(c, centre, x, y, w, h, vertical) ? 1000 : 0;
       const score = water + aligned;
       if (!best || score > best.score) best = { x, y, w, h, score };
     }

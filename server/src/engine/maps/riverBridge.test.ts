@@ -54,15 +54,11 @@ describe('river feature + bridge placeable', () => {
     expect(fp).toBeDefined();
     const isPath = (x: number, y: number): boolean => PATH_BASE.has(m.objectData[y * W + x] & 0x1fffffff);
 
-    // A deck column carries the road all the way across the river, joining the
-    // bank path above and below — the bridge and path are aligned, not separate.
-    let aligned = false;
-    for (let col = fp.x; col < fp.x + fp.w; col++) {
-      if (!isPath(col, fp.y - 1) || !isPath(col, fp.y + fp.h)) continue;
-      let allDeck = true;
-      for (let ry = fp.y; ry < fp.y + fp.h; ry++) if (!isPath(col, ry)) { allDeck = false; break; }
-      if (allDeck) { aligned = true; break; }
-    }
-    expect(aligned, 'the path runs continuously across the bridge deck').toBe(true);
+    // The road runs down the MIDDLE column of the deck, continuously from the bank
+    // above, across the river, to the bank below.
+    const mid = fp.x + (fp.w >> 1);
+    expect(isPath(mid, fp.y - 1), 'road meets the north bank at the deck middle').toBe(true);
+    expect(isPath(mid, fp.y + fp.h), 'road meets the south bank at the deck middle').toBe(true);
+    for (let ry = fp.y; ry < fp.y + fp.h; ry++) expect(isPath(mid, ry), `road continues across deck row ${ry}`).toBe(true);
   });
 });
